@@ -715,7 +715,8 @@ if mode == "手動確認":
                                 f"{'🔴 現在のID ' if is_current_id else ''}"
                                 f"{'✅ 現在と同じURL ' if url_match else ''}"
                                 f"{cand.get('title') or cand.get('name', '?')} "
-                                f"({cand.get('media_type','?')}) {tmdb_release}"
+                                f"({cand.get('media_type','?')}) {tmdb_release} "
+                                f"🆔 {tmdb_id}"
                             )
                             if st.button("✅ 決定", key=f"sel_{page_id}_{idx}"):
                                 date_prop        = props.get("公開", {}).get("date")
