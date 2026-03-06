@@ -221,6 +221,85 @@ def search_tmdb(query: str, year=None) -> list:
         return []
     return [r for r in res.json().get("results", []) if r.get("poster_path") and r.get("media_type") in ["movie", "tv"]]
 
+def fetch_tmdb_details(tmdb_id: int, media_type: str) -> dict:
+    """
+    TMDBからジャンル・キャスト・監督を日本語で取得する。
+    戻り値: {
+        "genres":   ["アクション", "SF", ...],
+        "cast":     "山田太郎 / 田中花子 / 鈴木一郎",
+        "director": "スティーブン・スピルバーグ",
+    }
+    """
+    base = "https://api.themoviedb.org/3"
+    params_ja = {"api_key": TMDB_API_KEY, "language": "ja-JP"}
+
+    # 基本情報（ジャンル）
+    detail_res = api_request("get", f"{base}/{media_type}/{tmdb_id}", params=params_ja)
+    genres = []
+    if detail_res and detail_res.status_code == 200:
+        genres = [g["name"] for g in detail_res.json().get("genres", [])]
+
+    # クレジット（キャスト・監督）
+    credit_endpoint = "credits" if media_type == "movie" else "aggregate_credits"
+    credit_res = api_request("get", f"{base}/{media_type}/{tmdb_id}/{credit_endpoint}", params=params_ja)
+    cast_names, director_name = [], ""
+
+    if credit_res and credit_res.status_code == 200:
+        data = credit_res.json()
+
+        # キャスト（主演3名）: 日本語名があれば使う
+        for member in data.get("cast", [])[:3]:
+            name = member.get("name", "")
+            cast_names.append(name)
+
+        # 監督
+        if media_type == "movie":
+            for member in data.get("crew", []):
+                if member.get("job") == "Director":
+                    director_name = member.get("name", "")
+                    break
+        else:
+            # ドラマは created_by から取得
+            tv_res = api_request("get", f"{base}/tv/{tmdb_id}", params=params_ja)
+            if tv_res and tv_res.status_code == 200:
+                creators = tv_res.json().get("created_by", [])
+                if creators:
+                    director_name = creators[0].get("name", "")
+
+    return {
+        "genres":   genres,
+        "cast":     " / ".join(cast_names),
+        "director": director_name,
+    }
+
+def update_notion_metadata(page_id: str, details: dict) -> bool:
+    """ジャンル・出演者・監督をNotionに上書き更新する"""
+    properties = {}
+
+    if details["genres"]:
+        properties["ジャンル"] = {
+            "multi_select": [{"name": g} for g in details["genres"]]
+        }
+    if details["cast"]:
+        properties["出演者・主催"] = {
+            "rich_text": [{"type": "text", "text": {"content": details["cast"]}}]
+        }
+    if details["director"]:
+        properties["監督・指揮者"] = {
+            "rich_text": [{"type": "text", "text": {"content": details["director"]}}]
+        }
+
+    if not properties:
+        return True  # 更新するものがなければスキップ
+
+    res = api_request(
+        "patch",
+        f"https://api.notion.com/v1/pages/{page_id}",
+        headers=NOTION_HEADERS,
+        json={"properties": properties},
+    )
+    return res is not None and res.status_code == 200
+
 def update_notion_cover(page_id: str, cover_url: str, tmdb_release, existing_release) -> bool:
     payload = {"cover": {"type": "external", "external": {"url": cover_url}}}
     if tmdb_release and not existing_release:
@@ -230,9 +309,22 @@ def update_notion_cover(page_id: str, cover_url: str, tmdb_release, existing_rel
     return res is not None and res.status_code == 200
 
 def update_all(page_id, cover_url, tmdb_release, existing_release,
-               title, tmdb_id, need_notion, need_drive) -> tuple:
+               title, tmdb_id, media_type, need_notion, need_drive) -> tuple:
+    """
+    need_notion / need_drive フラグに応じて必要な更新を実行。
+    メタデータ（ジャンル・出演者・監督）は常に更新。
+    戻り値: (notion_ok, drive_ok)
+    """
     notion_ok = update_notion_cover(page_id, cover_url, tmdb_release, existing_release) if need_notion else True
     drive_ok  = save_to_drive(cover_url, title, tmdb_id) if need_drive else True
+
+    # メタデータは常に上書き更新
+    try:
+        details = fetch_tmdb_details(tmdb_id, media_type)
+        update_notion_metadata(page_id, details)
+    except Exception as e:
+        st.warning(f"メタデータ更新失敗 ({title}): {e}")
+
     return notion_ok, drive_ok
 
 # ============================================================
@@ -375,6 +467,7 @@ if mode == "自動同期" and st.session_state.is_running:
                     continue
 
                 tmdb_id      = top["id"]
+                media_type   = top.get("media_type", "movie")
                 cover_url    = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{top['poster_path']}"
                 tmdb_release = top.get("release_date") or top.get("first_air_date")
                 st.session_state.tmdb_id_cache[item["id"]] = tmdb_id
@@ -401,7 +494,7 @@ if mode == "自動同期" and st.session_state.is_running:
 
                 n_ok, d_ok = update_all(
                     item["id"], cover_url, tmdb_release, existing_release,
-                    log_title, tmdb_id, need_notion, need_drive,
+                    log_title, tmdb_id, media_type, need_notion, need_drive,
                 )
                 parts = []
                 if need_notion: parts.append("Notion " + ("✅" if n_ok else "❌"))
@@ -524,6 +617,7 @@ if mode == "手動確認":
                             if st.button("✅ 決定", key=f"sel_{page_id}_{idx}"):
                                 date_prop        = props.get("公開", {}).get("date")
                                 existing_release = date_prop.get("start") if date_prop else None
+                                media_type       = cand.get("media_type", "movie")
                                 need_notion, need_drive = resolve_needs(notion_ok_now, drive_ok_now)
                                 if url_match and need_notion:
                                     need_notion = False
@@ -531,7 +625,7 @@ if mode == "手動確認":
                                 st.session_state.tmdb_id_cache[page_id] = tmdb_id
                                 n_ok, d_ok = update_all(
                                     page_id, cover_url, tmdb_release, existing_release,
-                                    log_title, tmdb_id, need_notion, need_drive,
+                                    log_title, tmdb_id, media_type, need_notion, need_drive,
                                 )
                                 parts = []
                                 if need_notion: parts.append("Notion " + ("✅" if n_ok else "❌失敗"))
