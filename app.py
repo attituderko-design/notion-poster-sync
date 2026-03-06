@@ -411,7 +411,6 @@ def get_display_pages():
 def resolve_needs(notion_ok_now, drive_ok_now):
     if diff_filter == "Notionのみ更新（Driveあり・Notionカバーなし）": return True, False
     if diff_filter == "Driveのみ更新（Notionカバーあり・Driveなし）":  return False, True
-    if sync_scope  == "全件走査": return True, True
     return not notion_ok_now, not drive_ok_now
 
 # ============================================================
@@ -488,8 +487,6 @@ if mode == "自動同期" and st.session_state.is_running:
                     continue
 
                 if url_matched and need_drive:
-                    fname_check = make_filename(log_title, tmdb_id)
-                    st.write(f"🔍 DEBUG {log_title}: tmdb_id={tmdb_id}, fname={fname_check}, in_cache={fname_check in get_drive_files()}")
                     d_ok = save_to_drive(cover_url, log_title, tmdb_id)
                     save_tmdb_id_to_notion(item["id"], tmdb_id, media_type)
                     meta_ok, meta_log = False, "（取得失敗）"
