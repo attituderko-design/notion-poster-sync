@@ -308,24 +308,37 @@ def update_notion_cover(page_id: str, cover_url: str, tmdb_release, existing_rel
                       headers=NOTION_HEADERS, json=payload)
     return res is not None and res.status_code == 200
 
+def build_meta_log(details: dict) -> str:
+    """更新したメタデータの内容を1行のログ文字列にまとめる"""
+    parts = []
+    if details.get("genres"):
+        parts.append(f"ジャンル: {' / '.join(details['genres'])}")
+    if details.get("cast"):
+        parts.append(f"出演: {details['cast']}")
+    if details.get("director"):
+        parts.append(f"監督: {details['director']}")
+    return "　".join(parts) if parts else "（取得データなし）"
+
 def update_all(page_id, cover_url, tmdb_release, existing_release,
                title, tmdb_id, media_type, need_notion, need_drive) -> tuple:
     """
     need_notion / need_drive フラグに応じて必要な更新を実行。
     メタデータ（ジャンル・出演者・監督）は常に更新。
-    戻り値: (notion_ok, drive_ok)
+    戻り値: (notion_ok, drive_ok, meta_ok, meta_log)
     """
     notion_ok = update_notion_cover(page_id, cover_url, tmdb_release, existing_release) if need_notion else True
     drive_ok  = save_to_drive(cover_url, title, tmdb_id) if need_drive else True
 
     # メタデータは常に上書き更新
+    meta_ok, meta_log = False, "（取得失敗）"
     try:
-        details = fetch_tmdb_details(tmdb_id, media_type)
-        update_notion_metadata(page_id, details)
+        details  = fetch_tmdb_details(tmdb_id, media_type)
+        meta_ok  = update_notion_metadata(page_id, details)
+        meta_log = build_meta_log(details)
     except Exception as e:
         st.warning(f"メタデータ更新失敗 ({title}): {e}")
 
-    return notion_ok, drive_ok
+    return notion_ok, drive_ok, meta_ok, meta_log
 
 # ============================================================
 # アプリ初期化
@@ -483,7 +496,17 @@ if mode == "自動同期" and st.session_state.is_running:
 
                 if url_matched and need_drive:
                     d_ok = save_to_drive(cover_url, log_title, tmdb_id)
-                    st.write(f"{'📥 補充(Drive保存のみ)' if d_ok else '❌ Drive保存失敗'}: {log_title}")
+                    meta_ok, meta_log = False, "（取得失敗）"
+                    try:
+                        details  = fetch_tmdb_details(tmdb_id, media_type)
+                        meta_ok  = update_notion_metadata(item["id"], details)
+                        meta_log = build_meta_log(details)
+                    except Exception:
+                        pass
+                    label = "📥 補充" if d_ok else "❌ Drive保存失敗"
+                    st.write(f"{label} {'✅' if d_ok else '❌'}　メタ {'✅' if meta_ok else '❌'}: {log_title}")
+                    if meta_ok:
+                        st.caption(f"　　↳ {meta_log}")
                     if d_ok:
                         count += 1
                     else:
@@ -492,20 +515,24 @@ if mode == "自動同期" and st.session_state.is_running:
                     time.sleep(0.1)
                     continue
 
-                n_ok, d_ok = update_all(
+                n_ok, d_ok, meta_ok, meta_log = update_all(
                     item["id"], cover_url, tmdb_release, existing_release,
                     log_title, tmdb_id, media_type, need_notion, need_drive,
                 )
                 parts = []
                 if need_notion: parts.append("Notion " + ("✅" if n_ok else "❌"))
                 if need_drive:  parts.append("Drive "  + ("✅" if d_ok else "❌"))
+                parts.append("メタ " + ("✅" if meta_ok else "❌"))
                 st.write(f"{log_title}　{'　'.join(parts)}")
-                if n_ok and d_ok:
+                if meta_ok:
+                    st.caption(f"　　↳ {meta_log}")
+                if n_ok and d_ok and meta_ok:
                     count += 1
                 else:
                     fail_parts = []
                     if need_notion and not n_ok: fail_parts.append("Notion更新失敗")
                     if need_drive  and not d_ok: fail_parts.append("Drive保存失敗")
+                    if not meta_ok:              fail_parts.append("メタデータ失敗")
                     error_log.append(f"❌ {log_title}（{' / '.join(fail_parts)}）")
 
             except Exception as e:
@@ -623,15 +650,17 @@ if mode == "手動確認":
                                     need_notion = False
                                     need_drive  = True
                                 st.session_state.tmdb_id_cache[page_id] = tmdb_id
-                                n_ok, d_ok = update_all(
+                                n_ok, d_ok, meta_ok, meta_log = update_all(
                                     page_id, cover_url, tmdb_release, existing_release,
                                     log_title, tmdb_id, media_type, need_notion, need_drive,
                                 )
                                 parts = []
                                 if need_notion: parts.append("Notion " + ("✅" if n_ok else "❌失敗"))
                                 if need_drive:  parts.append("Drive "  + ("✅" if d_ok else "❌失敗"))
-                                if n_ok and d_ok:
+                                parts.append("メタ " + ("✅" if meta_ok else "❌失敗"))
+                                if n_ok and d_ok and meta_ok:
                                     st.success("保存完了！ " + "　".join(parts))
+                                    st.caption(f"↳ {meta_log}")
                                     st.session_state.search_results.pop(page_id, None)
                                     if need_notion and n_ok:
                                         for p in st.session_state.pages:
