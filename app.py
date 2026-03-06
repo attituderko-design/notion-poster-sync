@@ -4,7 +4,8 @@ import json
 import requests
 import time
 import streamlit as st
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 import io
@@ -28,12 +29,15 @@ NOTION_HEADERS = {
 # ============================================================
 @st.cache_resource
 def get_drive_service():
-    """サービスアカウントJSONからDrive APIクライアントを生成"""
-    sa_info = json.loads(st.secrets["GCP_SERVICE_ACCOUNT_JSON"])
-    creds   = service_account.Credentials.from_service_account_info(
-        sa_info,
-        scopes=["https://www.googleapis.com/auth/drive"],
+    """OAuthリフレッシュトークンからDrive APIクライアントを生成"""
+    creds = Credentials(
+        token=None,
+        refresh_token=st.secrets["GOOGLE_REFRESH_TOKEN"],
+        client_id=st.secrets["GOOGLE_CLIENT_ID"],
+        client_secret=st.secrets["GOOGLE_CLIENT_SECRET"],
+        token_uri="https://oauth2.googleapis.com/token",
     )
+    creds.refresh(Request())
     return build("drive", "v3", credentials=creds)
 
 # ============================================================
