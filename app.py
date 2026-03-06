@@ -110,14 +110,33 @@ def save_to_drive(cover_url: str, title: str, tmdb_id) -> bool:
             service.files().update(
                 fileId=files[fname],
                 media_body=media,
+                supportsAllDrives=True,
             ).execute()
         else:
             # 新規アップロード
-            service.files().create(
+            file_metadata = service.files().create(
                 body={"name": fname, "parents": [DRIVE_FOLDER_ID]},
                 media_body=media,
                 fields="id",
+                supportsAllDrives=True,
             ).execute()
+
+            # オーナーをあなたのアカウントに移譲
+            owner_email = st.secrets.get("OWNER_EMAIL", "")
+            if owner_email:
+                try:
+                    service.permissions().create(
+                        fileId=file_metadata["id"],
+                        transferOwnership=True,
+                        body={
+                            "type": "user",
+                            "role": "owner",
+                            "emailAddress": owner_email,
+                        },
+                        supportsAllDrives=True,
+                    ).execute()
+                except Exception as perm_err:
+                    st.warning(f"オーナー移譲失敗 ({title}): {perm_err}")
 
         # キャッシュを破棄して次回取得時に最新化
         list_drive_files.clear()
