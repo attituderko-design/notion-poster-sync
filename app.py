@@ -499,7 +499,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 # ============================================================
 
 st.set_page_config(page_title="ArtéMis", page_icon="🌙", layout="wide")
-st.title("🌙 ArtéMis")
+st.title("🌙 ArtéMis v1.1")
 
 for key, default in {
     "is_running":         False,
