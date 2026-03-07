@@ -1,9 +1,9 @@
 import os
 import re
-import json
 import requests
 import time
 import streamlit as st
+from datetime import date
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -55,7 +55,6 @@ def get_title(props):
     return (jp if jp else en), jp, en
 
 def get_season_number(props) -> int | None:
-    """International TitleからSeason番号を取得"""
     en = "".join([t["plain_text"] for t in props.get("International Title", {}).get("rich_text", [])])
     m = re.search(r'[Ss]eason\s*(\d+)', en)
     return int(m.group(1)) if m else None
@@ -67,8 +66,6 @@ def get_current_notion_url(item) -> str | None:
     return None
 
 def is_unreleased(page) -> bool:
-    """公開日が未設定 or 未来の場合はTrue"""
-    from datetime import date
     date_prop = page["properties"].get("公開", {}).get("date")
     if not date_prop:
         return True
@@ -76,14 +73,13 @@ def is_unreleased(page) -> bool:
     if not release_str:
         return True
     try:
-        release_date = date.fromisoformat(release_str[:10])
-        return release_date > date.today()
+        return date.fromisoformat(release_str[:10]) > date.today()
     except ValueError:
         return False
 
 def is_incomplete(page) -> bool:
     props = page["properties"]
-    if is_unreleased(page):                                return False  # 未公開はスキップ
+    if is_unreleased(page):                                return False
     if not page.get("cover"):                              return True
     if not props.get("TMDB_ID", {}).get("number"):         return True
     if not props.get("ジャンル", {}).get("multi_select"):  return True
@@ -129,14 +125,12 @@ def save_to_drive(cover_url: str, title: str, tmdb_id) -> bool:
         media   = MediaIoBaseUpload(io.BytesIO(img_res.content), mimetype="image/jpeg", resumable=False)
         if fname in files:
             service.files().update(fileId=files[fname], media_body=media).execute()
-            # キャッシュのIDはそのまま維持
         else:
             result = service.files().create(
                 body={"name": fname, "parents": [DRIVE_FOLDER_ID]},
                 media_body=media,
                 fields="id",
             ).execute()
-            # 新規作成時は返ってきた実際のIDをキャッシュに保存
             st.session_state.drive_files_cache[fname] = result["id"]
         return True
     except Exception as e:
@@ -144,7 +138,6 @@ def save_to_drive(cover_url: str, title: str, tmdb_id) -> bool:
         return False
 
 def delete_from_drive(title: str, tmdb_id) -> bool:
-    """指定のファイルをDriveから削除してキャッシュも更新"""
     try:
         fname = make_filename(title, tmdb_id)
         files = get_drive_files()
@@ -195,7 +188,7 @@ def diff_badge(item) -> str:
 # ============================================================
 
 def api_request(method: str, url: str, max_retries: int = 3, **kwargs):
-    fn = {"get": requests.get, "post": requests.post, "patch": requests.patch}[method]
+    fn = {"get": requests.get, "post": requests.post, "patch": requests.patch, "delete": requests.delete}[method]
     for attempt in range(max_retries):
         try:
             res = fn(url, **kwargs)
@@ -253,9 +246,18 @@ def save_tmdb_id_to_notion(page_id: str, tmdb_id: int, media_type: str) -> bool:
         }},
     )
     if res is None or res.status_code != 200:
-        st.warning(f"TMDB_ID保存失敗 ({tmdb_id}): {res.status_code if res else 'None'} {res.text if res else ''}")
+        st.warning(f"TMDB_ID保存失敗 ({tmdb_id}): {res.status_code if res else 'None'}")
         return False
     return True
+
+def save_season_to_notion(page_id: str, season_number: int) -> bool:
+    res = api_request(
+        "patch",
+        f"https://api.notion.com/v1/pages/{page_id}",
+        headers=NOTION_HEADERS,
+        json={"properties": {"SEASON": {"number": season_number}}},
+    )
+    return res is not None and res.status_code == 200
 
 def fetch_tmdb_by_id(tmdb_id: int, media_type: str) -> dict | None:
     res = api_request(
@@ -290,16 +292,14 @@ def fetch_tmdb_details(tmdb_id: int, media_type: str, season_number: int | None 
     if detail_res and detail_res.status_code == 200:
         genres = [g["name"] for g in detail_res.json().get("genres", [])]
 
-    # シーズン個別API（tvかつseason_numberあり）
-    season_poster = None
-    season_air_date = None
+    season_poster, season_air_date = None, None
     if media_type == "tv" and season_number:
         season_res = api_request("get", f"{base}/tv/{tmdb_id}/season/{season_number}", params=params_ja)
         if season_res and season_res.status_code == 200:
-            season_data  = season_res.json()
+            season_data     = season_res.json()
             season_poster   = season_data.get("poster_path")
             season_air_date = season_data.get("air_date")
-            cast_names = [m.get("name", "") for m in season_data.get("credits", {}).get("cast", [])[:3]]
+            cast_names      = [m.get("name", "") for m in season_data.get("credits", {}).get("cast", [])[:3]]
         else:
             cast_names = []
         director_name = ""
@@ -334,29 +334,24 @@ def fetch_tmdb_details(tmdb_id: int, media_type: str, season_number: int | None 
         score = score_res.json().get("vote_average")
 
     return {
-        "genres":         genres,
-        "cast":           " / ".join(cast_names),
-        "director":       director_name,
-        "score":          round(score, 1) if score else None,
-        "season_poster":  season_poster,
+        "genres":          genres,
+        "cast":            " / ".join(cast_names),
+        "director":        director_name,
+        "score":           round(score, 1) if score else None,
+        "season_poster":   season_poster,
         "season_air_date": season_air_date,
     }
 
 def update_notion_metadata(page_id: str, details: dict, force: bool = False, props: dict = None) -> tuple:
-    """
-    更新するプロパティだけを送信。
-    force=Trueなら全部上書き。
-    戻り値: (成功フラグ, 更新したプロパティ名リスト)
-    """
     properties = {}
     updated    = []
 
     def needs_update(key):
         if force or props is None: return True
-        if key == "ジャンル":      return not props.get("ジャンル", {}).get("multi_select")
-        if key == "出演者・主催":   return not props.get("出演者・主催", {}).get("rich_text")
-        if key == "監督・指揮者":   return not props.get("監督・指揮者", {}).get("rich_text")
-        if key == "TMDB_score":    return props.get("TMDB_score", {}).get("number") is None
+        if key == "ジャンル":     return not props.get("ジャンル", {}).get("multi_select")
+        if key == "出演者・主催":  return not props.get("出演者・主催", {}).get("rich_text")
+        if key == "監督・指揮者":  return not props.get("監督・指揮者", {}).get("rich_text")
+        if key == "TMDB_score":   return props.get("TMDB_score", {}).get("number") is None
         return False
 
     if details["genres"] and needs_update("ジャンル"):
@@ -385,19 +380,9 @@ def update_notion_cover(page_id: str, cover_url: str, tmdb_release, existing_rel
     res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}", headers=NOTION_HEADERS, json=payload)
     return res is not None and res.status_code == 200
 
-def save_season_to_notion(page_id: str, season_number: int) -> bool:
-    res = api_request(
-        "patch",
-        f"https://api.notion.com/v1/pages/{page_id}",
-        headers=NOTION_HEADERS,
-        json={"properties": {"SEASON": {"number": season_number}}},
-    )
-    return res is not None and res.status_code == 200
-
 def update_all(page_id, cover_url, tmdb_release, existing_release,
                title, tmdb_id, media_type, need_notion, need_drive,
                force_meta=False, props=None, season_number=None) -> tuple:
-    # シーズン個別ポスターがあればそちらを使う
     actual_cover_url = cover_url
     if media_type == "tv" and season_number:
         details_pre = fetch_tmdb_details(tmdb_id, media_type, season_number)
@@ -406,16 +391,18 @@ def update_all(page_id, cover_url, tmdb_release, existing_release,
         if details_pre.get("season_air_date") and not existing_release:
             tmdb_release = details_pre["season_air_date"]
 
-    notion_ok        = update_notion_cover(page_id, actual_cover_url, tmdb_release, existing_release) if need_notion else True
-    drive_ok         = save_to_drive(actual_cover_url, title, tmdb_id) if need_drive else True
-    # IDが変わった場合は古いDriveファイルを削除
+    notion_ok = update_notion_cover(page_id, actual_cover_url, tmdb_release, existing_release) if need_notion else True
+    drive_ok  = save_to_drive(actual_cover_url, title, tmdb_id) if need_drive else True
+
     if props is not None:
         old_tmdb_id = props.get("TMDB_ID", {}).get("number")
         if old_tmdb_id and int(old_tmdb_id) != tmdb_id:
             delete_from_drive(title, int(old_tmdb_id))
+
     save_tmdb_id_to_notion(page_id, tmdb_id, media_type)
     if season_number:
         save_season_to_notion(page_id, season_number)
+
     meta_ok, updated = False, []
     try:
         details          = fetch_tmdb_details(tmdb_id, media_type, season_number)
@@ -423,6 +410,36 @@ def update_all(page_id, cover_url, tmdb_release, existing_release,
     except Exception as e:
         st.warning(f"メタデータ更新失敗 ({title}): {e}")
     return notion_ok, drive_ok, meta_ok, updated
+
+def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
+                       tmdb_id: int, media_type: str, cover_url: str,
+                       tmdb_release: str, details: dict) -> bool:
+    """Notionに新規ページを作成してポスター・メタデータも一括登録"""
+    properties = {
+        "タイトル":           {"title": [{"type": "text", "text": {"content": jp_title}}]},
+        "International Title": {"rich_text": [{"type": "text", "text": {"content": en_title}}]},
+        "媒体":              {"multi_select": [{"name": media_type_label}]},
+        "TMDB_ID":           {"number": tmdb_id},
+        "MEDIA_TYPE":        {"multi_select": [{"name": media_type}]},
+    }
+    if tmdb_release:
+        properties["公開"] = {"date": {"start": tmdb_release}}
+    if details.get("genres"):
+        properties["ジャンル"] = {"multi_select": [{"name": g} for g in details["genres"]]}
+    if details.get("cast"):
+        properties["出演者・主催"] = {"rich_text": [{"type": "text", "text": {"content": details["cast"]}}]}
+    if details.get("director"):
+        properties["監督・指揮者"] = {"rich_text": [{"type": "text", "text": {"content": details["director"]}}]}
+    if details.get("score") is not None:
+        properties["TMDB_score"] = {"number": details["score"]}
+
+    payload = {
+        "parent":     {"database_id": NOTION_DB_ID},
+        "cover":      {"type": "external", "external": {"url": cover_url}},
+        "properties": properties,
+    }
+    res = api_request("post", "https://api.notion.com/v1/pages", headers=NOTION_HEADERS, json=payload)
+    return res is not None and res.status_code == 200
 
 def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_ok, meta_ok, updated, is_refresh=False) -> str:
     parts = []
@@ -446,13 +463,14 @@ st.set_page_config(page_title="Notion Movie Master", page_icon="🎬", layout="w
 st.title("🎬 Notion ポスター同期")
 
 for key, default in {
-    "is_running":     False,
-    "pages_loaded":   False,
-    "pages":          [],
-    "search_results": {},
-    "tmdb_id_cache":  {},
-    "manual_page":    0,
-    "sync_mode":      "normal",
+    "is_running":       False,
+    "pages_loaded":     False,
+    "pages":            [],
+    "search_results":   {},
+    "tmdb_id_cache":    {},
+    "manual_page":      0,
+    "sync_mode":        "normal",
+    "new_search_results": [],
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -462,8 +480,18 @@ for key, default in {
 # ============================================================
 with st.sidebar:
     st.header("操作パネル")
+    st.caption("モードを選択してからデータを取得してください")
 
-    if st.button("📥 Notionデータ取得", use_container_width=True):
+    st.divider()
+    st.header("動作モード")
+    mode       = st.radio("モード",   ["新規登録", "手動確認", "自動同期"])
+    if mode != "新規登録":
+        sync_scope = st.radio("同期範囲", ["未設定のみ更新", "全件走査"])
+    else:
+        sync_scope = "未設定のみ更新"
+
+    st.divider()
+    if st.button("📥 Notionデータ取得", use_container_width=True, disabled=(mode == "新規登録")):
         with st.spinner("Notionからデータ取得中..."):
             all_pages = load_notion_data()
             st.session_state.pages          = filter_target_pages(all_pages)
@@ -473,24 +501,22 @@ with st.sidebar:
             refresh_drive_files()
         st.success(f"{len(st.session_state.pages)} 件取得しました")
 
-    st.divider()
-    st.header("動作モード")
-    mode       = st.radio("モード",   ["手動確認", "自動同期"])
-    sync_scope = st.radio("同期範囲", ["未設定のみ更新", "全件走査"])
-
-    st.divider()
-    st.header("差分フィルタ")
-    st.caption("🟢=登録済　🔴=未登録")
-    diff_filter = st.radio(
-        "対象を絞り込む",
-        [
-            "フィルタなし",
-            "Notionのみ更新（Driveあり・Notionカバーなし）",
-            "Driveのみ更新（Notionカバーあり・Driveなし）",
-            "どちらも更新（両方なし）",
-        ],
-        index=0,
-    )
+    if mode != "新規登録":
+        st.divider()
+        st.header("差分フィルタ")
+        st.caption("🟢=登録済　🔴=未登録")
+        diff_filter = st.radio(
+            "対象を絞り込む",
+            [
+                "フィルタなし",
+                "Notionのみ更新（Driveあり・Notionカバーなし）",
+                "Driveのみ更新（Notionカバーあり・Driveなし）",
+                "どちらも更新（両方なし）",
+            ],
+            index=0,
+        )
+    else:
+        diff_filter = "フィルタなし"
 
     if mode == "自動同期":
         st.divider()
@@ -506,9 +532,72 @@ with st.sidebar:
             st.session_state.is_running = False
             st.rerun()
 
-    st.divider()
-    confirm_delete = st.checkbox("カバー全削除を許可")
-    delete_btn = st.button("🗑 カバー全削除", disabled=not confirm_delete or not st.session_state.pages_loaded)
+    if mode != "新規登録":
+        st.divider()
+        confirm_delete = st.checkbox("カバー全削除を許可")
+        delete_btn = st.button("🗑 カバー全削除", disabled=not confirm_delete or not st.session_state.pages_loaded)
+    else:
+        delete_btn = False
+
+# ============================================================
+# 新規登録モード
+# ============================================================
+if mode == "新規登録":
+    st.subheader("➕ 新規登録")
+
+    reg_col1, reg_col2, reg_col3 = st.columns([3, 3, 2])
+    jp_input    = reg_col1.text_input("日本語タイトル", placeholder="例: 千と千尋の神隠し")
+    en_input    = reg_col2.text_input("英語タイトル（検索用）", placeholder="例: Spirited Away")
+    media_label = reg_col3.selectbox("媒体", ["映画", "ドラマ"])
+
+    if st.button("🔍 検索", key="new_search"):
+        query = en_input if en_input else jp_input
+        if query:
+            results = search_tmdb(query)
+            st.session_state.new_search_results = results[:10]
+        else:
+            st.warning("タイトルを入力してください")
+
+    if st.session_state.new_search_results:
+        st.caption(f"{len(st.session_state.new_search_results)} 件の候補")
+        for row_start in range(0, len(st.session_state.new_search_results), 3):
+            cols = st.columns(3)
+            for col_idx, cand in enumerate(st.session_state.new_search_results[row_start:row_start + 3]):
+                abs_idx = row_start + col_idx
+                with cols[col_idx]:
+                    tmdb_id      = cand["id"]
+                    cover_url    = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{cand['poster_path']}"
+                    tmdb_release = cand.get("release_date") or cand.get("first_air_date") or ""
+                    media_type   = cand.get("media_type", "movie")
+
+                    st.image(cover_url)
+                    st.caption(
+                        f"{cand.get('title') or cand.get('name', '?')} "
+                        f"({media_type}) {tmdb_release} "
+                        f"🆔 {tmdb_id}"
+                    )
+                    if st.button("✅ 登録", key=f"new_reg_{abs_idx}"):
+                        with st.spinner("登録中..."):
+                            en_title = en_input or cand.get("title") or cand.get("name", "")
+                            details  = fetch_tmdb_details(tmdb_id, media_type)
+                            ok = create_notion_page(
+                                jp_title=jp_input,
+                                en_title=en_title,
+                                media_type_label=media_label,
+                                tmdb_id=tmdb_id,
+                                media_type=media_type,
+                                cover_url=cover_url,
+                                tmdb_release=tmdb_release,
+                                details=details,
+                            )
+                            if ok:
+                                save_to_drive(cover_url, jp_input if jp_input else en_title, tmdb_id)
+                                st.success(f"✅ 登録完了！ {jp_input or en_title}")
+                                st.session_state.new_search_results = []
+                                st.rerun()
+                            else:
+                                st.error("登録失敗しました")
+    st.stop()
 
 # ============================================================
 # データ未取得ガード
@@ -532,7 +621,7 @@ def resolve_needs(notion_ok_now, drive_ok_now):
     return not notion_ok_now, not drive_ok_now
 
 # ============================================================
-# 1. カバー全削除
+# カバー全削除
 # ============================================================
 if delete_btn:
     with st.status("🗑️ 全削除中...", expanded=True) as status:
@@ -549,7 +638,7 @@ if delete_btn:
     st.rerun()
 
 # ============================================================
-# 2. 自動同期 / リフレッシュ
+# 自動同期 / リフレッシュ
 # ============================================================
 if mode == "自動同期" and st.session_state.is_running:
     is_refresh   = (st.session_state.sync_mode == "refresh")
@@ -567,7 +656,6 @@ if mode == "自動同期" and st.session_state.is_running:
             props     = item["properties"]
             log_title, jp, en = get_title(props)
             notion_ok_now, drive_ok_now = get_diff_status(item)
-
             need_notion = True if is_refresh else not notion_ok_now
             need_drive  = True if is_refresh else not drive_ok_now
 
@@ -603,21 +691,19 @@ if mode == "自動同期" and st.session_state.is_running:
                 current_url = get_current_notion_url(item)
                 url_matched = (current_url == cover_url)
 
-                # 通常モード: 全部揃ってたら維持
                 if not is_refresh and url_matched and not need_drive and not is_incomplete(item):
                     st.write(f"⏸️ 維持(OK): {log_title}")
                     pbar.progress((i + 1) / len(sync_targets))
                     time.sleep(0.1)
                     continue
 
-                # 補充ルート: NotionカバーURLは合っているがDriveかメタデータが欠けている
                 if not is_refresh and url_matched and not need_drive:
                     save_tmdb_id_to_notion(item["id"], tmdb_id, media_type)
                     need_meta = is_incomplete(item)
                     meta_ok, updated = True, []
                     if need_meta:
                         try:
-                            details          = fetch_tmdb_details(tmdb_id, media_type)
+                            details          = fetch_tmdb_details(tmdb_id, media_type, season_number)
                             meta_ok, updated = update_notion_metadata(item["id"], details, force=False, props=props)
                         except Exception:
                             pass
@@ -668,7 +754,7 @@ if mode == "自動同期" and st.session_state.is_running:
     st.session_state.is_running = False
 
 # ============================================================
-# 3. 手動確認モード
+# 手動確認モード
 # ============================================================
 if mode == "手動確認":
     display_pages = get_display_pages()
@@ -729,7 +815,6 @@ if mode == "手動確認":
             if current_url:
                 st.caption(f"現在のURL: `{current_url}`")
 
-            # ── TMDB_ID / MEDIA_TYPE 手動編集フォーム ──
             st.caption("🔧 TMDB_ID / MEDIA_TYPE を手動で修正")
             id_col, type_col, save_col = st.columns([2, 2, 1])
             new_tmdb_id = id_col.number_input(
@@ -762,7 +847,6 @@ if mode == "手動確認":
 
             st.divider()
 
-            # ── 候補検索・表示 ──
             default_query = re.sub(r'[Ss]eason\s*\d+', '', en if en else jp).strip()
             search_col, btn_col = st.columns([4, 1])
             custom_query = search_col.text_input(
@@ -811,10 +895,7 @@ if mode == "手動確認":
                                 is_current_id = (saved_tmdb_id == tmdb_id)
 
                                 if is_current_id:
-                                    st.markdown(
-                                        '<div style="border: 3px solid red; padding: 4px; border-radius: 6px;">',
-                                        unsafe_allow_html=True,
-                                    )
+                                    st.markdown('<div style="border: 3px solid red; padding: 4px; border-radius: 6px;">', unsafe_allow_html=True)
                                 st.image(cover_url)
                                 if is_current_id:
                                     st.markdown('</div>', unsafe_allow_html=True)
@@ -830,13 +911,14 @@ if mode == "手動確認":
                                     date_prop        = props.get("公開", {}).get("date")
                                     existing_release = date_prop.get("start") if date_prop else None
                                     media_type       = cand.get("media_type", "movie")
+                                    season_number    = get_season_number(props)
                                     # 手動決定は最強の権限：全部強制上書き
                                     need_notion, need_drive = True, True
                                     st.session_state.tmdb_id_cache[page_id] = tmdb_id
                                     n_ok, d_ok, meta_ok, updated = update_all(
                                         page_id, cover_url, tmdb_release, existing_release,
                                         log_title, tmdb_id, media_type, need_notion, need_drive,
-                                        force_meta=True, props=props,
+                                        force_meta=True, props=props, season_number=season_number,
                                     )
                                     parts = []
                                     if need_notion: parts.append("Notion " + ("✅" if n_ok else "❌失敗"))
@@ -847,10 +929,9 @@ if mode == "手動確認":
                                         st.session_state.search_results.pop(page_id, None)
                                         for p in st.session_state.pages:
                                             if p["id"] == page_id:
-                                                if need_notion and n_ok:
-                                                    p["cover"] = {"type": "external", "external": {"url": cover_url}}
-                                                p["properties"]["TMDB_ID"]    = {"number": tmdb_id}
-                                                p["properties"]["MEDIA_TYPE"] = {"multi_select": [{"name": media_type}]}
+                                                p["cover"]                        = {"type": "external", "external": {"url": cover_url}}
+                                                p["properties"]["TMDB_ID"]        = {"number": tmdb_id}
+                                                p["properties"]["MEDIA_TYPE"]     = {"multi_select": [{"name": media_type}]}
                                         time.sleep(0.5)
                                         st.rerun()
                                     else:
