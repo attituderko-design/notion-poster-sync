@@ -743,7 +743,7 @@ if mode == "手動確認":
             st.divider()
 
             # ── 候補検索・表示 ──
-            default_query = en if en else jp
+            default_query = re.sub(r'[Ss]eason\s*\d+', '', en if en else jp).strip()
             search_col, btn_col = st.columns([4, 1])
             custom_query = search_col.text_input(
                 "🔍 検索ワード",
