@@ -1,4 +1,3 @@
-import os
 import re
 import requests
 import time
@@ -23,6 +22,26 @@ NOTION_HEADERS = {
     "Notion-Version": "2022-06-28",
     "Content-Type": "application/json",
 }
+
+# ============================================================
+# 媒体マッピング
+# ============================================================
+BOOTSTRAP_CDN = "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/icons/{}.svg"
+
+MEDIA_ICON_MAP = {
+    "映画":          ("🎬 映画",          "camera-reels"),
+    "ドラマ":        ("📺 ドラマ",        "display"),
+    "演奏会":        ("🎻 演奏会",        "music-note-beamed"),
+    "展示会":        ("🖼️ 展示会",        "image"),
+    "ライブ/ショー": ("🎤 ライブ/ショー", "mic"),
+    "書籍":          ("📖 書籍",          "book"),
+}
+
+RATING_OPTIONS = ["", "★", "★★", "★★★", "★★★★", "★★★★★"]
+
+def get_media_icon_url(media_label: str) -> str:
+    icon_name = MEDIA_ICON_MAP.get(media_label, ("", "camera-reels"))[1]
+    return BOOTSTRAP_CDN.format(icon_name)
 
 # ============================================================
 # Google Drive API クライアント
@@ -419,7 +438,7 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
     """Notionに新規ページを作成してポスター・メタデータも一括登録"""
     properties = {
         "タイトル":            {"title": [{"type": "text", "text": {"content": jp_title}}]},
-        "International Title": {"rich_text": [{"type": "text", "text": {"content": en_title}}]},
+        "International Title": {"rich_text": [{"type": "text", "text": {"content": en_title}, "annotations": {"italic": True}}]},
         "媒体":               {"multi_select": [{"name": media_type_label}]},
         "TMDB_ID":            {"number": tmdb_id},
         "MEDIA_TYPE":         {"multi_select": [{"name": media_type}]},
@@ -440,13 +459,26 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
     if details.get("score") is not None:
         properties["TMDB_score"] = {"number": details["score"]}
 
+    icon_url = get_media_icon_url(media_type_label)
     payload = {
         "parent":     {"database_id": NOTION_DB_ID},
         "cover":      {"type": "external", "external": {"url": cover_url}},
+        "icon":       {"type": "external", "external": {"url": icon_url}},
         "properties": properties,
     }
     res = api_request("post", "https://api.notion.com/v1/pages", headers=NOTION_HEADERS, json=payload)
     return res is not None and res.status_code == 200
+
+def check_duplicate(jp_title: str, en_title: str, pages: list) -> list:
+    """タイトル or International Titleが部分一致する既存ページを返す"""
+    jp_lower = jp_title.lower().strip()
+    en_lower = en_title.lower().strip()
+    hits = []
+    for p in pages:
+        _, p_jp, p_en = get_title(p["properties"])
+        if (jp_lower and jp_lower in p_jp.lower()) or (en_lower and en_lower in p_en.lower()):
+            hits.append(p)
+    return hits
 
 def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_ok, meta_ok, updated, is_refresh=False) -> str:
     parts = []
@@ -466,18 +498,19 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 # アプリ初期化
 # ============================================================
 
-st.set_page_config(page_title="Notion Movie Master", page_icon="🎬", layout="wide")
-st.title("🎬 Notion ポスター同期")
+st.set_page_config(page_title="ArtéMis", page_icon="🌙", layout="wide")
+st.title("🌙 ArtéMis")
 
 for key, default in {
-    "is_running":       False,
-    "pages_loaded":     False,
-    "pages":            [],
-    "search_results":   {},
-    "tmdb_id_cache":    {},
-    "manual_page":      0,
-    "sync_mode":        "normal",
+    "is_running":         False,
+    "pages_loaded":       False,
+    "pages":              [],
+    "search_results":     {},
+    "tmdb_id_cache":      {},
+    "manual_page":        0,
+    "sync_mode":          "normal",
     "new_search_results": [],
+    "confirm_reg":        None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -491,7 +524,7 @@ with st.sidebar:
 
     st.divider()
     st.header("動作モード")
-    mode       = st.radio("モード",   ["新規登録", "手動確認", "自動同期"])
+    mode = st.radio("モード", ["新規登録", "手動確認", "自動同期"])
     if mode != "新規登録":
         sync_scope = st.radio("同期範囲", ["未設定のみ更新", "全件走査"])
     else:
@@ -549,33 +582,84 @@ with st.sidebar:
 # ============================================================
 # 新規登録モード
 # ============================================================
-MEDIA_OPTIONS  = ["映画", "ドラマ", "演奏会", "書籍", "展示会", "ライブ/ショー"]
-RATING_OPTIONS = ["", "★", "★★", "★★★", "★★★★", "★★★★★"]
-
 if mode == "新規登録":
     st.subheader("➕ 新規登録")
 
-    # 1行目：タイトル
     col_jp, col_en = st.columns([1, 1])
     jp_input = col_jp.text_input("日本語タイトル", placeholder="例: 千と千尋の神隠し")
     en_input = col_en.text_input("英語タイトル（検索用）", placeholder="例: Spirited Away")
 
-    # 2行目：メタ情報
     col_media, col_wl, col_date, col_rating = st.columns([2, 1, 2, 2])
-    media_label  = col_media.selectbox("媒体", MEDIA_OPTIONS)
-    wlflg        = col_wl.checkbox("WLflg", value=False)
-    watched_date = col_date.date_input("鑑賞日", value=None)
-    rating_sel   = col_rating.selectbox("評価", RATING_OPTIONS)
+    media_display = col_media.selectbox("媒体", [v[0] for v in MEDIA_ICON_MAP.values()])
+    media_label   = next(k for k, v in MEDIA_ICON_MAP.items() if v[0] == media_display)
+    wlflg         = col_wl.checkbox("WLflg", value=False)
+    watched_date  = col_date.date_input("鑑賞日", value=None)
+    rating_sel    = col_rating.selectbox("評価", RATING_OPTIONS)
 
     if st.button("🔍 検索", key="new_search"):
         query = en_input if en_input else jp_input
         if query:
             results = search_tmdb(query)
             st.session_state.new_search_results = results[:10]
+            st.session_state.confirm_reg = None
         else:
             st.warning("タイトルを入力してください")
 
-    if st.session_state.new_search_results:
+    # ── 確認・修正ステップ ──
+    if st.session_state.confirm_reg is not None:
+        reg = st.session_state.confirm_reg
+        st.divider()
+        st.subheader("📝 登録内容の確認・修正")
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            st.image(reg["cover_url"])
+            st.caption(f"{reg['cand_en']} ({reg['media_type']}) {reg['tmdb_release']} 🆔 {reg['tmdb_id']}")
+        with c2:
+            final_jp = st.text_input("日本語タイトル（修正可）", value=reg.get("jp_input", jp_input), key="final_jp")
+            final_en = st.text_input("英語タイトル（修正可）",   value=reg["cand_en"],                key="final_en")
+
+            # 重複チェック（Notionデータ取得済みの場合のみ）
+            if st.session_state.pages_loaded:
+                dupes = check_duplicate(final_jp, final_en, st.session_state.pages)
+                if dupes:
+                    dupe_titles = "、".join([get_title(d["properties"])[0] for d in dupes])
+                    st.warning(f"⚠️ 登録済のデータがあります：{dupe_titles}\nそれでも登録しますか？")
+
+            col_ok, col_cancel = st.columns([1, 1])
+            with col_ok:
+                if st.button("✅ 登録する", key="confirm_ok"):
+                    with st.spinner("登録中..."):
+                        details     = fetch_tmdb_details(reg["tmdb_id"], reg["media_type"])
+                        watched_str = watched_date.isoformat() if watched_date else None
+                        ok = create_notion_page(
+                            jp_title=final_jp,
+                            en_title=final_en,
+                            media_type_label=media_label,
+                            tmdb_id=reg["tmdb_id"],
+                            media_type=reg["media_type"],
+                            cover_url=reg["cover_url"],
+                            tmdb_release=reg["tmdb_release"],
+                            details=details,
+                            wlflg=wlflg,
+                            watched_date=watched_str,
+                            rating=rating_sel if rating_sel else None,
+                        )
+                        if ok:
+                            save_to_drive(reg["cover_url"], final_jp if final_jp else final_en, reg["tmdb_id"])
+                            st.session_state.confirm_reg        = None
+                            st.session_state.new_search_results = []
+                            st.success(f"✅ 登録完了！「{final_jp or final_en}」をNotionに追加しました")
+                            time.sleep(1.5)
+                            st.rerun()
+                        else:
+                            st.error("登録失敗しました")
+            with col_cancel:
+                if st.button("❌ キャンセル", key="confirm_cancel"):
+                    st.session_state.confirm_reg = None
+                    st.rerun()
+
+    # ── 候補一覧 ──
+    elif st.session_state.new_search_results:
         st.caption(f"{len(st.session_state.new_search_results)} 件の候補")
         for row_start in range(0, len(st.session_state.new_search_results), 3):
             cols = st.columns(3)
@@ -586,38 +670,20 @@ if mode == "新規登録":
                     cover_url    = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{cand['poster_path']}"
                     tmdb_release = cand.get("release_date") or cand.get("first_air_date") or ""
                     media_type   = cand.get("media_type", "movie")
+                    cand_en      = cand.get("title") or cand.get("name", "")
 
                     st.image(cover_url)
-                    st.caption(
-                        f"{cand.get('title') or cand.get('name', '?')} "
-                        f"({media_type}) {tmdb_release} "
-                        f"🆔 {tmdb_id}"
-                    )
-                    if st.button("✅ 登録", key=f"new_reg_{abs_idx}"):
-                        with st.spinner("登録中..."):
-                            en_title     = en_input or cand.get("title") or cand.get("name", "")
-                            details      = fetch_tmdb_details(tmdb_id, media_type)
-                            watched_str  = watched_date.isoformat() if watched_date else None
-                            ok = create_notion_page(
-                                jp_title=jp_input,
-                                en_title=en_title,
-                                media_type_label=media_label,
-                                tmdb_id=tmdb_id,
-                                media_type=media_type,
-                                cover_url=cover_url,
-                                tmdb_release=tmdb_release,
-                                details=details,
-                                wlflg=wlflg,
-                                watched_date=watched_str,
-                                rating=rating_sel if rating_sel else None,
-                            )
-                            if ok:
-                                save_to_drive(cover_url, jp_input if jp_input else en_title, tmdb_id)
-                                st.success(f"✅ 登録完了！ {jp_input or en_title}")
-                                st.session_state.new_search_results = []
-                                st.rerun()
-                            else:
-                                st.error("登録失敗しました")
+                    st.caption(f"{cand_en} ({media_type}) {tmdb_release} 🆔 {tmdb_id}")
+                    if st.button("✅ これで登録", key=f"new_reg_{abs_idx}"):
+                        st.session_state.confirm_reg = {
+                            "tmdb_id":      tmdb_id,
+                            "cover_url":    cover_url,
+                            "tmdb_release": tmdb_release,
+                            "media_type":   media_type,
+                            "cand_en":      cand_en,
+                            "jp_input":     jp_input,
+                        }
+                        st.rerun()
     st.stop()
 
 # ============================================================
@@ -933,7 +999,6 @@ if mode == "手動確認":
                                     existing_release = date_prop.get("start") if date_prop else None
                                     media_type       = cand.get("media_type", "movie")
                                     season_number    = get_season_number(props)
-                                    # 手動決定は最強の権限：全部強制上書き
                                     need_notion, need_drive = True, True
                                     st.session_state.tmdb_id_cache[page_id] = tmdb_id
                                     n_ok, d_ok, meta_ok, updated = update_all(
@@ -950,10 +1015,10 @@ if mode == "手動確認":
                                         st.session_state.search_results.pop(page_id, None)
                                         for p in st.session_state.pages:
                                             if p["id"] == page_id:
-                                                p["cover"]                        = {"type": "external", "external": {"url": cover_url}}
-                                                p["properties"]["TMDB_ID"]        = {"number": tmdb_id}
-                                                p["properties"]["MEDIA_TYPE"]     = {"multi_select": [{"name": media_type}]}
-                                        time.sleep(0.5)
+                                                p["cover"]                    = {"type": "external", "external": {"url": cover_url}}
+                                                p["properties"]["TMDB_ID"]    = {"number": tmdb_id}
+                                                p["properties"]["MEDIA_TYPE"] = {"multi_select": [{"name": media_type}]}
+                                        time.sleep(1.5)
                                         st.rerun()
                                     else:
                                         st.error("一部失敗しました: " + "　".join(parts))
