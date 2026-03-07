@@ -316,7 +316,7 @@ def search_tmdb(query: str, year=None) -> list:
 def search_books(query: str) -> list:
     """Google Books APIで書籍検索"""
     res = api_request("get", "https://www.googleapis.com/books/v1/volumes",
-                      params={"q": query, "maxResults": 10, "langRestrict": "ja"})
+                      params={"q": query, "maxResults": 10})
     if res is None or res.status_code != 200:
         return []
     items = res.json().get("items", [])
@@ -548,7 +548,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.5")
+st.caption("v1.51")
 
 for key, default in {
     "is_running":         False,
@@ -736,7 +736,10 @@ if mode == "新規登録":
 
     # ── 候補一覧 ──
     elif st.session_state.new_search_results == [] and "new_search_done" in st.session_state and st.session_state.new_search_done:
-        st.warning("候補が見つかりませんでした。検索ワードを変えて再試行してください。\nTMDBで直接検索してIDを確認する方法もあります → https://www.themoviedb.org")
+        if media_label == "書籍":
+            st.warning("候補が見つかりませんでした。検索ワードを変えて再試行してください。\nGoogle Booksで直接検索する方法もあります → https://books.google.co.jp")
+        else:
+            st.warning("候補が見つかりませんでした。検索ワードを変えて再試行してください。\nTMDBで直接検索してIDを確認する方法もあります → https://www.themoviedb.org")
     elif st.session_state.new_search_results:
         st.caption(f"{len(st.session_state.new_search_results)} 件の候補")
         for row_start in range(0, len(st.session_state.new_search_results), 3):
