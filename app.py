@@ -143,6 +143,21 @@ def save_to_drive(cover_url: str, title: str, tmdb_id) -> bool:
         st.warning(f"Drive保存失敗 ({title}): {e}")
         return False
 
+def delete_from_drive(title: str, tmdb_id) -> bool:
+    """指定のファイルをDriveから削除してキャッシュも更新"""
+    try:
+        fname = make_filename(title, tmdb_id)
+        files = get_drive_files()
+        if fname not in files:
+            return True
+        service = get_drive_service()
+        service.files().delete(fileId=files[fname]).execute()
+        del st.session_state.drive_files_cache[fname]
+        return True
+    except Exception as e:
+        st.warning(f"Drive削除失敗 ({title} / {tmdb_id}): {e}")
+        return False
+
 # ============================================================
 # 差分判定
 # ============================================================
@@ -393,6 +408,11 @@ def update_all(page_id, cover_url, tmdb_release, existing_release,
 
     notion_ok        = update_notion_cover(page_id, actual_cover_url, tmdb_release, existing_release) if need_notion else True
     drive_ok         = save_to_drive(actual_cover_url, title, tmdb_id) if need_drive else True
+    # IDが変わった場合は古いDriveファイルを削除
+    if props is not None:
+        old_tmdb_id = props.get("TMDB_ID", {}).get("number")
+        if old_tmdb_id and int(old_tmdb_id) != tmdb_id:
+            delete_from_drive(title, int(old_tmdb_id))
     save_tmdb_id_to_notion(page_id, tmdb_id, media_type)
     if season_number:
         save_season_to_notion(page_id, season_number)
