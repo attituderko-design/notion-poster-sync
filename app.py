@@ -513,7 +513,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.4")
+st.caption("v1.41")
 
 for key, default in {
     "is_running":         False,
@@ -794,7 +794,9 @@ if mode == "自動同期" and st.session_state.is_running:
                     api_request("patch", f"https://api.notion.com/v1/pages/{item['id']}",
                                 headers=NOTION_HEADERS,
                                 json={"icon": {"type": "external", "external": {"url": icon_url}}})
-                success_log.append(f"🎨 アイコン更新: {log_title}")
+                msg = f"🎨 アイコン更新: {log_title}"
+                st.write(msg)
+                success_log.append(msg)
                 count += 1
                 pbar.progress((i + 1) / len(sync_targets))
                 time.sleep(0.1)
@@ -819,7 +821,9 @@ if mode == "自動同期" and st.session_state.is_running:
                     src     = "🔍 検索"
 
                 if not top:
-                    error_log.append(f"候補なし ({src}): {log_title}")
+                    msg = f"候補なし ({src}): {log_title}"
+                    st.write(f"⚠️ {msg}")
+                    error_log.append(msg)
                     pbar.progress((i + 1) / len(sync_targets))
                     time.sleep(0.1)
                     continue
@@ -834,7 +838,9 @@ if mode == "自動同期" and st.session_state.is_running:
                 url_matched = (current_url == cover_url)
 
                 if not is_refresh and url_matched and not need_drive and not is_incomplete(item):
-                    maintain_log.append(f"⏸️ 維持(OK): {log_title}")
+                    msg = f"⏸️ 維持(OK): {log_title}"
+                    st.write(msg)
+                    maintain_log.append(log_title)
                     pbar.progress((i + 1) / len(sync_targets))
                     time.sleep(0.1)
                     continue
@@ -849,8 +855,10 @@ if mode == "自動同期" and st.session_state.is_running:
                             meta_ok, updated = update_notion_metadata(item["id"], details, force=False, props=props)
                         except Exception:
                             pass
-                    log = build_update_log(log_title, src, False, True, False, True, meta_ok, updated)
-                    entry = log + (f"　↳ {' / '.join(updated)}" if updated else "")
+                    entry = build_update_log(log_title, src, False, True, False, True, meta_ok, updated)
+                    if updated:
+                        entry += f"　↳ {' / '.join(updated)}"
+                    st.write(entry)
                     success_log.append(entry)
                     count += 1
                     pbar.progress((i + 1) / len(sync_targets))
@@ -862,11 +870,13 @@ if mode == "自動同期" and st.session_state.is_running:
                     log_title, tmdb_id, media_type, need_notion, need_drive,
                     force_meta=is_refresh, props=props, season_number=season_number,
                 )
-                log = build_update_log(log_title, src, need_notion, n_ok, need_drive, d_ok, meta_ok, updated, is_refresh)
-                entry = log + (f"　↳ {' / '.join(updated)}" if updated else "")
+                entry = build_update_log(log_title, src, need_notion, n_ok, need_drive, d_ok, meta_ok, updated, is_refresh)
+                if updated:
+                    entry += f"　↳ {' / '.join(updated)}"
 
                 all_ok = (not need_notion or n_ok) and (not need_drive or d_ok) and meta_ok
                 if all_ok:
+                    st.write(entry)
                     success_log.append(entry)
                     count += 1
                 else:
@@ -874,10 +884,14 @@ if mode == "自動同期" and st.session_state.is_running:
                     if need_notion and not n_ok: fail_parts.append("Notion更新失敗")
                     if need_drive  and not d_ok: fail_parts.append("Drive保存失敗")
                     if not meta_ok:              fail_parts.append("メタデータ失敗")
-                    error_log.append(f"❌ {log_title}（{' / '.join(fail_parts)}）")
+                    msg = f"❌ {log_title}（{' / '.join(fail_parts)}）"
+                    st.write(msg)
+                    error_log.append(msg)
 
             except Exception as e:
-                error_log.append(f"⚠️ エラー: {log_title}（{e}）")
+                msg = f"⚠️ エラー: {log_title}（{e}）"
+                st.write(msg)
+                error_log.append(msg)
 
             pbar.progress((i + 1) / len(sync_targets))
             time.sleep(0.1)
