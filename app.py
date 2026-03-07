@@ -54,6 +54,12 @@ def get_title(props):
     en = "".join([t["plain_text"] for t in props.get("International Title", {}).get("rich_text", [])])
     return (jp if jp else en), jp, en
 
+def get_season_number(props) -> int | None:
+    """International TitleからSeason番号を取得"""
+    en = "".join([t["plain_text"] for t in props.get("International Title", {}).get("rich_text", [])])
+    m = re.search(r'[Ss]eason\s*(\d+)', en)
+    return int(m.group(1)) if m else None
+
 def get_current_notion_url(item) -> str | None:
     cover = item.get("cover")
     if cover and cover.get("type") == "external":
@@ -259,7 +265,7 @@ def search_tmdb(query: str, year=None) -> list:
         return []
     return [r for r in res.json().get("results", []) if r.get("poster_path") and r.get("media_type") in ["movie", "tv"]]
 
-def fetch_tmdb_details(tmdb_id: int, media_type: str) -> dict:
+def fetch_tmdb_details(tmdb_id: int, media_type: str, season_number: int | None = None) -> dict:
     base      = "https://api.themoviedb.org/3"
     params_ja = {"api_key": TMDB_API_KEY, "language": "ja-JP"}
     params_en = {"api_key": TMDB_API_KEY, "language": "en-US"}
@@ -269,25 +275,43 @@ def fetch_tmdb_details(tmdb_id: int, media_type: str) -> dict:
     if detail_res and detail_res.status_code == 200:
         genres = [g["name"] for g in detail_res.json().get("genres", [])]
 
-    credit_endpoint = "credits" if media_type == "movie" else "aggregate_credits"
-    credit_res = api_request("get", f"{base}/{media_type}/{tmdb_id}/{credit_endpoint}", params=params_ja)
-    cast_names, director_name = [], ""
-
-    if credit_res and credit_res.status_code == 200:
-        data = credit_res.json()
-        for member in data.get("cast", [])[:3]:
-            cast_names.append(member.get("name", ""))
-        if media_type == "movie":
-            for member in data.get("crew", []):
-                if member.get("job") == "Director":
-                    director_name = member.get("name", "")
-                    break
+    # シーズン個別API（tvかつseason_numberあり）
+    season_poster = None
+    season_air_date = None
+    if media_type == "tv" and season_number:
+        season_res = api_request("get", f"{base}/tv/{tmdb_id}/season/{season_number}", params=params_ja)
+        if season_res and season_res.status_code == 200:
+            season_data  = season_res.json()
+            season_poster   = season_data.get("poster_path")
+            season_air_date = season_data.get("air_date")
+            cast_names = [m.get("name", "") for m in season_data.get("credits", {}).get("cast", [])[:3]]
         else:
-            tv_res = api_request("get", f"{base}/tv/{tmdb_id}", params=params_ja)
-            if tv_res and tv_res.status_code == 200:
-                creators = tv_res.json().get("created_by", [])
-                if creators:
-                    director_name = creators[0].get("name", "")
+            cast_names = []
+        director_name = ""
+        tv_res = api_request("get", f"{base}/tv/{tmdb_id}", params=params_ja)
+        if tv_res and tv_res.status_code == 200:
+            creators = tv_res.json().get("created_by", [])
+            if creators:
+                director_name = creators[0].get("name", "")
+    else:
+        credit_endpoint = "credits" if media_type == "movie" else "aggregate_credits"
+        credit_res = api_request("get", f"{base}/{media_type}/{tmdb_id}/{credit_endpoint}", params=params_ja)
+        cast_names, director_name = [], ""
+        if credit_res and credit_res.status_code == 200:
+            data = credit_res.json()
+            for member in data.get("cast", [])[:3]:
+                cast_names.append(member.get("name", ""))
+            if media_type == "movie":
+                for member in data.get("crew", []):
+                    if member.get("job") == "Director":
+                        director_name = member.get("name", "")
+                        break
+            else:
+                tv_res = api_request("get", f"{base}/tv/{tmdb_id}", params=params_ja)
+                if tv_res and tv_res.status_code == 200:
+                    creators = tv_res.json().get("created_by", [])
+                    if creators:
+                        director_name = creators[0].get("name", "")
 
     score = None
     score_res = api_request("get", f"{base}/{media_type}/{tmdb_id}", params=params_en)
@@ -295,10 +319,12 @@ def fetch_tmdb_details(tmdb_id: int, media_type: str) -> dict:
         score = score_res.json().get("vote_average")
 
     return {
-        "genres":   genres,
-        "cast":     " / ".join(cast_names),
-        "director": director_name,
-        "score":    round(score, 1) if score else None,
+        "genres":         genres,
+        "cast":           " / ".join(cast_names),
+        "director":       director_name,
+        "score":          round(score, 1) if score else None,
+        "season_poster":  season_poster,
+        "season_air_date": season_air_date,
     }
 
 def update_notion_metadata(page_id: str, details: dict, force: bool = False, props: dict = None) -> tuple:
@@ -344,15 +370,35 @@ def update_notion_cover(page_id: str, cover_url: str, tmdb_release, existing_rel
     res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}", headers=NOTION_HEADERS, json=payload)
     return res is not None and res.status_code == 200
 
+def save_season_to_notion(page_id: str, season_number: int) -> bool:
+    res = api_request(
+        "patch",
+        f"https://api.notion.com/v1/pages/{page_id}",
+        headers=NOTION_HEADERS,
+        json={"properties": {"SEASON": {"number": season_number}}},
+    )
+    return res is not None and res.status_code == 200
+
 def update_all(page_id, cover_url, tmdb_release, existing_release,
                title, tmdb_id, media_type, need_notion, need_drive,
-               force_meta=False, props=None) -> tuple:
-    notion_ok        = update_notion_cover(page_id, cover_url, tmdb_release, existing_release) if need_notion else True
-    drive_ok         = save_to_drive(cover_url, title, tmdb_id) if need_drive else True
+               force_meta=False, props=None, season_number=None) -> tuple:
+    # シーズン個別ポスターがあればそちらを使う
+    actual_cover_url = cover_url
+    if media_type == "tv" and season_number:
+        details_pre = fetch_tmdb_details(tmdb_id, media_type, season_number)
+        if details_pre.get("season_poster"):
+            actual_cover_url = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{details_pre['season_poster']}"
+        if details_pre.get("season_air_date") and not existing_release:
+            tmdb_release = details_pre["season_air_date"]
+
+    notion_ok        = update_notion_cover(page_id, actual_cover_url, tmdb_release, existing_release) if need_notion else True
+    drive_ok         = save_to_drive(actual_cover_url, title, tmdb_id) if need_drive else True
     save_tmdb_id_to_notion(page_id, tmdb_id, media_type)
+    if season_number:
+        save_season_to_notion(page_id, season_number)
     meta_ok, updated = False, []
     try:
-        details          = fetch_tmdb_details(tmdb_id, media_type)
+        details          = fetch_tmdb_details(tmdb_id, media_type, season_number)
         meta_ok, updated = update_notion_metadata(page_id, details, force=force_meta, props=props)
     except Exception as e:
         st.warning(f"メタデータ更新失敗 ({title}): {e}")
@@ -511,6 +557,7 @@ if mode == "自動同期" and st.session_state.is_running:
 
             try:
                 saved_tmdb_id, saved_media_type = get_tmdb_id_from_notion(props)
+                season_number = get_season_number(props)
 
                 if saved_tmdb_id and saved_media_type:
                     top = fetch_tmdb_by_id(saved_tmdb_id, saved_media_type)
@@ -566,7 +613,7 @@ if mode == "自動同期" and st.session_state.is_running:
                 n_ok, d_ok, meta_ok, updated = update_all(
                     item["id"], cover_url, tmdb_release, existing_release,
                     log_title, tmdb_id, media_type, need_notion, need_drive,
-                    force_meta=is_refresh, props=props,
+                    force_meta=is_refresh, props=props, season_number=season_number,
                 )
                 log = build_update_log(log_title, src, need_notion, n_ok, need_drive, d_ok, meta_ok, updated, is_refresh)
                 st.write(log)
