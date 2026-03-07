@@ -84,7 +84,7 @@ def get_current_notion_url(item) -> str | None:
     return None
 
 def is_unreleased(page) -> bool:
-    date_prop = page["properties"].get("公開", {}).get("date")
+    date_prop = page["properties"].get("リリース日", {}).get("date")
     if not date_prop:
         return True
     release_str = date_prop.get("start", "")
@@ -101,8 +101,8 @@ def is_incomplete(page) -> bool:
     if not page.get("cover"):                              return True
     if not props.get("TMDB_ID", {}).get("number"):         return True
     if not props.get("ジャンル", {}).get("multi_select"):  return True
-    if not props.get("出演者・主催", {}).get("rich_text"):  return True
-    if not props.get("監督・指揮者", {}).get("rich_text"):  return True
+    if not props.get("キャスト・関係者", {}).get("rich_text"):  return True
+    if not props.get("クリエイター", {}).get("rich_text"):  return True
     if props.get("TMDB_score", {}).get("number") is None:  return True
     return False
 
@@ -312,6 +312,41 @@ def search_tmdb(query: str, year=None) -> list:
         return []
     return [r for r in res.json().get("results", []) if r.get("poster_path") and r.get("media_type") in ["movie", "tv"]]
 
+
+def search_books(query: str) -> list:
+    """Google Books APIで書籍検索"""
+    res = api_request("get", "https://www.googleapis.com/books/v1/volumes",
+                      params={"q": query, "maxResults": 10, "langRestrict": "ja"})
+    if res is None or res.status_code != 200:
+        return []
+    items = res.json().get("items", [])
+    results = []
+    for item in items:
+        info = item.get("volumeInfo", {})
+        cover = info.get("imageLinks", {}).get("thumbnail") or info.get("imageLinks", {}).get("smallThumbnail")
+        if not cover:
+            continue
+        # httpsに変換
+        cover = cover.replace("http://", "https://")
+        results.append({
+            "id":           item["id"],
+            "title":        info.get("title", ""),
+            "authors":      info.get("authors", []),
+            "publisher":    info.get("publisher", ""),
+            "published":    info.get("publishedDate", ""),
+            "genres":       info.get("categories", []),
+            "cover_url":    cover,
+            "media_type":   "book",
+        })
+    return results
+
+def fetch_book_ja_title(book_id: str) -> str:
+    """Google Books APIで日本語タイトルを取得"""
+    res = api_request("get", f"https://www.googleapis.com/books/v1/volumes/{book_id}")
+    if res is None or res.status_code != 200:
+        return ""
+    return res.json().get("volumeInfo", {}).get("title", "")
+
 def fetch_tmdb_details(tmdb_id: int, media_type: str, season_number: int | None = None) -> dict:
     base      = "https://api.themoviedb.org/3"
     params_ja = {"api_key": TMDB_API_KEY, "language": "ja-JP"}
@@ -379,19 +414,19 @@ def update_notion_metadata(page_id: str, details: dict, force: bool = False, pro
     def needs_update(key):
         if force or props is None: return True
         if key == "ジャンル":     return not props.get("ジャンル", {}).get("multi_select")
-        if key == "出演者・主催":  return not props.get("出演者・主催", {}).get("rich_text")
-        if key == "監督・指揮者":  return not props.get("監督・指揮者", {}).get("rich_text")
+        if key == "キャスト・関係者":  return not props.get("キャスト・関係者", {}).get("rich_text")
+        if key == "クリエイター":  return not props.get("クリエイター", {}).get("rich_text")
         if key == "TMDB_score":   return props.get("TMDB_score", {}).get("number") is None
         return False
 
     if details["genres"] and needs_update("ジャンル"):
         properties["ジャンル"] = {"multi_select": [{"name": g} for g in details["genres"]]}
         updated.append("ジャンル")
-    if details["cast"] and needs_update("出演者・主催"):
-        properties["出演者・主催"] = {"rich_text": [{"type": "text", "text": {"content": details["cast"]}}]}
+    if details["cast"] and needs_update("キャスト・関係者"):
+        properties["キャスト・関係者"] = {"rich_text": [{"type": "text", "text": {"content": details["cast"]}}]}
         updated.append("出演者")
-    if details["director"] and needs_update("監督・指揮者"):
-        properties["監督・指揮者"] = {"rich_text": [{"type": "text", "text": {"content": details["director"]}}]}
+    if details["director"] and needs_update("クリエイター"):
+        properties["クリエイター"] = {"rich_text": [{"type": "text", "text": {"content": details["director"]}}]}
         updated.append("監督")
     if details.get("score") is not None and needs_update("TMDB_score"):
         properties["TMDB_score"] = {"number": details["score"]}
@@ -406,7 +441,7 @@ def update_notion_metadata(page_id: str, details: dict, force: bool = False, pro
 def update_notion_cover(page_id: str, cover_url: str, tmdb_release, existing_release) -> bool:
     payload = {"cover": {"type": "external", "external": {"url": cover_url}}}
     if tmdb_release and not existing_release:
-        payload["properties"] = {"公開": {"date": {"start": tmdb_release}}}
+        payload["properties"] = {"リリース日": {"date": {"start": tmdb_release}}}
     res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}", headers=NOTION_HEADERS, json=payload)
     return res is not None and res.status_code == 200
 
@@ -465,7 +500,7 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
         "WLflg":              {"checkbox": wlflg},
     }
     if tmdb_release:
-        properties["公開"] = {"date": {"start": tmdb_release}}
+        properties["リリース日"] = {"date": {"start": tmdb_release}}
     if watched_date:
         properties["鑑賞日"] = {"date": {"start": watched_date}}
     if rating:
@@ -473,9 +508,9 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
     if details.get("genres"):
         properties["ジャンル"] = {"multi_select": [{"name": g} for g in details["genres"]]}
     if details.get("cast"):
-        properties["出演者・主催"] = {"rich_text": [{"type": "text", "text": {"content": details["cast"]}}]}
+        properties["キャスト・関係者"] = {"rich_text": [{"type": "text", "text": {"content": details["cast"]}}]}
     if details.get("director"):
-        properties["監督・指揮者"] = {"rich_text": [{"type": "text", "text": {"content": details["director"]}}]}
+        properties["クリエイター"] = {"rich_text": [{"type": "text", "text": {"content": details["director"]}}]}
     if details.get("score") is not None:
         properties["TMDB_score"] = {"number": details["score"]}
 
@@ -513,7 +548,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.43")
+st.caption("v1.5")
 
 for key, default in {
     "is_running":         False,
@@ -617,7 +652,10 @@ if mode == "新規登録":
     if st.button("🔍 検索", key="new_search"):
         query = en_input if en_input else jp_input
         if query:
-            results = search_tmdb(query)
+            if media_label == "書籍":
+                results = search_books(query)
+            else:
+                results = search_tmdb(query)
             st.session_state.new_search_results = results[:10]
             st.session_state.new_search_done    = True
             st.session_state.confirm_reg        = None
@@ -660,13 +698,22 @@ if mode == "新規登録":
 
             if st.session_state.registering:
                 with st.spinner("登録中..."):
-                    details     = fetch_tmdb_details(reg["tmdb_id"], reg["media_type"])
+                    if reg["media_type"] == "book":
+                        details = {
+                            "genres":   reg.get("book_genres", []),
+                            "cast":     " / ".join(reg.get("book_authors", [])),
+                            "director": "",
+                            "score":    None,
+                        }
+                    else:
+                        details = fetch_tmdb_details(reg["tmdb_id"], reg["media_type"])
                     watched_str = watched_date.isoformat() if watched_date else None
+                    page_tmdb_id = 0 if reg["media_type"] == "book" else reg["tmdb_id"]
                     ok = create_notion_page(
                         jp_title=final_jp,
                         en_title=final_en,
                         media_type_label=media_label,
-                        tmdb_id=reg["tmdb_id"],
+                        tmdb_id=page_tmdb_id,
                         media_type=reg["media_type"],
                         cover_url=reg["cover_url"],
                         tmdb_release=reg["tmdb_release"],
@@ -697,25 +744,49 @@ if mode == "新規登録":
             for col_idx, cand in enumerate(st.session_state.new_search_results[row_start:row_start + 3]):
                 abs_idx = row_start + col_idx
                 with cols[col_idx]:
-                    tmdb_id      = cand["id"]
-                    cover_url    = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{cand['poster_path']}"
-                    tmdb_release = cand.get("release_date") or cand.get("first_air_date") or ""
-                    media_type   = cand.get("media_type", "movie")
-                    cand_en      = cand.get("title") or cand.get("name", "")
+                    if media_label == "書籍":
+                        tmdb_id      = cand["id"]
+                        cover_url    = cand["cover_url"]
+                        tmdb_release = cand.get("published", "")
+                        media_type   = "book"
+                        cand_en      = cand.get("title", "")
+                        authors      = " / ".join(cand.get("authors", []))
+                    else:
+                        tmdb_id      = cand["id"]
+                        cover_url    = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{cand['poster_path']}"
+                        tmdb_release = cand.get("release_date") or cand.get("first_air_date") or ""
+                        media_type   = cand.get("media_type", "movie")
+                        cand_en      = cand.get("title") or cand.get("name", "")
+                        authors      = ""
 
                     st.image(cover_url)
-                    st.caption(f"{cand_en} ({media_type}) {tmdb_release} 🆔 {tmdb_id}")
+                    caption = f"{cand_en}"
+                    if authors: caption += f"　{authors}"
+                    caption += f" {tmdb_release} 🆔 {tmdb_id}"
+                    st.caption(caption)
                     if st.button("✅ これで登録", key=f"new_reg_{abs_idx}"):
-                        with st.spinner("日本語タイトル取得中..."):
-                            ja_title = fetch_tmdb_ja_title(tmdb_id, media_type)
-                        st.session_state.confirm_reg = {
-                            "tmdb_id":      tmdb_id,
-                            "cover_url":    cover_url,
-                            "tmdb_release": tmdb_release,
-                            "media_type":   media_type,
-                            "cand_en":      cand_en,
-                            "jp_input":     ja_title or jp_input,
-                        }
+                        if media_label == "書籍":
+                            st.session_state.confirm_reg = {
+                                "tmdb_id":      cand["id"],
+                                "cover_url":    cand["cover_url"],
+                                "tmdb_release": cand["published"],
+                                "media_type":   "book",
+                                "cand_en":      cand["title"],
+                                "jp_input":     cand["title"],
+                                "book_authors": cand["authors"],
+                                "book_genres":  cand["genres"],
+                            }
+                        else:
+                            with st.spinner("日本語タイトル取得中..."):
+                                ja_title = fetch_tmdb_ja_title(tmdb_id, media_type)
+                            st.session_state.confirm_reg = {
+                                "tmdb_id":      tmdb_id,
+                                "cover_url":    cover_url,
+                                "tmdb_release": tmdb_release,
+                                "media_type":   media_type,
+                                "cand_en":      cand_en,
+                                "jp_input":     ja_title or jp_input,
+                            }
                         st.rerun()
     st.stop()
 
@@ -805,7 +876,7 @@ if mode == "自動同期" and st.session_state.is_running:
             need_notion = True if is_refresh else not notion_ok_now
             need_drive  = True if is_refresh else not drive_ok_now
 
-            date_prop        = props.get("公開", {}).get("date")
+            date_prop        = props.get("リリース日", {}).get("date")
             existing_release = date_prop.get("start") if date_prop else None
             query            = en if en else jp
 
@@ -1008,7 +1079,7 @@ if mode == "手動確認":
                             if top:
                                 cover_url        = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{top['poster_path']}"
                                 tmdb_release     = top.get("release_date") or top.get("first_air_date")
-                                date_prop        = props.get("公開", {}).get("date")
+                                date_prop        = props.get("リリース日", {}).get("date")
                                 existing_release = date_prop.get("start") if date_prop else None
                                 season_number    = get_season_number(props)
                                 st.session_state.tmdb_id_cache[page_id] = new_tmdb_id
@@ -1100,7 +1171,7 @@ if mode == "手動確認":
                                     f"🆔 {tmdb_id}"
                                 )
                                 if st.button("✅ 決定", key=f"sel_{page_id}_{abs_idx}"):
-                                    date_prop        = props.get("公開", {}).get("date")
+                                    date_prop        = props.get("リリース日", {}).get("date")
                                     existing_release = date_prop.get("start") if date_prop else None
                                     media_type       = cand.get("media_type", "movie")
                                     season_number    = get_season_number(props)
