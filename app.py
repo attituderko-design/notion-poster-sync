@@ -72,6 +72,8 @@ def is_incomplete(page) -> bool:
         return True
     if not props.get("監督・指揮者", {}).get("rich_text"):
         return True
+    if props.get("TMDB_score", {}).get("number") is None:
+        return True
     return False
 
 # ============================================================
@@ -489,7 +491,7 @@ if mode == "自動同期" and st.session_state.is_running:
                 current_url = get_current_notion_url(item)
                 url_matched = (current_url == cover_url)
 
-                if url_matched and not need_drive:
+                if url_matched and not need_drive and not is_incomplete(item):
                     st.write(f"⏸️ 維持(OK): {log_title}")
                     pbar.progress((i + 1) / len(sync_targets))
                     time.sleep(0.1)
