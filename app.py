@@ -60,8 +60,24 @@ def get_current_notion_url(item) -> str | None:
         return cover.get("external", {}).get("url")
     return None
 
+def is_unreleased(page) -> bool:
+    """公開日が未設定 or 未来の場合はTrue"""
+    from datetime import date
+    date_prop = page["properties"].get("公開", {}).get("date")
+    if not date_prop:
+        return True
+    release_str = date_prop.get("start", "")
+    if not release_str:
+        return True
+    try:
+        release_date = date.fromisoformat(release_str[:10])
+        return release_date > date.today()
+    except ValueError:
+        return False
+
 def is_incomplete(page) -> bool:
     props = page["properties"]
+    if is_unreleased(page):                                return False  # 未公開はスキップ
     if not page.get("cover"):                              return True
     if not props.get("TMDB_ID", {}).get("number"):         return True
     if not props.get("ジャンル", {}).get("multi_select"):  return True
@@ -148,7 +164,10 @@ def apply_diff_filter(pages: list, diff_filter: str) -> list:
 
 def diff_badge(item) -> str:
     notion_ok, drive_ok = get_diff_status(item)
-    return ("🟢Notion" if notion_ok else "🔴Notion") + " " + ("🟢Drive" if drive_ok else "🔴Drive")
+    badge = ("🟢Notion" if notion_ok else "🔴Notion") + " " + ("🟢Drive" if drive_ok else "🔴Drive")
+    if is_unreleased(item):
+        badge += " 🔜未公開"
+    return badge
 
 # ============================================================
 # APIリトライラッパー
@@ -761,10 +780,12 @@ if mode == "手動確認":
                                     if n_ok and d_ok and meta_ok:
                                         st.success("保存完了！ " + "　".join(parts))
                                         st.session_state.search_results.pop(page_id, None)
-                                        if need_notion and n_ok:
-                                            for p in st.session_state.pages:
-                                                if p["id"] == page_id:
+                                        for p in st.session_state.pages:
+                                            if p["id"] == page_id:
+                                                if need_notion and n_ok:
                                                     p["cover"] = {"type": "external", "external": {"url": cover_url}}
+                                                p["properties"]["TMDB_ID"]    = {"number": tmdb_id}
+                                                p["properties"]["MEDIA_TYPE"] = {"multi_select": [{"name": media_type}]}
                                         time.sleep(0.5)
                                         st.rerun()
                                     else:
