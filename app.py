@@ -466,8 +466,8 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 # アプリ初期化
 # ============================================================
 
-st.set_page_config(page_title="Notion Movie Master", page_icon="🎬", layout="wide")
-st.title("🎬 Notion ポスター同期")
+st.set_page_config(page_title="ArtéMis", page_icon="🌙", layout="wide")
+st.title("ArtéMis")
 
 for key, default in {
     "is_running":       False,
