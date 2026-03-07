@@ -489,16 +489,9 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
     res = api_request("post", "https://api.notion.com/v1/pages", headers=NOTION_HEADERS, json=payload)
     return res is not None and res.status_code == 200
 
-def check_duplicate(jp_title: str, en_title: str, pages: list) -> list:
-    """タイトル or International Titleが部分一致する既存ページを返す"""
-    jp_lower = jp_title.lower().strip()
-    en_lower = en_title.lower().strip()
-    hits = []
-    for p in pages:
-        _, p_jp, p_en = get_title(p["properties"])
-        if (jp_lower and jp_lower in p_jp.lower()) or (en_lower and en_lower in p_en.lower()):
-            hits.append(p)
-    return hits
+def check_duplicate(tmdb_id: int, pages: list) -> list:
+    """TMDB_IDが一致する既存ページを返す"""
+    return [p for p in pages if p["properties"].get("TMDB_ID", {}).get("number") == tmdb_id]
 
 def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_ok, meta_ok, updated, is_refresh=False) -> str:
     parts = []
@@ -519,12 +512,13 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 # ============================================================
 
 st.set_page_config(page_title="ArtéMis", page_icon="🌙", layout="wide")
-st.title("🌙 ArtéMis v1.30")
+st.title("🌙 ArtéMis v1.31")
 
 for key, default in {
     "is_running":         False,
     "pages_loaded":       False,
     "pages":              [],
+    "all_pages":          [],
     "search_results":     {},
     "tmdb_id_cache":      {},
     "manual_page":        0,
@@ -556,12 +550,13 @@ with st.sidebar:
     if st.button("📥 Notionデータ取得", use_container_width=True, disabled=(mode == "新規登録")):
         with st.spinner("Notionからデータ取得中..."):
             all_pages = load_notion_data()
+            st.session_state.all_pages      = all_pages
             st.session_state.pages          = filter_target_pages(all_pages)
             st.session_state.pages_loaded   = True
             st.session_state.search_results = {}
             st.session_state.manual_page    = 0
             refresh_drive_files()
-        st.success(f"{len(st.session_state.pages)} 件取得しました")
+        st.success(f"{len(st.session_state.pages)} 件取得しました（全媒体: {len(st.session_state.all_pages)} 件）")
 
     if mode != "新規登録":
         st.divider()
@@ -641,12 +636,16 @@ if mode == "新規登録":
             final_jp = st.text_input("日本語タイトル（修正可）", value=reg.get("jp_input", jp_input), key="final_jp")
             final_en = st.text_input("英語タイトル（修正可）",   value=reg["cand_en"],                key="final_en")
 
-            # 重複チェック（Notionデータ取得済みの場合のみ）
-            if st.session_state.pages_loaded:
-                dupes = check_duplicate(final_jp, final_en, st.session_state.pages)
-                if dupes:
-                    dupe_titles = "、".join([get_title(d["properties"])[0] for d in dupes])
-                    st.warning(f"⚠️ 登録済のデータがあります：{dupe_titles}\nそれでも登録しますか？")
+            # 重複チェック（セッション中1回だけNotion取得してキャッシュ）
+            if not st.session_state.pages_loaded:
+                with st.spinner("重複チェック中..."):
+                    all_pages = load_notion_data()
+                    st.session_state.pages        = filter_target_pages(all_pages)
+                    st.session_state.pages_loaded = True
+            dupes = check_duplicate(reg["tmdb_id"], st.session_state.pages)
+            if dupes:
+                dupe_titles = "、".join([get_title(d["properties"])[0] for d in dupes])
+                st.warning(f"⚠️ 登録済のデータがあります：{dupe_titles}\nそれでも登録しますか？")
 
             col_ok, col_cancel = st.columns([1, 1])
             with col_ok:
@@ -762,12 +761,17 @@ if delete_btn:
 # ============================================================
 if mode == "自動同期" and st.session_state.is_running:
     is_refresh   = (st.session_state.sync_mode == "refresh")
-    sync_targets = target_pages if is_refresh else get_display_pages()
+    if is_refresh:
+        sync_targets = st.session_state.all_pages if st.session_state.all_pages else target_pages
+    else:
+        sync_targets = get_display_pages()
     label_mode   = "🔄 リフレッシュ" if is_refresh else "⚙️ 自動同期"
 
     with st.status(f"{label_mode}中... 対象 {len(sync_targets)} 件", expanded=True) as status:
         pbar, count = st.progress(0), 0
-        error_log: list[str] = []
+        success_log: list[str] = []
+        maintain_log: list[str] = []
+        error_log:   list[str] = []
 
         for i, item in enumerate(sync_targets):
             if not st.session_state.is_running:
@@ -776,6 +780,24 @@ if mode == "自動同期" and st.session_state.is_running:
             props     = item["properties"]
             log_title, jp, en = get_title(props)
             notion_ok_now, drive_ok_now = get_diff_status(item)
+            is_movie_drama = any(
+                m["name"] in ["映画", "ドラマ"]
+                for m in props.get("媒体", {}).get("multi_select", [])
+            )
+            if is_refresh and not is_movie_drama:
+                # 映画・ドラマ以外はアイコン更新のみ
+                media_labels = [m["name"] for m in props.get("媒体", {}).get("multi_select", [])]
+                media_label_val = media_labels[0] if media_labels else None
+                icon_url = get_media_icon_url(media_label_val) if media_label_val else None
+                if icon_url:
+                    api_request("patch", f"https://api.notion.com/v1/pages/{item['id']}",
+                                headers=NOTION_HEADERS,
+                                json={"icon": {"type": "external", "external": {"url": icon_url}}})
+                success_log.append(f"🎨 アイコン更新: {log_title}")
+                count += 1
+                pbar.progress((i + 1) / len(sync_targets))
+                time.sleep(0.1)
+                continue
             need_notion = True if is_refresh else not notion_ok_now
             need_drive  = True if is_refresh else not drive_ok_now
 
@@ -796,7 +818,6 @@ if mode == "自動同期" and st.session_state.is_running:
                     src     = "🔍 検索"
 
                 if not top:
-                    st.write(f"候補なし ({src}): {log_title}")
                     error_log.append(f"候補なし ({src}): {log_title}")
                     pbar.progress((i + 1) / len(sync_targets))
                     time.sleep(0.1)
@@ -812,7 +833,7 @@ if mode == "自動同期" and st.session_state.is_running:
                 url_matched = (current_url == cover_url)
 
                 if not is_refresh and url_matched and not need_drive and not is_incomplete(item):
-                    st.write(f"⏸️ 維持(OK): {log_title}")
+                    maintain_log.append(f"⏸️ 維持(OK): {log_title}")
                     pbar.progress((i + 1) / len(sync_targets))
                     time.sleep(0.1)
                     continue
@@ -828,9 +849,8 @@ if mode == "自動同期" and st.session_state.is_running:
                         except Exception:
                             pass
                     log = build_update_log(log_title, src, False, True, False, True, meta_ok, updated)
-                    st.write(log)
-                    if meta_ok and updated:
-                        st.caption(f"　　↳ {' / '.join(updated)}")
+                    entry = log + (f"　↳ {' / '.join(updated)}" if updated else "")
+                    success_log.append(entry)
                     count += 1
                     pbar.progress((i + 1) / len(sync_targets))
                     time.sleep(0.1)
@@ -842,12 +862,11 @@ if mode == "自動同期" and st.session_state.is_running:
                     force_meta=is_refresh, props=props, season_number=season_number,
                 )
                 log = build_update_log(log_title, src, need_notion, n_ok, need_drive, d_ok, meta_ok, updated, is_refresh)
-                st.write(log)
-                if updated:
-                    st.caption(f"　　↳ {' / '.join(updated)}")
+                entry = log + (f"　↳ {' / '.join(updated)}" if updated else "")
 
                 all_ok = (not need_notion or n_ok) and (not need_drive or d_ok) and meta_ok
                 if all_ok:
+                    success_log.append(entry)
                     count += 1
                 else:
                     fail_parts = []
@@ -857,19 +876,31 @@ if mode == "自動同期" and st.session_state.is_running:
                     error_log.append(f"❌ {log_title}（{' / '.join(fail_parts)}）")
 
             except Exception as e:
-                st.write(f"⚠️ エラー ({log_title}): {e}")
                 error_log.append(f"⚠️ エラー: {log_title}（{e}）")
 
             pbar.progress((i + 1) / len(sync_targets))
             time.sleep(0.1)
 
-        status.update(label=f"{label_mode}完了！計 {count} 件更新　失敗 {len(error_log)} 件", state="complete")
-        if error_log:
-            st.error(f"**⚠️ 要確認リスト（{len(error_log)} 件）**")
+        status.update(
+            label=f"{label_mode}完了！✅ {len(success_log)}件　⏸️ {len(maintain_log)}件　❌ {len(error_log)}件",
+            state="complete"
+        )
+
+    # 完了後にexpanderで仕分け表示
+    if success_log:
+        with st.expander(f"✅ 更新成功 （{len(success_log)} 件）", expanded=False):
+            for msg in success_log:
+                st.write(msg)
+    if maintain_log:
+        with st.expander(f"⏸️ 維持 （{len(maintain_log)} 件）", expanded=False):
+            for msg in maintain_log:
+                st.write(msg)
+    if error_log:
+        with st.expander(f"❌ 失敗・要確認 （{len(error_log)} 件）", expanded=True):
             for msg in error_log:
                 st.write(msg)
-        else:
-            st.success("すべて正常に処理されました ✅")
+    if not error_log:
+        st.success("すべて正常に処理されました ✅")
 
     st.session_state.is_running = False
 
