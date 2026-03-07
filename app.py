@@ -278,10 +278,17 @@ def fetch_tmdb_details(tmdb_id: int, media_type: str) -> dict:
                 if creators:
                     director_name = creators[0].get("name", "")
 
+    # スコア取得（英語版で取得）
+    score = None
+    score_res = api_request("get", f"{base}/{media_type}/{tmdb_id}", params={"api_key": TMDB_API_KEY, "language": "en-US"})
+    if score_res and score_res.status_code == 200:
+        score = score_res.json().get("vote_average")
+
     return {
         "genres":   genres,
         "cast":     " / ".join(cast_names),
         "director": director_name,
+        "score":    round(score, 1) if score else None,
     }
 
 def update_notion_metadata(page_id: str, details: dict) -> bool:
@@ -292,6 +299,8 @@ def update_notion_metadata(page_id: str, details: dict) -> bool:
         properties["出演者・主催"] = {"rich_text": [{"type": "text", "text": {"content": details["cast"]}}]}
     if details["director"]:
         properties["監督・指揮者"] = {"rich_text": [{"type": "text", "text": {"content": details["director"]}}]}
+    if details.get("score") is not None:
+        properties["TMDB_score"] = {"number": details["score"]}
     if not properties:
         return True
     res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}", headers=NOTION_HEADERS, json={"properties": properties})
