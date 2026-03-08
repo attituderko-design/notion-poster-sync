@@ -497,41 +497,33 @@ def search_games(query: str) -> list:
     return results
 
 # ============================================================
-# MusicBrainz + Cover Art Archive（音楽アルバム）
+# iTunes Search API（音楽アルバム）
 # ============================================================
 def search_albums(query: str, artist: str = None) -> list:
-    search_q = f'release:"{query}"'
-    if artist:
-        search_q += f' AND artist:"{artist}"'
+    search_term = f"{artist} {query}".strip() if artist else query
     res = requests.get(
-        "https://musicbrainz.org/ws/2/release",
-        params={"query": search_q, "limit": 20, "fmt": "json"},
-        headers={"User-Agent": "ArteMis/1.0 (notion-poster-sync)"},
+        "https://itunes.apple.com/search",
+        params={
+            "term":    search_term,
+            "media":   "music",
+            "entity":  "album",
+            "country": "JP",
+            "lang":    "ja_jp",
+            "limit":   20,
+        },
+        headers={"User-Agent": "ArteMis/1.0"},
     )
     if res.status_code != 200:
         return []
     results = []
-    seen = set()
-    for item in res.json().get("releases", []):
-        mbid = item.get("id", "")
-        title = item.get("title", "")
-        key = (title, item.get("artist-credit", [{}])[0].get("artist", {}).get("name", ""))
-        if key in seen:
-            continue
-        seen.add(key)
-        artist_name = " / ".join(
-            ac.get("artist", {}).get("name", "")
-            for ac in item.get("artist-credit", [])
-            if isinstance(ac, dict) and ac.get("artist")
-        )
-        release_date = item.get("date", "")[:10] if item.get("date") else ""
-        # Cover Art Archive
-        cover_url = f"https://coverartarchive.org/release/{mbid}/front-250"
+    for item in res.json().get("results", []):
+        cover_url = item.get("artworkUrl100", "").replace("100x100bb", "600x600bb")
+        release   = (item.get("releaseDate", "") or "")[:10]
         results.append({
-            "id":         mbid,
-            "title":      title,
-            "artist":     artist_name,
-            "release":    release_date,
+            "id":         item.get("collectionId", 0),
+            "title":      item.get("collectionName", ""),
+            "artist":     item.get("artistName", ""),
+            "release":    release,
             "cover_url":  cover_url,
             "media_type": "album",
         })
@@ -814,7 +806,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.90")
+st.caption("v1.91")
 
 for key, default in {
     "is_running":         False,
