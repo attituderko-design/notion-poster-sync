@@ -423,6 +423,7 @@ def search_books(query: str) -> list:
                     "sort": "sales",
                 }
                 url_rk = f"https://app.rakuten.co.jp/services/api/BooksBook/Search/20170404?{urllib.parse.urlencode(rk_params)}"
+                st.caption(f"🔑 RAKUTEN_APP_ID の値: `{RAKUTEN_APP_ID}`")
                 st.caption(f"🔍 楽天URL: `{url_rk}`")
                 res_rk = requests.get(url_rk, timeout=5)
                 st.caption(f"ステータス: {res_rk.status_code}")
