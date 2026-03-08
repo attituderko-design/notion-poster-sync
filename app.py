@@ -427,6 +427,14 @@ def search_books(query: str) -> list:
                 if ndl_res.status_code == 200:
                     import xml.etree.ElementTree as _ET2
                     _root2 = _ET2.fromstring(ndl_res.content)
+                    # タグ一覧を確認
+                    _all_tags = list({el.tag for el in _root2.iter()})[:15]
+                    st.caption(f"🏷 tags: {_all_tags}")
+                    # 最初のitemのテキスト全部
+                    _first_item = _root2.find(".//{http://www.w3.org/2005/Atom}entry") or _root2.find(".//item")
+                    if _first_item is not None:
+                        _texts = {child.tag: child.text for child in _first_item}
+                        st.caption(f"📄 first item: {list(_texts.items())[:8]}")
                     _all_ids = [el.text for el in _root2.findall(".//{http://purl.org/dc/elements/1.1/}identifier")]
                     st.caption(f"📋 identifiers: {_all_ids[:5]}")
                     for _item in _root2.findall(".//{http://purl.org/dc/elements/1.1/}identifier"):
