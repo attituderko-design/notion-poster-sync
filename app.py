@@ -463,7 +463,7 @@ def search_books(query: str) -> list:
             import urllib.parse as _up
             url_rk = "https://openapi.rakuten.co.jp/services/api/BooksBook/Search/20170404?" + _up.urlencode(rk_params)
             st.caption(f"🔗 URL: {url_rk[:200]}")
-            res_rk = requests.get(url_rk, timeout=5)
+            res_rk = requests.get(url_rk, timeout=5, headers={"Referer": "https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app"})
             if res_rk.status_code == 200:
                 items_rk = res_rk.json().get("Items", [])
                 if items_rk:
