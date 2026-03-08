@@ -423,16 +423,19 @@ def search_books(query: str) -> list:
                     params={"title": title_q, "cnt": 3, "mediatype": 1},
                     timeout=5,
                 )
+                st.caption(f"🔍 OpenSearch status={ndl_res.status_code} title={title_q}")
                 if ndl_res.status_code == 200:
                     import xml.etree.ElementTree as _ET2
                     _root2 = _ET2.fromstring(ndl_res.content)
+                    _all_ids = [el.text for el in _root2.findall(".//{http://purl.org/dc/elements/1.1/}identifier")]
+                    st.caption(f"📋 identifiers: {_all_ids[:5]}")
                     for _item in _root2.findall(".//{http://purl.org/dc/elements/1.1/}identifier"):
                         _val = _re.sub(r"[^0-9]", "", (_item.text or ""))
                         if _re.match(r"^97[89]\d{10}$", _val):
                             isbn = _val
                             break
-            except Exception:
-                pass
+            except Exception as _e:
+                st.caption(f"🔴 OpenSearch例外: {_e}")
 
         # Open BDでカバー画像取得
         if isbn:
