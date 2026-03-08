@@ -31,15 +31,15 @@ NOTION_HEADERS = {
 # 媒体マッピング
 # ============================================================
 MEDIA_ICON_MAP = {
-    "映画":          ("🎬 映画",          "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/camera-reels.svg"),
-    "ドラマ":        ("📺 ドラマ",        "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/display.svg"),
-    "演奏会":        ("🎻 演奏会",        "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/music-note-beamed.svg"),
-    "展示会":        ("🖼️ 展示会",        "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/image.svg"),
-    "ライブ/ショー": ("🎤 ライブ/ショー", "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/mic.svg"),
-    "書籍":          ("📖 書籍",          "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/book.svg"),
-    "漫画":          ("📚 漫画",          "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/book-manga.svg"),
-    "音楽アルバム":  ("🎵 音楽アルバム",  "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/disc.svg"),
-    "ゲーム":        ("🎮 ゲーム",        "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/controller.svg"),
+    "映画":          ("🎬 映画",          "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/camera-reels.svg"),
+    "ドラマ":        ("📺 ドラマ",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/display.svg"),
+    "演奏会":        ("🎻 演奏会",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/music-note-beamed.svg"),
+    "展示会":        ("🖼️ 展示会",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/exhibition.svg"),
+    "ライブ/ショー": ("🎤 ライブ/ショー", "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/mic.svg"),
+    "書籍":          ("📖 書籍",          "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/book.svg"),
+    "漫画":          ("📚 漫画",          "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/book-manga.svg"),
+    "音楽アルバム":  ("🎵 音楽アルバム",  "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/disc.svg"),
+    "ゲーム":        ("🎮 ゲーム",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/controller.svg"),
 }
 
 RATING_OPTIONS = ["", "★", "★★", "★★★", "★★★★", "★★★★★"]
@@ -825,9 +825,9 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 # アプリ初期化
 # ============================================================
 
-st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
-st.image("logo.png", width=320)
-st.caption("v2.03")
+st.set_page_config(page_title="ArtéMis", page_icon="assets/favicon.png", layout="wide")
+st.image("assets/logo.png", width=320)
+st.caption("v2.04")
 
 for key, default in {
     "is_running":         False,
