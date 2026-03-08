@@ -316,9 +316,10 @@ def search_tmdb(query: str, year=None) -> list:
 
 
 def search_books(query: str) -> list:
-    """国立国会図書館APIで書籍検索 + Google Booksでカバー画像取得"""
+    """国立国会図書館APIで書籍検索 + 楽天Books APIでカバー画像取得"""
     import urllib.request, urllib.parse, json as _json, re as _re
     import xml.etree.ElementTree as ET
+    import streamlit as st
 
     params = urllib.parse.urlencode({
         "operation": "searchRetrieve",
@@ -357,17 +358,14 @@ def search_books(query: str) -> list:
     book_candidates = []
 
     for record in records:
-        # recordDataの中のXMLを文字列として取得
         rd_el = record.find("srw:recordData", ns)
         if rd_el is None:
             continue
         rd_text = ET.tostring(rd_el, encoding="unicode")
 
-        # 不要なメディア除外
         if any(kw in rd_text for kw in SKIP_KEYWORDS):
             continue
 
-        # dc:title を ET で取得（名前空間付き）
         title_el = rd_el.find(".//{http://purl.org/dc/elements/1.1/}title")
         if title_el is None or not title_el.text:
             continue
@@ -375,11 +373,9 @@ def search_books(query: str) -> list:
         if not title or title in seen_titles:
             continue
 
-        # dc:creator
         creators = rd_el.findall(".//{http://purl.org/dc/elements/1.1/}creator")
         authors = [c.text.strip() for c in creators if c.text]
 
-        # dc:publisher
         pub_el = rd_el.find(".//{http://purl.org/dc/elements/1.1/}publisher")
         publisher = pub_el.text.strip() if pub_el is not None and pub_el.text else ""
 
@@ -401,31 +397,52 @@ def search_books(query: str) -> list:
         author_clean = ""
         if cand["authors"]:
             author_clean = _re.sub(r'[∥\s]*(著|訳|編|著者|作).*', '', cand["authors"][0]).strip()
+
+        # --- 修正① タイトルのクリーニング ---
+        title_clean = _re.sub(r"[ :：／/].*", "", cand["title"]).strip()
+
         cover = ""
         book_id = cand["title"]
         published = ""
+
         if RAKUTEN_APP_ID:
             try:
                 rk_params = {
                     "applicationId": RAKUTEN_APP_ID,
-                    "title": cand["title"],
+                    "title": title_clean,  # ← 修正② クリーンタイトルを使用
                     "hits": 1,
                     "formatVersion": 2,
                 }
+
+                # --- 修正③ author と publisherName を検索条件に追加 ---
                 if author_clean:
                     rk_params["author"] = author_clean
-                url_rk = f"https://app.rakuten.co.jp/services/api/BooksBook/Search/20170404?{urllib.parse.urlencode(rk_params)}"
+                if cand["publisher"]:
+                    rk_params["publisherName"] = cand["publisher"]
+
+                url_rk = (
+                    "https://app.rakuten.co.jp/services/api/BooksBook/Search/20170404?"
+                    + urllib.parse.urlencode(rk_params)
+                )
+
                 req_rk = urllib.request.Request(url_rk, headers={"User-Agent": "ArteMis/1.0"})
                 with urllib.request.urlopen(req_rk, timeout=5) as r_rk:
                     rk_data = _json.loads(r_rk.read().decode())
+
                 items_rk = rk_data.get("Items", [])
                 if items_rk:
                     item = items_rk[0]
-                    c = item.get("largeImageUrl") or item.get("mediumImageUrl") or item.get("smallImageUrl", "")
+                    c = (
+                        item.get("largeImageUrl")
+                        or item.get("mediumImageUrl")
+                        or item.get("smallImageUrl", "")
+                    )
                     if c:
                         cover = c.replace("http://", "https://")
+
                     book_id = item.get("isbn") or cand["title"]
                     published = item.get("salesDate", "")[:4]
+
             except Exception:
                 pass
 
@@ -439,6 +456,7 @@ def search_books(query: str) -> list:
             "cover_url": cover,
             "media_type": "book",
         })
+
     return results
 
 
