@@ -319,11 +319,13 @@ def search_books(query: str) -> list:
     import urllib.request, urllib.parse, json as _json
     params = urllib.parse.urlencode({"q": query, "maxResults": 10, "key": GOOGLE_BOOKS_API_KEY})
     url = f"https://www.googleapis.com/books/v1/volumes?{params}"
+    st.caption(f"🔑 key先頭8文字: {GOOGLE_BOOKS_API_KEY[:8]}...")
     try:
         with urllib.request.urlopen(url, timeout=10) as r:
             data = _json.loads(r.read().decode())
     except Exception as e:
         st.warning(f"⚠️ Google Books API エラー: {e}")
+        st.caption(f"URL: {url[:80]}...")
         return []
     items = data.get("items", [])
     st.caption(f"📚 Google Books: {len(items)} 件取得（画像なし含む）")
@@ -558,7 +560,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.52")
+st.caption("v1.53")
 
 for key, default in {
     "is_running":         False,
