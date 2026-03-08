@@ -903,7 +903,7 @@ if mode == "新規登録":
                         cover_url    = cand["cover_url"]
                         tmdb_release = cand.get("published", "")
                         media_type   = "book"
-                        cand_en      = cand.get("title", "")
+                        cand_en      = ""  # 書籍は英語タイトル不要
                         authors      = " / ".join(cand.get("authors", []))
                     else:
                         tmdb_id      = cand["id"]
@@ -937,7 +937,7 @@ if mode == "新規登録":
                                 "cover_url":    cand["cover_url"],
                                 "tmdb_release": cand["published"],
                                 "media_type":   "book",
-                                "cand_en":      cand["title"],
+                                "cand_en":      "",
                                 "jp_input":     cand["title"],
                                 "book_authors": cand["authors"],
                                 "book_genres":  cand["genres"],
