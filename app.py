@@ -393,18 +393,28 @@ def search_books(query: str) -> list:
             if isbn:
                 break
 
+        lang_el = rd_el.find(".//{http://purl.org/dc/elements/1.1/}language")
+        lang = lang_el.text.strip() if lang_el is not None and lang_el.text else ""
+
         seen_titles.add(title)
         book_candidates.append({
             "title":     title,
             "authors":   authors,
             "publisher": publisher,
             "isbn":      isbn,
+            "lang":      lang,
         })
         if len(book_candidates) >= 10:
             break
 
     if not book_candidates:
         return []
+
+    # 日本語レコード優先・ISBNあり優先でソート
+    book_candidates.sort(key=lambda c: (
+        0 if c.get("lang") == "jpn" else 1,
+        0 if c.get("isbn") else 1,
+    ))
 
     # NDL書誌APIでISBN取得 → Open BDでカバー画像取得
     results = []
@@ -423,20 +433,10 @@ def search_books(query: str) -> list:
                     params={"title": title_q, "cnt": 3, "mediatype": 1},
                     timeout=5,
                 )
-                st.caption(f"🔍 OpenSearch status={ndl_res.status_code} title={title_q}")
                 if ndl_res.status_code == 200:
                     import xml.etree.ElementTree as _ET2
                     _root2 = _ET2.fromstring(ndl_res.content)
-                    # タグ一覧を確認
-                    _all_tags = list({el.tag for el in _root2.iter()})[:15]
-                    st.caption(f"🏷 tags: {_all_tags}")
-                    # 最初のitemのテキスト全部
-                    _first_item = _root2.find(".//{http://www.w3.org/2005/Atom}entry") or _root2.find(".//item")
-                    if _first_item is not None:
-                        _texts = {child.tag: child.text for child in _first_item}
-                        st.caption(f"📄 first item: {list(_texts.items())[:8]}")
                     _all_ids = [el.text for el in _root2.findall(".//{http://purl.org/dc/elements/1.1/}identifier")]
-                    st.caption(f"📋 identifiers: {_all_ids[:5]}")
                     for _item in _root2.findall(".//{http://purl.org/dc/elements/1.1/}identifier"):
                         _val = _re.sub(r"[^0-9]", "", (_item.text or ""))
                         if _re.match(r"^97[89]\d{10}$", _val):
