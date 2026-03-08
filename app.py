@@ -682,8 +682,9 @@ if mode == "新規登録":
         query = en_input if en_input else jp_input
         if query or creator_input or cast_input:
             if media_label == "書籍":
-                rk_q = query or creator_input or cast_input
-                results = search_books(rk_q, author=creator_input if not query else None)
+                rk_q   = query or None
+                rk_auth = creator_input or None
+                results = search_books(rk_q or "", author=rk_auth)
             else:
                 tmdb_q = query or creator_input or cast_input
                 results = search_tmdb(tmdb_q)
