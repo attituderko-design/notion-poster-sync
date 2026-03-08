@@ -417,7 +417,7 @@ def search_books(query: str) -> list:
                 }
                 
                 url_rk = (
-                    "https://openapi.rakuten.co.jp/ichibams/api/BooksBook/Search/20220601?"
+                    "https://openapi.rakuten.co.jp/services/api/BooksBook/Search/20170404?"
                     + urllib.parse.urlencode(rk_params)
                 )
 
