@@ -385,12 +385,22 @@ def search_books(query: str) -> list:
 
         # dc:identifier からISBNを取得
         isbn = ""
+        _all_ids = []
         for id_el in rd_el.findall(".//{http://purl.org/dc/elements/1.1/}identifier"):
-            val = id_el.text or ""
-            val = val.strip().replace("-", "").replace("ISBN", "").replace("isbn", "").strip()
-            if _re.match(r"^97[89]\d{10}$", val) or _re.match(r"^\d{10}$", val):
-                isbn = val
+            _all_ids.append(id_el.text or "")
+            val = (id_el.text or "").strip()
+            # ハイフン・スペース除去・プレフィックス除去
+            val_clean = _re.sub(r"[^0-9X]", "", val.upper())
+            if _re.match(r"^97[89]\d{10}$", val_clean) or _re.match(r"^\d{10}$", val_clean):
+                isbn = val_clean
                 break
+            # "978-..." や "ISBN978-..." 形式も対応
+            m = _re.search(r"97[89][\d\-]{10,}", val)
+            if m:
+                isbn = _re.sub(r"[^0-9]", "", m.group())[:13]
+                break
+        if len(book_candidates) < 2:  # 最初の1〜2件だけデバッグ表示
+            st.caption(f"🔎 identifiers: {_all_ids} → ISBN: {isbn or 'なし'}")
 
         seen_titles.add(title)
         book_candidates.append({
