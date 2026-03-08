@@ -467,7 +467,7 @@ def search_books(query: str) -> list:
                 "Referer":       "https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app",
                 "Origin":        "https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app",
                 "User-Agent":    "Mozilla/5.0",
-                "Authorization": f"ESA {st.secrets.get('RAKUTEN_ACCESS_KEY', '')}",
+                "Authorization": f"Bearer {st.secrets.get('RAKUTEN_ACCESS_KEY', '')}",
             }
             res_rk = requests.get(url_rk, timeout=5, headers=rk_headers)
             if res_rk.status_code == 200:
