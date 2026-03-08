@@ -431,6 +431,7 @@ def search_books(query: str) -> list:
 
                 items_rk = rk_data.get("Items", [])
                 if items_rk:
+                    st.write("RK RAW", items_rk[0])
                     item = items_rk[0]
                     c = (
                         item.get("largeImageUrl")
@@ -439,6 +440,7 @@ def search_books(query: str) -> list:
                     )
                     if c:
                         cover = c.replace("http://", "https://")
+                    st.write("IMAGE", cover)
 
                     book_id = item.get("isbn") or cand["title"]
                     published = item.get("salesDate", "")[:4]
