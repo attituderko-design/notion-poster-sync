@@ -133,13 +133,14 @@ def drive_exists_fuzzy(title: str) -> bool:
     prefix = sanitize_filename(title) + "_"
     return any(name.startswith(prefix) and name.endswith(".jpg") for name in get_drive_files())
 
-def save_to_drive(cover_url: str, title: str, tmdb_id, image_bytes: bytes | None = None, mimetype: str = "image/jpeg") -> bool:
+def save_to_drive(cover_url: str, title: str, tmdb_id, image_bytes: bytes | None = None, mimetype: str = "image/jpeg") -> str | None:
+    """Drive保存成功時はfile_idを返す、失敗時はNone"""
     try:
         if image_bytes is None:
             img_url = cover_url.replace("w600_and_h900_bestv2", "original")
             img_res = api_request("get", img_url)
             if img_res is None or img_res.status_code != 200:
-                return False
+                return None
             image_bytes = img_res.content
             mimetype    = "image/jpeg"
         service = get_drive_service()
@@ -147,18 +148,20 @@ def save_to_drive(cover_url: str, title: str, tmdb_id, image_bytes: bytes | None
         files   = get_drive_files()
         media   = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype=mimetype, resumable=False)
         if fname in files:
-            service.files().update(fileId=files[fname], media_body=media).execute()
+            file_id = files[fname]
+            service.files().update(fileId=file_id, media_body=media).execute()
         else:
-            result = service.files().create(
+            result  = service.files().create(
                 body={"name": fname, "parents": [DRIVE_FOLDER_ID]},
                 media_body=media,
                 fields="id",
             ).execute()
-            st.session_state.drive_files_cache[fname] = result["id"]
-        return True
+            file_id = result["id"]
+            st.session_state.drive_files_cache[fname] = file_id
+        return file_id
     except Exception as e:
         st.warning(f"Drive保存失敗 ({title}): {e}")
-        return False
+        return None
 
 def get_drive_public_url(title: str, tmdb_id) -> str | None:
     """Drive上のファイルIDから公開URLを返す"""
@@ -539,7 +542,7 @@ def update_all(page_id, cover_url, tmdb_release, existing_release,
             api_request("patch", f"https://api.notion.com/v1/pages/{page_id}",
                         headers=NOTION_HEADERS,
                         json={"icon": {"type": "external", "external": {"url": icon_url}}})
-    drive_ok  = save_to_drive(actual_cover_url, title, tmdb_id) if need_drive else True
+    drive_ok  = bool(save_to_drive(actual_cover_url, title, tmdb_id)) if need_drive else True
 
     if props is not None:
         old_tmdb_id = props.get("TMDB_ID", {}).get("number")
@@ -643,7 +646,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.84")
+st.caption("v1.85")
 
 for key, default in {
     "is_running":         False,
@@ -832,12 +835,16 @@ if mode == "新規登録":
                     )
 
                     if ok and image_bytes:
-                        # Drive保存してNotionカバーを更新
-                        save_to_drive("", event_title, "event", image_bytes=image_bytes, mimetype=image_mime)
-                        drive_url = get_drive_public_url(event_title, "event")
-                        if drive_url:
-                            # 最新ページIDを取得してカバー更新
+                        file_id = save_to_drive("", event_title, "event", image_bytes=image_bytes, mimetype=image_mime)
+                        if file_id:
                             try:
+                                # 公開設定
+                                get_drive_service().permissions().create(
+                                    fileId=file_id,
+                                    body={"role": "reader", "type": "anyone"}
+                                ).execute()
+                                drive_url = f"https://drive.google.com/uc?id={file_id}"
+                                # 最新ページIDを取得してカバー更新
                                 latest = api_request(
                                     "post",
                                     f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query",
@@ -852,8 +859,8 @@ if mode == "新規登録":
                                         headers=NOTION_HEADERS,
                                         json={"cover": {"type": "external", "external": {"url": drive_url}}},
                                     )
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                st.warning(f"カバー設定失敗: {e}")
 
                     if ok:
                         st.success(f"✅ 登録完了！「{event_title}」をNotionに追加しました")
