@@ -18,6 +18,8 @@ TMDB_API_KEY         = st.secrets["TMDB_API_KEY"]
 GOOGLE_BOOKS_API_KEY = st.secrets.get("GOOGLE_BOOKS_API_KEY", "")
 RAKUTEN_APP_ID = st.secrets.get("RAKUTEN_APP_ID", "")
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"]
+IGDB_CLIENT_ID     = st.secrets.get("IGDB_CLIENT_ID", "")
+IGDB_CLIENT_SECRET = st.secrets.get("IGDB_CLIENT_SECRET", "")
 
 NOTION_HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -37,6 +39,9 @@ MEDIA_ICON_MAP = {
     "展示会":        ("🖼️ 展示会",        "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/image.svg"),
     "ライブ/ショー": ("🎤 ライブ/ショー", "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/mic.svg"),
     "書籍":          ("📖 書籍",          "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/book.svg"),
+    "漫画":          ("📚 漫画",          "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/book.svg"),
+    "音楽アルバム":  ("🎵 音楽アルバム",  "https://raw.githubusercontent.com/attituderko-design/notion-poster-sync/refs/heads/main/music-note-beamed.svg"),
+    "ゲーム":        ("🎮 ゲーム",        BOOTSTRAP_CDN.format("controller")),
 }
 
 RATING_OPTIONS = ["", "★", "★★", "★★★", "★★★★", "★★★★★"]
@@ -434,7 +439,157 @@ def search_books(query: str, author: str = None) -> list:
 def fetch_book_ja_title(book_id: str) -> str:
     return book_id
 
-def fetch_tmdb_details(tmdb_id: int, media_type: str, season_number: int | None = None) -> dict:
+# ============================================================
+# IGDB（ゲーム）
+# ============================================================
+@st.cache_data(ttl=3600)
+def get_igdb_token() -> str:
+    """TwitchからIGDB用アクセストークンを取得（1時間キャッシュ）"""
+    res = requests.post(
+        "https://id.twitch.tv/oauth2/token",
+        params={
+            "client_id":     IGDB_CLIENT_ID,
+            "client_secret": IGDB_CLIENT_SECRET,
+            "grant_type":    "client_credentials",
+        }
+    )
+    if res.status_code == 200:
+        return res.json().get("access_token", "")
+    return ""
+
+def search_games(query: str) -> list:
+    token = get_igdb_token()
+    if not token:
+        return []
+    headers = {
+        "Client-ID":     IGDB_CLIENT_ID,
+        "Authorization": f"Bearer {token}",
+    }
+    body = f'search "{query}"; fields name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,summary; limit 20;'
+    res = requests.post("https://api.igdb.com/v4/games", headers=headers, data=body)
+    if res.status_code != 200:
+        return []
+    results = []
+    for item in res.json():
+        cover_url = ""
+        if item.get("cover", {}).get("url"):
+            cover_url = "https:" + item["cover"]["url"].replace("t_thumb", "t_cover_big")
+        release_year = ""
+        if item.get("first_release_date"):
+            from datetime import datetime
+            release_year = datetime.utcfromtimestamp(item["first_release_date"]).strftime("%Y-%m-%d")
+        genres = [g["name"] for g in item.get("genres", [])]
+        developer, publisher = "", ""
+        for c in item.get("involved_companies", []):
+            name = c.get("company", {}).get("name", "")
+            if c.get("developer"):   developer = name
+            if c.get("publisher"):   publisher = name
+        results.append({
+            "id":          item["id"],
+            "title":       item.get("name", ""),
+            "cover_url":   cover_url,
+            "release":     release_year,
+            "genres":      genres,
+            "developer":   developer,
+            "publisher":   publisher,
+            "media_type":  "game",
+        })
+    return results
+
+# ============================================================
+# MusicBrainz + Cover Art Archive（音楽アルバム）
+# ============================================================
+def search_albums(query: str, artist: str = None) -> list:
+    search_q = f'release:"{query}"'
+    if artist:
+        search_q += f' AND artist:"{artist}"'
+    res = requests.get(
+        "https://musicbrainz.org/ws/2/release",
+        params={"query": search_q, "limit": 20, "fmt": "json"},
+        headers={"User-Agent": "ArteMis/1.0 (notion-poster-sync)"},
+    )
+    if res.status_code != 200:
+        return []
+    results = []
+    seen = set()
+    for item in res.json().get("releases", []):
+        mbid = item.get("id", "")
+        title = item.get("title", "")
+        key = (title, item.get("artist-credit", [{}])[0].get("artist", {}).get("name", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        artist_name = " / ".join(
+            ac.get("artist", {}).get("name", "")
+            for ac in item.get("artist-credit", [])
+            if isinstance(ac, dict) and ac.get("artist")
+        )
+        release_date = item.get("date", "")[:10] if item.get("date") else ""
+        # Cover Art Archive
+        cover_url = f"https://coverartarchive.org/release/{mbid}/front-250"
+        results.append({
+            "id":         mbid,
+            "title":      title,
+            "artist":     artist_name,
+            "release":    release_date,
+            "cover_url":  cover_url,
+            "media_type": "album",
+        })
+    return results
+
+# ============================================================
+# 漫画（楽天ブックス コミックジャンル）
+# ============================================================
+def search_manga(query: str, author: str = None) -> list:
+    access_key = st.secrets.get("RAKUTEN_ACCESS_KEY", "")
+    rk_params = {
+        "applicationId": RAKUTEN_APP_ID,
+        "accessKey":     access_key,
+        "booksGenreId":  "001001",   # コミック・ラノベ
+        "hits":          20,
+        "formatVersion": 2,
+        "sort":          "sales",
+        "outOfStockFlag": 1,
+    }
+    if query:  rk_params["title"]  = query
+    if author: rk_params["author"] = author
+    rk_headers = {
+        "Referer":       "https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app",
+        "Origin":        "https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app",
+        "User-Agent":    "Mozilla/5.0",
+        "Authorization": f"Bearer {access_key}",
+    }
+    res = requests.get(
+        "https://openapi.rakuten.co.jp/services/api/BooksBook/Search/20170404",
+        params=rk_params, headers=rk_headers,
+    )
+    if res.status_code != 200:
+        return []
+    results = []
+    seen = set()
+    for item in res.json().get("Items", []):
+        cover = item.get("largeImageUrl") or item.get("mediumImageUrl") or item.get("smallImageUrl", "")
+        cover = cover.replace("http://", "https://") if cover else ""
+        raw_authors = [a.strip() for a in (item.get("author", "") or "").split("/") if a.strip()]
+        authors = [clean_author(a) for a in raw_authors]
+        # 巻数を除いたタイトルを作品単位として使う
+        base_title = re.sub(r'\s*[\(（]?\d+[\)）]?\s*$', '', item.get("title", "")).strip()
+        if base_title in seen:
+            continue
+        seen.add(base_title)
+        isbn_val = item.get("isbn", "")
+        results.append({
+            "id":         isbn_val or base_title,
+            "isbn":       isbn_val,
+            "title":      base_title,
+            "authors":    authors,
+            "published":  (item.get("salesDate", "") or "")[:4],
+            "cover_url":  cover,
+            "media_type": "manga",
+        })
+    return results
+
+
     base      = "https://api.themoviedb.org/3"
     params_ja = {"api_key": TMDB_API_KEY, "language": "ja-JP"}
     params_en = {"api_key": TMDB_API_KEY, "language": "en-US"}
@@ -659,7 +814,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.88")
+st.caption("v1.89")
 
 for key, default in {
     "is_running":         False,
@@ -842,13 +997,31 @@ if mode == "新規登録":
 
         st.stop()
 
-    # ── 映画・ドラマ・書籍（検索フロー） ──
-    col_jp, col_en = st.columns([1, 1])
-    jp_input     = col_jp.text_input("日本語タイトル", placeholder="例: 千と千尋の神隠し")
-    en_input     = col_en.text_input("英語タイトル（検索用）", placeholder="例: Spirited Away")
-    col_creator, col_cast = st.columns([1, 1])
-    creator_input = col_creator.text_input("クリエイター（著者・監督）", placeholder="例: 宮崎駿 / 道尾秀介")
-    cast_input    = col_cast.text_input("キャスト・関係者", placeholder="例: 木村拓哉")
+    # ── 映画・ドラマ・書籍・漫画・音楽アルバム・ゲーム（検索フロー） ──
+    if media_label in ["音楽アルバム"]:
+        col_jp, col_en = st.columns([1, 1])
+        jp_input      = col_jp.text_input("アルバム名", placeholder="例: 千のナイフ")
+        creator_input = col_en.text_input("アーティスト名", placeholder="例: 坂本龍一")
+        cast_input    = ""
+        en_input      = ""
+    elif media_label == "ゲーム":
+        jp_input      = st.text_input("ゲームタイトル", placeholder="例: ゼルダの伝説")
+        creator_input = ""
+        cast_input    = ""
+        en_input      = jp_input
+    elif media_label == "漫画":
+        col_jp, col_en = st.columns([1, 1])
+        jp_input      = col_jp.text_input("タイトル", placeholder="例: 鬼滅の刃")
+        creator_input = col_en.text_input("著者名", placeholder="例: 吾峠呼世晴")
+        cast_input    = ""
+        en_input      = ""
+    else:
+        col_jp, col_en = st.columns([1, 1])
+        jp_input      = col_jp.text_input("日本語タイトル", placeholder="例: 千と千尋の神隠し")
+        en_input      = col_en.text_input("英語タイトル（検索用）", placeholder="例: Spirited Away")
+        col_creator, col_cast = st.columns([1, 1])
+        creator_input = col_creator.text_input("クリエイター（著者・監督）", placeholder="例: 宮崎駿 / 道尾秀介")
+        cast_input    = col_cast.text_input("キャスト・関係者", placeholder="例: 木村拓哉")
 
     col_wl, col_date, col_rating = st.columns([1, 2, 2])
     wlflg        = col_wl.checkbox("WLflg", value=False)
@@ -859,9 +1032,13 @@ if mode == "新規登録":
         query = en_input if en_input else jp_input
         if query or creator_input or cast_input:
             if media_label == "書籍":
-                rk_q    = query or None
-                rk_auth = creator_input or None
-                results = search_books(rk_q or "", author=rk_auth)
+                results = search_books(query or "", author=creator_input or None)
+            elif media_label == "漫画":
+                results = search_manga(query or "", author=creator_input or None)
+            elif media_label == "音楽アルバム":
+                results = search_albums(query or "", artist=creator_input or None)
+            elif media_label == "ゲーム":
+                results = search_games(query or jp_input)
             else:
                 if creator_input or cast_input:
                     results = search_tmdb_by_person(creator_input or cast_input)
@@ -872,7 +1049,7 @@ if mode == "新規登録":
             st.session_state.confirm_reg        = None
             st.session_state.bulk_checked       = {}
         else:
-            st.warning("タイトルまたはクリエイター/キャストを入力してください")
+            st.warning("タイトルまたはクリエイター名を入力してください")
 
     # ── 確認・修正ステップ ──
     if st.session_state.confirm_reg is not None:
@@ -915,17 +1092,24 @@ if mode == "新規登録":
 
             if st.session_state.registering:
                 with st.spinner("登録中..."):
-                    if reg["media_type"] == "book":
+                    if reg["media_type"] in ("book", "manga"):
                         details = {
                             "genres":   reg.get("book_genres", []),
                             "cast":     "",
                             "director": clean_author_list(reg.get("book_authors", [])),
                             "score":    None,
                         }
+                    elif reg["media_type"] in ("album", "game"):
+                        details = {
+                            "genres":   reg.get("book_genres", []),
+                            "cast":     reg.get("game_publisher", ""),
+                            "director": clean_author_list(reg.get("book_authors", [])),
+                            "score":    None,
+                        }
                     else:
                         details = fetch_tmdb_details(reg["tmdb_id"], reg["media_type"])
                     watched_str  = watched_date.isoformat() if watched_date else None
-                    page_tmdb_id = 0 if reg["media_type"] == "book" else reg["tmdb_id"]
+                    page_tmdb_id = 0 if reg["media_type"] not in ("movie", "tv") else reg["tmdb_id"]
                     ok = create_notion_page(
                         jp_title=final_jp,
                         en_title=final_en,
@@ -971,13 +1155,28 @@ if mode == "新規登録":
             for col_idx, cand in enumerate(results_list[row_start:row_start + 3]):
                 abs_idx = row_start + col_idx
                 with cols[col_idx]:
-                    if media_label == "書籍":
-                        cover_url    = cand["cover_url"]
-                        tmdb_release = cand.get("published", "")
-                        media_type   = "book"
-                        cand_en      = ""
+                    cand_type = cand.get("media_type", "")
+                    if media_label in ("書籍", "漫画"):
+                        cover_url     = cand["cover_url"]
+                        tmdb_release  = cand.get("published", "")
+                        media_type    = cand_type
+                        cand_en       = ""
                         display_title = cand["title"]
-                        authors      = " / ".join(cand.get("authors", []))
+                        authors       = " / ".join(cand.get("authors", []))
+                    elif media_label == "音楽アルバム":
+                        cover_url     = cand["cover_url"]
+                        tmdb_release  = cand.get("release", "")
+                        media_type    = "album"
+                        cand_en       = ""
+                        display_title = cand["title"]
+                        authors       = cand.get("artist", "")
+                    elif media_label == "ゲーム":
+                        cover_url     = cand["cover_url"]
+                        tmdb_release  = cand.get("release", "")
+                        media_type    = "game"
+                        cand_en       = cand["title"]
+                        display_title = cand["title"]
+                        authors       = cand.get("developer", "")
                     else:
                         cover_url    = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{cand['poster_path']}"
                         tmdb_release = cand.get("release_date") or cand.get("first_air_date") or ""
@@ -993,35 +1192,55 @@ if mode == "新規登録":
                     )
                     st.session_state.bulk_checked[abs_idx] = checked
 
-                    if media_label == "書籍":
-                        if cover_url and "placeholder" not in cover_url:
-                            try:
-                                st.image(cover_url)
-                            except Exception:
-                                st.caption("📷 表紙取得失敗")
-                        else:
-                            st.caption("📷 表紙なし")
-                        if authors: st.caption(f"著者: {authors}")
-                        if tmdb_release: st.caption(f"出版: {tmdb_release}")
+                    if cover_url:
+                        try:
+                            st.image(cover_url)
+                        except Exception:
+                            st.caption("📷 画像取得失敗")
                     else:
-                        st.image(cover_url)
-                        caption = cand_en
-                        if tmdb_release: caption += f" {tmdb_release}"
-                        caption += f" 🆔 {cand['id']}"
-                        st.caption(caption)
+                        st.caption("📷 画像なし")
+                    if authors:      st.caption(f"{'著者' if media_label in ('書籍','漫画') else 'アーティスト' if media_label == '音楽アルバム' else '開発'}: {authors}")
+                    if tmdb_release: st.caption(f"{'出版' if media_label in ('書籍','漫画') else 'リリース'}: {tmdb_release}")
+                    if media_label not in ("書籍", "漫画", "音楽アルバム", "ゲーム"):
+                        st.caption(f"🆔 {cand['id']}")
 
                     if st.button("✅ これで登録", key=f"new_reg_{abs_idx}"):
-                        if media_label == "書籍":
+                        if media_label in ("書籍", "漫画"):
                             st.session_state.confirm_reg = {
                                 "tmdb_id":      cand["id"],
                                 "cover_url":    cand["cover_url"],
                                 "tmdb_release": cand.get("published", ""),
-                                "media_type":   "book",
+                                "media_type":   cand_type,
                                 "cand_en":      "",
                                 "jp_input":     cand["title"],
-                                "book_authors": cand["authors"],
-                                "book_genres":  cand["genres"],
+                                "book_authors": cand.get("authors", []),
+                                "book_genres":  cand.get("genres", []),
                                 "isbn":         cand.get("isbn", ""),
+                            }
+                        elif media_label == "音楽アルバム":
+                            st.session_state.confirm_reg = {
+                                "tmdb_id":      0,
+                                "cover_url":    cand["cover_url"],
+                                "tmdb_release": cand.get("release", ""),
+                                "media_type":   "album",
+                                "cand_en":      "",
+                                "jp_input":     cand["title"],
+                                "book_authors": [cand.get("artist", "")],
+                                "book_genres":  [],
+                                "isbn":         "",
+                            }
+                        elif media_label == "ゲーム":
+                            st.session_state.confirm_reg = {
+                                "tmdb_id":      0,
+                                "cover_url":    cand["cover_url"],
+                                "tmdb_release": cand.get("release", ""),
+                                "media_type":   "game",
+                                "cand_en":      cand["title"],
+                                "jp_input":     cand["title"],
+                                "book_authors": [cand.get("developer", "")],
+                                "book_genres":  cand.get("genres", []),
+                                "isbn":         "",
+                                "game_publisher": cand.get("publisher", ""),
                             }
                         else:
                             with st.spinner("日本語タイトル取得中..."):
@@ -1053,7 +1272,8 @@ if mode == "新規登録":
                     prog = st.progress(0)
                     for n, i in enumerate(checked_indices):
                         cand = results_list[i]
-                        if media_label == "書籍":
+                        c_type = cand.get("media_type", "")
+                        if media_label in ("書籍", "漫画"):
                             c_cover    = cand["cover_url"]
                             c_release  = cand.get("published", "")
                             c_jp       = cand["title"]
@@ -1062,10 +1282,39 @@ if mode == "新規登録":
                                 "genres":   cand.get("genres", []),
                                 "cast":     "",
                                 "director": clean_author_list(cand.get("authors", [])),
-                                "score": None,
+                                "score":    None,
                             }
                             c_tmdb_id  = 0
-                            c_media    = "book"
+                            c_media    = c_type
+                            c_isbn     = cand.get("isbn", "")
+                        elif media_label == "音楽アルバム":
+                            c_cover    = cand["cover_url"]
+                            c_release  = cand.get("release", "")
+                            c_jp       = cand["title"]
+                            c_en       = ""
+                            c_details  = {
+                                "genres":   [],
+                                "cast":     "",
+                                "director": clean_author(cand.get("artist", "")),
+                                "score":    None,
+                            }
+                            c_tmdb_id  = 0
+                            c_media    = "album"
+                            c_isbn     = ""
+                        elif media_label == "ゲーム":
+                            c_cover    = cand["cover_url"]
+                            c_release  = cand.get("release", "")
+                            c_jp       = cand["title"]
+                            c_en       = cand["title"]
+                            c_details  = {
+                                "genres":   cand.get("genres", []),
+                                "cast":     cand.get("publisher", ""),
+                                "director": clean_author(cand.get("developer", "")),
+                                "score":    None,
+                            }
+                            c_tmdb_id  = 0
+                            c_media    = "game"
+                            c_isbn     = ""
                         else:
                             c_cover    = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{cand['poster_path']}"
                             c_release  = cand.get("release_date") or cand.get("first_air_date") or ""
@@ -1074,6 +1323,7 @@ if mode == "新規登録":
                             c_details  = fetch_tmdb_details(cand["id"], cand.get("media_type","movie"))
                             c_tmdb_id  = cand["id"]
                             c_media    = cand.get("media_type", "movie")
+                            c_isbn     = ""
                         ok = create_notion_page(
                             jp_title=c_jp, en_title=c_en,
                             media_type_label=media_label,
@@ -1082,6 +1332,7 @@ if mode == "新規登録":
                             details=c_details, wlflg=wlflg,
                             watched_date=watched_str,
                             rating=rating_sel if rating_sel else None,
+                            isbn=c_isbn or None,
                         )
                         if ok:
                             save_to_drive(c_cover, c_jp or c_en, c_tmdb_id)
