@@ -446,25 +446,36 @@ def search_books(query: str) -> list:
             except Exception as _e:
                 st.caption(f"🔴 OpenSearch例外: {_e}")
 
-        # Open BDでカバー画像取得
-        if isbn:
-            try:
-                obd_res = requests.get(
-                    f"https://api.openbd.jp/v1/get?isbn={isbn}",
-                    timeout=5,
-                )
-                if obd_res.status_code == 200:
-                    obd_list = obd_res.json()
-                    if obd_list and obd_list[0]:
-                        summary = obd_list[0].get("summary", {})
-                        c = summary.get("cover", "")
-                        if c:
-                            cover = c.replace("http://", "https://")
-                        pub_date = summary.get("pubdate", "")
-                        published = pub_date[:4] if pub_date else ""
-                        book_id = isbn
-            except Exception:
-                pass
+        # 楽天ブックスAPIでカバー画像取得
+        try:
+            title_clean = cand["title"].split("：")[0].split(":")[0].split(" -- ")[0].strip()[:40]
+            rk_params = {
+                "applicationId": RAKUTEN_APP_ID,
+                "accessKey":     st.secrets.get("RAKUTEN_ACCESS_KEY", ""),
+                "hits":          3,
+                "formatVersion": 2,
+                "sort":          "sales",
+            }
+            if isbn:
+                rk_params["isbn"] = isbn
+            else:
+                rk_params["title"] = title_clean
+            import urllib.parse as _up
+            url_rk = "https://app.rakuten.co.jp/services/api/BooksBook/Search/20170404?" + _up.urlencode(rk_params)
+            res_rk = requests.get(url_rk, timeout=5)
+            if res_rk.status_code == 200:
+                items_rk = res_rk.json().get("Items", [])
+                if items_rk:
+                    item = items_rk[0]
+                    c = item.get("largeImageUrl") or item.get("mediumImageUrl") or item.get("smallImageUrl", "")
+                    if c:
+                        cover = c.replace("http://", "https://")
+                    book_id   = item.get("isbn") or isbn or cand["title"]
+                    published = item.get("salesDate", "")[:4]
+            else:
+                st.caption(f"🔴 楽天API {res_rk.status_code}: {res_rk.text[:120]}")
+        except Exception as _e:
+            st.caption(f"🔴 楽天例外: {_e}")
 
         results.append({
             "id":         isbn or cand["title"],
