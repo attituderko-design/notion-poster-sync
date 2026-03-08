@@ -133,16 +133,19 @@ def drive_exists_fuzzy(title: str) -> bool:
     prefix = sanitize_filename(title) + "_"
     return any(name.startswith(prefix) and name.endswith(".jpg") for name in get_drive_files())
 
-def save_to_drive(cover_url: str, title: str, tmdb_id) -> bool:
+def save_to_drive(cover_url: str, title: str, tmdb_id, image_bytes: bytes | None = None, mimetype: str = "image/jpeg") -> bool:
     try:
-        img_url = cover_url.replace("w600_and_h900_bestv2", "original")
-        img_res = api_request("get", img_url)
-        if img_res is None or img_res.status_code != 200:
-            return False
+        if image_bytes is None:
+            img_url = cover_url.replace("w600_and_h900_bestv2", "original")
+            img_res = api_request("get", img_url)
+            if img_res is None or img_res.status_code != 200:
+                return False
+            image_bytes = img_res.content
+            mimetype    = "image/jpeg"
         service = get_drive_service()
         fname   = make_filename(title, tmdb_id)
         files   = get_drive_files()
-        media   = MediaIoBaseUpload(io.BytesIO(img_res.content), mimetype="image/jpeg", resumable=False)
+        media   = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype=mimetype, resumable=False)
         if fname in files:
             service.files().update(fileId=files[fname], media_body=media).execute()
         else:
@@ -156,6 +159,20 @@ def save_to_drive(cover_url: str, title: str, tmdb_id) -> bool:
     except Exception as e:
         st.warning(f"Drive保存失敗 ({title}): {e}")
         return False
+
+def get_drive_public_url(title: str, tmdb_id) -> str | None:
+    """Drive上のファイルIDから公開URLを返す"""
+    try:
+        fname = make_filename(title, tmdb_id)
+        files = get_drive_files()
+        if fname not in files:
+            return None
+        file_id = files[fname]
+        service = get_drive_service()
+        service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
+        return f"https://drive.google.com/uc?id={file_id}"
+    except Exception:
+        return None
 
 def delete_from_drive(title: str, tmdb_id) -> bool:
     try:
@@ -385,8 +402,10 @@ def search_books(query: str, author: str = None) -> list:
         # 著者名から接尾語を除去
         raw_authors = [a.strip() for a in (item.get("author", "") or "").split("/") if a.strip()]
         authors = [_re.sub(r"[（(][^）)]*[）)]|\s*(著|訳|編|著者|監修|イラスト)$", "", a).strip() for a in raw_authors]
+        isbn_val = item.get("isbn", "")
         results.append({
-            "id":         item.get("isbn") or item.get("title", ""),
+            "id":         isbn_val or item.get("title", ""),
+            "isbn":       isbn_val,
             "title":      item.get("title", ""),
             "authors":    authors,
             "publisher":  item.get("publisherName", ""),
@@ -543,7 +562,10 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
                        tmdb_id: int, media_type: str, cover_url: str,
                        tmdb_release: str, details: dict,
                        wlflg: bool = False, watched_date: str | None = None,
-                       rating: str | None = None) -> bool:
+                       rating: str | None = None,
+                       isbn: str | None = None,
+                       location: str | None = None,
+                       event_end: str | None = None) -> bool:
     """Notionに新規ページを作成してポスター・メタデータも一括登録"""
     properties = {
         "タイトル":            {"title": [{"type": "text", "text": {"content": jp_title}}]},
@@ -554,8 +576,11 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
         "WLflg":              {"checkbox": wlflg},
     }
     if tmdb_release:
-        release_date_str = str(tmdb_release)[:10]  # 日付部分のみ（時刻を除去）
-        properties["リリース日"] = {"date": {"start": release_date_str}}
+        release_date_str = str(tmdb_release)[:10]
+        date_prop = {"start": release_date_str}
+        if event_end:
+            date_prop["end"] = str(event_end)[:10]
+        properties["リリース日"] = {"date": date_prop}
     if watched_date:
         properties["鑑賞日"] = {"date": {"start": watched_date}}
     if rating:
@@ -568,14 +593,19 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
         properties["クリエイター"] = {"rich_text": [{"type": "text", "text": {"content": details["director"]}}]}
     if details.get("score") is not None:
         properties["TMDB_score"] = {"number": details["score"]}
+    if isbn:
+        properties["ISBN"] = {"rich_text": [{"type": "text", "text": {"content": isbn}}]}
+    if location:
+        properties["ロケーション"] = {"rich_text": [{"type": "text", "text": {"content": location}}]}
 
     icon_url = get_media_icon_url(media_type_label)
     payload = {
         "parent":     {"database_id": NOTION_DB_ID},
-        "cover":      {"type": "external", "external": {"url": cover_url}},
         "icon":       {"type": "external", "external": {"url": icon_url}},
         "properties": properties,
     }
+    if cover_url:
+        payload["cover"] = {"type": "external", "external": {"url": cover_url}}
     res = api_request("post", "https://api.notion.com/v1/pages", headers=NOTION_HEADERS, json=payload)
     return res is not None and res.status_code == 200
 
@@ -603,7 +633,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.70")
+st.caption("v1.80")
 
 for key, default in {
     "is_running":         False,
@@ -693,6 +723,138 @@ with st.sidebar:
 if mode == "新規登録":
     st.subheader("➕ 新規登録")
 
+    # ── 媒体選択を最初に ──
+    media_display = st.selectbox("媒体", [v[0] for v in MEDIA_ICON_MAP.values()], key="reg_media")
+    media_label   = next(k for k, v in MEDIA_ICON_MAP.items() if v[0] == media_display)
+
+    # ── イベント系（演奏会・展示会・ライブ/ショー） ──
+    EVENT_MEDIA = ["演奏会", "展示会", "ライブ/ショー"]
+
+    if media_label in EVENT_MEDIA:
+        st.divider()
+
+        # タイトル
+        event_title = st.text_input("公演名 / 展示名 *", placeholder="例: 大阪フィルハーモニー交響楽団 第588回定期演奏会")
+
+        # ロケーション・クリエイター
+        col_loc, col_creator = st.columns([1, 1])
+        event_location = col_loc.text_input("会場", placeholder="例: フェスティバルホール")
+        event_creator  = col_creator.text_input(
+            "クリエイター",
+            placeholder="例: 指揮者・キュレーターなど",
+        )
+
+        # 出演者・ジャンル
+        col_cast, col_genre = st.columns([1, 1])
+        event_cast  = col_cast.text_input("出演者・演奏者", placeholder="例: 山田太郎 / 鈴木花子")
+        event_genre = col_genre.text_input("ジャンル", placeholder="例: クラシック / 印象派")
+
+        # 日付
+        if media_label == "展示会":
+            col_start, col_end, col_watch = st.columns([1, 1, 1])
+            event_start = col_start.date_input("開催開始日", value=None, key="ev_start")
+            event_end   = col_end.date_input("開催終了日",   value=None, key="ev_end")
+            event_watch = col_watch.date_input("鑑賞日",     value=None, key="ev_watch")
+        else:
+            col_watch2, _ = st.columns([1, 1])
+            event_watch = col_watch2.date_input("鑑賞日", value=None, key="ev_watch2")
+            event_start = event_watch
+            event_end   = None
+
+        # 評価・WLflg
+        col_rating, col_wl = st.columns([2, 1])
+        rating_sel = col_rating.selectbox("評価", RATING_OPTIONS, key="ev_rating")
+        wlflg      = col_wl.checkbox("WLflg", value=False, key="ev_wl")
+
+        # 画像アップロード
+        st.caption("📷 フライヤー・ポスター画像")
+        uploaded_img = st.file_uploader(
+            "画像をアップロード（JPG / PNG）",
+            type=["jpg", "jpeg", "png"],
+            key="ev_img",
+        )
+        if uploaded_img:
+            st.image(uploaded_img, width=200)
+
+        st.divider()
+        if st.button("📥 登録する", type="primary", key="event_register", disabled=not event_title):
+            if not event_title:
+                st.warning("公演名 / 展示名は必須です")
+            else:
+                with st.spinner("登録中..."):
+                    # 画像処理
+                    cover_url   = ""
+                    image_bytes = None
+                    image_mime  = "image/jpeg"
+                    if uploaded_img:
+                        image_bytes = uploaded_img.read()
+                        image_mime  = uploaded_img.type or "image/jpeg"
+
+                    # 日付
+                    start_str = event_start.isoformat() if event_start else None
+                    end_str   = event_end.isoformat()   if event_end   else None
+                    watch_str = event_watch.isoformat()  if event_watch  else None
+
+                    # ジャンル
+                    genres = [g.strip() for g in event_genre.split("/") if g.strip()] if event_genre else []
+
+                    details = {
+                        "genres":   genres,
+                        "cast":     event_cast or "",
+                        "director": event_creator or "",
+                        "score":    None,
+                    }
+
+                    ok = create_notion_page(
+                        jp_title=event_title,
+                        en_title="",
+                        media_type_label=media_label,
+                        tmdb_id=0,
+                        media_type="",
+                        cover_url=cover_url,
+                        tmdb_release=start_str or "",
+                        details=details,
+                        wlflg=wlflg,
+                        watched_date=watch_str,
+                        rating=rating_sel if rating_sel else None,
+                        location=event_location or None,
+                        event_end=end_str,
+                    )
+
+                    if ok and image_bytes:
+                        # Drive保存してNotionカバーを更新
+                        save_to_drive("", event_title, "event", image_bytes=image_bytes, mimetype=image_mime)
+                        drive_url = get_drive_public_url(event_title, "event")
+                        if drive_url:
+                            # 最新ページIDを取得してカバー更新
+                            try:
+                                latest = api_request(
+                                    "post",
+                                    f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query",
+                                    headers=NOTION_HEADERS,
+                                    json={"page_size": 1, "sorts": [{"timestamp": "created_time", "direction": "descending"}]},
+                                )
+                                if latest and latest.status_code == 200:
+                                    page_id = latest.json()["results"][0]["id"]
+                                    api_request(
+                                        "patch",
+                                        f"https://api.notion.com/v1/pages/{page_id}",
+                                        headers=NOTION_HEADERS,
+                                        json={"cover": {"type": "external", "external": {"url": drive_url}}},
+                                    )
+                            except Exception:
+                                pass
+
+                    if ok:
+                        st.success(f"✅ 登録完了！「{event_title}」をNotionに追加しました")
+                        time.sleep(1.5)
+                        st.rerun()
+                    else:
+                        st.error("登録失敗しました")
+
+        st.stop()
+
+    # ── 映画・ドラマ・書籍（検索フロー） ──
     col_jp, col_en = st.columns([1, 1])
     jp_input     = col_jp.text_input("日本語タイトル", placeholder="例: 千と千尋の神隠し")
     en_input     = col_en.text_input("英語タイトル（検索用）", placeholder="例: Spirited Away")
@@ -700,18 +862,16 @@ if mode == "新規登録":
     creator_input = col_creator.text_input("クリエイター（著者・監督）", placeholder="例: 宮崎駿 / 道尾秀介")
     cast_input    = col_cast.text_input("キャスト・関係者", placeholder="例: 木村拓哉")
 
-    col_media, col_wl, col_date, col_rating = st.columns([2, 1, 2, 2])
-    media_display = col_media.selectbox("媒体", [v[0] for v in MEDIA_ICON_MAP.values()])
-    media_label   = next(k for k, v in MEDIA_ICON_MAP.items() if v[0] == media_display)
-    wlflg         = col_wl.checkbox("WLflg", value=False)
-    watched_date  = col_date.date_input("鑑賞日", value=None)
-    rating_sel    = col_rating.selectbox("評価", RATING_OPTIONS)
+    col_wl, col_date, col_rating = st.columns([1, 2, 2])
+    wlflg        = col_wl.checkbox("WLflg", value=False)
+    watched_date = col_date.date_input("鑑賞日", value=None)
+    rating_sel   = col_rating.selectbox("評価", RATING_OPTIONS)
 
     if st.button("🔍 検索", key="new_search"):
         query = en_input if en_input else jp_input
         if query or creator_input or cast_input:
             if media_label == "書籍":
-                rk_q   = query or None
+                rk_q    = query or None
                 rk_auth = creator_input or None
                 results = search_books(rk_q or "", author=rk_auth)
             else:
@@ -733,19 +893,24 @@ if mode == "新規登録":
         st.subheader("📝 登録内容の確認・修正")
         c1, c2 = st.columns([1, 2])
         with c1:
-            st.image(reg["cover_url"])
-            st.caption(f"{reg['cand_en']} ({reg['media_type']}) {reg['tmdb_release']} 🆔 {reg['tmdb_id']}")
+            if reg.get("cover_url"):
+                st.image(reg["cover_url"])
+            st.caption(f"{reg['cand_en']} ({reg['media_type']}) {reg['tmdb_release']} 🆔 {reg.get('tmdb_id','')}")
         with c2:
             final_jp = st.text_input("日本語タイトル（修正可）", value=reg.get("jp_input", jp_input), key="final_jp")
             final_en = st.text_input("英語タイトル（修正可）",   value=reg["cand_en"],                key="final_en")
+            if media_label == "書籍":
+                final_isbn = st.text_input("ISBN", value=reg.get("isbn", ""), key="final_isbn")
+            else:
+                final_isbn = None
 
-            # 重複チェック（セッション中1回だけNotion取得してキャッシュ）
+            # 重複チェック
             if not st.session_state.pages_loaded:
                 with st.spinner("重複チェック中..."):
                     all_pages = load_notion_data()
                     st.session_state.pages        = filter_target_pages(all_pages)
                     st.session_state.pages_loaded = True
-            dupes = check_duplicate(reg["tmdb_id"], st.session_state.pages)
+            dupes = check_duplicate(reg.get("tmdb_id", 0), st.session_state.pages)
             if dupes:
                 dupe_titles = "、".join([get_title(d["properties"])[0] for d in dupes])
                 st.warning(f"⚠️ 登録済のデータがあります：{dupe_titles}\nそれでも登録しますか？")
@@ -771,7 +936,7 @@ if mode == "新規登録":
                         }
                     else:
                         details = fetch_tmdb_details(reg["tmdb_id"], reg["media_type"])
-                    watched_str = watched_date.isoformat() if watched_date else None
+                    watched_str  = watched_date.isoformat() if watched_date else None
                     page_tmdb_id = 0 if reg["media_type"] == "book" else reg["tmdb_id"]
                     ok = create_notion_page(
                         jp_title=final_jp,
@@ -785,6 +950,7 @@ if mode == "新規登録":
                         wlflg=wlflg,
                         watched_date=watched_str,
                         rating=rating_sel if rating_sel else None,
+                        isbn=final_isbn or None,
                     )
                     st.session_state.registering = False
                     if ok:
@@ -867,6 +1033,7 @@ if mode == "新規登録":
                                 "jp_input":     cand["title"],
                                 "book_authors": cand["authors"],
                                 "book_genres":  cand["genres"],
+                                "isbn":         cand.get("isbn", ""),
                             }
                         else:
                             with st.spinner("日本語タイトル取得中..."):
