@@ -323,7 +323,7 @@ def search_books(query: str) -> list:
     params = urllib.parse.urlencode({
         "operation": "searchRetrieve",
         "query": f'title any "{query}"',
-        "recordSchema": "dcndl",
+        "recordSchema": "dc",
         "maximumRecords": 50,
         "recordPacking": "xml",
     })
@@ -406,32 +406,43 @@ def search_books(query: str) -> list:
     if not book_candidates:
         return []
 
-    # Open BD APIでカバー画像を取得（ISBN必須・認証不要）
+    # Google Books APIでカバー画像を取得（タイトル検索・認証不要）
     results = []
     for cand in book_candidates:
         cover = ""
         book_id = cand["isbn"] or cand["title"]
         published = ""
 
-        st.caption(f"ISBN: `{cand['isbn'] or 'なし'}`")
-        if cand["isbn"]:
-            try:
-                res_obd = requests.get(
-                    f"https://api.openbd.jp/v1/get?isbn={cand['isbn']}",
-                    timeout=5,
-                )
-                if res_obd.status_code == 200:
-                    obd_list = res_obd.json()
-                    if obd_list and obd_list[0]:
-                        obd = obd_list[0]
-                        summary = obd.get("summary", {})
-                        c = summary.get("cover", "")
-                        if c:
-                            cover = c.replace("http://", "https://")
-                        pub_date = summary.get("pubdate", "")
-                        published = pub_date[:4] if pub_date else ""
-            except Exception:
-                pass
+        # タイトルをクリーニング
+        title_clean = cand["title"]
+        for sep in ["：", ":", " -- ", "--", "【", "（"]:
+            if sep in title_clean:
+                title_clean = title_clean.split(sep)[0].strip()
+                break
+        title_clean = title_clean[:40]
+
+        try:
+            q = f"isbn:{cand['isbn']}" if cand["isbn"] else f"intitle:{title_clean}"
+            res_gb = requests.get(
+                "https://www.googleapis.com/books/v1/volumes",
+                params={"q": q, "langRestrict": "ja", "maxResults": 1},
+                timeout=5,
+            )
+            if res_gb.status_code == 200:
+                items_gb = res_gb.json().get("items", [])
+                if items_gb:
+                    vi = items_gb[0].get("volumeInfo", {})
+                    img = vi.get("imageLinks", {})
+                    c = img.get("thumbnail") or img.get("smallThumbnail", "")
+                    if c:
+                        cover = c.replace("http://", "https://").replace("zoom=1", "zoom=2")
+                    pub_date = vi.get("publishedDate", "")
+                    published = pub_date[:4] if pub_date else ""
+                    isbn_list = [i["identifier"] for i in vi.get("industryIdentifiers", []) if "ISBN" in i.get("type","")]
+                    if isbn_list:
+                        book_id = _re.sub(r"[^0-9]", "", isbn_list[-1])
+        except Exception:
+            pass
 
         results.append({
             "id":        book_id,
@@ -444,6 +455,7 @@ def search_books(query: str) -> list:
             "media_type": "book",
         })
     return results
+
 
 
 def fetch_book_ja_title(book_id: str) -> str:
