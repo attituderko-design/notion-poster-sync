@@ -527,25 +527,25 @@ def update_notion_metadata(page_id: str, details: dict, force: bool = False, pro
     res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}", headers=NOTION_HEADERS, json={"properties": properties})
     return (res is not None and res.status_code == 200), updated
 
-def update_notion_cover(page_id: str, cover_url: str, tmdb_release, existing_release) -> bool:
+def update_notion_cover(page_id: str, cover_url: str, tmdb_release, existing_release, is_refresh: bool = False) -> bool:
     payload = {"cover": {"type": "external", "external": {"url": cover_url}}}
-    if tmdb_release and not existing_release:
+    if tmdb_release and (not existing_release or is_refresh):
         payload["properties"] = {"リリース日": {"date": {"start": tmdb_release}}}
     res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}", headers=NOTION_HEADERS, json=payload)
     return res is not None and res.status_code == 200
 
 def update_all(page_id, cover_url, tmdb_release, existing_release,
                title, tmdb_id, media_type, need_notion, need_drive,
-               force_meta=False, props=None, season_number=None) -> tuple:
+               force_meta=False, props=None, season_number=None, is_refresh=False) -> tuple:
     actual_cover_url = cover_url
     if media_type == "tv" and season_number:
         details_pre = fetch_tmdb_details(tmdb_id, media_type, season_number)
         if details_pre.get("season_poster"):
             actual_cover_url = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{details_pre['season_poster']}"
-        if details_pre.get("season_air_date") and not existing_release:
+        if details_pre.get("season_air_date") and (not existing_release or is_refresh):
             tmdb_release = details_pre["season_air_date"]
 
-    notion_ok = update_notion_cover(page_id, actual_cover_url, tmdb_release, existing_release) if need_notion else True
+    notion_ok = update_notion_cover(page_id, actual_cover_url, tmdb_release, existing_release, is_refresh) if need_notion else True
     # アイコンを媒体に応じて更新
     if props is not None:
         media_labels = [m["name"] for m in props.get("媒体", {}).get("multi_select", [])]
@@ -659,7 +659,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.87")
+st.caption("v1.88")
 
 for key, default in {
     "is_running":         False,
@@ -1261,6 +1261,7 @@ if mode == "自動同期" and st.session_state.is_running:
                     item["id"], cover_url, tmdb_release, existing_release,
                     log_title, tmdb_id, media_type, need_notion, need_drive,
                     force_meta=is_refresh, props=props, season_number=season_number,
+                    is_refresh=is_refresh,
                 )
                 entry = build_update_log(log_title, src, need_notion, n_ok, need_drive, d_ok, meta_ok, updated, is_refresh)
                 if updated:
