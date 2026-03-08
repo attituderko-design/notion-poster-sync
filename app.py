@@ -646,7 +646,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.85")
+st.caption("v1.86")
 
 for key, default in {
     "is_running":         False,
@@ -779,15 +779,7 @@ if mode == "新規登録":
         rating_sel = col_rating.selectbox("評価", RATING_OPTIONS, key="ev_rating")
         wlflg      = col_wl.checkbox("WLflg", value=False, key="ev_wl")
 
-        # 画像アップロード
-        st.caption("📷 フライヤー・ポスター画像")
-        uploaded_img = st.file_uploader(
-            "画像をアップロード（JPG / PNG）",
-            type=["jpg", "jpeg", "png"],
-            key="ev_img",
-        )
-        if uploaded_img:
-            st.image(uploaded_img, width=200)
+        st.caption("🖼 カバー画像・ロケーション情報はNotion上で入力してください。")
 
         st.divider()
         if st.button("📥 登録する", type="primary", key="event_register", disabled=not event_title):
@@ -795,14 +787,6 @@ if mode == "新規登録":
                 st.warning("公演名 / 展示名は必須です")
             else:
                 with st.spinner("登録中..."):
-                    # 画像処理
-                    cover_url   = ""
-                    image_bytes = None
-                    image_mime  = "image/jpeg"
-                    if uploaded_img:
-                        image_bytes = uploaded_img.read()
-                        image_mime  = uploaded_img.type or "image/jpeg"
-
                     # 日付
                     start_str = event_start.isoformat() if event_start else None
                     end_str   = event_end.isoformat()   if event_end   else None
@@ -824,7 +808,7 @@ if mode == "新規登録":
                         media_type_label=media_label,
                         tmdb_id=0,
                         media_type="",
-                        cover_url=cover_url,
+                        cover_url="",
                         tmdb_release=start_str or "",
                         details=details,
                         wlflg=wlflg,
@@ -834,33 +818,7 @@ if mode == "新規登録":
                         event_end=end_str,
                     )
 
-                    if ok and image_bytes:
-                        file_id = save_to_drive("", event_title, "event", image_bytes=image_bytes, mimetype=image_mime)
-                        if file_id:
-                            try:
-                                # 公開設定
-                                get_drive_service().permissions().create(
-                                    fileId=file_id,
-                                    body={"role": "reader", "type": "anyone"}
-                                ).execute()
-                                drive_url = f"https://drive.google.com/uc?id={file_id}"
-                                # 最新ページIDを取得してカバー更新
-                                latest = api_request(
-                                    "post",
-                                    f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query",
-                                    headers=NOTION_HEADERS,
-                                    json={"page_size": 1, "sorts": [{"timestamp": "created_time", "direction": "descending"}]},
-                                )
-                                if latest and latest.status_code == 200:
-                                    page_id = latest.json()["results"][0]["id"]
-                                    api_request(
-                                        "patch",
-                                        f"https://api.notion.com/v1/pages/{page_id}",
-                                        headers=NOTION_HEADERS,
-                                        json={"cover": {"type": "external", "external": {"url": drive_url}}},
-                                    )
-                            except Exception as e:
-                                st.warning(f"カバー設定失敗: {e}")
+
 
                     if ok:
                         st.success(f"✅ 登録完了！「{event_title}」をNotionに追加しました")
