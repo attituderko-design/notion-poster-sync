@@ -382,12 +382,20 @@ def search_books(query: str) -> list:
                 isbn = val.replace("-", "")
                 break
 
-        # カバー画像（Open LibraryのISBNベース）
+        # カバー画像：ISBNあればOpen Library、なければNDLサムネイル
         cover = ""
         if isbn:
             cover = f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg"
-        if not cover:
-            continue
+        else:
+            # NDLのサムネイルURLを試みる
+            id_els = data_el.findall(".//{http://purl.org/dc/elements/1.1/}identifier")
+            for id_el in id_els:
+                val = id_el.text or ""
+                if "ndljp" in val or val.startswith("http"):
+                    continue
+                # NDL書誌IDでサムネイル
+            # カバーなしでもタイトルだけ表示するためプレースホルダー
+            cover = "https://via.placeholder.com/120x160?text=No+Cover"
 
         results.append({
             "id":          isbn or title,
@@ -607,7 +615,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.55")
+st.caption("v1.56")
 
 for key, default in {
     "is_running":         False,
