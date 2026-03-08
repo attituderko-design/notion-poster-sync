@@ -315,47 +315,57 @@ def search_tmdb(query: str, year=None) -> list:
 
 
 def search_books(query: str) -> list:
-    """Google Books APIで書籍検索（urllib使用）"""
+    """Open Library APIで書籍検索（キー不要）"""
     import urllib.request, urllib.parse, json as _json
-    params = urllib.parse.urlencode({"q": query, "maxResults": 10, "key": GOOGLE_BOOKS_API_KEY})
-    url = f"https://www.googleapis.com/books/v1/volumes?{params}"
-    st.caption(f"🔑 key先頭8文字: {GOOGLE_BOOKS_API_KEY[:8]}...")
+    params = urllib.parse.urlencode({"q": query, "limit": 10, "language": "jpn"})
+    url = f"https://openlibrary.org/search.json?{params}"
     try:
-        with urllib.request.urlopen(url, timeout=10) as r:
+        req = urllib.request.Request(url, headers={"User-Agent": "ArteMis/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
             data = _json.loads(r.read().decode())
     except Exception as e:
-        st.warning(f"⚠️ Google Books API エラー: {e}")
-        st.caption(f"URL: {url[:80]}...")
-        return []
-    items = data.get("items", [])
-    st.caption(f"📚 Google Books: {len(items)} 件取得（画像なし含む）")
+        # 日本語で見つからない場合は言語制限なしで再試行
+        try:
+            params2 = urllib.parse.urlencode({"q": query, "limit": 20})
+            url2 = f"https://openlibrary.org/search.json?{params2}"
+            req2 = urllib.request.Request(url2, headers={"User-Agent": "ArteMis/1.0"})
+            with urllib.request.urlopen(req2, timeout=10) as r:
+                data = _json.loads(r.read().decode())
+        except Exception as e2:
+            st.warning(f"⚠️ Open Library API エラー: {e2}")
+            return []
+    docs = data.get("docs", [])
     results = []
-    for item in items:
-        info = item.get("volumeInfo", {})
-        cover = info.get("imageLinks", {}).get("thumbnail") or info.get("imageLinks", {}).get("smallThumbnail")
-        if not cover:
+    for doc in docs:
+        cover_id = doc.get("cover_i")
+        if not cover_id:
             continue
-        cover = cover.replace("http://", "https://")
+        cover = f"https://covers.openlibrary.org/b/id/{cover_id}-L.jpg"
+        authors = doc.get("author_name", [])
+        published = str(doc.get("first_publish_year", ""))
         results.append({
-            "id":           item["id"],
-            "title":        info.get("title", ""),
-            "authors":      info.get("authors", []),
-            "publisher":    info.get("publisher", ""),
-            "published":    info.get("publishedDate", ""),
-            "genres":       info.get("categories", []),
+            "id":           doc.get("key", "").replace("/works/", ""),
+            "title":        doc.get("title", ""),
+            "authors":      authors,
+            "publisher":    ", ".join(doc.get("publisher", [])[:1]),
+            "published":    published,
+            "genres":       doc.get("subject", [])[:3],
             "cover_url":    cover,
             "media_type":   "book",
         })
+        if len(results) >= 10:
+            break
     return results
 
 def fetch_book_ja_title(book_id: str) -> str:
-    """Google Books APIで日本語タイトルを取得（urllib使用）"""
+    """Open Library APIでタイトルを取得"""
     import urllib.request, json as _json
-    url = f"https://www.googleapis.com/books/v1/volumes/{book_id}"
+    url = f"https://openlibrary.org/works/{book_id}.json"
     try:
-        with urllib.request.urlopen(url, timeout=10) as r:
+        req = urllib.request.Request(url, headers={"User-Agent": "ArteMis/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
             data = _json.loads(r.read().decode())
-        return data.get("volumeInfo", {}).get("title", "")
+        return data.get("title", "")
     except Exception:
         return ""
 
@@ -560,7 +570,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.53")
+st.caption("v1.54")
 
 for key, default in {
     "is_running":         False,
