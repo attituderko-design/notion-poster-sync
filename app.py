@@ -379,8 +379,6 @@ def search_books(query: str) -> list:
 
         # ISBN取得: dcndl:ISBN / dc:identifier から探す
         isbn = ""
-        if len(book_candidates) == 0:
-            st.code(rd_text[:2000], language="xml")
         for tag in [
             "{http://ndl.go.jp/dcndl/terms/}ISBN",
             "{http://purl.org/dc/elements/1.1/}identifier",
@@ -430,18 +428,21 @@ def search_books(query: str) -> list:
                 title_q = cand["title"].split("：")[0].split(":")[0].split(" -- ")[0].strip()[:40]
                 ndl_res = requests.get(
                     "https://ndlsearch.ndl.go.jp/api/opensearch",
-                    params={"title": title_q, "cnt": 3, "mediatype": 1},
+                    params={"title": title_q, "cnt": 5, "mediatype": 1},
                     timeout=5,
                 )
                 if ndl_res.status_code == 200:
                     import xml.etree.ElementTree as _ET2
                     _root2 = _ET2.fromstring(ndl_res.content)
-                    _all_ids = [el.text for el in _root2.findall(".//{http://purl.org/dc/elements/1.1/}identifier")]
-                    for _item in _root2.findall(".//{http://purl.org/dc/elements/1.1/}identifier"):
-                        _val = _re.sub(r"[^0-9]", "", (_item.text or ""))
-                        if _re.match(r"^97[89]\d{10}$", _val):
-                            isbn = _val
+                    for _item in _root2.findall(".//item"):
+                        for _child in _item:
+                            _val = _re.sub(r"[^0-9]", "", (_child.text or ""))
+                            if _re.match(r"^97[89]\d{10}$", _val):
+                                isbn = _val
+                                break
+                        if isbn:
                             break
+                st.caption(f"📗 '{title_q[:20]}' → ISBN: {isbn or 'なし'}")
             except Exception as _e:
                 st.caption(f"🔴 OpenSearch例外: {_e}")
 
