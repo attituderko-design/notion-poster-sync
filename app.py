@@ -316,183 +316,54 @@ def search_tmdb(query: str, year=None) -> list:
 
 
 def search_books(query: str) -> list:
-    """国立国会図書館APIで書籍検索 + Google Booksでカバー画像取得"""
-    import urllib.request, urllib.parse, json as _json, re as _re
-    import xml.etree.ElementTree as ET
+    """楽天ブックスAPIで書籍検索（タイトル直接検索）"""
+    import urllib.parse as _up, re as _re
 
-    params = urllib.parse.urlencode({
-        "operation": "searchRetrieve",
-        "query": f'title any "{query}"',
-        "recordSchema": "dc",
-        "maximumRecords": 50,
-        "recordPacking": "xml",
-    })
-    url = f"https://iss.ndl.go.jp/api/sru?{params}"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "ArteMis/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            xml_data = r.read().decode("utf-8")
-    except Exception as e:
-        st.warning(f"⚠️ 国立国会図書館API エラー: {e}")
-        return []
-
-    # XML名前空間
-    ns = {
-        "srw":   "http://www.loc.gov/zing/srw/",
-        "dc":    "http://purl.org/dc/elements/1.1/",
-        "dcndl": "http://ndl.go.jp/dcndl/terms/",
-        "rdfs":  "http://www.w3.org/2000/01/rdf-schema#",
+    rk_params = {
+        "applicationId": RAKUTEN_APP_ID,
+        "accessKey":     st.secrets.get("RAKUTEN_ACCESS_KEY", ""),
+        "title":         query,
+        "hits":          10,
+        "formatVersion": 2,
+        "sort":          "sales",
+        "outOfStockFlag": 1,
     }
-
+    rk_headers = {
+        "Referer":       "https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app",
+        "Origin":        "https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app",
+        "User-Agent":    "Mozilla/5.0",
+        "Authorization": f"Bearer {st.secrets.get('RAKUTEN_ACCESS_KEY', '')}",
+    }
+    url_rk = "https://openapi.rakuten.co.jp/services/api/BooksBook/Search/20170404?" + _up.urlencode(rk_params)
     try:
-        root = ET.fromstring(xml_data)
-    except ET.ParseError as e:
-        st.warning(f"⚠️ XML parse error: {e}")
+        res_rk = requests.get(url_rk, timeout=8, headers=rk_headers)
+    except Exception as e:
+        st.warning(f"⚠️ 楽天ブックスAPI エラー: {e}")
         return []
 
-    records = root.findall(".//srw:record", ns)
-
-    seen_titles = set()
-    book_candidates = []
-
-    for record in records:
-        rd_el = record.find("srw:recordData", ns)
-        if rd_el is None:
-            continue
-        rd_text = ET.tostring(rd_el, encoding="unicode")
-
-        # dc:title
-        title_el = rd_el.find(".//{http://purl.org/dc/elements/1.1/}title")
-        if title_el is None or not title_el.text:
-            continue
-        title = title_el.text.strip()
-        if not title or title in seen_titles:
-            continue
-
-        # dc:creator
-        creators = rd_el.findall(".//{http://purl.org/dc/elements/1.1/}creator")
-        authors = [c.text.strip() for c in creators if c.text]
-
-        # dc:publisher
-        pub_el = rd_el.find(".//{http://purl.org/dc/elements/1.1/}publisher")
-        publisher = pub_el.text.strip() if pub_el is not None and pub_el.text else ""
-
-        # ISBN取得: dcndl:ISBN / dc:identifier から探す
-        isbn = ""
-        for tag in [
-            "{http://ndl.go.jp/dcndl/terms/}ISBN",
-            "{http://purl.org/dc/elements/1.1/}identifier",
-        ]:
-            for el in rd_el.findall(f".//{tag}"):
-                val = _re.sub(r"[^0-9]", "", (el.text or ""))
-                if _re.match(r"^97[89]\d{10}$", val) or _re.match(r"^\d{10}$", val):
-                    isbn = val
-                    break
-            if isbn:
-                break
-
-        lang_el = rd_el.find(".//{http://purl.org/dc/elements/1.1/}language")
-        lang = lang_el.text.strip() if lang_el is not None and lang_el.text else ""
-
-        seen_titles.add(title)
-        book_candidates.append({
-            "title":     title,
-            "authors":   authors,
-            "publisher": publisher,
-            "isbn":      isbn,
-            "lang":      lang,
-        })
-        if len(book_candidates) >= 10:
-            break
-
-    if not book_candidates:
+    if res_rk.status_code != 200:
+        st.warning(f"⚠️ 楽天ブックスAPI {res_rk.status_code}: {res_rk.text[:200]}")
         return []
 
-    # 日本語レコード優先・ISBNあり優先でソート
-    book_candidates.sort(key=lambda c: (
-        0 if c.get("lang") == "jpn" else 1,
-        0 if c.get("isbn") else 1,
-    ))
-
-    # NDL書誌APIでISBN取得 → Open BDでカバー画像取得
+    items = res_rk.json().get("Items", [])
     results = []
-    for cand in book_candidates:
-        cover = ""
-        book_id = cand["isbn"] or cand["title"]
-        published = ""
-
-        # ISBNがなければNDL書誌検索APIで取得を試みる
-        isbn = cand["isbn"]
-        if not isbn:
-            try:
-                title_q = cand["title"].split("：")[0].split(":")[0].split(" -- ")[0].strip()[:40]
-                ndl_res = requests.get(
-                    "https://ndlsearch.ndl.go.jp/api/opensearch",
-                    params={"title": title_q, "cnt": 5, "mediatype": 1},
-                    timeout=5,
-                )
-                if ndl_res.status_code == 200:
-                    import xml.etree.ElementTree as _ET2
-                    _root2 = _ET2.fromstring(ndl_res.content)
-                    for _item in _root2.findall(".//item"):
-                        for _child in _item:
-                            _val = _re.sub(r"[^0-9]", "", (_child.text or ""))
-                            if _re.match(r"^97[89]\d{10}$", _val):
-                                isbn = _val
-                                break
-                        if isbn:
-                            break
-            except Exception:
-                pass
-
-        # 楽天ブックスAPIでカバー画像取得
-        try:
-            title_clean = cand["title"].split("：")[0].split(":")[0].split(" -- ")[0].strip()[:40]
-            rk_params = {
-                "applicationId": RAKUTEN_APP_ID,
-                "accessKey":     st.secrets.get("RAKUTEN_ACCESS_KEY", ""),
-                "hits":          3,
-                "formatVersion": 2,
-                "sort":          "sales",
-            }
-            if isbn:
-                rk_params["isbn"] = isbn
-            else:
-                rk_params["title"] = title_clean
-            import urllib.parse as _up
-            url_rk = "https://openapi.rakuten.co.jp/services/api/BooksBook/Search/20170404?" + _up.urlencode(rk_params)
-            rk_headers = {
-                "Referer":       "https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app",
-                "Origin":        "https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app",
-                "User-Agent":    "Mozilla/5.0",
-                "Authorization": f"Bearer {st.secrets.get('RAKUTEN_ACCESS_KEY', '')}",
-            }
-            res_rk = requests.get(url_rk, timeout=5, headers=rk_headers)
-            if res_rk.status_code == 200:
-                items_rk = res_rk.json().get("Items", [])
-                if items_rk:
-                    item = items_rk[0]
-                    c = item.get("largeImageUrl") or item.get("mediumImageUrl") or item.get("smallImageUrl", "")
-                    if c:
-                        cover = c.replace("http://", "https://")
-                    book_id   = item.get("isbn") or isbn or cand["title"]
-                    published = item.get("salesDate", "")[:4]
-        except Exception:
-            pass
-
+    for item in items:
+        cover = item.get("largeImageUrl") or item.get("mediumImageUrl") or item.get("smallImageUrl", "")
+        cover = cover.replace("http://", "https://") if cover else ""
+        # 著者名から接尾語を除去
+        raw_authors = [a.strip() for a in (item.get("author", "") or "").split("/") if a.strip()]
+        authors = [_re.sub(r"[（(][^）)]*[）)]|\s*(著|訳|編|著者|監修|イラスト)$", "", a).strip() for a in raw_authors]
         results.append({
-            "id":         isbn or cand["title"],
-            "title":      cand["title"],
-            "authors":    cand["authors"],
-            "publisher":  cand["publisher"],
-            "published":  published,
+            "id":         item.get("isbn") or item.get("title", ""),
+            "title":      item.get("title", ""),
+            "authors":    authors,
+            "publisher":  item.get("publisherName", ""),
+            "published":  (item.get("salesDate", "") or "")[:4],
             "genres":     [],
             "cover_url":  cover,
             "media_type": "book",
         })
     return results
-
-
 
 
 def fetch_book_ja_title(book_id: str) -> str:
