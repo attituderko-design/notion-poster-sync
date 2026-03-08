@@ -315,6 +315,35 @@ def search_tmdb(query: str, year=None) -> list:
     return [r for r in res.json().get("results", []) if r.get("poster_path") and r.get("media_type") in ["movie", "tv"]]
 
 
+def search_tmdb_by_person(person_query: str) -> list:
+    """クリエイター/キャスト名でTMDB人物検索→その人の作品一覧を返す"""
+    res = api_request("get", "https://api.themoviedb.org/3/search/person",
+                      params={"api_key": TMDB_API_KEY, "query": person_query, "language": "en-US"})
+    if res is None:
+        return []
+    people = res.json().get("results", [])
+    if not people:
+        return []
+    # 最初にヒットした人物の出演・監督作品を取得
+    person_id = people[0]["id"]
+    res2 = api_request("get", f"https://api.themoviedb.org/3/person/{person_id}/combined_credits",
+                       params={"api_key": TMDB_API_KEY, "language": "en-US"})
+    if res2 is None:
+        return []
+    credits = res2.json()
+    works = credits.get("cast", []) + credits.get("crew", [])
+    # ポスターありのmovie/tvのみ、人気順で重複除去
+    seen_ids = set()
+    results = []
+    for w in sorted(works, key=lambda x: x.get("popularity", 0), reverse=True):
+        if w.get("poster_path") and w.get("media_type") in ["movie", "tv"] and w["id"] not in seen_ids:
+            seen_ids.add(w["id"])
+            results.append(w)
+        if len(results) >= 20:
+            break
+    return results
+
+
 def search_books(query: str, author: str = None) -> list:
     """楽天ブックスAPIで書籍検索（タイトル直接検索）"""
     import urllib.parse as _up, re as _re
@@ -686,8 +715,10 @@ if mode == "新規登録":
                 rk_auth = creator_input or None
                 results = search_books(rk_q or "", author=rk_auth)
             else:
-                tmdb_q = query or creator_input or cast_input
-                results = search_tmdb(tmdb_q)
+                if creator_input or cast_input:
+                    results = search_tmdb_by_person(creator_input or cast_input)
+                else:
+                    results = search_tmdb(query)
             st.session_state.new_search_results = results[:20]
             st.session_state.new_search_done    = True
             st.session_state.confirm_reg        = None
