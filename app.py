@@ -461,7 +461,8 @@ def search_books(query: str) -> list:
             else:
                 rk_params["title"] = title_clean
             import urllib.parse as _up
-            url_rk = "https://app.rakuten.co.jp/services/api/BooksBook/Search/20170404?" + _up.urlencode(rk_params)
+            url_rk = "https://openapi.rakuten.co.jp/services/api/BooksBook/Search/20170404?" + _up.urlencode(rk_params)
+            st.caption(f"🔗 URL: {url_rk[:200]}")
             res_rk = requests.get(url_rk, timeout=5)
             if res_rk.status_code == 200:
                 items_rk = res_rk.json().get("Items", [])
