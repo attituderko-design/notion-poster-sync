@@ -814,7 +814,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.89")
+st.caption("v1.90")
 
 for key, default in {
     "is_running":         False,
@@ -1025,7 +1025,8 @@ if mode == "新規登録":
 
     col_wl, col_date, col_rating = st.columns([1, 2, 2])
     wlflg        = col_wl.checkbox("WLflg", value=False)
-    watched_date = col_date.date_input("鑑賞日", value=None)
+    date_label   = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日"}.get(media_label, "鑑賞日")
+    watched_date = col_date.date_input(date_label, value=None)
     rating_sel   = col_rating.selectbox("評価", RATING_OPTIONS)
 
     if st.button("🔍 検索", key="new_search"):
@@ -1231,15 +1232,15 @@ if mode == "新規登録":
                             }
                         elif media_label == "ゲーム":
                             st.session_state.confirm_reg = {
-                                "tmdb_id":      0,
-                                "cover_url":    cand["cover_url"],
-                                "tmdb_release": cand.get("release", ""),
-                                "media_type":   "game",
-                                "cand_en":      cand["title"],
-                                "jp_input":     cand["title"],
-                                "book_authors": [cand.get("developer", "")],
-                                "book_genres":  cand.get("genres", []),
-                                "isbn":         "",
+                                "tmdb_id":        0,
+                                "cover_url":      cand["cover_url"],
+                                "tmdb_release":   cand.get("release", ""),
+                                "media_type":     "game",
+                                "cand_en":        cand["title"],
+                                "jp_input":       "",
+                                "book_authors":   [cand.get("developer", "")],
+                                "book_genres":    cand.get("genres", []),
+                                "isbn":           "",
                                 "game_publisher": cand.get("publisher", ""),
                             }
                         else:
