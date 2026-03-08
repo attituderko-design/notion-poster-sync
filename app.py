@@ -316,10 +316,9 @@ def search_tmdb(query: str, year=None) -> list:
 
 
 def search_books(query: str) -> list:
-    """国立国会図書館APIで書籍検索 + 楽天Books APIでカバー画像取得"""
+    """国立国会図書館APIで書籍検索 + Google Booksでカバー画像取得"""
     import urllib.request, urllib.parse, json as _json, re as _re
     import xml.etree.ElementTree as ET
-    import streamlit as st
 
     params = urllib.parse.urlencode({
         "operation": "searchRetrieve",
@@ -358,14 +357,17 @@ def search_books(query: str) -> list:
     book_candidates = []
 
     for record in records:
+        # recordDataの中のXMLを文字列として取得
         rd_el = record.find("srw:recordData", ns)
         if rd_el is None:
             continue
         rd_text = ET.tostring(rd_el, encoding="unicode")
 
+        # 不要なメディア除外
         if any(kw in rd_text for kw in SKIP_KEYWORDS):
             continue
 
+        # dc:title を ET で取得（名前空間付き）
         title_el = rd_el.find(".//{http://purl.org/dc/elements/1.1/}title")
         if title_el is None or not title_el.text:
             continue
@@ -373,9 +375,11 @@ def search_books(query: str) -> list:
         if not title or title in seen_titles:
             continue
 
+        # dc:creator
         creators = rd_el.findall(".//{http://purl.org/dc/elements/1.1/}creator")
         authors = [c.text.strip() for c in creators if c.text]
 
+        # dc:publisher
         pub_el = rd_el.find(".//{http://purl.org/dc/elements/1.1/}publisher")
         publisher = pub_el.text.strip() if pub_el is not None and pub_el.text else ""
 
@@ -398,60 +402,43 @@ def search_books(query: str) -> list:
         if cand["authors"]:
             author_clean = _re.sub(r'[∥\s]*(著|訳|編|著者|作).*', '', cand["authors"][0]).strip()
 
-        # --- 修正① タイトルのクリーニング ---
-        title_clean = cand["title"].split(":")[0].split("：")[0].split("/")[0].strip()
+        # タイトルをクリーニング（長すぎるNDLタイトルを短縮）
+        title_clean = cand["title"]
+        for sep in ["：", ":", "　", " -- ", "--", "【", "（", "/"]:
+            if sep in title_clean:
+                title_clean = title_clean.split(sep)[0].strip()
+                break
+        title_clean = title_clean[:50]  # 50文字上限
 
         cover = ""
         book_id = cand["title"]
         published = ""
-
-        url_rk = ""
-        
         if RAKUTEN_APP_ID:
             try:
                 rk_params = {
                     "applicationId": RAKUTEN_APP_ID,
-                    "keyword": title_clean,
+                    "title": title_clean,
                     "hits": 1,
                     "formatVersion": 2,
                 }
-                
-                url_rk = (
-                    "https://openapi.rakuten.co.jp/services/api/BooksBook/Search/20170404?"
-                    + urllib.parse.urlencode(rk_params)
-                )
-
-                st.write("RK PARAMS", rk_params)
-                st.write("RK URL", url_rk) 
-
-                headers = {
-                    "User-Agent": "ArteMis/1.0",
-                    "Origin": "https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app"
-                }
-
-                req_rk = urllib.request.Request(url_rk, headers=headers)
+                if author_clean:
+                    rk_params["author"] = author_clean
+                url_rk = f"https://app.rakuten.co.jp/services/api/BooksBook/Search/20170404?{urllib.parse.urlencode(rk_params)}"
+                req_rk = urllib.request.Request(url_rk, headers={"User-Agent": "ArteMis/1.0"})
                 with urllib.request.urlopen(req_rk, timeout=5) as r_rk:
                     rk_data = _json.loads(r_rk.read().decode())
-
                 items_rk = rk_data.get("Items", [])
-                st.write("RK COUNT", len(items_rk))
                 if items_rk:
-                    st.write("RK RAW", items_rk[0])
-                    item = items_rk[0]["Item"]
-                    c = (
-                        item.get("largeImageUrl")
-                        or item.get("mediumImageUrl")
-                        or item.get("smallImageUrl", "")
-                    )
+                    # formatVersion=2 の場合はItems[0]が直接dictだが念のため両方対応
+                    raw = items_rk[0]
+                    item = raw.get("Item", raw)
+                    c = item.get("largeImageUrl") or item.get("mediumImageUrl") or item.get("smallImageUrl", "")
                     if c:
                         cover = c.replace("http://", "https://")
-                    st.write("IMAGE", cover)
-
                     book_id = item.get("isbn") or cand["title"]
                     published = item.get("salesDate", "")[:4]
-
-            except Exception as e:
-                st.write("RAKUTEN ERROR", e)
+            except Exception:
+                pass
 
         results.append({
             "id":        book_id,
@@ -463,7 +450,6 @@ def search_books(query: str) -> list:
             "cover_url": cover,
             "media_type": "book",
         })
-
     return results
 
 
@@ -792,7 +778,6 @@ if mode == "新規登録":
         st.subheader("📝 登録内容の確認・修正")
         c1, c2 = st.columns([1, 2])
         with c1:
-            st.write(reg["cover_url"])
             st.image(reg["cover_url"])
             st.caption(f"{reg['cand_en']} ({reg['media_type']}) {reg['tmdb_release']} 🆔 {reg['tmdb_id']}")
         with c2:
