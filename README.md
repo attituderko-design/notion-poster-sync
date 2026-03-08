@@ -25,8 +25,7 @@
 
 ## 📸 Screenshots / スクリーンショット
 
-<!-- TODO: Add screenshots here -->
-> _Screenshots coming soon_
+![ArtéMis CERS Screenshot](assets/SS.png)
 
 ---
 
