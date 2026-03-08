@@ -321,7 +321,7 @@ def search_books(query: str) -> list:
 
     params = urllib.parse.urlencode({
         "operation": "searchRetrieve",
-        "query": f'title="{query}" AND mediatype="Book"',
+        "query": f"title any \"{query}\"",
         "recordSchema": "dcndl",
         "maximumRecords": 20,
         "recordPacking": "xml",
@@ -607,7 +607,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.4")
+st.caption("v1.55")
 
 for key, default in {
     "is_running":         False,
