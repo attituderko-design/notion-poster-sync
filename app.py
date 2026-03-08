@@ -914,7 +914,7 @@ if mode == "新規登録":
                         authors      = ""
 
                     if media_label == "書籍":
-                        st.write(f"**{cand_en}**")
+                        st.write(f"**{cand['title']}**")
                         if not cover_url or "placeholder" in cover_url:
                             st.caption("📷 表紙なし")
                         else:
