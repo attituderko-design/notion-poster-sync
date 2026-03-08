@@ -327,10 +327,12 @@ def search_books(query: str) -> list:
         "recordPacking": "xml",
     })
     url = f"https://iss.ndl.go.jp/api/sru?{params}"
+    st.caption(f"🔍 URL: {url[:120]}")
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "ArteMis/1.0"})
         with urllib.request.urlopen(req, timeout=10) as r:
             xml_data = r.read().decode("utf-8")
+        st.caption(f"📥 レスポンス先頭200文字: {xml_data[:200]}")
     except Exception as e:
         st.warning(f"⚠️ 国立国会図書館API エラー: {e}")
         return []
@@ -348,8 +350,10 @@ def search_books(query: str) -> list:
         st.warning(f"⚠️ XML解析エラー: {e}")
         return []
 
+    records = root.findall(".//srw:record", ns)
+    st.caption(f"📚 NDL レコード数: {len(records)}")
     results = []
-    for record in root.findall(".//srw:record", ns):
+    for record in records:
         data_el = record.find(".//srw:recordData", ns)
         if data_el is None:
             continue
@@ -603,7 +607,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.55")
+st.caption("v1.4")
 
 for key, default in {
     "is_running":         False,
