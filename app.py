@@ -315,19 +315,22 @@ def search_tmdb(query: str, year=None) -> list:
     return [r for r in res.json().get("results", []) if r.get("poster_path") and r.get("media_type") in ["movie", "tv"]]
 
 
-def search_books(query: str) -> list:
+def search_books(query: str, author: str = None) -> list:
     """楽天ブックスAPIで書籍検索（タイトル直接検索）"""
     import urllib.parse as _up, re as _re
 
     rk_params = {
         "applicationId": RAKUTEN_APP_ID,
         "accessKey":     st.secrets.get("RAKUTEN_ACCESS_KEY", ""),
-        "title":         query,
-        "hits":          10,
+        "hits":          20,
         "formatVersion": 2,
         "sort":          "sales",
         "outOfStockFlag": 1,
     }
+    if query:
+        rk_params["title"] = query
+    if author:
+        rk_params["author"] = author
     rk_headers = {
         "Referer":       "https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app",
         "Origin":        "https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app",
@@ -571,7 +574,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.60")
+st.caption("v1.70")
 
 for key, default in {
     "is_running":         False,
@@ -662,8 +665,11 @@ if mode == "新規登録":
     st.subheader("➕ 新規登録")
 
     col_jp, col_en = st.columns([1, 1])
-    jp_input = col_jp.text_input("日本語タイトル", placeholder="例: 千と千尋の神隠し")
-    en_input = col_en.text_input("英語タイトル（検索用）", placeholder="例: Spirited Away")
+    jp_input     = col_jp.text_input("日本語タイトル", placeholder="例: 千と千尋の神隠し")
+    en_input     = col_en.text_input("英語タイトル（検索用）", placeholder="例: Spirited Away")
+    col_creator, col_cast = st.columns([1, 1])
+    creator_input = col_creator.text_input("クリエイター（著者・監督）", placeholder="例: 宮崎駿 / 道尾秀介")
+    cast_input    = col_cast.text_input("キャスト・関係者", placeholder="例: 木村拓哉")
 
     col_media, col_wl, col_date, col_rating = st.columns([2, 1, 2, 2])
     media_display = col_media.selectbox("媒体", [v[0] for v in MEDIA_ICON_MAP.values()])
@@ -674,16 +680,19 @@ if mode == "新規登録":
 
     if st.button("🔍 検索", key="new_search"):
         query = en_input if en_input else jp_input
-        if query:
+        if query or creator_input or cast_input:
             if media_label == "書籍":
-                results = search_books(query)
+                rk_q = query or creator_input or cast_input
+                results = search_books(rk_q, author=creator_input if not query else None)
             else:
-                results = search_tmdb(query)
-            st.session_state.new_search_results = results[:10]
+                tmdb_q = query or creator_input or cast_input
+                results = search_tmdb(tmdb_q)
+            st.session_state.new_search_results = results[:20]
             st.session_state.new_search_done    = True
             st.session_state.confirm_reg        = None
+            st.session_state.bulk_checked       = {}
         else:
-            st.warning("タイトルを入力してください")
+            st.warning("タイトルまたはクリエイター/キャストを入力してください")
 
     # ── 確認・修正ステップ ──
     if st.session_state.confirm_reg is not None:
@@ -724,8 +733,8 @@ if mode == "新規登録":
                     if reg["media_type"] == "book":
                         details = {
                             "genres":   reg.get("book_genres", []),
-                            "cast":     " / ".join(a.replace(" 著","").replace("著","").replace(" 訳","").replace("訳","").replace(" 編","").replace("編","").strip() for a in reg.get("book_authors", [])),
-                            "director": "",
+                            "cast":     "",
+                            "director": " / ".join(a.replace(" 著","").replace("著","").replace(" 訳","").replace("訳","").replace(" 編","").replace("編","").strip() for a in reg.get("book_authors", [])),
                             "score":    None,
                         }
                     else:
@@ -764,50 +773,63 @@ if mode == "新規登録":
         else:
             st.warning("候補が見つかりませんでした。検索ワードを変えて再試行してください。\nTMDBで直接検索してIDを確認する方法もあります → https://www.themoviedb.org")
     elif st.session_state.new_search_results:
-        st.caption(f"{len(st.session_state.new_search_results)} 件の候補")
-        for row_start in range(0, len(st.session_state.new_search_results), 3):
+        results_list = st.session_state.new_search_results
+        if "bulk_checked" not in st.session_state:
+            st.session_state.bulk_checked = {}
+
+        st.caption(f"{len(results_list)} 件の候補　チェックして一括登録できます")
+
+        # チェックボックス＋カード一覧
+        for row_start in range(0, len(results_list), 3):
             cols = st.columns(3)
-            for col_idx, cand in enumerate(st.session_state.new_search_results[row_start:row_start + 3]):
+            for col_idx, cand in enumerate(results_list[row_start:row_start + 3]):
                 abs_idx = row_start + col_idx
                 with cols[col_idx]:
                     if media_label == "書籍":
-                        tmdb_id      = cand["id"]
                         cover_url    = cand["cover_url"]
                         tmdb_release = cand.get("published", "")
                         media_type   = "book"
-                        cand_en      = ""  # 書籍は英語タイトル不要
+                        cand_en      = ""
+                        display_title = cand["title"]
                         authors      = " / ".join(cand.get("authors", []))
                     else:
-                        tmdb_id      = cand["id"]
                         cover_url    = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{cand['poster_path']}"
                         tmdb_release = cand.get("release_date") or cand.get("first_air_date") or ""
                         media_type   = cand.get("media_type", "movie")
                         cand_en      = cand.get("title") or cand.get("name", "")
+                        display_title = cand_en
                         authors      = ""
 
+                    checked = st.checkbox(
+                        f"**{display_title}**",
+                        key=f"chk_{abs_idx}",
+                        value=st.session_state.bulk_checked.get(abs_idx, False),
+                    )
+                    st.session_state.bulk_checked[abs_idx] = checked
+
                     if media_label == "書籍":
-                        st.write(f"**{cand['title']}**")
-                        if not cover_url or "placeholder" in cover_url:
-                            st.caption("📷 表紙なし")
-                        else:
+                        if cover_url and "placeholder" not in cover_url:
                             try:
                                 st.image(cover_url)
-                            except Exception as _img_e:
-                                st.caption(f"📷 表紙取得失敗: {_img_e}")
+                            except Exception:
+                                st.caption("📷 表紙取得失敗")
+                        else:
+                            st.caption("📷 表紙なし")
                         if authors: st.caption(f"著者: {authors}")
                         if tmdb_release: st.caption(f"出版: {tmdb_release}")
                     else:
                         st.image(cover_url)
-                        caption = f"{cand_en}"
-                        if authors: caption += f"　{authors}"
-                        caption += f" {tmdb_release} 🆔 {tmdb_id}"
+                        caption = cand_en
+                        if tmdb_release: caption += f" {tmdb_release}"
+                        caption += f" 🆔 {cand['id']}"
                         st.caption(caption)
+
                     if st.button("✅ これで登録", key=f"new_reg_{abs_idx}"):
                         if media_label == "書籍":
                             st.session_state.confirm_reg = {
                                 "tmdb_id":      cand["id"],
                                 "cover_url":    cand["cover_url"],
-                                "tmdb_release": cand["published"],
+                                "tmdb_release": cand.get("published", ""),
                                 "media_type":   "book",
                                 "cand_en":      "",
                                 "jp_input":     cand["title"],
@@ -816,9 +838,9 @@ if mode == "新規登録":
                             }
                         else:
                             with st.spinner("日本語タイトル取得中..."):
-                                ja_title = fetch_tmdb_ja_title(tmdb_id, media_type)
+                                ja_title = fetch_tmdb_ja_title(cand["id"], media_type)
                             st.session_state.confirm_reg = {
-                                "tmdb_id":      tmdb_id,
+                                "tmdb_id":      cand["id"],
                                 "cover_url":    cover_url,
                                 "tmdb_release": tmdb_release,
                                 "media_type":   media_type,
@@ -826,6 +848,68 @@ if mode == "新規登録":
                                 "jp_input":     ja_title or jp_input,
                             }
                         st.rerun()
+
+        # 一括登録ボタン
+        checked_indices = [i for i, v in st.session_state.bulk_checked.items() if v]
+        if checked_indices:
+            st.divider()
+            st.caption(f"✅ {len(checked_indices)} 件選択中")
+            if st.button(f"📥 {len(checked_indices)} 件を一括登録", type="primary", key="bulk_register"):
+                if not st.session_state.pages_loaded:
+                    with st.spinner("Notionデータ取得中..."):
+                        all_pages = load_notion_data()
+                        st.session_state.pages        = filter_target_pages(all_pages)
+                        st.session_state.pages_loaded = True
+                watched_str = watched_date.isoformat() if watched_date else None
+                success_count = 0
+                with st.spinner(f"一括登録中... (0/{len(checked_indices)})"):
+                    prog = st.progress(0)
+                    for n, i in enumerate(checked_indices):
+                        cand = results_list[i]
+                        if media_label == "書籍":
+                            c_cover    = cand["cover_url"]
+                            c_release  = cand.get("published", "")
+                            c_jp       = cand["title"]
+                            c_en       = ""
+                            c_details  = {
+                                "genres":   cand.get("genres", []),
+                                "cast":     "",
+                                "director": " / ".join(
+                                    a.replace(" 著","").replace("著","").replace(" 訳","").replace("訳","").replace(" 編","").replace("編","").strip()
+                                    for a in cand.get("authors", [])
+                                ),
+                                "score": None,
+                            }
+                            c_tmdb_id  = 0
+                            c_media    = "book"
+                        else:
+                            c_cover    = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{cand['poster_path']}"
+                            c_release  = cand.get("release_date") or cand.get("first_air_date") or ""
+                            c_en       = cand.get("title") or cand.get("name", "")
+                            c_jp       = fetch_tmdb_ja_title(cand["id"], cand.get("media_type","movie")) or c_en
+                            c_details  = fetch_tmdb_details(cand["id"], cand.get("media_type","movie"))
+                            c_tmdb_id  = cand["id"]
+                            c_media    = cand.get("media_type", "movie")
+                        ok = create_notion_page(
+                            jp_title=c_jp, en_title=c_en,
+                            media_type_label=media_label,
+                            tmdb_id=c_tmdb_id, media_type=c_media,
+                            cover_url=c_cover, tmdb_release=c_release,
+                            details=c_details, wlflg=wlflg,
+                            watched_date=watched_str,
+                            rating=rating_sel if rating_sel else None,
+                        )
+                        if ok:
+                            save_to_drive(c_cover, c_jp or c_en, c_tmdb_id)
+                            success_count += 1
+                        prog.progress((n + 1) / len(checked_indices))
+                        time.sleep(0.3)
+                st.success(f"✅ {success_count}/{len(checked_indices)} 件登録完了！")
+                st.session_state.new_search_results = []
+                st.session_state.new_search_done    = False
+                st.session_state.bulk_checked       = {}
+                time.sleep(1.5)
+                st.rerun()
     st.stop()
 
 # ============================================================
