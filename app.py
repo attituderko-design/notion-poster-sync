@@ -646,12 +646,13 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
         "タイトル":            {"title": [{"type": "text", "text": {"content": jp_title}}]},
         "International Title": {"rich_text": [{"type": "text", "text": {"content": en_title}, "annotations": {"italic": True}}]},
         "媒体":               {"multi_select": [{"name": media_type_label}]},
-        "TMDB_ID":            {"number": tmdb_id},
-        "MEDIA_TYPE":         {"multi_select": [{"name": media_type}]},
+        **({"TMDB_ID": {"number": tmdb_id}} if tmdb_id else {}),
+        **({"MEDIA_TYPE": {"multi_select": [{"name": media_type}]}} if media_type not in ("book",) else {}),
         "WLflg":              {"checkbox": wlflg},
     }
     if tmdb_release:
-        properties["リリース日"] = {"date": {"start": tmdb_release}}
+        release_date_str = str(tmdb_release)[:10]  # 日付部分のみ（時刻を除去）
+        properties["リリース日"] = {"date": {"start": release_date_str}}
     if watched_date:
         properties["鑑賞日"] = {"date": {"start": watched_date}}
     if rating:
@@ -852,7 +853,7 @@ if mode == "新規登録":
                     if reg["media_type"] == "book":
                         details = {
                             "genres":   reg.get("book_genres", []),
-                            "cast":     " / ".join(reg.get("book_authors", [])),
+                            "cast":     " / ".join(a.replace(" 著","").replace("著","").replace(" 訳","").replace("訳","").replace(" 編","").replace("編","").strip() for a in reg.get("book_authors", [])),
                             "director": "",
                             "score":    None,
                         }
