@@ -352,6 +352,11 @@ def search_books(query: str) -> list:
 
     records = root.findall(".//srw:record", ns)
     st.caption(f"📚 NDL レコード数: {len(records)}")
+    # 最初のレコードのXMLをデバッグ表示
+    if records:
+        first_data = records[0].find(".//srw:recordData", ns)
+        if first_data is not None:
+            st.caption(f"🔍 XML: {ET.tostring(first_data, encoding='unicode')[:500]}")
     results = []
     for record in records:
         data_el = record.find(".//srw:recordData", ns)
@@ -615,7 +620,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="favicon.png", layout="wide")
 st.image("logo.png", width=320)
-st.caption("v1.56")
+st.caption("v1.57")
 
 for key, default in {
     "is_running":         False,
