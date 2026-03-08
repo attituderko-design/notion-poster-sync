@@ -412,6 +412,7 @@ def search_books(query: str) -> list:
         book_id = cand["isbn"] or cand["title"]
         published = ""
 
+        st.caption(f"ISBN: `{cand['isbn'] or 'なし'}`")
         if cand["isbn"]:
             try:
                 res_obd = requests.get(
