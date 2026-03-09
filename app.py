@@ -478,7 +478,7 @@ def search_books(query: str, author: str = None) -> list:
     rk_params = {
         "applicationId": RAKUTEN_APP_ID,
         "accessKey":     st.secrets.get("RAKUTEN_ACCESS_KEY", ""),
-        "hits":          20,
+        "hits":          30,
         "formatVersion": 2,
         "sort":          "sales",
         "outOfStockFlag": 1,
@@ -879,7 +879,7 @@ def search_manga(query: str, author: str = None) -> list:
         "applicationId": RAKUTEN_APP_ID,
         "accessKey":     st.secrets.get("RAKUTEN_ACCESS_KEY", ""),
         "booksGenreId":  "001001",   # コミック・ラノベ
-        "hits":          20,
+        "hits":          30,
         "formatVersion": 2,
         "sort":          "sales",
         "outOfStockFlag": 1,
@@ -1290,7 +1290,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v4.62-debug")
+st.caption("v4.63")
 
 for key, default in {
     "is_running":         False,
@@ -1864,7 +1864,6 @@ if mode == "新規登録":
             final_en = st.text_input("英語タイトル（修正可）",   value=reg["cand_en"],                key="final_en")
             if media_label in ("書籍", "漫画"):
                 final_isbn = st.text_input("ISBN", value=reg.get("isbn", ""), key="final_isbn")
-                st.caption(f"🔍 DEBUG isbn in reg: `{reg.get('isbn', '(なし)')}`")
             else:
                 final_isbn = None
 
@@ -2183,8 +2182,6 @@ if mode == "新規登録":
                 success_count = 0
                 prog = st.progress(0)
                 for n, item in enumerate(st.session_state.reg_cart):
-                    if item.get("media_type") in ("book", "manga"):
-                        st.caption(f"🔍 DEBUG [{item['jp_title']}] isbn=`{item.get('isbn', '(なし)')}`")
                     ok = create_notion_page(
                         jp_title=item["jp_title"], en_title=item.get("en_title",""),
                         media_type_label=item.get("media_label", media_label),
