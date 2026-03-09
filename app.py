@@ -1290,7 +1290,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v4.64")
+st.caption("v4.65")
 
 for key, default in {
     "is_running":         False,
@@ -2542,9 +2542,10 @@ if mode == "データ管理":
 
             # ── 全媒体共通編集UI ──
             st.caption("✏️ 基本情報を編集")
-            existing_rating = props.get("評価", {}).get("select", {}).get("name", "")
-            existing_memo   = "".join(t["plain_text"] for t in props.get("メモ", {}).get("rich_text", []))
-            existing_date_start = props.get("鑑賞日", {}).get("date", {}).get("start", "") or ""
+            existing_rating = (props.get("評価") or {}).get("select") or {}
+            existing_rating = existing_rating.get("name", "") if isinstance(existing_rating, dict) else ""
+            existing_memo   = "".join(t["plain_text"] for t in (props.get("メモ") or {}).get("rich_text", []))
+            existing_date_start = ((props.get("鑑賞日") or {}).get("date") or {}).get("start", "") or ""
             edit_col1, edit_col2, edit_col3 = st.columns([1.5, 3, 1])
             new_rating = edit_col1.selectbox(
                 "評価", RATING_OPTIONS,
