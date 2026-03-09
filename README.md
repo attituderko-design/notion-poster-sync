@@ -2,11 +2,11 @@
 
 **Cultural Experience Recording System**
 
-> Notion-based personal tracker for films, dramas, concerts, exhibitions, live shows, books, manga, music albums, and games — with automatic metadata & poster fetching.
+> Notion-based personal tracker for films, dramas, concerts, exhibitions, live shows, books, manga, music albums, games, and musical scores — with automatic metadata & poster fetching.
 >
-> Notionをバックエンドにした、映画・ドラマ・演奏会・展示会・ライブ/ショー・書籍・漫画・音楽アルバム・ゲームの鑑賞記録管理システム。メタデータとポスター画像を自動取得します。
+> Notionをバックエンドにした、映画・ドラマ・演奏会・展示会・ライブ/ショー・書籍・漫画・音楽アルバム・ゲーム・演奏曲の鑑賞記録管理システム。メタデータとポスター画像を自動取得します。
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://notion-poster-sync-5wr4mgqdksey3z8tttbk9u.streamlit.app)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://artemis-cers.streamlit.app)
 
 ---
 
@@ -14,12 +14,14 @@
 
 | Feature | Description |
 |---|---|
-| 🔍 Multi-source search | Fetch metadata from TMDB / Rakuten Books / iTunes / IGDB by media type |
+| 🔍 Multi-source search | Fetch metadata from TMDB / Rakuten Books / iTunes / IGDB / MusicBrainz by media type |
 | 🖼️ Auto poster fetch | Automatically retrieve cover images and save to Google Drive (films & dramas) |
-| 📝 Bulk registration | Register multiple titles at once from search results |
+| 🛒 Cart registration | Add multiple titles to a cart, edit per-item details, then bulk-register in one go |
+| 📍 Location tagging | Search venues via Nominatim and write to Notion's place field (mini-map enabled) |
 | 🔄 Refresh sync | Re-sync metadata and icons for existing Notion records |
 | 🎵 Track listing | Append album track lists to notes (music albums) |
 | 🔁 Duplicate detection | Detect duplicates via TMDB ID and auto-fetch existing Notion records |
+| 🎼 Composer search | Search composers and works via MusicBrainz; auto-fetch portrait images |
 
 ---
 
@@ -39,6 +41,9 @@
 | Books & Manga | [Rakuten Books API](https://webservice.rakuten.co.jp/) |
 | Music Albums | [iTunes Search API](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/) |
 | Games | [IGDB API](https://api-docs.igdb.com/) (via Twitch OAuth2) |
+| Musical Scores | [MusicBrainz API](https://musicbrainz.org/doc/MusicBrainz_API) |
+| Composer Portraits | [Wikipedia API](https://www.mediawiki.org/wiki/API:Main_page) |
+| Location | [Nominatim / OpenStreetMap](https://nominatim.org/) |
 | Image Storage | [Google Drive API](https://developers.google.com/drive/api) |
 | Hosting | [Streamlit Cloud](https://streamlit.io/cloud) |
 
@@ -53,18 +58,22 @@ The following fields are required in your Notion database:
 |---|---|---|
 | `タイトル` | Title | — |
 | `International Title` | Rich text | English title |
-| `MEDIA_TYPE` | Select | 映画 / ドラマ / 演奏会 / 展示会 / ライブ/ショー / 書籍 / 漫画 / 音楽アルバム / ゲーム |
+| `媒体` | Multi-select | 映画 / ドラマ / 演奏会 / 展示会 / ライブ/ショー / 書籍 / 漫画 / 音楽アルバム / ゲーム / 演奏曲 |
+| `MEDIA_TYPE` | Multi-select | movie / tv / event / book / manga / album / game / score |
 | `鑑賞日` | Date | — |
-| `クリエイター` | Rich text | Director / Author / Artist / Developer |
+| `リリース日` | Date | Release date (end date used for exhibitions) |
+| `クリエイター` | Rich text | Director / Author / Artist / Developer / Composer |
 | `キャスト・関係者` | Rich text | Cast / Publisher |
-| `リリース日` | Rich text | — |
 | `ジャンル` | Multi-select | — |
-| `評価` | Select | — |
+| `評価` | Select | ★ / ★★ / ★★★ / ★★★★ / ★★★★★ |
+| `WLflg` | Checkbox | Watchlist flag |
+| `ロケーション` | Place | Venue / purchase location (mini-map enabled) |
 | `メモ` | Rich text | Track lists, notes, etc. |
 | `ISBN` | Rich text | Books & manga |
-| `TMDB_ID` | Rich text | Films & dramas (for duplicate detection) |
-| `カバー` | Files & media | Poster image (auto-set via Google Drive URL) |
-| `アイコン` | Files & media | Media type icon (auto-set via GitHub raw URL) |
+| `TMDB_ID` | Number | Films & dramas (for duplicate detection) |
+| `TMDB_score` | Number | TMDB user score |
+| `年代` | Formula | Auto-calculated from release date (do not write) |
+| `メディアリンク` | Formula | Auto-generated link (do not write) |
 
 ---
 
@@ -109,26 +118,8 @@ pip install -r requirements.txt
 
 ### 7. Configure Streamlit secrets
 
-Create `.streamlit/secrets.toml` (local) or set via Streamlit Cloud dashboard:
-
-```toml
-NOTION_API_KEY       = "secret_xxxx"
-NOTION_DB_ID         = "xxxx"
-TMDB_API_KEY         = "xxxx"
-RAKUTEN_APP_ID       = "xxxx"
-RAKUTEN_ACCESS_KEY   = "pk_xxxx"
-RAKUTEN_AFFILIATE_ID = "xxxx"        # optional
-IGDB_CLIENT_ID       = "xxxx"
-IGDB_CLIENT_SECRET   = "xxxx"
-DRIVE_FOLDER_ID      = "xxxx"
-
-[gcp_service_account]
-# Google OAuth2 credentials
-type                        = "authorized_user"
-client_id                   = "xxxx"
-client_secret               = "xxxx"
-refresh_token               = "xxxx"
-```
+Create `.streamlit/secrets.toml` (local) or set via Streamlit Cloud dashboard.
+See `.streamlit/secrets.toml.example` for the full template.
 
 ### 8. Run locally
 
@@ -151,16 +142,18 @@ artemis-cers/
 └── assets/
     ├── logo.png
     ├── favicon.png
+    ├── SS.png
     └── icons/
-        ├── camera-reels.svg   # 映画
-        ├── display.svg        # ドラマ
+        ├── camera-reels.svg      # 映画
+        ├── display.svg           # ドラマ
         ├── music-note-beamed.svg # 演奏会
-        ├── exhibition.svg     # 展示会
-        ├── mic.svg            # ライブ/ショー
-        ├── book.svg           # 書籍
-        ├── book-manga.svg     # 漫画
-        ├── disc.svg           # 音楽アルバム
-        └── controller.svg     # ゲーム
+        ├── exhibition.svg        # 展示会
+        ├── mic.svg               # ライブ/ショー
+        ├── book.svg              # 書籍
+        ├── book-manga.svg        # 漫画
+        ├── disc.svg              # 音楽アルバム
+        ├── controller.svg        # ゲーム
+        └── music-score.svg       # 演奏曲
 ```
 
 ---
