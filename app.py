@@ -40,7 +40,7 @@ MEDIA_ICON_MAP = {
     "音楽アルバム":  ("🎵 音楽アルバム",  "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/disc.svg"),
     "ゲーム":        ("🎮 ゲーム",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/controller.svg"),
     "演奏曲":        ("🎼 演奏曲",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/music-score.svg"),
-    "アニメ":        ("🎌 アニメ",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/anime.svg"),
+    "アニメ":        ("🌟 アニメ",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/anime.svg"),
 }
 
 RATING_OPTIONS = ["", "★", "★★", "★★★", "★★★★", "★★★★★"]
