@@ -529,7 +529,7 @@ def search_mb_composer(name: str) -> tuple[list, str | None]:
     try:
         res = requests.get(
             "https://musicbrainz.org/ws/2/artist",
-            params={"query": name, "type": "person", "fmt": "json", "limit": 10},
+            params={"query": name, "fmt": "json", "limit": 10},
             headers=MB_HEADERS, timeout=8,
         )
         if res.status_code != 200:
@@ -996,7 +996,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="assets/favicon.png", layout="wide")
 st.image("assets/logo.png", width=320)
-st.caption("v2.09")
+st.caption("v2.10")
 
 for key, default in {
     "is_running":         False,
