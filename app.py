@@ -1253,6 +1253,47 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
         return False
     return True
 
+def get_registered_ids(pages: list) -> dict:
+    """登録済みIDをまとめて返す"""
+    tmdb, anilist, igdb, itunes, isbn = set(), set(), set(), set(), set()
+    for p in pages:
+        pr = p["properties"]
+        v = (pr.get("TMDB_ID") or {}).get("number")
+        if v: tmdb.add(int(v))
+        v = (pr.get("AniList_ID") or {}).get("number")
+        if v: anilist.add(int(v))
+        v = (pr.get("IGDB_ID") or {}).get("number")
+        if v: igdb.add(int(v))
+        v = (pr.get("iTunes_ID") or {}).get("number")
+        if v: itunes.add(int(v))
+        v = "".join(t["plain_text"] for t in (pr.get("ISBN") or {}).get("rich_text", []))
+        if v: isbn.add(v)
+    return {"tmdb": tmdb, "anilist": anilist, "igdb": igdb, "itunes": itunes, "isbn": isbn}
+
+def filter_registered(results: list, media_label: str, reg_ids: dict):
+    """検索結果から登録済みを除外。(filtered, excluded_titles) を返す"""
+    filtered, excluded = [], []
+    for cand in results:
+        cid   = cand.get("id")
+        title = cand.get("title") or cand.get("name") or ""
+        if media_label in ("映画", "ドラマ"):
+            dup = bool(cid and int(cid) in reg_ids["tmdb"])
+        elif media_label == "アニメ":
+            dup = bool(cid and int(cid) in reg_ids["anilist"])
+        elif media_label == "ゲーム":
+            dup = bool(cid and int(cid) in reg_ids["igdb"])
+        elif media_label == "音楽アルバム":
+            dup = bool(cid and int(cid) in reg_ids["itunes"])
+        elif media_label in ("書籍", "漫画"):
+            dup = bool(cand.get("isbn") and cand.get("isbn") in reg_ids["isbn"])
+        else:
+            dup = False
+        if dup:
+            excluded.append(title)
+        else:
+            filtered.append(cand)
+    return filtered, excluded
+
 def check_duplicate(tmdb_id: int, pages: list) -> list:
     """TMDB_IDが一致する既存ページを返す"""
     return [p for p in pages if p["properties"].get("TMDB_ID", {}).get("number") == tmdb_id]
@@ -1290,11 +1331,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v4.66")
+st.caption("v4.67")
 
 for key, default in {
     "is_running":         False,
     "pages_loaded":       False,
+    "new_search_excluded": [],
     "pages":              [],
     "all_pages":          [],
     "search_results":     {},
@@ -1336,7 +1378,7 @@ with st.sidebar:
     sync_scope = "欠損のみ補填"  # legacy compat
 
     st.divider()
-    if st.button("📥 Notionデータ取得", use_container_width=True, disabled=(mode == "新規登録"), key="load_notion"):
+    if st.button("📥 Notionデータ取得", use_container_width=True, key="load_notion"):
         with st.spinner("Notionからデータ取得中..."):
             all_pages = load_notion_data()
             st.session_state.all_pages      = all_pages
@@ -1823,10 +1865,13 @@ if mode == "新規登録":
                     results = search_tmdb_by_person(creator_input or cast_input, media_type=tmdb_mt)
                 else:
                     results = search_tmdb(query, media_type=tmdb_mt)
-            st.session_state.new_search_results = results[:20]
-            st.session_state.new_search_done    = True
-            st.session_state.confirm_reg        = None
-            st.session_state.bulk_checked       = {}
+            reg_ids = get_registered_ids(st.session_state.pages)
+            filtered, excluded = filter_registered(results, media_label, reg_ids)
+            st.session_state.new_search_results  = filtered[:20]
+            st.session_state.new_search_excluded = excluded
+            st.session_state.new_search_done     = True
+            st.session_state.confirm_reg         = None
+            st.session_state.bulk_checked        = {}
         else:
             st.warning("タイトルまたはクリエイター名を入力してください")
 
@@ -1942,7 +1987,13 @@ if mode == "新規登録":
     # ── 検索結果一覧（カード＋チェック）──
     elif st.session_state.new_search_results:
         results_list = st.session_state.new_search_results
+        excluded_list = st.session_state.get("new_search_excluded", [])
         st.caption(f"{len(results_list)} 件の候補　チェックして登録リストに追加できます")
+        if excluded_list:
+            st.caption(f"⚠️ {len(excluded_list)} 件は登録済みのため除外")
+            with st.expander("除外されたタイトルを表示"):
+                for t in excluded_list:
+                    st.caption(f"・{t}")
 
         for row_start in range(0, len(results_list), 3):
             cols = st.columns(3)
@@ -2199,7 +2250,8 @@ if mode == "新規登録":
 # データ未取得ガード
 # ============================================================
 if not st.session_state.pages_loaded:
-    st.info("👈 サイドバーの「Notionデータ取得」ボタンを押してください")
+    st.info("👈 まずサイドバーの「📥 Notionデータ取得」を押してください")
+    st.caption("すべてのモードはデータ取得後に利用できます")
     st.stop()
 
 target_pages = st.session_state.pages
