@@ -32,7 +32,8 @@ NOTION_HEADERS = {
 MEDIA_ICON_MAP = {
     "映画":          ("🎬 映画",          "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/camera-reels.svg"),
     "ドラマ":        ("📺 ドラマ",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/display.svg"),
-    "演奏会":        ("🎻 演奏会",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/music-note-beamed.svg"),
+    "演奏会（鑑賞）": ("🎼 演奏会（鑑賞）", "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/music-note-beamed.svg"),
+    "演奏会（出演）": ("🎻 演奏会（出演）", "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/violin.svg"),
     "展示会":        ("🖼️ 展示会",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/exhibition.svg"),
     "ライブ/ショー": ("🎤 ライブ/ショー", "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/mic.svg"),
     "書籍":          ("📖 書籍",          "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/book.svg"),
@@ -1088,7 +1089,8 @@ def location_search_ui(key_prefix: str, media_label: str) -> dict | None:
     LOCATION_LABELS = {
         "映画":          ("📍 鑑賞した場所（任意）", "例: TOHOシネマズ梅田"),
         "ドラマ":        ("📍 鑑賞した場所（任意）", "例: 自宅 / Netflix"),
-        "演奏会":        ("📍 会場（任意）",          "例: フェニーチェ堺"),
+        "演奏会（鑑賞）": ("📍 会場（任意）",          "例: フェニーチェ堺"),
+        "演奏会（出演）": ("📍 会場（任意）",          "例: フェニーチェ堺"),
         "展示会":        ("📍 会場（任意）",          "例: 国立国際美術館"),
         "ライブ/ショー": ("📍 会場（任意）",          "例: 大阪城ホール"),
         "書籍":          ("📍 読んだ場所や購入した場所（任意）",  "例: 梅田 蔦屋書店"),
@@ -1247,7 +1249,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v4.0")
+st.caption("v4.1")
 
 for key, default in {
     "is_running":         False,
@@ -1376,19 +1378,26 @@ if mode == "新規登録":
         st.session_state.reg_cart           = []
         st.session_state.prev_media_label   = media_label
 
-    EVENT_MEDIA = ["演奏会", "展示会", "ライブ/ショー"]
+    EVENT_MEDIA = ["演奏会（鑑賞）", "演奏会（出演）", "展示会", "ライブ/ショー"]
 
     # ============================================================
-    # イベント系（演奏会・展示会・ライブ/ショー）- 単体登録のみ
+    # イベント系（演奏会（鑑賞）・演奏会（出演）・展示会・ライブ/ショー）- 単体登録のみ
     # ============================================================
     if media_label in EVENT_MEDIA:
         st.divider()
-        event_title = st.text_input("公演名 / 展示名 *", placeholder="例: 大阪フィルハーモニー交響楽団 第588回定期演奏会")
+        is_performance = (media_label == "演奏会（出演）")
+        event_title = st.text_input("公演名 *", placeholder="例: 大阪フィルハーモニー交響楽団 第588回定期演奏会" if not is_performance else "例: 〇〇室内楽演奏会 / 定期演奏会")
         st.caption("📍 ロケーション情報はNotion上で入力してください。")
-        event_creator = st.text_input("クリエイター", placeholder="例: 指揮者・キュレーターなど")
+        event_creator = st.text_input(
+            "指揮者" if is_performance else "クリエイター",
+            placeholder="例: 井上道義" if is_performance else "例: 指揮者・キュレーターなど"
+        )
         col_cast, col_genre = st.columns([1, 1])
-        event_cast  = col_cast.text_input("出演者・演奏者", placeholder="例: 山田太郎 / 鈴木花子")
-        event_genre = col_genre.text_input("ジャンル", placeholder="例: クラシック / 印象派")
+        event_cast  = col_cast.text_input(
+            "自分のパート・役割" if is_performance else "出演者・演奏者",
+            placeholder="例: Vn. / ピアノ / ソプラノ" if is_performance else "例: 山田太郎 / 鈴木花子"
+        )
+        event_genre = col_genre.text_input("ジャンル", placeholder="例: クラシック / 室内楽")
         if media_label == "展示会":
             col_start, col_end, col_watch = st.columns([1, 1, 1])
             event_start = col_start.date_input("開催開始日", value=None, key="ev_start")
@@ -1396,7 +1405,8 @@ if mode == "新規登録":
             event_watch = col_watch.date_input("鑑賞日",     value=None, key="ev_watch")
         else:
             col_watch2, _ = st.columns([1, 1])
-            event_watch = col_watch2.date_input("鑑賞日", value=None, key="ev_watch2")
+            date_label_ev = "出演日" if is_performance else "鑑賞日"
+            event_watch = col_watch2.date_input(date_label_ev, value=None, key="ev_watch2")
             event_start = event_watch
             event_end   = None
         col_rating, col_wl = st.columns([2, 1])
