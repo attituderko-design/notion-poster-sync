@@ -402,6 +402,16 @@ def search_tmdb_by_person(person_query: str, media_type: str = "multi") -> list:
     return results
 
 
+def parse_rakuten_date(date_str: str) -> str:
+    """楽天APIの日付文字列をISO形式に変換 例: '2004年01月' -> '2004-01-01'"""
+    if not date_str:
+        return ""
+    m = re.match(r'(\d{4})年(\d{2})月?', date_str)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-01"
+    return date_str[:10] if len(date_str) >= 10 else date_str
+
+
 def get_openlibrary_cover(isbn: str) -> str:
     """ISBNからOpen Libraryの高解像度カバー画像URLを返す。取得できなければ空文字。"""
     if not isbn:
@@ -1151,7 +1161,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v3.5")
+st.caption("v3.6")
 
 for key, default in {
     "is_running":         False,
@@ -1447,7 +1457,7 @@ if mode == "新規登録":
                     else:
                         cover_url_final = MB_DEFAULT_COVER
 
-                if st.button(f"🛒 {len(selected_works)} 件をカートに追加", key="mb_add_cart"):
+                if st.button(f"📋 {len(selected_works)} 件を登録リストに追加", key="mb_add_cart"):
                     for w in selected_works:
                         st.session_state.reg_cart.append({
                             "jp_title":    w["title"],
@@ -1465,7 +1475,7 @@ if mode == "新規登録":
                             "media_label": media_label,
                         })
                     st.session_state.mb_checked = {}
-                    st.success(f"✅ {len(selected_works)} 件をカートに追加しました")
+                    st.success(f"✅ {len(selected_works)} 件を登録リストに追加しました")
         st.stop()
 
     # ============================================================
@@ -1627,7 +1637,7 @@ if mode == "新規登録":
     # ── 検索結果一覧（カード＋チェック）──
     elif st.session_state.new_search_results:
         results_list = st.session_state.new_search_results
-        st.caption(f"{len(results_list)} 件の候補　チェックしてカートに追加できます")
+        st.caption(f"{len(results_list)} 件の候補　チェックして登録リストに追加できます")
 
         for row_start in range(0, len(results_list), 3):
             cols = st.columns(3)
@@ -1717,12 +1727,12 @@ if mode == "新規登録":
                             }
                         st.rerun()
 
-        # ── カートに追加ボタン ──
+        # ── 登録リストに追加ボタン ──
         checked_indices = [i for i, v in st.session_state.bulk_checked.items() if v]
         if checked_indices:
             st.divider()
             st.caption(f"✅ {len(checked_indices)} 件選択中")
-            if st.button(f"🛒 {len(checked_indices)} 件をカートに追加", type="primary", key="add_to_cart"):
+            if st.button(f"📋 {len(checked_indices)} 件を登録リストに追加", type="primary", key="add_to_cart"):
                 for i in checked_indices:
                     cand   = results_list[i]
                     c_type = cand.get("media_type", "")
@@ -1773,13 +1783,13 @@ if mode == "新規登録":
                         }
                     st.session_state.reg_cart.append(cart_item)
                 st.session_state.bulk_checked = {}
-                st.success(f"✅ {len(checked_indices)} 件をカートに追加しました")
+                st.success(f"✅ {len(checked_indices)} 件を登録リストに追加しました")
                 st.rerun()
 
-    # ── カート確認・編集・一括登録 ──
+    # ── 登録リスト確認・編集・一括登録 ──
     if st.session_state.reg_cart:
         st.divider()
-        st.subheader(f"🛒 登録カート（{len(st.session_state.reg_cart)} 件）")
+        st.subheader(f"📋 登録リスト（{len(st.session_state.reg_cart)} 件）")
         date_label = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "演奏曲": "演奏日"}.get(media_label, "鑑賞日")
 
         remove_indices = []
@@ -1845,7 +1855,7 @@ if mode == "新規登録":
                 time.sleep(1)
                 st.rerun()
         with col_clear:
-            if st.button("🗑 カートをクリア", key="cart_clear"):
+            if st.button("🗑 登録リストをクリア", key="cart_clear"):
                 st.session_state.reg_cart = []
                 st.rerun()
 
