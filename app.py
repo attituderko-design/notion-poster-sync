@@ -995,7 +995,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="assets/favicon.png", layout="wide")
 st.image("assets/logo.png", width=320)
-st.caption("v2.16")
+st.caption("v2.17")
 
 for key, default in {
     "is_running":         False,
@@ -1265,7 +1265,14 @@ if mode == "新規登録":
                     portrait_url = st.session_state.mb_portrait_url
 
                 if portrait_url:
-                    st.image(portrait_url, width=120, caption=f"{comp_name}")
+                    if portrait_url.startswith("https://drive.google.com"):
+                        try:
+                            img_res = requests.get(portrait_url, timeout=8)
+                            st.image(io.BytesIO(img_res.content), width=120, caption=comp_name)
+                        except Exception:
+                            st.image(portrait_url, width=120, caption=comp_name)
+                    else:
+                        st.image(portrait_url, width=120, caption=comp_name)
                     cover_url_final = portrait_url
                 else:
                     st.warning(f"⚠️ {comp_name} の肖像画が見つかりませんでした。画像をアップロードしてください。")
