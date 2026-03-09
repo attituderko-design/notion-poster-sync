@@ -1290,7 +1290,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v4.61")
+st.caption("v4.62-debug")
 
 for key, default in {
     "is_running":         False,
@@ -1864,6 +1864,7 @@ if mode == "新規登録":
             final_en = st.text_input("英語タイトル（修正可）",   value=reg["cand_en"],                key="final_en")
             if media_label in ("書籍", "漫画"):
                 final_isbn = st.text_input("ISBN", value=reg.get("isbn", ""), key="final_isbn")
+                st.caption(f"🔍 DEBUG isbn in reg: `{reg.get('isbn', '(なし)')}`")
             else:
                 final_isbn = None
 
