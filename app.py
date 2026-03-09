@@ -59,11 +59,19 @@ def show_post_register_ui(media_label: str, clear_keys: list):
     if col_cont.button(f"➕ 続けて{media_label}を登録する", type="primary", key="post_reg_continue"):
         for k in clear_keys:
             st.session_state.pop(k, None)
+        # 検索結果・確認画面もクリア
+        for k in ["new_search_results", "new_search_done", "confirm_reg", "bulk_checked",
+                  "reg_cart", "prev_media_label"]:
+            st.session_state.pop(k, None)
         st.rerun()
     if col_end.button("✅ 登録を終了する", key="post_reg_end"):
         for k in clear_keys:
             st.session_state.pop(k, None)
-        st.session_state.pop("selected_media", None)
+        for k in ["new_search_results", "new_search_done", "confirm_reg", "bulk_checked",
+                  "reg_cart", "prev_media_label"]:
+            st.session_state.pop(k, None)
+        # 媒体選択をプレースホルダーに戻す
+        st.session_state["reg_media"] = "（媒体を選択してください）"
         st.rerun()
 
 # ============================================================
@@ -1266,7 +1274,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v4.4")
+st.caption("v4.42")
 
 for key, default in {
     "is_running":         False,
@@ -1496,17 +1504,22 @@ if mode == "新規登録":
 
                 if st.session_state.get("ev_mb_works"):
                     ev_works = st.session_state.ev_mb_works
+                    if "ev_mb_checked" not in st.session_state:
+                        st.session_state.ev_mb_checked = {}
                     st.caption(f"{len(ev_works)} 件の作品")
                     col_all2, col_none2 = st.columns([1, 1])
-                    if col_all2.button("全選択",  key="ev_mb_all"):
-                        for w in ev_works: st.session_state.ev_mb_checked[w["id"]] = True
+                    if col_all2.button("全選択", key="ev_mb_all"):
+                        for w in ev_works:
+                            st.session_state.ev_mb_checked[w["id"]] = True
+                        st.rerun()
                     if col_none2.button("全解除", key="ev_mb_none"):
                         st.session_state.ev_mb_checked = {}
+                        st.rerun()
                     for w in ev_works:
                         label = w["title"] + (f"　{w['disambiguation']}" if w["disambiguation"] else "")
-                        checked = st.checkbox(label, key=f"ev_mb_{w['id']}", value=st.session_state.ev_mb_checked.get(w["id"], False))
-                        if checked: st.session_state.ev_mb_checked[w["id"]] = True
-                        else:       st.session_state.ev_mb_checked.pop(w["id"], None)
+                        val = st.session_state.ev_mb_checked.get(w["id"], False)
+                        checked = st.checkbox(label, value=val, key=f"ev_mb_chk_{w['id']}")
+                        st.session_state.ev_mb_checked[w["id"]] = checked
                     ev_sel_works = [w for w in ev_works if st.session_state.ev_mb_checked.get(w["id"])]
                     if ev_sel_works:
                         st.info(f"{len(ev_sel_works)} 曲選択中")
@@ -1516,8 +1529,12 @@ if mode == "新規登録":
                             for w in ev_sel_works:
                                 if len(current) < MAX_MAIN and w["title"] not in [x["title"] for x in current]:
                                     current.append({"title": w["title"], "part": ""})
-                            st.session_state.ev_setlist_main = current + [{"title": "", "part": ""}] if len(current) < MAX_MAIN else current
-                            st.session_state.ev_mb_checked = {}
+                            # 末尾に空欄を1つだけ追加（入力継続用）
+                            empty = [{"title": "", "part": ""}]
+                            st.session_state.ev_setlist_main = current + empty if len(current) < MAX_MAIN else current
+                            for w in ev_works:
+                                st.session_state.ev_mb_checked[w["id"]] = False
+                                st.session_state.pop(f"ev_mb_chk_{w['id']}", None)
                             st.rerun()
                         if col_add_enc.button("🎊 アンコールに追加", key="ev_mb_add_enc"):
                             current_enc = [x for x in st.session_state.ev_setlist_encore if x["title"].strip()]
@@ -1525,7 +1542,9 @@ if mode == "新規登録":
                                 if len(current_enc) < MAX_ENCORE and w["title"] not in [x["title"] for x in current_enc]:
                                     current_enc.append({"title": w["title"], "part": ""})
                             st.session_state.ev_setlist_encore = current_enc
-                            st.session_state.ev_mb_checked = {}
+                            for w in ev_works:
+                                st.session_state.ev_mb_checked[w["id"]] = False
+                                st.session_state.pop(f"ev_mb_chk_{w['id']}", None)
                             st.rerun()
 
             # ── ライブ/ショー: iTunes検索 ──
@@ -1554,13 +1573,15 @@ if mode == "新規登録":
 
                 if st.session_state.get("ev_it_results"):
                     it_results = st.session_state.ev_it_results
+                    if "ev_it_checked" not in st.session_state:
+                        st.session_state.ev_it_checked = {}
                     st.caption(f"{len(it_results)} 件")
                     for i, track in enumerate(it_results):
                         label = f"{track.get('trackName', '')}  —  {track.get('artistName', '')}"
-                        checked = st.checkbox(label, key=f"ev_it_{i}", value=st.session_state.ev_it_checked.get(i, False))
-                        if checked: st.session_state.ev_it_checked[i] = True
-                        else:       st.session_state.ev_it_checked.pop(i, None)
-                    it_sel = [it_results[i] for i in st.session_state.ev_it_checked if st.session_state.ev_it_checked.get(i)]
+                        val = st.session_state.ev_it_checked.get(i, False)
+                        checked = st.checkbox(label, value=val, key=f"ev_it_chk_{i}")
+                        st.session_state.ev_it_checked[i] = checked
+                    it_sel = [it_results[i] for i in range(len(it_results)) if st.session_state.ev_it_checked.get(i)]
                     if it_sel:
                         st.info(f"{len(it_sel)} 曲選択中")
                         col_add_main2, col_add_enc2 = st.columns([1, 1])
@@ -1570,8 +1591,11 @@ if mode == "新規登録":
                                 name = t.get("trackName", "")
                                 if len(current) < MAX_MAIN and name not in [x["title"] for x in current]:
                                     current.append({"title": name, "part": ""})
-                            st.session_state.ev_setlist_main = current + [{"title": "", "part": ""}] if len(current) < MAX_MAIN else current
-                            st.session_state.ev_it_checked = {}
+                            empty = [{"title": "", "part": ""}]
+                            st.session_state.ev_setlist_main = current + empty if len(current) < MAX_MAIN else current
+                            for i in range(len(it_results)):
+                                st.session_state.ev_it_checked[i] = False
+                                st.session_state.pop(f"ev_it_chk_{i}", None)
                             st.rerun()
                         if col_add_enc2.button("🎊 アンコールに追加", key="ev_it_add_enc"):
                             current_enc = [x for x in st.session_state.ev_setlist_encore if x["title"].strip()]
@@ -1580,7 +1604,9 @@ if mode == "新規登録":
                                 if len(current_enc) < MAX_ENCORE and name not in [x["title"] for x in current_enc]:
                                     current_enc.append({"title": name, "part": ""})
                             st.session_state.ev_setlist_encore = current_enc
-                            st.session_state.ev_it_checked = {}
+                            for i in range(len(it_results)):
+                                st.session_state.ev_it_checked[i] = False
+                                st.session_state.pop(f"ev_it_chk_{i}", None)
                             st.rerun()
 
             # ── セットリスト編集UI（共通）──
@@ -1602,9 +1628,12 @@ if mode == "新規登録":
                     st.rerun()
             st.session_state.ev_setlist_main = new_main
             if len([x for x in new_main if x["title"].strip()]) < MAX_MAIN:
-                if st.button("＋ 曲を追加", key="ev_main_add"):
-                    st.session_state.ev_setlist_main = [x for x in new_main if x["title"].strip()] + [{"title": "", "part": ""}]
-                    st.rerun()
+                # 末尾が既に空欄の場合は追加しない
+                last_empty = new_main and not new_main[-1]["title"].strip()
+                if not last_empty:
+                    if st.button("＋ 曲を追加", key="ev_main_add"):
+                        st.session_state.ev_setlist_main = [x for x in new_main if x["title"].strip()] + [{"title": "", "part": ""}]
+                        st.rerun()
 
             st.caption(f"🎊 アンコール（最大{MAX_ENCORE}曲）")
             enc_list = st.session_state.ev_setlist_encore
