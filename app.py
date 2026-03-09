@@ -1139,6 +1139,28 @@ if mode == "新規登録":
             run_patch({"properties": {"ロケーション": {"rich_text": [
                 {"type": "text", "text": {"content": test_name}}
             ]}}})
+
+        st.divider()
+        st.caption("🧪 パターンD: lat/lon + name（緯度経度を直接指定）")
+        col_lat, col_lon = st.columns(2)
+        test_lat = col_lat.number_input("緯度 (lat)", value=34.702547, format="%.6f", key="dev_lat")
+        test_lon = col_lon.number_input("経度 (lon)", value=135.495949, format="%.6f", key="dev_lon")
+
+        col_d1, col_d2 = st.columns(2)
+        if col_d1.button("D1: lat+lon+name", key="dev_place_d1"):
+            run_patch({"properties": {"ロケーション": {"place": {
+                "lat":  test_lat,
+                "lon":  test_lon,
+                "name": test_name,
+            }}}})
+
+        if col_d2.button("D2: lat+lon+name+address", key="dev_place_d2"):
+            run_patch({"properties": {"ロケーション": {"place": {
+                "lat":     test_lat,
+                "lon":     test_lon,
+                "name":    test_name,
+                "address": test_address,
+            }}}})
     # ── 🔬 実験ここまで ──
 
 
