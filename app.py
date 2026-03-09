@@ -1249,7 +1249,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v4.1")
+st.caption("v4.2")
 
 for key, default in {
     "is_running":         False,
@@ -1385,19 +1385,35 @@ if mode == "新規登録":
     # ============================================================
     if media_label in EVENT_MEDIA:
         st.divider()
-        is_performance = (media_label == "演奏会（出演）")
-        event_title = st.text_input("公演名 *", placeholder="例: 大阪フィルハーモニー交響楽団 第588回定期演奏会" if not is_performance else "例: 〇〇室内楽演奏会 / 定期演奏会")
-        st.caption("📍 ロケーション情報はNotion上で入力してください。")
+        is_performance  = (media_label == "演奏会（出演）")
+        is_concert      = media_label in ("演奏会（鑑賞）", "演奏会（出演）")
+        is_live         = (media_label == "ライブ/ショー")
+        has_setlist     = is_concert or is_live
+
+        # ── 基本情報 ──
+        event_title = st.text_input(
+            "公演名 *",
+            placeholder="例: 〇〇室内楽演奏会 / 定期演奏会" if is_performance else
+                        "例: 大阪フィルハーモニー交響楽団 第588回定期演奏会" if is_concert else
+                        "例: 〇〇 LIVE TOUR 2025"
+        )
         event_creator = st.text_input(
-            "指揮者" if is_performance else "クリエイター",
-            placeholder="例: 井上道義" if is_performance else "例: 指揮者・キュレーターなど"
+            "指揮者" if is_performance else ("アーティスト" if is_live else "クリエイター"),
+            placeholder="例: 井上道義" if is_performance else
+                        "例: Queen / 米津玄師" if is_live else
+                        "例: 指揮者・キュレーターなど"
         )
         col_cast, col_genre = st.columns([1, 1])
-        event_cast  = col_cast.text_input(
-            "自分のパート・役割" if is_performance else "出演者・演奏者",
-            placeholder="例: Vn. / ピアノ / ソプラノ" if is_performance else "例: 山田太郎 / 鈴木花子"
+        event_cast = col_cast.text_input(
+            "自分のパート・役割" if is_performance else ("演奏団体" if is_concert else "出演者・バンド"),
+            placeholder="例: Vn. / ピアノ" if is_performance else
+                        "例: 大阪フィルハーモニー交響楽団" if is_concert else
+                        "例: Queen"
         )
-        event_genre = col_genre.text_input("ジャンル", placeholder="例: クラシック / 室内楽")
+        event_genre = col_genre.text_input(
+            "ジャンル",
+            placeholder="例: クラシック / 室内楽" if is_concert else "例: ロック / J-POP"
+        )
         if media_label == "展示会":
             col_start, col_end, col_watch = st.columns([1, 1, 1])
             event_start = col_start.date_input("開催開始日", value=None, key="ev_start")
@@ -1405,19 +1421,211 @@ if mode == "新規登録":
             event_watch = col_watch.date_input("鑑賞日",     value=None, key="ev_watch")
         else:
             col_watch2, _ = st.columns([1, 1])
-            date_label_ev = "出演日" if is_performance else "鑑賞日"
+            date_label_ev = "出演日" if is_performance else ("鑑賞日" if is_concert else "参加日")
             event_watch = col_watch2.date_input(date_label_ev, value=None, key="ev_watch2")
             event_start = event_watch
             event_end   = None
         col_rating, col_wl = st.columns([2, 1])
         rating_sel = col_rating.selectbox("評価", RATING_OPTIONS, key="ev_rating")
         wlflg      = col_wl.checkbox("WLflg", value=False, key="ev_wl")
+
+        # ── セットリスト / プログラム楽曲 ──
+        if has_setlist:
+            st.divider()
+            MAX_MAIN    = 25
+            MAX_ENCORE  = 5
+
+            # セッションステート初期化
+            if "ev_setlist_main"   not in st.session_state: st.session_state.ev_setlist_main   = [""]
+            if "ev_setlist_encore" not in st.session_state: st.session_state.ev_setlist_encore = []
+
+            # ── 演奏会系: MusicBrainz検索 ──
+            if is_concert:
+                st.caption("🎵 プログラム楽曲（MusicBrainz検索・任意）")
+                col_ev_comp, col_ev_title = st.columns([1, 1])
+                ev_composer_input = col_ev_comp.text_input("作曲家名", placeholder="例: Beethoven / ベートーヴェン", key="ev_composer")
+                ev_title_filter   = col_ev_title.text_input("曲名で絞り込み（任意）", placeholder="例: Symphony", key="ev_title_filter")
+
+                if st.button("🔍 作曲家を検索", key="ev_mb_search"):
+                    if ev_composer_input:
+                        with st.spinner("作曲家を検索中..."):
+                            ev_composers, ev_err = search_mb_composer(ev_composer_input)
+                        if ev_err:
+                            st.error(f"⚠️ MusicBrainz API エラー: {ev_err}")
+                        st.session_state.ev_mb_composers    = ev_composers
+                        st.session_state.ev_mb_works        = []
+                        st.session_state.ev_mb_title_filter = ev_title_filter
+                        st.session_state.ev_mb_selected     = None
+                        st.session_state.ev_mb_checked      = {}
+                        if not ev_composers and not ev_err:
+                            st.warning("作曲家が見つかりませんでした。")
+                    else:
+                        st.warning("作曲家名を入力してください")
+
+                if st.session_state.get("ev_mb_composers"):
+                    ev_composers   = st.session_state.ev_mb_composers
+                    ev_comp_labels = [
+                        f"{c['name']}" + (f"（{c['disambiguation']}）" if c['disambiguation'] else "") + (f" [{c['life_span']}–]" if c['life_span'] else "")
+                        for c in ev_composers
+                    ]
+                    ev_sel_idx = st.radio("作曲家を選択", range(len(ev_comp_labels)), format_func=lambda i: ev_comp_labels[i], key="ev_mb_comp_radio")
+                    if st.button("この作曲家の作品一覧を取得", key="ev_mb_fetch_works"):
+                        ev_sel_comp = ev_composers[ev_sel_idx]
+                        st.session_state.ev_mb_selected = ev_sel_comp
+                        with st.spinner(f"{ev_sel_comp['name']} の作品を取得中..."):
+                            ev_works = search_mb_works(ev_sel_comp["id"], st.session_state.ev_mb_title_filter)
+                        st.session_state.ev_mb_works   = ev_works
+                        st.session_state.ev_mb_checked = {}
+
+                if st.session_state.get("ev_mb_works"):
+                    ev_works = st.session_state.ev_mb_works
+                    st.caption(f"{len(ev_works)} 件の作品")
+                    col_all2, col_none2 = st.columns([1, 1])
+                    if col_all2.button("全選択",  key="ev_mb_all"):
+                        for w in ev_works: st.session_state.ev_mb_checked[w["id"]] = True
+                    if col_none2.button("全解除", key="ev_mb_none"):
+                        st.session_state.ev_mb_checked = {}
+                    for w in ev_works:
+                        label = w["title"] + (f"　{w['disambiguation']}" if w["disambiguation"] else "")
+                        checked = st.checkbox(label, key=f"ev_mb_{w['id']}", value=st.session_state.ev_mb_checked.get(w["id"], False))
+                        if checked: st.session_state.ev_mb_checked[w["id"]] = True
+                        else:       st.session_state.ev_mb_checked.pop(w["id"], None)
+                    ev_sel_works = [w for w in ev_works if st.session_state.ev_mb_checked.get(w["id"])]
+                    if ev_sel_works:
+                        st.info(f"{len(ev_sel_works)} 曲選択中")
+                        col_add_main, col_add_enc = st.columns([1, 1])
+                        if col_add_main.button("📋 通常セトリに追加", key="ev_mb_add_main"):
+                            current = [t for t in st.session_state.ev_setlist_main if t.strip()]
+                            for w in ev_sel_works:
+                                if len(current) < MAX_MAIN and w["title"] not in current:
+                                    current.append(w["title"])
+                            st.session_state.ev_setlist_main = current + [""] if len(current) < MAX_MAIN else current
+                            st.session_state.ev_mb_checked = {}
+                            st.rerun()
+                        if col_add_enc.button("🎊 アンコールに追加", key="ev_mb_add_enc"):
+                            current_enc = [t for t in st.session_state.ev_setlist_encore if t.strip()]
+                            for w in ev_sel_works:
+                                if len(current_enc) < MAX_ENCORE and w["title"] not in current_enc:
+                                    current_enc.append(w["title"])
+                            st.session_state.ev_setlist_encore = current_enc
+                            st.session_state.ev_mb_checked = {}
+                            st.rerun()
+
+            # ── ライブ/ショー: iTunes検索 ──
+            elif is_live:
+                st.caption("🎵 セットリスト（iTunes検索・任意）")
+                col_it_art, col_it_title = st.columns([1, 1])
+                it_artist_input = col_it_art.text_input("アーティスト名", placeholder="例: Queen / 米津玄師", key="ev_it_artist")
+                it_title_input  = col_it_title.text_input("曲名", placeholder="例: Bohemian Rhapsody", key="ev_it_title")
+
+                if st.button("🔍 曲を検索", key="ev_it_search"):
+                    q = " ".join(filter(None, [it_artist_input, it_title_input]))
+                    if q:
+                        with st.spinner("検索中..."):
+                            res = api_request("get", "https://itunes.apple.com/search",
+                                params={"term": q, "entity": "song", "limit": 20, "lang": "ja_jp"})
+                        if res:
+                            it_results = res.json().get("results", [])
+                            st.session_state.ev_it_results  = it_results
+                            st.session_state.ev_it_checked  = {}
+                            if not it_results:
+                                st.warning("曲が見つかりませんでした。")
+                        else:
+                            st.warning("⚠️ iTunes API エラー")
+                    else:
+                        st.warning("アーティスト名または曲名を入力してください")
+
+                if st.session_state.get("ev_it_results"):
+                    it_results = st.session_state.ev_it_results
+                    st.caption(f"{len(it_results)} 件")
+                    for i, track in enumerate(it_results):
+                        label = f"{track.get('trackName', '')}  —  {track.get('artistName', '')}"
+                        checked = st.checkbox(label, key=f"ev_it_{i}", value=st.session_state.ev_it_checked.get(i, False))
+                        if checked: st.session_state.ev_it_checked[i] = True
+                        else:       st.session_state.ev_it_checked.pop(i, None)
+                    it_sel = [it_results[i] for i in st.session_state.ev_it_checked if st.session_state.ev_it_checked.get(i)]
+                    if it_sel:
+                        st.info(f"{len(it_sel)} 曲選択中")
+                        col_add_main2, col_add_enc2 = st.columns([1, 1])
+                        if col_add_main2.button("📋 通常セトリに追加", key="ev_it_add_main"):
+                            current = [t for t in st.session_state.ev_setlist_main if t.strip()]
+                            for t in it_sel:
+                                name = t.get("trackName", "")
+                                if len(current) < MAX_MAIN and name not in current:
+                                    current.append(name)
+                            st.session_state.ev_setlist_main = current + [""] if len(current) < MAX_MAIN else current
+                            st.session_state.ev_it_checked = {}
+                            st.rerun()
+                        if col_add_enc2.button("🎊 アンコールに追加", key="ev_it_add_enc"):
+                            current_enc = [t for t in st.session_state.ev_setlist_encore if t.strip()]
+                            for t in it_sel:
+                                name = t.get("trackName", "")
+                                if len(current_enc) < MAX_ENCORE and name not in current_enc:
+                                    current_enc.append(name)
+                            st.session_state.ev_setlist_encore = current_enc
+                            st.session_state.ev_it_checked = {}
+                            st.rerun()
+
+            # ── セットリスト編集UI（共通）──
+            st.divider()
+            st.caption(f"📋 通常セットリスト（最大{MAX_MAIN}曲）")
+            main_list = st.session_state.ev_setlist_main
+            new_main  = []
+            for i, val in enumerate(main_list):
+                col_num, col_inp, col_del = st.columns([0.3, 4, 0.5])
+                col_num.markdown(f"**{i+1}.**")
+                v = col_inp.text_input("", value=val, key=f"ev_main_{i}", label_visibility="collapsed")
+                new_main.append(v)
+                if col_del.button("✕", key=f"ev_main_del_{i}") and len(main_list) > 1:
+                    new_main.pop()
+                    st.session_state.ev_setlist_main = [x for j, x in enumerate(new_main) if j != i]
+                    st.rerun()
+            st.session_state.ev_setlist_main = new_main
+            if len([x for x in new_main if x.strip()]) < MAX_MAIN:
+                if st.button("＋ 曲を追加", key="ev_main_add"):
+                    st.session_state.ev_setlist_main = [x for x in new_main if x.strip()] + [""]
+                    st.rerun()
+
+            st.caption(f"🎊 アンコール（最大{MAX_ENCORE}曲）")
+            enc_list = st.session_state.ev_setlist_encore
+            new_enc  = []
+            for i, val in enumerate(enc_list):
+                col_num2, col_inp2, col_del2 = st.columns([0.3, 4, 0.5])
+                col_num2.markdown(f"**{i+1}.**")
+                v2 = col_inp2.text_input("", value=val, key=f"ev_enc_{i}", label_visibility="collapsed")
+                new_enc.append(v2)
+                if col_del2.button("✕", key=f"ev_enc_del_{i}"):
+                    st.session_state.ev_setlist_encore = [x for j, x in enumerate(new_enc) if j != i]
+                    st.rerun()
+            st.session_state.ev_setlist_encore = new_enc
+            if len([x for x in new_enc if x.strip()]) < MAX_ENCORE:
+                if st.button("＋ アンコール曲を追加", key="ev_enc_add"):
+                    st.session_state.ev_setlist_encore = [x for x in new_enc if x.strip()] + [""]
+                    st.rerun()
+
         st.divider()
         event_location = location_search_ui("event", media_label)
         if st.button("📥 登録する", type="primary", key="event_register", disabled=not event_title):
             watch_str = event_watch.isoformat() if event_watch else None
             start_str = event_start.isoformat() if event_start else None
             end_str   = event_end.isoformat()   if event_end   else None
+
+            # ── メモ生成 ──
+            memo_text = None
+            if has_setlist:
+                part      = event_cast if is_performance else ""
+                main_songs  = [t.strip() for t in st.session_state.get("ev_setlist_main",   []) if t.strip()]
+                encore_songs = [t.strip() for t in st.session_state.get("ev_setlist_encore", []) if t.strip()]
+                def fmt(i, title):
+                    suffix = f" [{part}]" if part else ""
+                    return f"{i+1}. {title}{suffix}"
+                lines = [fmt(i, t) for i, t in enumerate(main_songs)]
+                if encore_songs:
+                    lines.append("")
+                    lines.append("[Encore]")
+                    lines += [fmt(i, t) for i, t in enumerate(encore_songs)]
+                memo_text = "\n".join(lines) if lines else None
+
             ok = create_notion_page(
                 jp_title=event_title, en_title=event_title,
                 media_type_label=media_label,
@@ -1430,8 +1638,13 @@ if mode == "新規登録":
                 rating=rating_sel if rating_sel else None,
                 event_end=end_str,
                 location=event_location,
+                memo=memo_text,
             )
             if ok:
+                for key in ["ev_mb_composers", "ev_mb_works", "ev_mb_checked", "ev_mb_selected",
+                            "ev_it_results", "ev_it_checked",
+                            "ev_setlist_main", "ev_setlist_encore"]:
+                    st.session_state.pop(key, None)
                 st.success("✅ 登録完了！")
             else:
                 st.error("❌ 登録失敗")
