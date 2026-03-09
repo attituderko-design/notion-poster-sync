@@ -62,6 +62,20 @@ def get_drive_service():
     creds.refresh(Request())
     return build("drive", "v3", credentials=creds)
 
+def get_drive_service_safe():
+    """トークン期限切れ時にキャッシュをクリアして再取得するラッパー"""
+    try:
+        service = get_drive_service()
+        service.about().get(fields="user").execute()
+        return service
+    except Exception:
+        get_drive_service.clear()
+        try:
+            return get_drive_service()
+        except Exception as e:
+            st.error(f"Google Drive 認証エラー: {e}")
+            return None
+
 # ============================================================
 # ユーティリティ
 # ============================================================
@@ -132,7 +146,7 @@ def get_drive_files() -> dict:
     return st.session_state.drive_files_cache
 
 def refresh_drive_files():
-    service = get_drive_service()
+    service = get_drive_service_safe()
     results = service.files().list(
         q=f"'{DRIVE_FOLDER_ID}' in parents and trashed=false",
         fields="files(id, name)",
@@ -157,7 +171,7 @@ def save_to_drive(cover_url: str, title: str, tmdb_id, image_bytes: bytes | None
                 return None
             image_bytes = img_res.content
             mimetype    = "image/jpeg"
-        service = get_drive_service()
+        service = get_drive_service_safe()
         fname   = make_filename(title, tmdb_id)
         files   = get_drive_files()
         media   = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype=mimetype, resumable=False)
@@ -185,7 +199,7 @@ def get_drive_public_url(title: str, tmdb_id) -> str | None:
         if fname not in files:
             return None
         file_id = files[fname]
-        service = get_drive_service()
+        service = get_drive_service_safe()
         service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
         return f"https://drive.google.com/uc?id={file_id}"
     except Exception:
@@ -197,7 +211,7 @@ def delete_from_drive(title: str, tmdb_id) -> bool:
         files = get_drive_files()
         if fname not in files:
             return True
-        service = get_drive_service()
+        service = get_drive_service_safe()
         service.files().delete(fileId=files[fname]).execute()
         del st.session_state.drive_files_cache[fname]
         return True
@@ -502,7 +516,7 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
     if fname in files:
         file_id = files[fname]
         try:
-            service = get_drive_service()
+            service = get_drive_service_safe()
             service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
             return f"https://drive.google.com/uc?id={file_id}"
         except Exception:
@@ -555,7 +569,7 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
         img_data = requests.get(img_url, timeout=8)
         if img_data.status_code != 200:
             return None
-        service = get_drive_service()
+        service = get_drive_service_safe()
         media   = MediaIoBaseUpload(io.BytesIO(img_data.content), mimetype="image/jpeg", resumable=False)
         result  = service.files().create(
             body={"name": fname, "parents": [DRIVE_FOLDER_ID]},
@@ -1161,7 +1175,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v3.6")
+st.caption("v3.8")
 
 for key, default in {
     "is_running":         False,
@@ -1325,7 +1339,7 @@ if mode == "新規登録":
             ok = create_notion_page(
                 jp_title=event_title, en_title=event_title,
                 media_type_label=media_label,
-                tmdb_id=0, media_type="event",
+                tmdb_id=None, media_type="event",
                 cover_url=get_media_icon_url(media_label),
                 tmdb_release=start_str or "",
                 details={"genres": [event_genre] if event_genre else [], "cast": event_cast, "director": event_creator, "score": None},
@@ -1440,7 +1454,7 @@ if mode == "新規登録":
                         img_bytes = uploaded.read()
                         mimetype  = "image/png" if uploaded.name.endswith(".png") else "image/jpeg"
                         with st.spinner("Driveに保存中..."):
-                            service = get_drive_service()
+                            service = get_drive_service_safe()
                             media   = MediaIoBaseUpload(io.BytesIO(img_bytes), mimetype=mimetype, resumable=False)
                             result  = service.files().create(
                                 body={"name": save_fname, "parents": [DRIVE_FOLDER_ID]},
