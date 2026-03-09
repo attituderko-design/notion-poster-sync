@@ -905,6 +905,106 @@ def update_all(page_id, cover_url, tmdb_release, existing_release,
         st.warning(f"メタデータ更新失敗 ({title}): {e}")
     return notion_ok, drive_ok, meta_ok, updated
 
+# ============================================================
+# Nominatim ジオコーディング
+# ============================================================
+
+NOMINATIM_HEADERS = {
+    "User-Agent": "ArteMisCERS/3.1 (https://github.com/attituderko-design/artemis-cers)"
+}
+
+def geocode_nominatim(query: str) -> list[dict]:
+    """場所名から候補一覧を取得（lat/lon/name/address）"""
+    try:
+        res = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": query, "format": "json", "addressdetails": 1, "limit": 5, "accept-language": "ja"},
+            headers=NOMINATIM_HEADERS,
+            timeout=10,
+        )
+        time.sleep(1)  # レート制限: 1秒/リクエスト
+        if res.status_code != 200:
+            return []
+        results = res.json()
+        candidates = []
+        for r in results:
+            addr = r.get("address", {})
+            address_parts = [
+                addr.get("country", ""),
+                addr.get("state", ""),
+                addr.get("city", "") or addr.get("town", "") or addr.get("village", ""),
+                addr.get("suburb", "") or addr.get("neighbourhood", ""),
+                addr.get("road", ""),
+            ]
+            address_str = " ".join(p for p in address_parts if p)
+            candidates.append({
+                "name":    r.get("display_name", query).split(",")[0].strip(),
+                "address": address_str,
+                "lat":     float(r["lat"]),
+                "lon":     float(r["lon"]),
+                "display": r.get("display_name", ""),
+            })
+        return candidates
+    except Exception:
+        return []
+
+
+def location_search_ui(key_prefix: str, media_label: str) -> dict | None:
+    """ロケーション検索UIコンポーネント。選択済みlocation dictを返す（未選択はNone）"""
+    LOCATION_LABELS = {
+        "映画":          ("📍 鑑賞した場所（任意）", "例: TOHOシネマズ梅田"),
+        "ドラマ":        ("📍 鑑賞した場所（任意）", "例: 自宅 / Netflix"),
+        "演奏会":        ("📍 会場（任意）",          "例: フェニーチェ堺"),
+        "展示会":        ("📍 会場（任意）",          "例: 国立国際美術館"),
+        "ライブ/ショー": ("📍 会場（任意）",          "例: 大阪城ホール"),
+        "書籍":          ("📍 購入した場所（任意）",  "例: 梅田 蔦屋書店"),
+        "漫画":          ("📍 購入した場所（任意）",  "例: とらのあな"),
+        "音楽アルバム":  ("📍 購入した場所（任意）",  "例: タワーレコード梅田"),
+        "ゲーム":        ("📍 購入した場所（任意）",  "例: ヨドバシカメラ梅田"),
+        "演奏曲":        ("📍 演奏会場（任意）",      "例: ザ・シンフォニーホール"),
+    }
+    label, placeholder = LOCATION_LABELS.get(media_label, ("📍 場所（任意）", "例: 大阪"))
+
+    loc_key      = f"{key_prefix}_loc_query"
+    result_key   = f"{key_prefix}_loc_results"
+    selected_key = f"{key_prefix}_loc_selected"
+
+    if loc_key not in st.session_state:
+        st.session_state[loc_key]      = ""
+    if result_key not in st.session_state:
+        st.session_state[result_key]   = []
+    if selected_key not in st.session_state:
+        st.session_state[selected_key] = None
+
+    st.caption(label)
+    col_input, col_btn = st.columns([4, 1])
+    query = col_input.text_input(
+        label, value=st.session_state[loc_key],
+        placeholder=placeholder, label_visibility="collapsed", key=f"{key_prefix}_loc_input"
+    )
+    search_clicked = col_btn.button("🔍", key=f"{key_prefix}_loc_search_btn")
+
+    if search_clicked and query:
+        with st.spinner("検索中..."):
+            results = geocode_nominatim(query)
+        st.session_state[loc_key]      = query
+        st.session_state[result_key]   = results
+        st.session_state[selected_key] = None
+        if not results:
+            st.warning("見つかりませんでした。候補がない場合はNotion上で入力してください。")
+
+    results = st.session_state[result_key]
+    if results:
+        options = ["（選択してください）"] + [r["display"] for r in results]
+        choice  = st.selectbox("候補を選択", options, key=f"{key_prefix}_loc_select")
+        if choice != "（選択してください）":
+            chosen = results[options.index(choice) - 1]
+            st.session_state[selected_key] = chosen
+            st.caption(f"✅ {chosen['name']} （{chosen['lat']:.5f}, {chosen['lon']:.5f}）")
+
+    return st.session_state.get(selected_key)
+
+
 def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
                        tmdb_id: int, media_type: str, cover_url: str,
                        tmdb_release: str, details: dict,
@@ -945,9 +1045,15 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
         properties["ISBN"] = {"rich_text": [{"type": "text", "text": {"content": isbn}}]}
     if memo:
         properties["メモ"] = {"rich_text": [{"type": "text", "text": {"content": memo}}]}
-    # ロケーションはNotionのフィールド型に応じて要調整
-    # if location:
-    #     properties["ロケーション"] = {"rich_text": [{"type": "text", "text": {"content": location}}]}
+    if location and location.get("lat") and location.get("lon"):
+        place_payload = {
+            "lat":  location["lat"],
+            "lon":  location["lon"],
+            "name": location.get("name", ""),
+        }
+        if location.get("address"):
+            place_payload["address"] = location["address"]
+        properties["ロケーション"] = {"place": place_payload}
 
     icon_url = get_media_icon_url(media_type_label)
     payload = {
@@ -993,7 +1099,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="assets/favicon.png", layout="wide")
 st.image("assets/logo.png", width=320)
-st.caption("v3.0")
+st.caption("v3.1")
 
 for key, default in {
     "is_running":         False,
@@ -1095,75 +1201,6 @@ with st.sidebar:
 if mode == "新規登録":
     st.subheader("➕ 新規登録")
 
-    # ── 🔬 place型書き込み実験（確認後削除） ──
-    with st.expander("🔬 [DEV] place型書き込み実験", expanded=False):
-        st.caption("テスト対象ページIDを入力して各パターンを試してください")
-        test_page_id = st.text_input("テスト用ページID（NotionページURL末尾の32桁）", key="dev_page_id")
-        test_name    = st.text_input("場所名", value="フェニーチェ堺", key="dev_place_name")
-        test_address = st.text_input("住所（任意）", value="大阪府堺市", key="dev_place_address")
-
-        # UUID正規化（ハイフンなし32桁 → ハイフンあり標準形式に変換）
-        def normalize_uuid(raw: str) -> str:
-            s = raw.strip().replace("-", "")
-            if len(s) == 32:
-                return f"{s[0:8]}-{s[8:12]}-{s[12:16]}-{s[16:20]}-{s[20:32]}"
-            return raw.strip()
-
-        page_id_normalized = normalize_uuid(test_page_id) if test_page_id else ""
-        if test_page_id:
-            st.caption(f"正規化済みID: `{page_id_normalized}`")
-
-        def run_patch(payload):
-            url = f"https://api.notion.com/v1/pages/{page_id_normalized}"
-            st.caption(f"→ PATCH {url}")
-            try:
-                res = requests.patch(url, headers=NOTION_HEADERS, json=payload, timeout=10)
-                st.write(f"ステータス: {res.status_code}")
-                st.json(res.json())
-            except Exception as e:
-                st.error(f"例外: {e}")
-
-        col_a, col_b, col_c = st.columns(3)
-
-        if col_a.button("A: name+address", key="dev_place_a"):
-            run_patch({"properties": {"ロケーション": {"place": {
-                "name": test_name, "address": test_address,
-            }}}})
-
-        if col_b.button("B: nameのみ", key="dev_place_b"):
-            run_patch({"properties": {"ロケーション": {"place": {
-                "name": test_name,
-            }}}})
-
-        if col_c.button("C: rich_textで渡す", key="dev_place_c"):
-            run_patch({"properties": {"ロケーション": {"rich_text": [
-                {"type": "text", "text": {"content": test_name}}
-            ]}}})
-
-        st.divider()
-        st.caption("🧪 パターンD: lat/lon + name（緯度経度を直接指定）")
-        col_lat, col_lon = st.columns(2)
-        test_lat = col_lat.number_input("緯度 (lat)", value=34.702547, format="%.6f", key="dev_lat")
-        test_lon = col_lon.number_input("経度 (lon)", value=135.495949, format="%.6f", key="dev_lon")
-
-        col_d1, col_d2 = st.columns(2)
-        if col_d1.button("D1: lat+lon+name", key="dev_place_d1"):
-            run_patch({"properties": {"ロケーション": {"place": {
-                "lat":  test_lat,
-                "lon":  test_lon,
-                "name": test_name,
-            }}}})
-
-        if col_d2.button("D2: lat+lon+name+address", key="dev_place_d2"):
-            run_patch({"properties": {"ロケーション": {"place": {
-                "lat":     test_lat,
-                "lon":     test_lon,
-                "name":    test_name,
-                "address": test_address,
-            }}}})
-    # ── 🔬 実験ここまで ──
-
-
     # ── 媒体選択 ──
     media_display = st.selectbox("媒体", [v[0] for v in MEDIA_ICON_MAP.values()], key="reg_media")
     media_label   = next(k for k, v in MEDIA_ICON_MAP.items() if v[0] == media_display)
@@ -1203,6 +1240,8 @@ if mode == "新規登録":
         col_rating, col_wl = st.columns([2, 1])
         rating_sel = col_rating.selectbox("評価", RATING_OPTIONS, key="ev_rating")
         wlflg      = col_wl.checkbox("WLflg", value=False, key="ev_wl")
+        st.divider()
+        event_location = location_search_ui("event", media_label)
         if st.button("📥 登録する", type="primary", key="event_register", disabled=not event_title):
             watch_str = event_watch.isoformat() if event_watch else None
             start_str = event_start.isoformat() if event_start else None
@@ -1218,6 +1257,7 @@ if mode == "新規登録":
                 watched_date=watch_str,
                 rating=rating_sel if rating_sel else None,
                 event_end=end_str,
+                location=event_location,
             )
             if ok:
                 st.success("✅ 登録完了！")
@@ -1355,6 +1395,8 @@ if mode == "新規登録":
                             "tmdb_id":     0,
                             "details":     {"genres": [], "cast": "", "director": comp_name, "score": None},
                             "isbn":        "",
+                            "location":    None,
+                            "media_label": media_label,
                         })
                     st.session_state.mb_checked = {}
                     st.success(f"✅ {len(selected_works)} 件をカートに追加しました")
@@ -1464,6 +1506,8 @@ if mode == "新規登録":
             wlflg        = col_wl.checkbox("WLflg", value=False, key="confirm_wl")
             watched_date = col_date.date_input(date_label, value=None, key="confirm_date")
             rating_sel   = col_rating.selectbox("評価", RATING_OPTIONS, key="confirm_rating")
+            st.divider()
+            confirm_location = location_search_ui("confirm", media_label)
 
             col_ok, col_cancel = st.columns([1, 1])
             with col_ok:
@@ -1500,6 +1544,7 @@ if mode == "新規登録":
                         rating=rating_sel if rating_sel else None,
                         isbn=final_isbn or None,
                         memo=memo_text,
+                        location=confirm_location,
                     )
                     st.session_state.registering = False
                     if ok:
@@ -1622,6 +1667,7 @@ if mode == "新規登録":
                             "media_type": c_type, "tmdb_id": 0,
                             "details":    {"genres": cand.get("genres", []), "cast": "", "director": clean_author_list(cand.get("authors", [])), "score": None},
                             "isbn":       cand.get("isbn", ""),
+                            "location":   None, "media_label": media_label,
                         }
                     elif media_label == "音楽アルバム":
                         cart_item = {
@@ -1631,6 +1677,7 @@ if mode == "新規登録":
                             "media_type": "album", "tmdb_id": 0,
                             "details":    {"genres": [], "cast": "", "director": clean_author(cand.get("artist", "")), "score": None},
                             "isbn":       "",
+                            "location":   None, "media_label": media_label,
                         }
                     elif media_label == "ゲーム":
                         cart_item = {
@@ -1640,6 +1687,7 @@ if mode == "新規登録":
                             "media_type": "game", "tmdb_id": 0,
                             "details":    {"genres": cand.get("genres", []), "cast": cand.get("publisher", ""), "director": clean_author(cand.get("developer", "")), "score": None},
                             "isbn":       "",
+                            "location":   None, "media_label": media_label,
                         }
                     else:
                         c_cover   = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{cand['poster_path']}"
@@ -1654,6 +1702,7 @@ if mode == "新規登録":
                             "media_type": cand.get("media_type", "movie"), "tmdb_id": cand["id"],
                             "details":    fetch_tmdb_details(cand["id"], cand.get("media_type","movie")),
                             "isbn":       "",
+                            "location":   None, "media_label": media_label,
                         }
                     st.session_state.reg_cart.append(cart_item)
                 st.session_state.bulk_checked = {}
@@ -1668,6 +1717,7 @@ if mode == "新規登録":
 
         remove_indices = []
         for idx, item in enumerate(st.session_state.reg_cart):
+            item_media = item.get("media_label", media_label)
             with st.expander(f"{idx+1}. {item['jp_title']}", expanded=True):
                 cols = st.columns([2, 1, 2, 2, 1, 1])
                 item["jp_title"] = cols[0].text_input("日本語タイトル", value=item["jp_title"], key=f"cart_jp_{idx}")
@@ -1676,12 +1726,14 @@ if mode == "新規登録":
                 if item.get("watched"):
                     try: date_val = date.fromisoformat(item["watched"])
                     except: pass
-                watched_input    = cols[2].date_input(date_label, value=date_val, key=f"cart_watch_{idx}")
+                item_date_label  = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "演奏曲": "演奏日"}.get(item_media, "鑑賞日")
+                watched_input    = cols[2].date_input(item_date_label, value=date_val, key=f"cart_watch_{idx}")
                 item["watched"]  = watched_input.isoformat() if watched_input else ""
                 item["rating"]   = cols[3].selectbox("評価", RATING_OPTIONS, index=RATING_OPTIONS.index(item.get("rating","")) if item.get("rating","") in RATING_OPTIONS else 0, key=f"cart_rating_{idx}")
                 item["wlflg"]    = cols[4].checkbox("WL", value=item.get("wlflg", False), key=f"cart_wl_{idx}")
                 if cols[5].button("🗑", key=f"cart_del_{idx}"):
                     remove_indices.append(idx)
+                item["location"] = location_search_ui(f"cart_{idx}", item_media)
 
         for i in sorted(remove_indices, reverse=True):
             st.session_state.reg_cart.pop(i)
@@ -1701,13 +1753,14 @@ if mode == "新規登録":
                 for n, item in enumerate(st.session_state.reg_cart):
                     ok = create_notion_page(
                         jp_title=item["jp_title"], en_title=item.get("en_title",""),
-                        media_type_label=media_label,
+                        media_type_label=item.get("media_label", media_label),
                         tmdb_id=item["tmdb_id"], media_type=item["media_type"],
                         cover_url=item["cover_url"], tmdb_release=item.get("release",""),
                         details=item["details"], wlflg=item.get("wlflg", False),
                         watched_date=item["watched"] or None,
                         rating=item["rating"] or None,
                         isbn=item.get("isbn") or None,
+                        location=item.get("location"),
                     )
                     if ok:
                         if item["media_type"] in ("movie", "tv"):
