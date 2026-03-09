@@ -1092,6 +1092,21 @@ with st.sidebar:
 # ============================================================
 # 新規登録モード
 # ============================================================
+if st.button("🔬 ロケーションフィールド調査", key="debug_location"):
+    with st.spinner("取得中..."):
+        res = api_request("post",
+            f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query",
+            headers=NOTION_HEADERS,
+            json={"page_size": 3}
+        )
+        pages = res.json().get("results", [])
+        for page in pages:
+            loc = page["properties"].get("ロケーション", {})
+            if loc:
+                st.json(loc)
+                st.stop()
+        st.warning("ロケーションフィールドが見つかりませんでした")
+        
 if mode == "新規登録":
     st.subheader("➕ 新規登録")
 
