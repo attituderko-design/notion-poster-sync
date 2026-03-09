@@ -80,6 +80,32 @@ def clean_author_list(authors: list) -> str:
     """著者リストをクリーニングして ' / ' 結合"""
     return " / ".join(clean_author(a) for a in authors if a.strip())
 
+def parse_rakuten_date(sales_date: str) -> str:
+    """
+    楽天APIのsalesDateをISO日付文字列に変換する。
+    '2004年01月' → '2004-01-01'
+    '2004年'     → '2004-01-01'
+    '2004年頃'   → '2004-01-01'
+    '2004'       → '2004-01-01'
+    変換できない場合は '' を返す。
+    """
+    if not sales_date:
+        return ""
+    s = sales_date.strip()
+    m = re.match(r'(\d{4})年(\d{1,2})月', s)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-01"
+    m = re.match(r'(\d{4})年', s)
+    if m:
+        return f"{m.group(1)}-01-01"
+    m = re.match(r'(\d{4})-(\d{2})$', s)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-01"
+    m = re.match(r'^(\d{4})$', s)
+    if m:
+        return f"{m.group(1)}-01-01"
+    return ""
+
 def make_filename(title: str, tmdb_id) -> str:
     return f"{sanitize_filename(title)}_{tmdb_id}.jpg"
 
@@ -444,7 +470,7 @@ def search_books(query: str, author: str = None) -> list:
             "title":      item.get("title", ""),
             "authors":    authors,
             "publisher":  item.get("publisherName", ""),
-            "published":  (item.get("salesDate", "") or "")[:4],
+            "published":  parse_rakuten_date(item.get("salesDate", "") or ""),
             "genres":     [],
             "cover_url":  cover,
             "media_type": "book",
@@ -779,7 +805,7 @@ def search_manga(query: str, author: str = None) -> list:
             "isbn":       isbn_val,
             "title":      base_title,
             "authors":    authors,
-            "published":  (item.get("salesDate", "") or "")[:4],
+            "published":  parse_rakuten_date(item.get("salesDate", "") or ""),
             "cover_url":  cover,
             "media_type": "manga",
         })
@@ -1136,7 +1162,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v3.1")
+st.caption("v3.2")
 
 for key, default in {
     "is_running":         False,
