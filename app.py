@@ -1290,7 +1290,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v4.63")
+st.caption("v4.64")
 
 for key, default in {
     "is_running":         False,
@@ -2602,57 +2602,57 @@ if mode == "データ管理":
                 st.divider()
                 st.caption("🔧 TMDB_ID / MEDIA_TYPE を手動で修正")
                 id_col, type_col, save_col = st.columns([2, 2, 1])
-            new_tmdb_id = id_col.number_input(
-                "TMDB_ID",
-                value=int(saved_tmdb_id) if saved_tmdb_id else 0,
-                min_value=0,
-                step=1,
-                key=f"tmdb_id_input_{page_id}",
-            )
-            new_media_type = type_col.selectbox(
-                "MEDIA_TYPE",
-                options=["movie", "tv"],
-                index=0 if saved_media_type != "tv" else 1,
-                key=f"media_type_input_{page_id}",
-            )
-            with save_col:
-                st.write("")
-                st.write("")
-                if st.button("💾 保存", key=f"save_id_{page_id}"):
-                    if new_tmdb_id > 0:
-                        with st.spinner("更新中..."):
-                            top = fetch_tmdb_by_id(new_tmdb_id, new_media_type)
-                            if top:
-                                cover_url        = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{top['poster_path']}"
-                                tmdb_release     = top.get("release_date") or top.get("first_air_date")
-                                date_prop        = props.get("リリース日", {}).get("date")
-                                existing_release = date_prop.get("start") if date_prop else None
-                                season_number    = get_season_number(props)
-                                st.session_state.tmdb_id_cache[page_id] = new_tmdb_id
-                                n_ok, d_ok, meta_ok, updated = update_all(
-                                    page_id, cover_url, tmdb_release, existing_release,
-                                    log_title, new_tmdb_id, new_media_type, True, True,
-                                    force_meta=True, props=props, season_number=season_number,
-                                )
-                                parts = []
-                                parts.append("Notion " + ("✅" if n_ok else "❌"))
-                                parts.append("Drive "  + ("✅" if d_ok else "❌"))
-                                if updated: parts.append("メタデータ[" + " / ".join(updated) + "] " + ("✅" if meta_ok else "❌"))
-                                if n_ok and d_ok:
-                                    st.success("保存完了！ " + "　".join(parts))
-                                    for p in st.session_state.pages:
-                                        if p["id"] == page_id:
-                                            p["cover"]                    = {"type": "external", "external": {"url": cover_url}}
-                                            p["properties"]["TMDB_ID"]    = {"number": new_tmdb_id}
-                                            p["properties"]["MEDIA_TYPE"] = {"multi_select": [{"name": new_media_type}]}
-                                    time.sleep(1.5)
-                                    st.rerun()
+                new_tmdb_id = id_col.number_input(
+                    "TMDB_ID",
+                    value=int(saved_tmdb_id) if saved_tmdb_id else 0,
+                    min_value=0,
+                    step=1,
+                    key=f"tmdb_id_input_{page_id}",
+                )
+                new_media_type = type_col.selectbox(
+                    "MEDIA_TYPE",
+                    options=["movie", "tv"],
+                    index=0 if saved_media_type != "tv" else 1,
+                    key=f"media_type_input_{page_id}",
+                )
+                with save_col:
+                    st.write("")
+                    st.write("")
+                    if st.button("💾 保存", key=f"save_id_{page_id}"):
+                        if new_tmdb_id > 0:
+                            with st.spinner("更新中..."):
+                                top = fetch_tmdb_by_id(new_tmdb_id, new_media_type)
+                                if top:
+                                    cover_url        = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{top['poster_path']}"
+                                    tmdb_release     = top.get("release_date") or top.get("first_air_date")
+                                    date_prop        = props.get("リリース日", {}).get("date")
+                                    existing_release = date_prop.get("start") if date_prop else None
+                                    season_number    = get_season_number(props)
+                                    st.session_state.tmdb_id_cache[page_id] = new_tmdb_id
+                                    n_ok, d_ok, meta_ok, updated = update_all(
+                                        page_id, cover_url, tmdb_release, existing_release,
+                                        log_title, new_tmdb_id, new_media_type, True, True,
+                                        force_meta=True, props=props, season_number=season_number,
+                                    )
+                                    parts = []
+                                    parts.append("Notion " + ("✅" if n_ok else "❌"))
+                                    parts.append("Drive "  + ("✅" if d_ok else "❌"))
+                                    if updated: parts.append("メタデータ[" + " / ".join(updated) + "] " + ("✅" if meta_ok else "❌"))
+                                    if n_ok and d_ok:
+                                        st.success("保存完了！ " + "　".join(parts))
+                                        for p in st.session_state.pages:
+                                            if p["id"] == page_id:
+                                                p["cover"]                    = {"type": "external", "external": {"url": cover_url}}
+                                                p["properties"]["TMDB_ID"]    = {"number": new_tmdb_id}
+                                                p["properties"]["MEDIA_TYPE"] = {"multi_select": [{"name": new_media_type}]}
+                                        time.sleep(1.5)
+                                        st.rerun()
+                                    else:
+                                        st.error("一部失敗: " + "　".join(parts))
                                 else:
-                                    st.error("一部失敗: " + "　".join(parts))
-                            else:
-                                st.error("TMDBでIDが見つかりませんでした")
-                    else:
-                        st.warning("TMDB_IDを入力してください")
+                                    st.error("TMDBでIDが見つかりませんでした")
+                        else:
+                            st.warning("TMDB_IDを入力してください")
 
             # TMDB検索UI（映画・ドラマ・アニメのみ）
             if is_tmdb_media:
