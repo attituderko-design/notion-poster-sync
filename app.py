@@ -40,6 +40,7 @@ MEDIA_ICON_MAP = {
     "音楽アルバム":  ("🎵 音楽アルバム",  "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/disc.svg"),
     "ゲーム":        ("🎮 ゲーム",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/controller.svg"),
     "演奏曲":        ("🎼 演奏曲",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/music-score.svg"),
+    "アニメ":        ("🎌 アニメ",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/refs/heads/main/assets/icons/anime.svg"),
 }
 
 RATING_OPTIONS = ["", "★", "★★", "★★★", "★★★★", "★★★★★"]
@@ -714,6 +715,74 @@ def search_games(query: str) -> list:
     return results
 
 # ============================================================
+# AniList API（アニメ）
+# ============================================================
+ANILIST_URL = "https://graphql.anilist.co"
+
+def search_anime(query: str) -> list:
+    """AniList GraphQL APIでアニメ検索"""
+    gql = """
+    query ($search: String) {
+      Page(perPage: 20) {
+        media(search: $search, type: ANIME, sort: POPULARITY_DESC) {
+          id
+          title { native romaji english }
+          coverImage { large }
+          genres
+          startDate { year month day }
+          averageScore
+          staff(perPage: 5, sort: RELEVANCE) {
+            edges { role node { name { full } } }
+          }
+        }
+      }
+    }
+    """
+    try:
+        res = requests.post(
+            ANILIST_URL,
+            json={"query": gql, "variables": {"search": query}},
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        if res.status_code != 200:
+            st.warning(f"⚠️ AniList API {res.status_code}")
+            return []
+        media_list = res.json().get("data", {}).get("Page", {}).get("media", [])
+        results = []
+        for m in media_list:
+            title    = m["title"]
+            native   = title.get("native") or ""
+            romaji   = title.get("romaji") or ""
+            english  = title.get("english") or ""
+            sd       = m.get("startDate", {})
+            release  = ""
+            if sd.get("year"):
+                release = f"{sd['year']}-{sd.get('month', 1):02d}-{sd.get('day', 1):02d}"
+            # 監督抽出（Director / Series Director）
+            director = ""
+            for edge in m.get("staff", {}).get("edges", []):
+                if edge.get("role", "") in ("Director", "Series Director"):
+                    director = edge["node"]["name"]["full"]
+                    break
+            results.append({
+                "id":          m["id"],
+                "title":       native or romaji,
+                "title_romaji": romaji,
+                "title_en":    english,
+                "cover_url":   m.get("coverImage", {}).get("large", ""),
+                "release":     release,
+                "genres":      m.get("genres", []),
+                "director":    director,
+                "score":       round(m["averageScore"] / 10, 1) if m.get("averageScore") else None,
+                "media_type":  "anime",
+            })
+        return results
+    except Exception as e:
+        st.warning(f"⚠️ AniList API エラー: {e}")
+        return []
+
+# ============================================================
 # iTunes Search API（音楽アルバム）
 # ============================================================
 def search_albums(query: str, artist: str = None) -> list:
@@ -1025,6 +1094,7 @@ def location_search_ui(key_prefix: str, media_label: str) -> dict | None:
         "音楽アルバム":  ("📍 聴いた場所や購入した場所（任意）",  "例: タワーレコード梅田"),
         "ゲーム":        ("📍 プレイした場所や購入した場所（任意）",  "例: ヨドバシカメラ梅田"),
         "演奏曲":        ("📍 演奏会場（任意）",      "例: ザ・シンフォニーホール"),
+        "アニメ":        ("📍 視聴した場所（任意）",  "例: 自宅 / 映画館"),
     }
     label, placeholder = LOCATION_LABELS.get(media_label, ("📍 場所（任意）", "例: 大阪"))
 
@@ -1175,7 +1245,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v3.9")
+st.caption("v4.0")
 
 for key, default in {
     "is_running":         False,
@@ -1493,7 +1563,7 @@ if mode == "新規登録":
         st.stop()
 
     # ============================================================
-    # 通常媒体（映画・ドラマ・書籍・漫画・音楽アルバム・ゲーム）
+    # 通常媒体（映画・ドラマ・書籍・漫画・音楽アルバム・ゲーム・アニメ）
     # ============================================================
     st.divider()
 
@@ -1505,6 +1575,11 @@ if mode == "新規登録":
         en_input      = ""
     elif media_label == "ゲーム":
         jp_input      = st.text_input("ゲームタイトル", placeholder="例: ゼルダの伝説")
+        creator_input = ""
+        cast_input    = ""
+        en_input      = jp_input
+    elif media_label == "アニメ":
+        jp_input      = st.text_input("アニメタイトル", placeholder="例: 鬼滅の刃 / Demon Slayer")
         creator_input = ""
         cast_input    = ""
         en_input      = jp_input
@@ -1533,6 +1608,8 @@ if mode == "新規登録":
                 results = search_albums(query or "", artist=creator_input or None)
             elif media_label == "ゲーム":
                 results = search_games(query or jp_input)
+            elif media_label == "アニメ":
+                results = search_anime(query or jp_input)
             else:
                 tmdb_mt = "movie" if media_label == "映画" else "tv"
                 if creator_input or cast_input:
@@ -1592,7 +1669,7 @@ if mode == "新規登録":
                 dupe_titles = "、".join([get_title(d["properties"])[0] for d in dupes])
                 st.warning(f"⚠️ 登録済のデータがあります：{dupe_titles}\nそれでも登録しますか？")
 
-            date_label   = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日"}.get(media_label, "鑑賞日")
+            date_label   = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "アニメ": "視聴日"}.get(media_label, "鑑賞日")
             col_wl, col_date, col_rating = st.columns([1, 2, 2])
             wlflg        = col_wl.checkbox("WLflg", value=False, key="confirm_wl")
             watched_date = col_date.date_input(date_label, value=None, key="confirm_date")
@@ -1616,6 +1693,8 @@ if mode == "新規登録":
                         details = {"genres": reg.get("book_genres", []), "cast": "", "director": clean_author_list(reg.get("book_authors", [])), "score": None}
                     elif reg["media_type"] in ("album", "game"):
                         details = {"genres": reg.get("book_genres", []), "cast": reg.get("game_publisher", ""), "director": clean_author_list(reg.get("book_authors", [])), "score": None}
+                    elif reg["media_type"] == "anime":
+                        details = {"genres": reg.get("book_genres", []), "cast": "", "director": clean_author_list(reg.get("book_authors", [])), "score": reg.get("anime_score")}
                     else:
                         details = fetch_tmdb_details(reg["tmdb_id"], reg["media_type"])
                     watched_str  = watched_date.isoformat() if watched_date else None
@@ -1680,6 +1759,13 @@ if mode == "新規登録":
                         cand_en       = cand["title"]
                         display_title = cand["title"]
                         authors       = cand.get("developer", "")
+                    elif media_label == "アニメ":
+                        cover_url     = cand["cover_url"]
+                        tmdb_release  = cand.get("release", "")
+                        media_type    = "anime"
+                        cand_en       = cand.get("title_en") or cand.get("title_romaji", "")
+                        display_title = cand["title"]
+                        authors       = cand.get("director", "")
                     else:
                         cover_url    = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{cand['poster_path']}"
                         tmdb_release = cand.get("release_date") or cand.get("first_air_date") or ""
@@ -1704,7 +1790,7 @@ if mode == "新規登録":
                         st.caption("📷 画像なし")
                     if authors:      st.caption(f"{'著者' if media_label in ('書籍','漫画') else 'アーティスト' if media_label == '音楽アルバム' else '開発'}: {authors}")
                     if tmdb_release: st.caption(f"{'出版' if media_label in ('書籍','漫画') else 'リリース'}: {tmdb_release}")
-                    if media_label not in ("書籍", "漫画", "音楽アルバム", "ゲーム"):
+                    if media_label not in ("書籍", "漫画", "音楽アルバム", "ゲーム", "アニメ"):
                         st.caption(f"🆔 {cand['id']}")
 
                     if st.button("✅ 単体登録", key=f"new_reg_{abs_idx}"):
@@ -1730,6 +1816,16 @@ if mode == "新規登録":
                                 "cand_en": cand["title"], "jp_input": cand["title"],
                                 "book_authors": [cand.get("developer", "")], "book_genres": cand.get("genres", []),
                                 "isbn": "", "game_publisher": cand.get("publisher", ""),
+                            }
+                        elif media_label == "アニメ":
+                            st.session_state.confirm_reg = {
+                                "tmdb_id": 0, "cover_url": cand["cover_url"],
+                                "tmdb_release": cand.get("release", ""), "media_type": "anime",
+                                "cand_en": cand.get("title_en") or cand.get("title_romaji", ""),
+                                "jp_input": cand["title"],
+                                "book_authors": [cand.get("director", "")],
+                                "book_genres": cand.get("genres", []),
+                                "isbn": "", "anime_score": cand.get("score"),
                             }
                         else:
                             with st.spinner("日本語タイトル取得中..."):
@@ -1780,6 +1876,17 @@ if mode == "新規登録":
                             "isbn":       "",
                             "location":   None, "media_label": media_label,
                         }
+                    elif media_label == "アニメ":
+                        cart_item = {
+                            "jp_title":   cand["title"],
+                            "en_title":   cand.get("title_en") or cand.get("title_romaji", ""),
+                            "cover_url":  cand["cover_url"], "release": cand.get("release", ""),
+                            "watched": "", "rating": "", "wlflg": False,
+                            "media_type": "anime", "tmdb_id": 0,
+                            "details":    {"genres": cand.get("genres", []), "cast": "", "director": cand.get("director", ""), "score": cand.get("score")},
+                            "isbn":       "",
+                            "location":   None, "media_label": media_label,
+                        }
                     else:
                         c_cover   = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{cand['poster_path']}"
                         c_release = cand.get("release_date") or cand.get("first_air_date") or ""
@@ -1804,7 +1911,7 @@ if mode == "新規登録":
     if st.session_state.reg_cart:
         st.divider()
         st.subheader(f"📋 登録リスト（{len(st.session_state.reg_cart)} 件）")
-        date_label = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "演奏曲": "演奏日"}.get(media_label, "鑑賞日")
+        date_label = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "演奏曲": "演奏日", "アニメ": "視聴日"}.get(media_label, "鑑賞日")
 
         remove_indices = []
         for idx, item in enumerate(st.session_state.reg_cart):
@@ -1817,7 +1924,7 @@ if mode == "新規登録":
                 if item.get("watched"):
                     try: date_val = date.fromisoformat(item["watched"])
                     except: pass
-                item_date_label  = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "演奏曲": "演奏日"}.get(item_media, "鑑賞日")
+                item_date_label  = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "演奏曲": "演奏日", "アニメ": "視聴日"}.get(item_media, "鑑賞日")
                 watched_input    = cols[2].date_input(item_date_label, value=date_val, key=f"cart_watch_{idx}")
                 item["watched"]  = watched_input.isoformat() if watched_input else ""
                 item["rating"]   = cols[3].selectbox("評価", RATING_OPTIONS, index=RATING_OPTIONS.index(item.get("rating","")) if item.get("rating","") in RATING_OPTIONS else 0, key=f"cart_rating_{idx}")
