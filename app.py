@@ -561,7 +561,6 @@ def search_mb_works(artist_id: str, title_filter: str = "") -> list:
                 "https://musicbrainz.org/ws/2/work",
                 params={
                     "artist": artist_id,
-                    "inc":    "work-rels",
                     "fmt":    "json",
                     "limit":  limit,
                     "offset": offset,
@@ -585,16 +584,6 @@ def search_mb_works(artist_id: str, title_filter: str = "") -> list:
         title = w.get("title", "")
         if title_filter and title_filter.lower() not in title.lower():
             continue
-
-        # 親workを持つ（= 楽章・部分）はスキップ
-        relations = w.get("relations", [])
-        is_part = any(
-            r.get("type") in ("part of", "parts", "medley") and r.get("direction") == "backward"
-            for r in relations
-        )
-        if is_part:
-            continue
-
         disambiguation = w.get("disambiguation", "")
         results.append({
             "id":             w["id"],
@@ -1006,7 +995,7 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis", page_icon="assets/favicon.png", layout="wide")
 st.image("assets/logo.png", width=320)
-st.caption("v2.13")
+st.caption("v2.14")
 
 for key, default in {
     "is_running":         False,
