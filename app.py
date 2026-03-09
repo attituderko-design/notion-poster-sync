@@ -1249,7 +1249,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v4.2")
+st.caption("v4.3")
 
 for key, default in {
     "is_running":         False,
@@ -1405,15 +1405,14 @@ if mode == "新規登録":
         )
         col_cast, col_genre = st.columns([1, 1])
         event_cast = col_cast.text_input(
-            "自分のパート・役割" if is_performance else ("演奏団体" if is_concert else "出演者・バンド"),
-            placeholder="例: Vn. / ピアノ" if is_performance else
-                        "例: 大阪フィルハーモニー交響楽団" if is_concert else
-                        "例: Queen"
+            "演奏団体" if is_concert else "出演者・バンド",
+            placeholder="例: 大阪フィルハーモニー交響楽団" if is_concert else "例: Queen"
         )
         event_genre = col_genre.text_input(
             "ジャンル",
             placeholder="例: クラシック / 室内楽" if is_concert else "例: ロック / J-POP"
         )
+        event_part = ""
         if media_label == "展示会":
             col_start, col_end, col_watch = st.columns([1, 1, 1])
             event_start = col_start.date_input("開催開始日", value=None, key="ev_start")
@@ -1436,7 +1435,8 @@ if mode == "新規登録":
             MAX_ENCORE  = 5
 
             # セッションステート初期化
-            if "ev_setlist_main"   not in st.session_state: st.session_state.ev_setlist_main   = [""]
+            # 構造: [{"title": "曲名", "part": "Vn."}]  ※part は演奏会（出演）のみ使用
+            if "ev_setlist_main"   not in st.session_state: st.session_state.ev_setlist_main   = [{"title": "", "part": ""}]
             if "ev_setlist_encore" not in st.session_state: st.session_state.ev_setlist_encore = []
 
             # ── 演奏会系: MusicBrainz検索 ──
@@ -1495,18 +1495,18 @@ if mode == "新規登録":
                         st.info(f"{len(ev_sel_works)} 曲選択中")
                         col_add_main, col_add_enc = st.columns([1, 1])
                         if col_add_main.button("📋 通常セトリに追加", key="ev_mb_add_main"):
-                            current = [t for t in st.session_state.ev_setlist_main if t.strip()]
+                            current = [x for x in st.session_state.ev_setlist_main if x["title"].strip()]
                             for w in ev_sel_works:
-                                if len(current) < MAX_MAIN and w["title"] not in current:
-                                    current.append(w["title"])
-                            st.session_state.ev_setlist_main = current + [""] if len(current) < MAX_MAIN else current
+                                if len(current) < MAX_MAIN and w["title"] not in [x["title"] for x in current]:
+                                    current.append({"title": w["title"], "part": ""})
+                            st.session_state.ev_setlist_main = current + [{"title": "", "part": ""}] if len(current) < MAX_MAIN else current
                             st.session_state.ev_mb_checked = {}
                             st.rerun()
                         if col_add_enc.button("🎊 アンコールに追加", key="ev_mb_add_enc"):
-                            current_enc = [t for t in st.session_state.ev_setlist_encore if t.strip()]
+                            current_enc = [x for x in st.session_state.ev_setlist_encore if x["title"].strip()]
                             for w in ev_sel_works:
-                                if len(current_enc) < MAX_ENCORE and w["title"] not in current_enc:
-                                    current_enc.append(w["title"])
+                                if len(current_enc) < MAX_ENCORE and w["title"] not in [x["title"] for x in current_enc]:
+                                    current_enc.append({"title": w["title"], "part": ""})
                             st.session_state.ev_setlist_encore = current_enc
                             st.session_state.ev_mb_checked = {}
                             st.rerun()
@@ -1548,20 +1548,20 @@ if mode == "新規登録":
                         st.info(f"{len(it_sel)} 曲選択中")
                         col_add_main2, col_add_enc2 = st.columns([1, 1])
                         if col_add_main2.button("📋 通常セトリに追加", key="ev_it_add_main"):
-                            current = [t for t in st.session_state.ev_setlist_main if t.strip()]
+                            current = [x for x in st.session_state.ev_setlist_main if x["title"].strip()]
                             for t in it_sel:
                                 name = t.get("trackName", "")
-                                if len(current) < MAX_MAIN and name not in current:
-                                    current.append(name)
-                            st.session_state.ev_setlist_main = current + [""] if len(current) < MAX_MAIN else current
+                                if len(current) < MAX_MAIN and name not in [x["title"] for x in current]:
+                                    current.append({"title": name, "part": ""})
+                            st.session_state.ev_setlist_main = current + [{"title": "", "part": ""}] if len(current) < MAX_MAIN else current
                             st.session_state.ev_it_checked = {}
                             st.rerun()
                         if col_add_enc2.button("🎊 アンコールに追加", key="ev_it_add_enc"):
-                            current_enc = [t for t in st.session_state.ev_setlist_encore if t.strip()]
+                            current_enc = [x for x in st.session_state.ev_setlist_encore if x["title"].strip()]
                             for t in it_sel:
                                 name = t.get("trackName", "")
-                                if len(current_enc) < MAX_ENCORE and name not in current_enc:
-                                    current_enc.append(name)
+                                if len(current_enc) < MAX_ENCORE and name not in [x["title"] for x in current_enc]:
+                                    current_enc.append({"title": name, "part": ""})
                             st.session_state.ev_setlist_encore = current_enc
                             st.session_state.ev_it_checked = {}
                             st.rerun()
@@ -1571,36 +1571,43 @@ if mode == "新規登録":
             st.caption(f"📋 通常セットリスト（最大{MAX_MAIN}曲）")
             main_list = st.session_state.ev_setlist_main
             new_main  = []
-            for i, val in enumerate(main_list):
-                col_num, col_inp, col_del = st.columns([0.3, 4, 0.5])
+            for i, item in enumerate(main_list):
+                if is_performance:
+                    col_num, col_inp, col_part, col_del = st.columns([0.3, 3.5, 1.2, 0.5])
+                else:
+                    col_num, col_inp, col_del = st.columns([0.3, 4, 0.5])
                 col_num.markdown(f"**{i+1}.**")
-                v = col_inp.text_input("", value=val, key=f"ev_main_{i}", label_visibility="collapsed")
-                new_main.append(v)
+                t = col_inp.text_input("", value=item["title"], key=f"ev_main_t_{i}", label_visibility="collapsed")
+                p = col_part.text_input("", value=item["part"], key=f"ev_main_p_{i}", placeholder="楽器", label_visibility="collapsed") if is_performance else ""
+                new_main.append({"title": t, "part": p})
                 if col_del.button("✕", key=f"ev_main_del_{i}") and len(main_list) > 1:
-                    new_main.pop()
                     st.session_state.ev_setlist_main = [x for j, x in enumerate(new_main) if j != i]
                     st.rerun()
             st.session_state.ev_setlist_main = new_main
-            if len([x for x in new_main if x.strip()]) < MAX_MAIN:
+            if len([x for x in new_main if x["title"].strip()]) < MAX_MAIN:
                 if st.button("＋ 曲を追加", key="ev_main_add"):
-                    st.session_state.ev_setlist_main = [x for x in new_main if x.strip()] + [""]
+                    st.session_state.ev_setlist_main = [x for x in new_main if x["title"].strip()] + [{"title": "", "part": ""}]
                     st.rerun()
 
             st.caption(f"🎊 アンコール（最大{MAX_ENCORE}曲）")
             enc_list = st.session_state.ev_setlist_encore
             new_enc  = []
-            for i, val in enumerate(enc_list):
-                col_num2, col_inp2, col_del2 = st.columns([0.3, 4, 0.5])
+            for i, item in enumerate(enc_list):
+                if is_performance:
+                    col_num2, col_inp2, col_part2, col_del2 = st.columns([0.3, 3.5, 1.2, 0.5])
+                else:
+                    col_num2, col_inp2, col_del2 = st.columns([0.3, 4, 0.5])
                 col_num2.markdown(f"**{i+1}.**")
-                v2 = col_inp2.text_input("", value=val, key=f"ev_enc_{i}", label_visibility="collapsed")
-                new_enc.append(v2)
+                t2 = col_inp2.text_input("", value=item["title"], key=f"ev_enc_t_{i}", label_visibility="collapsed")
+                p2 = col_part2.text_input("", value=item["part"], key=f"ev_enc_p_{i}", placeholder="楽器", label_visibility="collapsed") if is_performance else ""
+                new_enc.append({"title": t2, "part": p2})
                 if col_del2.button("✕", key=f"ev_enc_del_{i}"):
                     st.session_state.ev_setlist_encore = [x for j, x in enumerate(new_enc) if j != i]
                     st.rerun()
             st.session_state.ev_setlist_encore = new_enc
-            if len([x for x in new_enc if x.strip()]) < MAX_ENCORE:
+            if len([x for x in new_enc if x["title"].strip()]) < MAX_ENCORE:
                 if st.button("＋ アンコール曲を追加", key="ev_enc_add"):
-                    st.session_state.ev_setlist_encore = [x for x in new_enc if x.strip()] + [""]
+                    st.session_state.ev_setlist_encore = [x for x in new_enc if x["title"].strip()] + [{"title": "", "part": ""}]
                     st.rerun()
 
         st.divider()
@@ -1613,17 +1620,16 @@ if mode == "新規登録":
             # ── メモ生成 ──
             memo_text = None
             if has_setlist:
-                part      = event_cast if is_performance else ""
-                main_songs  = [t.strip() for t in st.session_state.get("ev_setlist_main",   []) if t.strip()]
-                encore_songs = [t.strip() for t in st.session_state.get("ev_setlist_encore", []) if t.strip()]
-                def fmt(i, title):
-                    suffix = f" [{part}]" if part else ""
-                    return f"{i+1}. {title}{suffix}"
-                lines = [fmt(i, t) for i, t in enumerate(main_songs)]
-                if encore_songs:
+                main_items   = [x for x in st.session_state.get("ev_setlist_main",   []) if x["title"].strip()]
+                encore_items = [x for x in st.session_state.get("ev_setlist_encore", []) if x["title"].strip()]
+                def fmt(i, item):
+                    suffix = f" [{item['part']}]" if is_performance and item.get("part","").strip() else ""
+                    return f"{i+1}. {item['title']}{suffix}"
+                lines = [fmt(i, x) for i, x in enumerate(main_items)]
+                if encore_items:
                     lines.append("")
                     lines.append("[Encore]")
-                    lines += [fmt(i, t) for i, t in enumerate(encore_songs)]
+                    lines += [fmt(i, x) for i, x in enumerate(encore_items)]
                 memo_text = "\n".join(lines) if lines else None
 
             ok = create_notion_page(
