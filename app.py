@@ -80,32 +80,6 @@ def clean_author_list(authors: list) -> str:
     """著者リストをクリーニングして ' / ' 結合"""
     return " / ".join(clean_author(a) for a in authors if a.strip())
 
-def parse_rakuten_date(sales_date: str) -> str:
-    """
-    楽天APIのsalesDateをISO日付文字列に変換する。
-    '2004年01月' → '2004-01-01'
-    '2004年'     → '2004-01-01'
-    '2004年頃'   → '2004-01-01'
-    '2004'       → '2004-01-01'
-    変換できない場合は '' を返す。
-    """
-    if not sales_date:
-        return ""
-    s = sales_date.strip()
-    m = re.match(r'(\d{4})年(\d{1,2})月', s)
-    if m:
-        return f"{m.group(1)}-{int(m.group(2)):02d}-01"
-    m = re.match(r'(\d{4})年', s)
-    if m:
-        return f"{m.group(1)}-01-01"
-    m = re.match(r'(\d{4})-(\d{2})$', s)
-    if m:
-        return f"{m.group(1)}-{m.group(2)}-01"
-    m = re.match(r'^(\d{4})$', s)
-    if m:
-        return f"{m.group(1)}-01-01"
-    return ""
-
 def make_filename(title: str, tmdb_id) -> str:
     return f"{sanitize_filename(title)}_{tmdb_id}.jpg"
 
@@ -470,7 +444,7 @@ def search_books(query: str, author: str = None) -> list:
             "title":      item.get("title", ""),
             "authors":    authors,
             "publisher":  item.get("publisherName", ""),
-            "published":  parse_rakuten_date(item.get("salesDate", "") or ""),
+            "published":  (item.get("salesDate", "") or "")[:4],
             "genres":     [],
             "cover_url":  cover,
             "media_type": "book",
@@ -805,7 +779,7 @@ def search_manga(query: str, author: str = None) -> list:
             "isbn":       isbn_val,
             "title":      base_title,
             "authors":    authors,
-            "published":  parse_rakuten_date(item.get("salesDate", "") or ""),
+            "published":  (item.get("salesDate", "") or "")[:4],
             "cover_url":  cover,
             "media_type": "manga",
         })
@@ -1162,7 +1136,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v3.2")
+st.caption("v3.3")
 
 for key, default in {
     "is_running":         False,
@@ -1929,26 +1903,47 @@ if mode == "自動同期" and st.session_state.is_running:
                 if icon_url:
                     patch_body["icon"] = {"type": "external", "external": {"url": icon_url}}
 
-                # クリエイター名正規化（書籍・漫画・音楽・ゲーム共通）
-                if media_label_val in ("書籍", "漫画", "音楽アルバム", "ゲーム"):
-                    # 書籍はISBNがある場合のみ、それ以外は無条件
-                    isbn_val = "".join(t["plain_text"] for t in props.get("ISBN", {}).get("rich_text", []))
-                    should_normalize = (media_label_val != "書籍") or bool(isbn_val)
-                    if should_normalize:
-                        raw_creator = "".join(t["plain_text"] for t in props.get("クリエイター", {}).get("rich_text", []))
-                        if raw_creator:
-                            cleaned = " / ".join(clean_author(a) for a in raw_creator.split("/") if a.strip())
-                            if cleaned != raw_creator:
-                                patch_body.setdefault("properties", {})["クリエイター"] = {
-                                    "rich_text": [{"type": "text", "text": {"content": cleaned}}]
-                                }
+                # クリエイター名正規化（全媒体共通）
+                # 書籍はISBNがある場合のみ、それ以外は無条件
+                isbn_val = "".join(t["plain_text"] for t in props.get("ISBN", {}).get("rich_text", []))
+                should_normalize = (media_label_val != "書籍") or bool(isbn_val)
+                if should_normalize:
+                    raw_creator = "".join(t["plain_text"] for t in props.get("クリエイター", {}).get("rich_text", []))
+                    if raw_creator:
+                        cleaned = " / ".join(clean_author(a) for a in raw_creator.split("/") if a.strip())
+                        if cleaned != raw_creator:
+                            patch_body.setdefault("properties", {})["クリエイター"] = {
+                                "rich_text": [{"type": "text", "text": {"content": cleaned}}]
+                            }
+
+                # 書籍: 楽天からカバー再取得
+                if media_label_val == "書籍":
+                    isbn_val2 = "".join(t["plain_text"] for t in props.get("ISBN", {}).get("rich_text", []))
+                    jp_title  = "".join(t["plain_text"] for t in props.get("タイトル", {}).get("title", []))
+                    query_str = isbn_val2 or jp_title
+                    if query_str:
+                        books = search_books(query_str)
+                        if books:
+                            new_cover = books[0]["cover_url"]
+                            if new_cover:
+                                patch_body["cover"] = {"type": "external", "external": {"url": new_cover}}
+
+                # 漫画: 楽天からカバー再取得
+                elif media_label_val == "漫画":
+                    jp_title  = "".join(t["plain_text"] for t in props.get("タイトル", {}).get("title", []))
+                    if jp_title:
+                        mangas = search_manga(jp_title)
+                        if mangas:
+                            new_cover = mangas[0]["cover_url"]
+                            if new_cover:
+                                patch_body["cover"] = {"type": "external", "external": {"url": new_cover}}
 
                 # 音楽アルバム: iTunesからカバー再取得（英語タイトル優先）
-                if media_label_val == "音楽アルバム":
-                    en_title_str  = "".join(t["plain_text"] for t in props.get("International Title", {}).get("rich_text", []))
-                    jp_title_str  = "".join(t["plain_text"] for t in props.get("タイトル", {}).get("title", []))
-                    title_str     = en_title_str or jp_title_str
-                    artist_str    = "".join(t["plain_text"] for t in props.get("クリエイター", {}).get("rich_text", []))
+                elif media_label_val == "音楽アルバム":
+                    en_title_str = "".join(t["plain_text"] for t in props.get("International Title", {}).get("rich_text", []))
+                    jp_title_str = "".join(t["plain_text"] for t in props.get("タイトル", {}).get("title", []))
+                    title_str    = en_title_str or jp_title_str
+                    artist_str   = "".join(t["plain_text"] for t in props.get("クリエイター", {}).get("rich_text", []))
                     if title_str:
                         albums = search_albums(title_str, artist=artist_str or None)
                         if albums:
@@ -1958,8 +1953,8 @@ if mode == "自動同期" and st.session_state.is_running:
 
                 # ゲーム: IGDBからカバー再取得
                 elif media_label_val == "ゲーム":
-                    en_title = "".join(t["plain_text"] for t in props.get("International Title", {}).get("rich_text", []))
-                    jp_title = "".join(t["plain_text"] for t in props.get("タイトル", {}).get("title", []))
+                    en_title  = "".join(t["plain_text"] for t in props.get("International Title", {}).get("rich_text", []))
+                    jp_title  = "".join(t["plain_text"] for t in props.get("タイトル", {}).get("title", []))
                     query_str = en_title or jp_title
                     if query_str:
                         games = search_games(query_str)
@@ -1968,10 +1963,26 @@ if mode == "自動同期" and st.session_state.is_running:
                             if new_cover:
                                 patch_body["cover"] = {"type": "external", "external": {"url": new_cover}}
 
+                # 演奏曲: Wikipedia肖像画をDriveに保存してカバーに設定
+                elif media_label_val == "演奏曲":
+                    raw_creator = "".join(t["plain_text"] for t in props.get("クリエイター", {}).get("rich_text", []))
+                    composer_name = raw_creator.split("/")[0].strip() if raw_creator else None
+                    if composer_name:
+                        # MusicBrainzでartist_idを検索
+                        composers, _err = search_mb_composer(composer_name)
+                        if composers:
+                            artist_id   = composers[0].get("id")
+                            portrait_url = get_composer_portrait_url(composer_name, artist_id) if artist_id else None
+                            if portrait_url:
+                                patch_body["cover"] = {"type": "external", "external": {"url": portrait_url}}
+
+                # 展示会・ライブ/ショー: アイコン更新 + クリエイター正規化のみ（カバー再取得なし）
+                # ← patch_bodyへの追加は上のクリエイター正規化ブロックで完結
+
                 if patch_body:
                     api_request("patch", f"https://api.notion.com/v1/pages/{item['id']}",
                                 headers=NOTION_HEADERS, json=patch_body)
-                msg = f"🎨 アイコン更新: {log_title}"
+                msg = f"🎨 リフレッシュ: {log_title}"
                 st.write(msg)
                 success_log.append(msg)
                 count += 1
