@@ -1092,23 +1092,50 @@ with st.sidebar:
 # ============================================================
 # 新規登録モード
 # ============================================================
-if st.button("🔬 ロケーションフィールド調査", key="debug_location"):
-    with st.spinner("取得中..."):
-        res = api_request("post",
-            f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query",
-            headers=NOTION_HEADERS,
-            json={"page_size": 3}
-        )
-        pages = res.json().get("results", [])
-        for page in pages:
-            loc = page["properties"].get("ロケーション", {})
-            if loc:
-                st.json(loc)
-                st.stop()
-        st.warning("ロケーションフィールドが見つかりませんでした")
-        
 if mode == "新規登録":
     st.subheader("➕ 新規登録")
+
+    # ── 🔬 place型書き込み実験（確認後削除） ──
+    with st.expander("🔬 [DEV] place型書き込み実験", expanded=False):
+        st.caption("テスト対象ページIDを入力して各パターンを試してください")
+        test_page_id = st.text_input("テスト用ページID（NotionページURL末尾の32桁）", key="dev_page_id")
+        test_name    = st.text_input("場所名", value="フェニーチェ堺", key="dev_place_name")
+        test_address = st.text_input("住所（任意）", value="大阪府堺市", key="dev_place_address")
+
+        col_a, col_b, col_c = st.columns(3)
+
+        # パターンA: name + address
+        if col_a.button("A: name+address", key="dev_place_a"):
+            payload = {"properties": {"ロケーション": {"place": {
+                "name":    test_name,
+                "address": test_address,
+            }}}}
+            res = api_request("patch", f"https://api.notion.com/v1/pages/{test_page_id}",
+                              headers=NOTION_HEADERS, json=payload)
+            st.write(f"ステータス: {res.status_code if res else 'None'}")
+            st.json(res.json() if res else {})
+
+        # パターンB: nameのみ
+        if col_b.button("B: nameのみ", key="dev_place_b"):
+            payload = {"properties": {"ロケーション": {"place": {
+                "name": test_name,
+            }}}}
+            res = api_request("patch", f"https://api.notion.com/v1/pages/{test_page_id}",
+                              headers=NOTION_HEADERS, json=payload)
+            st.write(f"ステータス: {res.status_code if res else 'None'}")
+            st.json(res.json() if res else {})
+
+        # パターンC: rich_text型として渡してみる（フォールバック確認）
+        if col_c.button("C: rich_textで渡す", key="dev_place_c"):
+            payload = {"properties": {"ロケーション": {"rich_text": [
+                {"type": "text", "text": {"content": test_name}}
+            ]}}}
+            res = api_request("patch", f"https://api.notion.com/v1/pages/{test_page_id}",
+                              headers=NOTION_HEADERS, json=payload)
+            st.write(f"ステータス: {res.status_code if res else 'None'}")
+            st.json(res.json() if res else {})
+    # ── 🔬 実験ここまで ──
+
 
     # ── 媒体選択 ──
     media_display = st.selectbox("媒体", [v[0] for v in MEDIA_ICON_MAP.values()], key="reg_media")
