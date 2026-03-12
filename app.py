@@ -1798,7 +1798,7 @@ st.markdown(
     "<em><strong>ArtéMis</strong></em> — named after the goddess of the hunt and the moon. She keeps track of everything you've ever experienced.",
     unsafe_allow_html=True
 )
-st.caption("v5.12")
+st.caption("v5.20")
 
 for key, default in {
     "is_running":         False,
@@ -3556,11 +3556,103 @@ if mode == "データ管理":
         is_event_media = page_media in ("演奏会（出演）", "演奏会（鑑賞）", "ライブ/ショー", "展示会")
 
         with st.expander(f"{diff_badge(item)}  {log_title}"):
+            def run_single_refresh():
+                media = page_media
+                existing_release = ((props.get("リリース日") or {}).get("date") or {}).get("start") or None
+                if media in ("映画", "ドラマ"):
+                    season_number = get_season_number(props)
+                    if saved_tmdb_id and saved_media_type:
+                        top = fetch_tmdb_by_id(saved_tmdb_id, saved_media_type)
+                        src = "🆔 ID参照"
+                    else:
+                        query = en if en else jp
+                        results = search_tmdb(query, existing_release[:4] if existing_release else None)
+                        top = results[0] if results else None
+                        src = "🔍 検索"
+                    if not top:
+                        return False, f"候補なし ({src})"
+                    tmdb_id = top["id"]
+                    media_type = top.get("media_type", saved_media_type or ("movie" if media == "映画" else "tv"))
+                    cover_url = f"https://image.tmdb.org/t/p/w600_and_h900_bestv2{top['poster_path']}"
+                    tmdb_release = top.get("release_date") or top.get("first_air_date")
+                    n_ok, d_ok, meta_ok, updated = update_all(
+                        page_id, cover_url, tmdb_release, existing_release,
+                        log_title, tmdb_id, media_type, True, True,
+                        force_meta=True, props=props, season_number=season_number,
+                        is_refresh=True,
+                    )
+                    all_ok = n_ok and d_ok and meta_ok
+                    return all_ok, f"TMDB: {('成功' if all_ok else '失敗')}"
+                if media == "アニメ":
+                    anilist_id = (props.get("AniList_ID") or {}).get("number")
+                    if not anilist_id:
+                        return False, "AniList_IDが未設定"
+                    anime = fetch_anime_by_id(int(anilist_id))
+                    if not anime:
+                        return False, "AniList取得失敗"
+                    cover_url = anime.get("cover_url", "")
+                    n_ok = update_notion_cover(page_id, cover_url, None, None, is_refresh=False) if cover_url else True
+                    meta_ok, _ = update_notion_metadata(
+                        page_id,
+                        {"genres": anime.get("genres", []), "cast": "", "director": anime.get("director", ""), "score": anime.get("score")},
+                        force=True, props=props,
+                    )
+                    d_ok = bool(save_to_drive(cover_url, log_title, anilist_id)) if cover_url else True
+                    all_ok = n_ok and meta_ok and d_ok
+                    return all_ok, f"AniList: {('成功' if all_ok else '失敗')}"
+                if media == "ゲーム":
+                    igdb_id = (props.get("IGDB_ID") or {}).get("number")
+                    if not igdb_id:
+                        return False, "IGDB_IDが未設定"
+                    game = fetch_game_by_id(int(igdb_id))
+                    if not game:
+                        return False, "IGDB取得失敗"
+                    cover_url = game.get("cover_url", "")
+                    n_ok = update_notion_cover(page_id, cover_url, None, None, is_refresh=False) if cover_url else True
+                    d_ok = bool(save_to_drive(cover_url, log_title, igdb_id)) if cover_url else True
+                    all_ok = n_ok and d_ok
+                    return all_ok, f"IGDB: {('成功' if all_ok else '失敗')}"
+                if media == "音楽アルバム":
+                    itunes_id = (props.get("iTunes_ID") or {}).get("number")
+                    if not itunes_id:
+                        return False, "iTunes_IDが未設定"
+                    album = fetch_album_by_id(int(itunes_id))
+                    if not album:
+                        return False, "iTunes取得失敗"
+                    cover_url = album.get("cover_url", "")
+                    n_ok = update_notion_cover(page_id, cover_url, None, None, is_refresh=False) if cover_url else True
+                    d_ok = bool(save_to_drive(cover_url, log_title, itunes_id)) if cover_url else True
+                    all_ok = n_ok and d_ok
+                    return all_ok, f"iTunes: {('成功' if all_ok else '失敗')}"
+                if media in ("書籍", "漫画"):
+                    isbn_val = "".join(t["plain_text"] for t in (props.get("ISBN") or {}).get("rich_text", []))
+                    author_val = "".join(t["plain_text"] for t in (props.get("クリエイター") or {}).get("rich_text", []))
+                    title_val = jp or en or log_title
+                    cover_candidates = collect_book_cover_candidates(isbn_val, title_val, author_val or None, "")
+                    cover_url = choose_best_cover(cover_candidates) or ""
+                    if not cover_url:
+                        return False, "書影取得失敗"
+                    n_ok = update_notion_cover(page_id, cover_url, None, None, is_refresh=False)
+                    drive_id = isbn_val or page_id
+                    d_ok = bool(save_to_drive(cover_url, log_title, drive_id))
+                    all_ok = n_ok and d_ok
+                    return all_ok, f"書影: {('成功' if all_ok else '失敗')}"
+                return False, "対象外"
+
             # ── ステータス行 ──
             stat_c1, stat_c2, stat_c3 = st.columns(3)
             stat_c1.metric("媒体", page_media or "不明")
             stat_c2.metric("Notionカバー", "登録済" if notion_ok_now else "未登録")
             stat_c3.metric("Drive画像",   "あり"   if drive_ok_now  else "なし")
+            if st.button("🔄 このページをリフレッシュ", key=f"refresh_one_{page_id}"):
+                with st.spinner("リフレッシュ中..."):
+                    ok, msg = run_single_refresh()
+                if ok:
+                    st.success(f"✅ {msg}")
+                    sync_notion_after_update(page_id=page_id)
+                    st.rerun()
+                else:
+                    st.error(f"❌ {msg}")
 
             # ── カバー画像プレビュー ──
             current_url = get_current_notion_url(item)
