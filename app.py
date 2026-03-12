@@ -62,6 +62,35 @@ def show_post_register_ui():
         st.session_state.clear()
         st.rerun()
 
+def reset_new_register_state():
+    """新規登録フォームの入力値をクリアする（媒体を跨いで残る値を防止）"""
+    keys = [
+        "reg_media",
+        "inp_jp_main", "inp_en_main", "inp_creator_main", "inp_cast_main",
+        "inp_jp_manga", "inp_creator_manga",
+        "inp_jp_album", "inp_creator_album",
+        "inp_jp_game",
+        "inp_jp_anime",
+        "final_jp", "final_en", "final_isbn",
+        "confirm_date", "confirm_rating", "confirm_wl",
+        "ev_title", "ev_creator", "ev_cast", "ev_genre",
+        "ev_start", "ev_end", "ev_watch", "ev_watch2", "ev_rating", "ev_wl",
+    ]
+    for k in keys:
+        st.session_state.pop(k, None)
+        st.session_state.pop(f"_cti_{k}", None)
+
+def maybe_reload_notion_data():
+    """更新後に自動でNotion再取得（オプション）"""
+    if not st.session_state.get("auto_reload_notion", False):
+        return
+    with st.spinner("Notionデータ再取得中..."):
+        all_pages = load_notion_data()
+        st.session_state.all_pages    = all_pages
+        st.session_state.pages        = filter_target_pages(all_pages)
+        st.session_state.search_results = {}
+        st.session_state.manual_page  = 0
+
 # ============================================================
 # Google Drive API クライアント
 # ============================================================
@@ -422,7 +451,7 @@ def get_tmdb_id_from_notion(props) -> tuple:
     tmdb_id_val    = props.get("TMDB_ID", {}).get("number")
     media_label    = (props.get("媒体") or {}).get("multi_select", [])
     media_label    = media_label[0]["name"] if media_label else None
-    media_type     = "movie" if media_label == "映画" else "tv" if media_label in ("ドラマ", "アニメ") else None
+    media_type     = "movie" if media_label == "映画" else "tv" if media_label == "ドラマ" else None
     return (int(tmdb_id_val) if tmdb_id_val else None), media_type
 
 def save_tmdb_id_to_notion(page_id: str, tmdb_id: int, media_type: str) -> bool:
@@ -682,19 +711,6 @@ def collect_book_cover_candidates(isbn: str, title: str, author: str | None, rak
         candidates.append(rakuten_cover)
     return [c for c in candidates if c]
 
-
-def get_openlibrary_cover(isbn: str) -> str:
-    """ISBNからOpen Libraryの高解像度カバー画像URLを返す。取得できなければ空文字。"""
-    if not isbn:
-        return ""
-    try:
-        check_url = f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg?default=false"
-        res = requests.get(check_url, timeout=6, allow_redirects=True)
-        if res.status_code == 200 and res.headers.get("Content-Type", "").startswith("image"):
-            return f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg"
-    except Exception:
-        pass
-    return ""
 
 def search_books(query: str, author: str = None, page: int = 1) -> list:
     """楽天ブックスAPIで書籍検索"""
@@ -1730,7 +1746,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v4.90")
+st.caption("ArtéMis — named after the goddess of the hunt and the moon. She keeps track of everything you've ever experienced.")
+st.caption("v5.00")
 
 for key, default in {
     "is_running":         False,
@@ -1767,6 +1784,7 @@ for key, default in {
     "refresh_success_log": [],
     "refresh_maintain_log": [],
     "refresh_error_log":   [],
+    "auto_reload_notion":  False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -1778,6 +1796,7 @@ with st.sidebar:
     st.header("操作パネル")
 
     st.divider()
+    st.checkbox("更新後にNotionを自動再取得", key="auto_reload_notion")
     if st.button("📥 Notionデータ取得", use_container_width=True, key="load_notion", type="primary"):
         with st.spinner("Notionからデータ取得中..."):
             all_pages = load_notion_data()
@@ -1987,16 +2006,19 @@ if mode == "新規登録":
                                     memo=r["memo"],
                                     location=None,  # TODO: 文字列→lat/lon変換は未実装、インポート後にデータ管理で設定
                                 )
-                                if ok:
-                                    success += 1
-                                else:
-                                    fail += 1
-                                    st.caption(f"❌ 登録失敗: {r['title']}")
-                                prog.progress((n + 1) / len(ok_rows))
-                                import time as _time
-                                _time.sleep(0.3)
-                            st.success(f"✅ {success} 件登録完了" + (f"　❌ {fail} 件失敗" if fail else ""))
-                            # pages再取得
+                            if ok:
+                                success += 1
+                            else:
+                                fail += 1
+                                st.caption(f"❌ 登録失敗: {r['title']}")
+                            prog.progress((n + 1) / len(ok_rows))
+                            import time as _time
+                            _time.sleep(0.3)
+                        st.success(f"✅ {success} 件登録完了" + (f"　❌ {fail} 件失敗" if fail else ""))
+                        if st.session_state.get("auto_reload_notion", False):
+                            maybe_reload_notion_data()
+                        else:
+                            # pages再取得（既存挙動）
                             all_pages = load_notion_data()
                             st.session_state.all_pages    = all_pages
                             st.session_state.pages        = filter_target_pages(all_pages)
@@ -2042,22 +2064,26 @@ if mode == "新規登録":
                 "公演名 *",
                 placeholder="例: 〇〇室内楽演奏会 / 定期演奏会" if is_performance else
                             "例: 大阪フィルハーモニー交響楽団 第588回定期演奏会" if is_concert else
-                            "例: 〇〇 LIVE TOUR 2025"
+                            "例: 〇〇 LIVE TOUR 2025",
+                key="ev_title",
             )
             event_creator = st.text_input(
                 "指揮者" if is_performance else ("アーティスト" if is_live else "クリエイター"),
                 placeholder="例: 井上道義" if is_performance else
                             "例: Queen / 米津玄師" if is_live else
-                            "例: 指揮者・キュレーターなど"
+                            "例: 指揮者・キュレーターなど",
+                key="ev_creator",
             )
             col_cast, col_genre = st.columns([1, 1])
             event_cast = col_cast.text_input(
                 "演奏団体" if is_concert else "出演者・バンド",
-                placeholder="例: 大阪フィルハーモニー交響楽団" if is_concert else "例: Queen"
+                placeholder="例: 大阪フィルハーモニー交響楽団" if is_concert else "例: Queen",
+                key="ev_cast",
             )
             event_genre = col_genre.text_input(
                 "ジャンル",
-                placeholder="例: クラシック / 室内楽" if is_concert else "例: ロック / J-POP"
+                placeholder="例: クラシック / 室内楽" if is_concert else "例: ロック / J-POP",
+                key="ev_genre",
             )
             if media_label == "展示会":
                 col_start, col_end, col_watch = st.columns([1, 1, 1])
@@ -2247,6 +2273,8 @@ if mode == "新規登録":
                     for key in ["ev_mb_composers", "ev_mb_works", "ev_mb_filter",
                                 "ev_it_results", "ev_setlist_main", "ev_setlist_encore"]:
                         st.session_state.pop(key, None)
+                    reset_new_register_state()
+                    maybe_reload_notion_data()
                     show_post_register_ui()
                 else:
                     st.error("❌ 登録失敗")
@@ -2560,6 +2588,8 @@ if mode == "新規登録":
                             st.session_state.new_search_done    = False
                             for key in ["confirm_reg", "new_search_results", "new_search_done", "bulk_checked"]:
                                 st.session_state.pop(key, None)
+                            reset_new_register_state()
+                            maybe_reload_notion_data()
                             show_post_register_ui()
                         else:
                             st.error("❌ 登録失敗")
@@ -2858,6 +2888,8 @@ if mode == "新規登録":
                                 "bulk_checked", "album_tracks_cache", "album_tracks_id"]:
                         st.session_state.pop(key, None)
                     st.success(f"✅ {success_count} 件登録完了！")
+                    reset_new_register_state()
+                    maybe_reload_notion_data()
                     show_post_register_ui()
             with col_clear:
                 if st.button("🗑 登録リストをクリア", key="cart_clear"):
@@ -3290,7 +3322,7 @@ if mode == "データ管理":
         saved_tmdb_id, saved_media_type = get_tmdb_id_from_notion(props)
 
         page_media = get_page_media(item)
-        is_tmdb_media = page_media in ("映画", "ドラマ", "アニメ")
+        is_tmdb_media = page_media in ("映画", "ドラマ")
         is_event_media = page_media in ("演奏会（出演）", "演奏会（鑑賞）", "ライブ/ショー", "展示会")
 
         with st.expander(f"{diff_badge(item)}  {log_title}"):
@@ -3374,9 +3406,9 @@ if mode == "データ管理":
                 if new_date != existing_date_start and new_date:
                     patch_props["鑑賞日"] = {"date": {"start": new_date}}
                 if new_jp != existing_jp:
-                    patch_props["名前"] = {"title": [{"type": "text", "text": {"content": new_jp}}]}
+                    patch_props["タイトル"] = {"title": [{"type": "text", "text": {"content": new_jp}}]}
                 if new_en != existing_en:
-                    patch_props["英語タイトル"] = {"rich_text": [{"type": "text", "text": {"content": new_en}}]}
+                    patch_props["International Title"] = {"rich_text": [{"type": "text", "text": {"content": new_en}}]}
                 if new_release != existing_release_edit and new_release:
                     patch_props["リリース日"] = {"date": {"start": new_release}}
                 if patch_props:
@@ -3388,6 +3420,7 @@ if mode == "データ管理":
                             if p["id"] == page_id:
                                 for k, v in patch_props.items():
                                     p["properties"][k] = v
+                        maybe_reload_notion_data()
                     else:
                         st.error("❌ 更新失敗")
                 else:
@@ -3411,6 +3444,7 @@ if mode == "データ管理":
                                       json={"properties": {"メモ": {"rich_text": [{"type": "text", "text": {"content": new_setlist}}]}}})
                     if res and res.status_code == 200:
                         st.success("✅ セットリスト保存完了")
+                        maybe_reload_notion_data()
                     else:
                         st.error("❌ 保存失敗")
 
@@ -3451,13 +3485,14 @@ if mode == "データ管理":
                                 for p in st.session_state.pages:
                                     if p["id"] == page_id:
                                         p["cover"] = {"type": "external", "external": {"url": public_url}}
+                                maybe_reload_notion_data()
                                 st.rerun()
                             else:
                                 st.error("❌ Notion更新失敗")
                         else:
                             st.error("❌ Drive保存失敗")
 
-            # ── TMDB_ID修正（映画・ドラマ・アニメのみ） ──
+            # ── TMDB_ID修正（映画・ドラマのみ） ──
             if is_tmdb_media:
                 st.divider()
                 st.caption("🔧 TMDB_ID を手動で修正")
@@ -3499,6 +3534,7 @@ if mode == "データ管理":
                                             if p["id"] == page_id:
                                                 p["cover"]                    = {"type": "external", "external": {"url": cover_url}}
                                                 p["properties"]["TMDB_ID"]    = {"number": new_tmdb_id}
+                                        maybe_reload_notion_data()
                                         time.sleep(1.5)
                                         st.rerun()
                                     else:
@@ -3508,7 +3544,7 @@ if mode == "データ管理":
                         else:
                             st.warning("TMDB_IDを入力してください")
 
-            # TMDB検索UI（映画・ドラマ・アニメのみ）
+            # TMDB検索UI（映画・ドラマのみ）
             if is_tmdb_media:
               default_query = re.sub(r'[Ss]eason\s*\d+', '', en if en else jp).strip()
               search_col, btn_col = st.columns([4, 1])
@@ -3597,3 +3633,134 @@ if mode == "データ管理":
                                           st.rerun()
                                       else:
                                           st.error("一部失敗しました: " + "　".join(parts))
+
+            # ── AniList_ID修正（アニメのみ） ──
+            if page_media == "アニメ":
+                st.divider()
+                st.caption("🔧 AniList_ID を手動で修正")
+                if saved_tmdb_id:
+                    st.warning("⚠️ このページは TMDB_ID を持っています。Notion側で削除してください。")
+                id_col, save_col = st.columns([3, 1])
+                current_anilist = (props.get("AniList_ID") or {}).get("number") or 0
+                new_anilist_id = id_col.number_input(
+                    "AniList_ID",
+                    value=int(current_anilist) if current_anilist else 0,
+                    min_value=0,
+                    step=1,
+                    key=f"anilist_id_input_{page_id}",
+                )
+                with save_col:
+                    st.write("")
+                    st.write("")
+                    if st.button("💾 保存", key=f"save_anilist_{page_id}"):
+                        if new_anilist_id > 0:
+                            with st.spinner("更新中..."):
+                                anime = fetch_anime_by_id(int(new_anilist_id))
+                                if anime:
+                                    cover_url = anime.get("cover_url", "")
+                                    res = api_request(
+                                        "patch",
+                                        f"https://api.notion.com/v1/pages/{page_id}",
+                                        headers=NOTION_HEADERS,
+                                        json={"properties": {"AniList_ID": {"number": int(new_anilist_id)}}},
+                                    )
+                                    n_ok = res is not None and res.status_code == 200
+                                    meta_ok, updated = update_notion_metadata(
+                                        page_id,
+                                        {
+                                            "genres": anime.get("genres", []),
+                                            "cast": "",
+                                            "director": anime.get("director", ""),
+                                            "score": anime.get("score"),
+                                        },
+                                        force=True,
+                                        props=props,
+                                    )
+                                    c_ok = update_notion_cover(page_id, cover_url, None, None, is_refresh=False) if cover_url else True
+                                    if n_ok and meta_ok and c_ok:
+                                        st.success("✅ AniList更新完了")
+                                        for p in st.session_state.pages:
+                                            if p["id"] == page_id:
+                                                p["properties"]["AniList_ID"] = {"number": int(new_anilist_id)}
+                                                if cover_url:
+                                                    p["cover"] = {"type": "external", "external": {"url": cover_url}}
+                                        maybe_reload_notion_data()
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ 一部更新に失敗しました")
+                                else:
+                                    st.error("AniListでIDが見つかりませんでした")
+                        else:
+                            st.warning("AniList_IDを入力してください")
+
+                st.divider()
+                st.caption("🔍 AniList 検索")
+                default_query = (en or jp or "").strip()
+                search_col, btn_col = st.columns([4, 1])
+                anime_query = clearable_text_input(
+                    "検索ワード", f"anilist_query_{page_id}",
+                    value=default_query,
+                    placeholder="タイトルで検索",
+                    container=search_col,
+                )
+                with btn_col:
+                    st.write("")
+                    st.write("")
+                    do_search = st.button("検索", key=f"anilist_search_{page_id}")
+                if do_search and anime_query:
+                    try:
+                        results = search_anime(anime_query)
+                        st.session_state.search_results[page_id] = results[:9]
+                    except Exception as e:
+                        st.error(f"検索エラー: {e}")
+                        st.session_state.search_results[page_id] = []
+                candidates = st.session_state.search_results.get(page_id)
+                if candidates is not None:
+                    if not candidates:
+                        st.warning("候補が見つかりませんでした")
+                    else:
+                        for row_start in range(0, len(candidates), 3):
+                            cols = st.columns(3)
+                            for col_idx, cand in enumerate(candidates[row_start:row_start + 3]):
+                                abs_idx = row_start + col_idx
+                                with cols[col_idx]:
+                                    st.image(cand.get("cover_url", ""))
+                                    st.caption(
+                                        f"{cand.get('title','?')} "
+                                        f"{cand.get('release','')} "
+                                        f"🆔 {cand.get('id')}"
+                                    )
+                                    if st.button("✅ 決定", key=f"sel_anilist_{page_id}_{abs_idx}"):
+                                        anime_id = cand.get("id")
+                                        if anime_id:
+                                            with st.spinner("更新中..."):
+                                                res = api_request(
+                                                    "patch",
+                                                    f"https://api.notion.com/v1/pages/{page_id}",
+                                                    headers=NOTION_HEADERS,
+                                                    json={"properties": {"AniList_ID": {"number": int(anime_id)}}},
+                                                )
+                                                n_ok = res is not None and res.status_code == 200
+                                                meta_ok, updated = update_notion_metadata(
+                                                    page_id,
+                                                    {
+                                                        "genres": cand.get("genres", []),
+                                                        "cast": "",
+                                                        "director": cand.get("director", ""),
+                                                        "score": cand.get("score"),
+                                                    },
+                                                    force=True,
+                                                    props=props,
+                                                )
+                                                c_ok = update_notion_cover(page_id, cand.get("cover_url", ""), None, None, is_refresh=False)
+                                                if n_ok and meta_ok and c_ok:
+                                                    st.success("✅ AniList更新完了")
+                                                    for p in st.session_state.pages:
+                                                        if p["id"] == page_id:
+                                                            p["properties"]["AniList_ID"] = {"number": int(anime_id)}
+                                                            if cand.get("cover_url"):
+                                                                p["cover"] = {"type": "external", "external": {"url": cand.get("cover_url")}}
+                                                    maybe_reload_notion_data()
+                                                    st.rerun()
+                                                else:
+                                                    st.error("❌ 一部更新に失敗しました")
