@@ -492,7 +492,7 @@ def search_books(query: str, author: str = None, page: int = 1) -> list:
     """楽天ブックスAPIで書籍検索"""
     rk_params = {
         "applicationId": RAKUTEN_APP_ID,
-        "accessKey":     st.secrets.get("RAKUTEN_ACCESS_KEY", ""),
+        "accessKey":      st.secrets.get("RAKUTEN_ACCESS_KEY", ""),
         "hits":          30,
         "page":          page,
         "formatVersion": 2,
@@ -502,9 +502,9 @@ def search_books(query: str, author: str = None, page: int = 1) -> list:
     if query:  rk_params["title"]  = query
     if author: rk_params["author"] = author
     rk_headers = {
-        "Referer":       "https://artemis-cers.streamlit.app",
-        "Origin":        "https://artemis-cers.streamlit.app",
-        "User-Agent":    "Mozilla/5.0",
+        "Referer":        "https://artemis-cers.streamlit.app",
+        "Origin":         "https://artemis-cers.streamlit.app",
+        "User-Agent":     "Mozilla/5.0",
         "Authorization": f"Bearer {st.secrets.get('RAKUTEN_ACCESS_KEY', '')}",
     }
     try:
@@ -521,14 +521,19 @@ def search_books(query: str, author: str = None, page: int = 1) -> list:
     results = []
     for item in res.json().get("Items", []):
         rakuten_cover = item.get("largeImageUrl") or item.get("mediumImageUrl") or item.get("smallImageUrl", "")
-        rakuten_cover = rakuten_cover.replace("http://", "https://") if rakuten_cover else ""
+        # --- 修正箇所：URLの整形とクエリパラメータの除去 ---
+        if rakuten_cover:
+            rakuten_cover = rakuten_cover.replace("http://", "https://").split('?')[0]
+        else:
+            rakuten_cover = ""
+        # ----------------------------------------------
         raw_authors = [a.strip() for a in (item.get("author", "") or "").split("/") if a.strip()]
         authors = [clean_author(a) for a in raw_authors]
         isbn_val = item.get("isbn", "")
         cover = get_openlibrary_cover(isbn_val) or rakuten_cover
         results.append({
             "id":         isbn_val or item.get("title", ""),
-            "isbn":       isbn_val,
+            "isbn":        isbn_val,
             "title":      item.get("title", ""),
             "authors":    authors,
             "publisher":  item.get("publisherName", ""),
