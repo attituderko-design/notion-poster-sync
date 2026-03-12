@@ -410,38 +410,6 @@ def get_page_media(page) -> str | None:
     ms = page["properties"].get("媒体", {}).get("multi_select", [])
     return ms[0]["name"] if ms else None
 
-def get_current_media_type(props) -> str:
-    mt = props.get("MEDIA_TYPE", {}).get("multi_select", [])
-    return mt[0]["name"] if mt else ""
-
-def media_label_to_media_type(label: str) -> str:
-    return {
-        "書籍": "book",
-        "漫画": "manga",
-        "音楽アルバム": "album",
-        "ゲーム": "game",
-        "アニメ": "anime",
-        "演奏曲": "score",
-        "演奏会（鑑賞）": "event",
-        "演奏会（出演）": "event",
-        "展示会": "event",
-        "ライブ/ショー": "event",
-    }.get(label, "")
-
-def ensure_media_type_property(page_id: str, target_media_type: str, props: dict | None = None) -> bool:
-    if not target_media_type:
-        return True
-    current = get_current_media_type(props or {})
-    if current == target_media_type:
-        return True
-    res = api_request(
-        "patch",
-        f"https://api.notion.com/v1/pages/{page_id}",
-        headers=NOTION_HEADERS,
-        json={"properties": {"MEDIA_TYPE": {"multi_select": [{"name": target_media_type}]}}},
-    )
-    return res is not None and res.status_code == 200
-
 def filter_target_pages(all_pages: list) -> list:
     """データ管理・自動同期対象：全媒体"""
     return list(all_pages)
@@ -452,8 +420,9 @@ def filter_sync_pages(all_pages: list) -> list:
 
 def get_tmdb_id_from_notion(props) -> tuple:
     tmdb_id_val    = props.get("TMDB_ID", {}).get("number")
-    media_type_val = props.get("MEDIA_TYPE", {}).get("multi_select", [])
-    media_type     = media_type_val[0]["name"] if media_type_val else None
+    media_label    = (props.get("媒体") or {}).get("multi_select", [])
+    media_label    = media_label[0]["name"] if media_label else None
+    media_type     = "movie" if media_label == "映画" else "tv" if media_label in ("ドラマ", "アニメ") else None
     return (int(tmdb_id_val) if tmdb_id_val else None), media_type
 
 def save_tmdb_id_to_notion(page_id: str, tmdb_id: int, media_type: str) -> bool:
@@ -463,7 +432,6 @@ def save_tmdb_id_to_notion(page_id: str, tmdb_id: int, media_type: str) -> bool:
         headers=NOTION_HEADERS,
         json={"properties": {
             "TMDB_ID":    {"number": tmdb_id},
-            "MEDIA_TYPE": {"multi_select": [{"name": media_type}]},
         }},
     )
     if res is None or res.status_code != 200:
@@ -1580,7 +1548,6 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
         "International Title": {"rich_text": [{"type": "text", "text": {"content": en_title}, "annotations": {"italic": True}}]},
         "媒体":               {"multi_select": [{"name": media_type_label}]},
         **({"TMDB_ID": {"number": tmdb_id}} if tmdb_id else {}),
-        **({"MEDIA_TYPE": {"multi_select": [{"name": media_type}]}} if media_type else {}),
         "WLflg":              {"checkbox": wlflg},
     }
     if tmdb_release and str(tmdb_release)[:10]:
@@ -1763,7 +1730,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.image("assets/logo.png", width=320)
-st.caption("v4.74")
+st.caption("v4.90")
 
 for key, default in {
     "is_running":         False,
@@ -3006,7 +2973,6 @@ if mode == "自動同期" and st.session_state.is_running:
                 cover_url = ""
                 src = "🆔 ID参照"
                 isbn_val = ""
-                target_media_type = media_label_to_media_type(media_label_val)
                 if media_label_val == "アニメ":
                     anilist_id = props.get("AniList_ID", {}).get("number")
                     if anilist_id:
@@ -3044,9 +3010,6 @@ if mode == "自動同期" and st.session_state.is_running:
                 need_notion = not notion_ok_now
                 need_drive  = not drive_ok_now
                 n_ok = update_notion_cover(item["id"], cover_url, None, None, is_refresh=False) if need_notion else True
-                mt_ok = ensure_media_type_property(item["id"], target_media_type, props=props)
-                if not mt_ok:
-                    error_log.append(f"⚠️ MEDIA_TYPE更新失敗: {log_title}")
                 drive_id = isbn_val if media_label_val in ("書籍", "漫画") and isbn_val else (props.get("AniList_ID", {}).get("number") or props.get("IGDB_ID", {}).get("number") or props.get("iTunes_ID", {}).get("number") or item["id"])
                 d_ok = bool(save_to_drive(cover_url, log_title, drive_id)) if need_drive else True
                 entry = build_update_log(log_title, src, need_notion, n_ok, need_drive, d_ok, True, [], is_refresh=False)
@@ -3088,11 +3051,6 @@ if mode == "自動同期" and st.session_state.is_running:
                 patch_body      = {}
                 if icon_url:
                     patch_body["icon"] = {"type": "external", "external": {"url": icon_url}}
-                target_media_type = media_label_to_media_type(media_label_val) if media_label_val else ""
-                if target_media_type:
-                    patch_body.setdefault("properties", {})["MEDIA_TYPE"] = {
-                        "multi_select": [{"name": target_media_type}]
-                    }
 
                 # クリエイター名正規化（書籍・漫画・音楽・ゲーム共通）
                 if media_label_val in ("書籍", "漫画", "音楽アルバム", "ゲーム"):
@@ -3368,7 +3326,7 @@ if mode == "データ管理":
                         st.caption(f"🎭 キャスト・関係者: {cast_val[:80] + '…' if len(cast_val) > 80 else cast_val}")
                         if tmdb_score is not None:
                             st.caption(f"⭐ TMDBスコア: {tmdb_score}")
-                        st.caption(f"🆔 TMDB_ID: {saved_tmdb_id or '—'}　MEDIA_TYPE: {saved_media_type or '—'}")
+                        st.caption(f"🆔 TMDB_ID: {saved_tmdb_id or '—'}")
                     if page_media in ("書籍", "漫画"):
                         st.caption(f"📚 クリエイター: {creator_val}")
                         st.caption(f"🔢 ISBN: {isbn_val}")
@@ -3502,8 +3460,8 @@ if mode == "データ管理":
             # ── TMDB_ID修正（映画・ドラマ・アニメのみ） ──
             if is_tmdb_media:
                 st.divider()
-                st.caption("🔧 TMDB_ID / MEDIA_TYPE を手動で修正")
-                id_col, type_col, save_col = st.columns([2, 2, 1])
+                st.caption("🔧 TMDB_ID を手動で修正")
+                id_col, save_col = st.columns([3, 1])
                 new_tmdb_id = id_col.number_input(
                     "TMDB_ID",
                     value=int(saved_tmdb_id) if saved_tmdb_id else 0,
@@ -3511,12 +3469,7 @@ if mode == "データ管理":
                     step=1,
                     key=f"tmdb_id_input_{page_id}",
                 )
-                new_media_type = type_col.selectbox(
-                    "MEDIA_TYPE",
-                    options=["movie", "tv"],
-                    index=0 if saved_media_type != "tv" else 1,
-                    key=f"media_type_input_{page_id}",
-                )
+                new_media_type = "movie" if page_media == "映画" else "tv"
                 with save_col:
                     st.write("")
                     st.write("")
@@ -3546,7 +3499,6 @@ if mode == "データ管理":
                                             if p["id"] == page_id:
                                                 p["cover"]                    = {"type": "external", "external": {"url": cover_url}}
                                                 p["properties"]["TMDB_ID"]    = {"number": new_tmdb_id}
-                                                p["properties"]["MEDIA_TYPE"] = {"multi_select": [{"name": new_media_type}]}
                                         time.sleep(1.5)
                                         st.rerun()
                                     else:
@@ -3641,7 +3593,6 @@ if mode == "データ管理":
                                               if p["id"] == page_id:
                                                   p["cover"]                    = {"type": "external", "external": {"url": cover_url}}
                                                   p["properties"]["TMDB_ID"]    = {"number": tmdb_id}
-                                                  p["properties"]["MEDIA_TYPE"] = {"multi_select": [{"name": media_type}]}
                                           time.sleep(1.5)
                                           st.rerun()
                                       else:
