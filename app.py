@@ -1795,7 +1795,7 @@ st.markdown("""
 
 st.image("assets/logo.png", width=320)
 st.caption("ArtéMis — named after the goddess of the hunt and the moon. She keeps track of everything you've ever experienced.")
-st.caption("v5.11")
+st.caption("v5.12")
 
 for key, default in {
     "is_running":         False,
@@ -1845,22 +1845,26 @@ with st.sidebar:
     st.header("操作パネル")
 
     st.divider()
+    if "auto_reload_mode" not in st.session_state:
+        st.session_state.auto_reload_mode = "manual"
+    current_label = (
+        "手動" if st.session_state.auto_reload_mode == "manual"
+        else "自動（全件）" if st.session_state.auto_reload_mode == "full"
+        else "半自動（該当ページ）"
+    )
     st.radio(
         "更新後の同期方式",
         options=["手動", "自動（全件）", "半自動（該当ページ）"],
-        index=["手動", "自動（全件）", "半自動（該当ページ）"].index(
-            "手動" if st.session_state.auto_reload_mode == "manual"
-            else "自動（全件）" if st.session_state.auto_reload_mode == "full"
-            else "半自動（該当ページ）"
-        ),
-        key="auto_reload_mode",
+        index=["手動", "自動（全件）", "半自動（該当ページ）"].index(current_label),
+        key="auto_reload_mode_display",
     )
-    # normalize stored value to internal keys
-    if st.session_state.auto_reload_mode == "手動":
+    # normalize stored value to internal keys (do not write to widget key)
+    display = st.session_state.get("auto_reload_mode_display", current_label)
+    if display == "手動":
         st.session_state.auto_reload_mode = "manual"
-    elif st.session_state.auto_reload_mode == "自動（全件）":
+    elif display == "自動（全件）":
         st.session_state.auto_reload_mode = "full"
-    elif st.session_state.auto_reload_mode == "半自動（該当ページ）":
+    elif display == "半自動（該当ページ）":
         st.session_state.auto_reload_mode = "partial"
     if st.button("📥 Notionデータ取得", use_container_width=True, key="load_notion", type="primary"):
         with st.spinner("Notionからデータ取得中..."):
