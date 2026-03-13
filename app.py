@@ -17,6 +17,7 @@ import uuid
 # ============================================================
 NOTION_API_KEY  = st.secrets["NOTION_API_KEY"]
 NOTION_DB_ID    = st.secrets["NOTION_DB_ID"]
+NOTION_SETLIST_DB_ID = st.secrets.get("NOTION_SETLIST_DB_ID", "")
 TMDB_API_KEY         = st.secrets["TMDB_API_KEY"]
 RAKUTEN_APP_ID = st.secrets.get("RAKUTEN_APP_ID", "")
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"]
@@ -31,7 +32,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.29"
+APP_VERSION = "7.30"
 
 # ============================================================
 # 媒体マッピング
@@ -2270,6 +2271,106 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
         pass
     return True
 
+@st.cache_data(ttl=600)
+def get_notion_db_property_types(database_id: str) -> dict:
+    if not database_id:
+        return {}
+    res = api_request("get", f"https://api.notion.com/v1/databases/{database_id}", headers=NOTION_HEADERS)
+    if res is None or res.status_code != 200:
+        return {}
+    props = (res.json() or {}).get("properties", {}) or {}
+    return {name: (meta.get("type") if isinstance(meta, dict) else None) for name, meta in props.items()}
+
+def _put_notion_prop(properties: dict, type_map: dict, name: str, value):
+    p_type = type_map.get(name)
+    if not p_type:
+        return
+    if p_type == "title":
+        text = str(value or "")
+        properties[name] = {"title": ([{"type": "text", "text": {"content": text}}] if text else [])}
+    elif p_type == "rich_text":
+        text = str(value or "")
+        properties[name] = {"rich_text": ([{"type": "text", "text": {"content": text}}] if text else [])}
+    elif p_type == "select":
+        text = str(value or "").strip()
+        properties[name] = {"select": {"name": text} if text else None}
+    elif p_type == "checkbox":
+        properties[name] = {"checkbox": bool(value)}
+    elif p_type == "number":
+        properties[name] = {"number": value if value is not None else None}
+    elif p_type == "date":
+        text = str(value or "").strip()
+        properties[name] = {"date": {"start": text} if text else None}
+    elif p_type == "relation":
+        if value is None:
+            properties[name] = {"relation": []}
+        elif isinstance(value, list):
+            properties[name] = {"relation": [{"id": rid} for rid in value if rid]}
+        else:
+            properties[name] = {"relation": [{"id": value}] if value else []}
+
+def create_setlist_rows_for_performance(
+    performance_page_id: str,
+    performance_title: str,
+    performance_date: str,
+    main_items: list[dict],
+    encore_items: list[dict],
+    selected_scores: list[dict],
+    score_pages: list[dict],
+) -> tuple[int, int]:
+    if not NOTION_SETLIST_DB_ID:
+        return 0, 0
+    type_map = get_notion_db_property_types(NOTION_SETLIST_DB_ID)
+    if not type_map:
+        return 0, 0
+
+    title_to_id = {}
+    for s in (selected_scores or []):
+        t = (s.get("title") or "").strip().lower()
+        sid = s.get("id")
+        if t and sid and t not in title_to_id:
+            title_to_id[t] = sid
+
+    created, failed = 0, 0
+    rows = [("通常", x) for x in (main_items or [])] + [("アンコール", x) for x in (encore_items or [])]
+    order = 1
+    for section, item in rows:
+        song_title = (item.get("title") or "").strip()
+        if not song_title:
+            continue
+        part = (item.get("part") or "").strip()
+        played = bool(part)
+        score_id = title_to_id.get(song_title.lower())
+        if not score_id:
+            found = _find_score_page_by_title(score_pages or [], song_title)
+            score_id = (found or {}).get("id")
+
+        props = {}
+        _put_notion_prop(props, type_map, "タイトル", song_title)
+        _put_notion_prop(props, type_map, "Playflg", "Yes" if played else "No")
+        _put_notion_prop(props, type_map, "共演者", "")
+        _put_notion_prop(props, type_map, "共演者担当楽器", "")
+        _put_notion_prop(props, type_map, "出演", performance_page_id)
+        _put_notion_prop(props, type_map, "出演日", performance_date)
+        _put_notion_prop(props, type_map, "区分", section)
+        _put_notion_prop(props, type_map, "担当楽器", part)
+        _put_notion_prop(props, type_map, "曲順", order)
+        _put_notion_prop(props, type_map, "演奏曲", score_id)
+        _put_notion_prop(props, type_map, "表示名", f"{performance_title} / {order:02d} / {section} / {song_title}")
+
+        if not props:
+            failed += 1
+            order += 1
+            continue
+        payload = {"parent": {"database_id": NOTION_SETLIST_DB_ID}, "properties": props}
+        res = api_request("post", "https://api.notion.com/v1/pages", headers=NOTION_HEADERS, json=payload)
+        if res is not None and res.status_code == 200:
+            created += 1
+        else:
+            failed += 1
+        order += 1
+    return created, failed
+
 def is_japanese_name(name: str) -> bool:
     """漢字・ひらがな・カタカナを含む場合は日本語著者名とみなす"""
     return bool(re.search(r'[\u3000-\u9fff\uff00-\uffef]', name))
@@ -3242,6 +3343,24 @@ if mode == "新規登録":
                     relation_ids=related_score_ids if is_performance else None,
                 )
                 if ok:
+                    created_setlist = failed_setlist = 0
+                    if is_performance and NOTION_SETLIST_DB_ID:
+                        setlist_main = [x for x in st.session_state.get("ev_setlist_main", []) if (x.get("title") or "").strip()]
+                        setlist_encore = [x for x in st.session_state.get("ev_setlist_encore", []) if (x.get("title") or "").strip()]
+                        if setlist_main or setlist_encore:
+                            perf_page_id = st.session_state.get("last_created_page_id", "")
+                            perf_date = watch_str or start_str or ""
+                            score_pages_for_link = _get_score_pages()
+                            selected_scores_for_link = st.session_state.get("ev_score_selected", [])
+                            created_setlist, failed_setlist = create_setlist_rows_for_performance(
+                                performance_page_id=perf_page_id,
+                                performance_title=event_title,
+                                performance_date=perf_date,
+                                main_items=setlist_main,
+                                encore_items=setlist_encore,
+                                selected_scores=selected_scores_for_link,
+                                score_pages=score_pages_for_link,
+                            )
                     for key in ["ev_mb_composers", "ev_mb_works", "ev_mb_filter",
                                 "ev_it_results", "ev_setlist_main", "ev_setlist_encore"]:
                         st.session_state.pop(key, None)
@@ -3250,6 +3369,13 @@ if mode == "新規登録":
                         page_id=st.session_state.get("last_created_page_id"),
                         updated_page=st.session_state.get("last_created_page"),
                     )
+                    if is_performance and NOTION_SETLIST_DB_ID and (created_setlist or failed_setlist):
+                        if failed_setlist == 0:
+                            st.success(f"✅ セットリストDBに {created_setlist} 件登録しました")
+                        elif created_setlist > 0:
+                            st.warning(f"⚠️ セットリストDB登録: 成功 {created_setlist} 件 / 失敗 {failed_setlist} 件")
+                        else:
+                            st.warning(f"⚠️ セットリストDB登録に失敗しました（{failed_setlist} 件）")
                     show_post_register_ui()
                 else:
                     st.error("❌ 登録失敗")
