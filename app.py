@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.23"
+APP_VERSION = "7.24"
 
 # ============================================================
 # 媒体マッピング
@@ -238,7 +238,7 @@ def has_any_id(props) -> bool:
         return True
     if props.get("iTunes_ID", {}).get("number"):
         return True
-    isbn_val = "".join(t["plain_text"] for t in (props.get("ISBN") or {}).get("rich_text", []))
+    isbn_val = plain_text_join((props.get("ISBN") or {}).get("rich_text", []))
     if isbn_val.strip():
         return True
     return False
@@ -341,6 +341,18 @@ def clean_author(name: str) -> str:
 def clean_author_list(authors: list) -> str:
     """著者リストをクリーニングして ' / ' 結合"""
     return " / ".join(clean_author(a) for a in authors if a.strip())
+
+def plain_text_join(items) -> str:
+    """Notion rich_text/title 配列を安全に文字列化する。"""
+    vals = []
+    for t in (items or []):
+        if not isinstance(t, dict):
+            continue
+        pt = t.get("plain_text")
+        if pt is None:
+            pt = ((t.get("text") or {}).get("content") or "")
+        vals.append(pt)
+    return "".join(vals)
 
 def make_filename(title: str, tmdb_id) -> str:
     return f"{sanitize_filename(title)}_{tmdb_id}.jpg"
@@ -2245,20 +2257,20 @@ def get_registered_ids(pages: list) -> dict:
         if v: igdb.add(int(v))
         v = (pr.get("iTunes_ID") or {}).get("number")
         if v: itunes.add(int(v))
-        v = "".join(t["plain_text"] for t in (pr.get("ISBN") or {}).get("rich_text", []))
+        v = plain_text_join((pr.get("ISBN") or {}).get("rich_text", []))
         if v: isbn.add(v)
         media_val = get_page_media(p)
         if media_val in ("書籍", "漫画"):
-            raw_title = "".join(t["plain_text"] for t in (pr.get("タイトル") or {}).get("title", []))
-            raw_creator = "".join(t["plain_text"] for t in (pr.get("クリエイター") or {}).get("rich_text", []))
+            raw_title = plain_text_join((pr.get("タイトル") or {}).get("title", []))
+            raw_creator = plain_text_join((pr.get("クリエイター") or {}).get("rich_text", []))
             norm_title = re.sub(r'\s*[\(（]?\d+[\)）]?\s*$', '', raw_title).strip().lower()
             for author in re.split(r'[/／・]', raw_creator):
                 author = author.strip()
                 if author:
                     book_keys.add((norm_title, normalize_name_for_compare(author)))
         elif media_val == "音楽アルバム":
-            raw_title = "".join(t["plain_text"] for t in (pr.get("タイトル") or {}).get("title", []))
-            raw_creator = "".join(t["plain_text"] for t in (pr.get("クリエイター") or {}).get("rich_text", []))
+            raw_title = plain_text_join((pr.get("タイトル") or {}).get("title", []))
+            raw_creator = plain_text_join((pr.get("クリエイター") or {}).get("rich_text", []))
             norm_title = raw_title.strip().lower()
             norm_artist = normalize_name_for_compare(raw_creator)
             if norm_title and norm_artist:
@@ -2504,7 +2516,29 @@ if is_drive_skip_mode():
 if "pending_notice" in st.session_state:
     st.success(st.session_state.pop("pending_notice"))
     # 新規作成直後は先頭へスクロールしてフォーカスされた編集カードを見つけやすくする
-    st.components.v1.html("<script>window.parent.scrollTo(0, 0);</script>", height=0)
+    # 実行タイミング差や環境差を吸収するため複数回トライする
+    st.components.v1.html(
+        """
+        <script>
+        function _scrollTopSafe(w) {
+          try { w.scrollTo({ top: 0, left: 0, behavior: "instant" }); }
+          catch (e1) {
+            try { w.scrollTo(0, 0); } catch (e2) {}
+          }
+          try { if (w.document && w.document.documentElement) w.document.documentElement.scrollTop = 0; } catch (e3) {}
+          try { if (w.document && w.document.body) w.document.body.scrollTop = 0; } catch (e4) {}
+        }
+        function _doScrollTop() {
+          _scrollTopSafe(window);
+          try { _scrollTopSafe(window.parent); } catch (e) {}
+        }
+        setTimeout(_doScrollTop, 0);
+        setTimeout(_doScrollTop, 120);
+        setTimeout(_doScrollTop, 400);
+        </script>
+        """,
+        height=0,
+    )
 
 for key, default in {
     "is_running":         False,
@@ -4378,8 +4412,8 @@ if mode == "自動同期" and st.session_state.is_running:
                         album = fetch_album_by_id(int(itunes_id))
                         cover_url = album.get("cover_url", "") if album else ""
                 elif media_label_val in ("書籍", "漫画"):
-                    isbn_val = "".join(t["plain_text"] for t in (props.get("ISBN") or {}).get("rich_text", []))
-                    author_val = "".join(t["plain_text"] for t in (props.get("クリエイター") or {}).get("rich_text", []))
+                    isbn_val = plain_text_join((props.get("ISBN") or {}).get("rich_text", []))
+                    author_val = plain_text_join((props.get("クリエイター") or {}).get("rich_text", []))
                     title_val = jp or en or log_title
                     cover_candidates = collect_book_cover_candidates(isbn_val, title_val, author_val or None, "")
                     cover_url = choose_best_cover(cover_candidates) or ""
@@ -4444,10 +4478,10 @@ if mode == "自動同期" and st.session_state.is_running:
                 # クリエイター名正規化（書籍・漫画・音楽・ゲーム共通）
                 if media_label_val in ("書籍", "漫画", "音楽アルバム", "ゲーム"):
                     # 書籍はISBNがある場合のみ、それ以外は無条件
-                    isbn_val = "".join(t["plain_text"] for t in props.get("ISBN", {}).get("rich_text", []))
+                    isbn_val = plain_text_join(props.get("ISBN", {}).get("rich_text", []))
                     should_normalize = (media_label_val != "書籍") or bool(isbn_val)
                     if should_normalize:
-                        raw_creator = "".join(t["plain_text"] for t in props.get("クリエイター", {}).get("rich_text", []))
+                        raw_creator = plain_text_join(props.get("クリエイター", {}).get("rich_text", []))
                         if raw_creator:
                             cleaned = " / ".join(clean_author(a) for a in raw_creator.split("/") if a.strip())
                             if cleaned != raw_creator:
@@ -4457,10 +4491,10 @@ if mode == "自動同期" and st.session_state.is_running:
 
                 # 音楽アルバム: iTunesからカバー再取得（英語タイトル優先）
                 if media_label_val == "音楽アルバム":
-                    en_title_str  = "".join(t["plain_text"] for t in props.get("International Title", {}).get("rich_text", []))
-                    jp_title_str  = "".join(t["plain_text"] for t in props.get("タイトル", {}).get("title", []))
+                    en_title_str  = plain_text_join(props.get("International Title", {}).get("rich_text", []))
+                    jp_title_str  = plain_text_join(props.get("タイトル", {}).get("title", []))
                     title_str     = en_title_str or jp_title_str
-                    artist_str    = "".join(t["plain_text"] for t in props.get("クリエイター", {}).get("rich_text", []))
+                    artist_str    = plain_text_join(props.get("クリエイター", {}).get("rich_text", []))
                     if title_str:
                         albums = search_albums(title_str, artist=artist_str or None)
                         if albums:
@@ -4470,8 +4504,8 @@ if mode == "自動同期" and st.session_state.is_running:
 
                 # ゲーム: IGDBからカバー再取得
                 elif media_label_val == "ゲーム":
-                    en_title = "".join(t["plain_text"] for t in props.get("International Title", {}).get("rich_text", []))
-                    jp_title = "".join(t["plain_text"] for t in props.get("タイトル", {}).get("title", []))
+                    en_title = plain_text_join(props.get("International Title", {}).get("rich_text", []))
+                    jp_title = plain_text_join(props.get("タイトル", {}).get("title", []))
                     query_str = en_title or jp_title
                     if query_str:
                         games = search_games(query_str)
@@ -4916,8 +4950,8 @@ if mode == "データ管理":
                     all_ok = n_ok and d_ok
                     return all_ok, f"iTunes: {('成功' if all_ok else '失敗')}"
                 if media in ("書籍", "漫画"):
-                    isbn_val = "".join(t["plain_text"] for t in (props.get("ISBN") or {}).get("rich_text", []))
-                    author_val = "".join(t["plain_text"] for t in (props.get("クリエイター") or {}).get("rich_text", []))
+                    isbn_val = plain_text_join((props.get("ISBN") or {}).get("rich_text", []))
+                    author_val = plain_text_join((props.get("クリエイター") or {}).get("rich_text", []))
                     title_val = jp or en or log_title
                     cover_candidates = collect_book_cover_candidates(isbn_val, title_val, author_val or None, "")
                     cover_url = choose_best_cover(cover_candidates) or ""
@@ -4968,10 +5002,10 @@ if mode == "データ管理":
                     release_val = ((props.get("リリース日") or {}).get("date") or {}).get("start", "") or "—"
                     genre_items = (props.get("ジャンル") or {}).get("multi_select", [])
                     genre_val   = "　".join(g["name"] for g in genre_items) if genre_items else "—"
-                    creator_val = "".join(t["plain_text"] for t in (props.get("クリエイター") or {}).get("rich_text", [])) or "—"
-                    cast_val    = "".join(t["plain_text"] for t in (props.get("キャスト・関係者") or {}).get("rich_text", [])) or "—"
+                    creator_val = plain_text_join((props.get("クリエイター") or {}).get("rich_text", [])) or "—"
+                    cast_val    = plain_text_join((props.get("キャスト・関係者") or {}).get("rich_text", [])) or "—"
                     tmdb_score  = (props.get("TMDB_score") or {}).get("number")
-                    isbn_val    = "".join(t["plain_text"] for t in (props.get("ISBN") or {}).get("rich_text", [])) or "—"
+                    isbn_val    = plain_text_join((props.get("ISBN") or {}).get("rich_text", [])) or "—"
                     igdb_id_val = (props.get("IGDB_ID") or {}).get("number")
                     itunes_id_val = (props.get("iTunes_ID") or {}).get("number")
                     anilist_id_val = (props.get("AniList_ID") or {}).get("number")
@@ -5000,7 +5034,7 @@ if mode == "データ管理":
             with st.expander("✏️ 基本", expanded=False):
                 existing_rating = (props.get("評価") or {}).get("select") or {}
                 existing_rating = existing_rating.get("name", "") if isinstance(existing_rating, dict) else ""
-                existing_memo   = "".join(t["plain_text"] for t in (props.get("メモ") or {}).get("rich_text", []))
+                existing_memo   = plain_text_join((props.get("メモ") or {}).get("rich_text", []))
                 existing_date_start = ((props.get("鑑賞日") or {}).get("date") or {}).get("start", "") or ""
                 edit_col1, edit_col2, edit_col3 = st.columns([1.5, 3, 1.2])
                 new_rating = edit_col1.selectbox(
@@ -5318,8 +5352,8 @@ if mode == "データ管理":
             st.divider()
             with st.expander("🧩 メタ / ID", expanded=False):
                 existing_genres = " / ".join(g["name"] for g in (props.get("ジャンル") or {}).get("multi_select", []))
-                existing_creator = "".join(t["plain_text"] for t in (props.get("クリエイター") or {}).get("rich_text", []))
-                existing_cast = "".join(t["plain_text"] for t in (props.get("キャスト・関係者") or {}).get("rich_text", []))
+                existing_creator = plain_text_join((props.get("クリエイター") or {}).get("rich_text", []))
+                existing_cast = plain_text_join((props.get("キャスト・関係者") or {}).get("rich_text", []))
                 meta_c1, meta_c2 = st.columns(2)
                 new_genres = meta_c1.text_input("ジャンル（区切り: / または , ）", value=existing_genres, key=f"edit_genres_{page_id}")
                 new_creator = meta_c2.text_input("クリエイター", value=existing_creator, key=f"edit_creator_{page_id}")
@@ -5346,7 +5380,7 @@ if mode == "データ管理":
                         )
 
                 id_c1, id_c2, id_c3, id_c4 = st.columns(4)
-                current_isbn = "".join(t["plain_text"] for t in (props.get("ISBN") or {}).get("rich_text", []))
+                current_isbn = plain_text_join((props.get("ISBN") or {}).get("rich_text", []))
                 new_isbn = id_c1.text_input("ISBN", value=current_isbn, key=f"edit_isbn_{page_id}")
                 current_anilist = (props.get("AniList_ID") or {}).get("number") or 0
                 new_anilist = id_c2.number_input("AniList_ID", value=int(current_anilist) if current_anilist else 0, min_value=0, step=1, key=f"edit_anilist_{page_id}")
@@ -5410,7 +5444,7 @@ if mode == "データ管理":
             if page_media == "出演":
                 st.divider()
                 st.caption("🎻 セットリスト編集")
-                existing_memo_full = "".join(t["plain_text"] for t in (props.get("メモ") or {}).get("rich_text", []))
+                existing_memo_full = plain_text_join((props.get("メモ") or {}).get("rich_text", []))
                 new_setlist = st.text_area(
                     "セットリスト（メモ欄に保存）",
                     value=existing_memo_full,
