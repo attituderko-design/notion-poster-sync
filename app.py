@@ -17,7 +17,10 @@ import uuid
 # ============================================================
 NOTION_API_KEY  = st.secrets["NOTION_API_KEY"]
 NOTION_DB_ID    = st.secrets["NOTION_DB_ID"]
-NOTION_SETLIST_DB_ID = st.secrets.get("NOTION_SETLIST_DB_ID", "")
+NOTION_SCORE_DB_ID = st.secrets.get("NOTION_SCORE_DB_ID", st.secrets.get("NOTION_SETLIST_DB_ID", ""))
+NOTION_PERFORMER_DB_ID = st.secrets.get("NOTION_PERFORMER_DB_ID", "")
+NOTION_ASSIGNMENT_DB_ID = st.secrets.get("NOTION_ASSIGNMENT_DB_ID", "")
+DEFAULT_PERFORMER_NAME = st.secrets.get("DEFAULT_PERFORMER_NAME", "")
 TMDB_API_KEY         = st.secrets["TMDB_API_KEY"]
 RAKUTEN_APP_ID = st.secrets.get("RAKUTEN_APP_ID", "")
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"]
@@ -32,7 +35,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.31"
+APP_VERSION = "7.35"
 
 # ============================================================
 # 媒体マッピング
@@ -2294,6 +2297,13 @@ def _put_notion_prop(properties: dict, type_map: dict, name: str, value):
     elif p_type == "select":
         text = str(value or "").strip()
         properties[name] = {"select": {"name": text} if text else None}
+    elif p_type == "multi_select":
+        if isinstance(value, list):
+            names = [str(v).strip() for v in value if str(v).strip()]
+        else:
+            text = str(value or "").strip()
+            names = [text] if text else []
+        properties[name] = {"multi_select": [{"name": n} for n in names]}
     elif p_type == "checkbox":
         properties[name] = {"checkbox": bool(value)}
     elif p_type == "number":
@@ -2309,6 +2319,38 @@ def _put_notion_prop(properties: dict, type_map: dict, name: str, value):
         else:
             properties[name] = {"relation": [{"id": value}] if value else []}
 
+def _split_instruments(part: str) -> list[str]:
+    return [x.strip() for x in re.split(r'[/／,、・\s]+', part or "") if x.strip()]
+
+def _find_or_create_performer_id(name: str) -> str | None:
+    performer_name = (name or "").strip()
+    if not performer_name or not NOTION_PERFORMER_DB_ID:
+        return None
+    res = api_request(
+        "post",
+        f"https://api.notion.com/v1/databases/{NOTION_PERFORMER_DB_ID}/query",
+        headers=NOTION_HEADERS,
+        json={"filter": {"property": "名前", "title": {"equals": performer_name}}, "page_size": 1},
+    )
+    if res is not None and res.status_code == 200:
+        rows = (res.json() or {}).get("results", [])
+        if rows:
+            return rows[0].get("id")
+    props = get_notion_db_property_types(NOTION_PERFORMER_DB_ID)
+    payload_props = {}
+    _put_notion_prop(payload_props, props, "名前", performer_name)
+    if not payload_props:
+        return None
+    cres = api_request(
+        "post",
+        "https://api.notion.com/v1/pages",
+        headers=NOTION_HEADERS,
+        json={"parent": {"database_id": NOTION_PERFORMER_DB_ID}, "properties": payload_props},
+    )
+    if cres is not None and cres.status_code == 200:
+        return (cres.json() or {}).get("id")
+    return None
+
 def create_setlist_rows_for_performance(
     performance_page_id: str,
     performance_title: str,
@@ -2317,12 +2359,12 @@ def create_setlist_rows_for_performance(
     encore_items: list[dict],
     selected_scores: list[dict],
     score_pages: list[dict],
-) -> tuple[int, int, str]:
-    if not NOTION_SETLIST_DB_ID:
-        return 0, 0, "NOTION_SETLIST_DB_ID 未設定"
-    type_map = get_notion_db_property_types(NOTION_SETLIST_DB_ID)
+) -> tuple[int, int, int, int, str]:
+    if not NOTION_SCORE_DB_ID:
+        return 0, 0, 0, 0, "NOTION_SCORE_DB_ID 未設定"
+    type_map = get_notion_db_property_types(NOTION_SCORE_DB_ID)
     if not type_map:
-        return 0, 0, "セットリストDBのプロパティ取得失敗（Integration接続/DB IDを確認）"
+        return 0, 0, 0, 0, "演奏曲DBのプロパティ取得失敗（Integration接続/DB IDを確認）"
 
     title_to_id = {}
     for s in (selected_scores or []):
@@ -2332,16 +2374,21 @@ def create_setlist_rows_for_performance(
             title_to_id[t] = sid
 
     created, failed = 0, 0
-    rows = [("通常", x) for x in (main_items or [])] + [("アンコール", x) for x in (encore_items or [])]
+    created_assign, failed_assign = 0, 0
+    rows = [("本編", x) for x in (main_items or [])] + [("Encore", x) for x in (encore_items or [])]
     if not rows:
-        return 0, 0, "セットリスト入力なし"
+        return 0, 0, 0, 0, "セットリスト入力なし"
+    performer_name = (st.session_state.get("ev_self_name") or DEFAULT_PERFORMER_NAME or "").strip()
+    performer_id = _find_or_create_performer_id(performer_name) if performer_name else None
+    assign_type_map = get_notion_db_property_types(NOTION_ASSIGNMENT_DB_ID) if NOTION_ASSIGNMENT_DB_ID else {}
+
     order = 1
     for section, item in rows:
         song_title = (item.get("title") or "").strip()
         if not song_title:
             continue
         part = (item.get("part") or "").strip()
-        played = bool(part)
+        played = bool(item.get("played", False))
         score_id = title_to_id.get(song_title.lower())
         if not score_id:
             found = _find_score_page_by_title(score_pages or [], song_title)
@@ -2349,13 +2396,9 @@ def create_setlist_rows_for_performance(
 
         props = {}
         _put_notion_prop(props, type_map, "タイトル", song_title)
-        _put_notion_prop(props, type_map, "Playflg", "Yes" if played else "No")
-        _put_notion_prop(props, type_map, "共演者", "")
-        _put_notion_prop(props, type_map, "共演者担当楽器", "")
         _put_notion_prop(props, type_map, "出演", performance_page_id)
         _put_notion_prop(props, type_map, "出演日", performance_date)
         _put_notion_prop(props, type_map, "区分", section)
-        _put_notion_prop(props, type_map, "担当楽器", part)
         _put_notion_prop(props, type_map, "曲順", order)
         _put_notion_prop(props, type_map, "演奏曲", score_id)
         _put_notion_prop(props, type_map, "表示名", f"{performance_title} / {order:02d} / {section} / {song_title}")
@@ -2364,14 +2407,39 @@ def create_setlist_rows_for_performance(
             failed += 1
             order += 1
             continue
-        payload = {"parent": {"database_id": NOTION_SETLIST_DB_ID}, "properties": props}
+        payload = {"parent": {"database_id": NOTION_SCORE_DB_ID}, "properties": props}
         res = api_request("post", "https://api.notion.com/v1/pages", headers=NOTION_HEADERS, json=payload)
         if res is not None and res.status_code == 200:
             created += 1
+            score_row_id = (res.json() or {}).get("id")
+            if played and NOTION_ASSIGNMENT_DB_ID:
+                if not score_row_id or not performer_id:
+                    failed_assign += 1
+                else:
+                    a_props = {}
+                    _put_notion_prop(a_props, assign_type_map, "タイトル", f"{performance_title} / {order:02d} / {performer_name or '出演者'}")
+                    _put_notion_prop(a_props, assign_type_map, "演奏曲", score_row_id)
+                    _put_notion_prop(a_props, assign_type_map, "出演者", performer_id)
+                    _put_notion_prop(a_props, assign_type_map, "担当楽器", _split_instruments(part))
+                    if a_props:
+                        a_res = api_request(
+                            "post",
+                            "https://api.notion.com/v1/pages",
+                            headers=NOTION_HEADERS,
+                            json={"parent": {"database_id": NOTION_ASSIGNMENT_DB_ID}, "properties": a_props},
+                        )
+                        if a_res is not None and a_res.status_code == 200:
+                            created_assign += 1
+                        else:
+                            failed_assign += 1
+                    else:
+                        failed_assign += 1
         else:
             failed += 1
         order += 1
-    return created, failed, ""
+    if NOTION_ASSIGNMENT_DB_ID and not performer_id and any(bool(x.get("played", False)) for _, x in rows):
+        return created, failed, created_assign, failed_assign, "演奏担当DB: 自分の出演者名（ev_self_name/DEFAULT_PERFORMER_NAME）未設定"
+    return created, failed, created_assign, failed_assign, ""
 
 def is_japanese_name(name: str) -> bool:
     """漢字・ひらがな・カタカナを含む場合は日本語著者名とみなす"""
@@ -3087,8 +3155,15 @@ if mode == "新規登録":
                 st.divider()
                 MAX_MAIN   = 25
                 MAX_ENCORE = 5
+                if is_performance:
+                    st.text_input(
+                        "自分の出演者名（出演者DBの名前）",
+                        key="ev_self_name",
+                        value=st.session_state.get("ev_self_name", DEFAULT_PERFORMER_NAME),
+                        placeholder="例: Yuta Kita",
+                    )
 
-                # セッションステート構造: [{"title": "曲名", "part": "Vn."}]  ※part は出演のみ使用
+                # セッションステート構造: [{"title": "曲名", "part": "Vn.", "played": True}]
                 def render_song_list(slot_key, max_count, label):
                     """曲リストUIを描画し、現在のリストを返す"""
                     songs = st.session_state[slot_key]
@@ -3096,13 +3171,18 @@ if mode == "新規登録":
                     new_list = []
                     for i, item in enumerate(songs):
                         if is_performance:
-                            c_num, c_inp, c_part, c_del = st.columns([0.3, 3.5, 1.2, 0.5])
+                            c_num, c_inp, c_play, c_part, c_del = st.columns([0.3, 3.2, 0.8, 1.2, 0.5])
                         else:
                             c_num, c_inp, c_del = st.columns([0.3, 4, 0.5])
                         c_num.markdown(f"**{i+1}.**")
                         t = c_inp.text_input("", value=item["title"], key=f"{slot_key}_t_{i}", label_visibility="collapsed")
-                        p = c_part.text_input("", value=item["part"], key=f"{slot_key}_p_{i}", placeholder="楽器", label_visibility="collapsed") if is_performance else ""
-                        new_list.append({"title": t, "part": p})
+                        if is_performance:
+                            played = c_play.checkbox("演奏", value=bool(item.get("played", False)), key=f"{slot_key}_played_{i}", label_visibility="collapsed")
+                            p = c_part.text_input("", value=item.get("part", ""), key=f"{slot_key}_p_{i}", placeholder="担当楽器", label_visibility="collapsed")
+                        else:
+                            played = False
+                            p = ""
+                        new_list.append({"title": t, "part": p, "played": played})
                         if c_del.button("✕", key=f"{slot_key}_del_{i}"):
                             st.session_state[slot_key] = [x for j, x in enumerate(new_list) if j != i]
                             st.rerun()
@@ -3112,7 +3192,7 @@ if mode == "新規登録":
                     last_empty = new_list and not new_list[-1]["title"].strip()
                     if len(filled) < max_count and not last_empty:
                         if st.button(f"＋ 曲を追加", key=f"{slot_key}_add"):
-                            st.session_state[slot_key] = filled + [{"title": "", "part": ""}]
+                            st.session_state[slot_key] = filled + [{"title": "", "part": "", "played": False}]
                             st.rerun()
 
                 def add_songs_to_slot(slot_key, titles, max_count):
@@ -3120,7 +3200,7 @@ if mode == "新規登録":
                     current = [x for x in st.session_state[slot_key] if x["title"].strip()]
                     for title in titles:
                         if len(current) < max_count and title not in [x["title"] for x in current]:
-                            current.append({"title": title, "part": ""})
+                            current.append({"title": title, "part": "", "played": False})
                     st.session_state[slot_key] = current
 
                 # ── 通常セットリスト ──
@@ -3129,46 +3209,80 @@ if mode == "新規登録":
                 # ── アンコール ──
                 render_song_list("ev_setlist_encore", MAX_ENCORE, f"🎊 アンコール（最大{MAX_ENCORE}曲）")
 
-                # ── 楽曲検索（検索→ボタンで直接追加、チェックボックスなし）──
+                # ── 楽曲検索（出演はクラシック/ポピュラーを切替可）──
                 st.divider()
-                if is_concert:
-                    st.caption("🔍 楽曲検索（MusicBrainz）")
-                    col_ev_comp, col_ev_title = st.columns([1, 1])
-                    ev_composer_input = col_ev_comp.text_input("作曲家名", placeholder="例: Beethoven / ベートーヴェン", key="ev_composer")
-                    ev_title_filter   = col_ev_title.text_input("曲名で絞り込み（任意）", placeholder="例: Symphony", key="ev_title_filter")
+                use_mb = is_concert
+                use_itunes = is_live
+                if is_performance:
+                    search_mode = st.segmented_control(
+                        "楽曲検索方式",
+                        options=["クラシック（MusicBrainz）", "ポピュラー（iTunes）", "両方"],
+                        default="両方",
+                        key="ev_song_search_mode",
+                    )
+                    use_mb = search_mode in ("クラシック（MusicBrainz）", "両方")
+                    use_itunes = search_mode in ("ポピュラー（iTunes）", "両方")
 
+                if use_mb:
+                    st.caption("🔍 楽曲検索（MusicBrainz）")
+                    st.caption("1) 作曲家を検索 → 2) 作曲家を確定 → 3) 曲名で検索 → 4) 曲を追加")
+                    ev_composer_input = st.text_input(
+                        "1. 作曲家を検索",
+                        placeholder="例: Beethoven / ベートーヴェン",
+                        key="ev_composer",
+                    )
                     if st.button("🔍 作曲家を検索", key="ev_mb_search"):
-                        if ev_composer_input:
+                        if ev_composer_input.strip():
                             with st.spinner("作曲家を検索中..."):
-                                ev_composers, ev_err = search_mb_composer(ev_composer_input)
+                                ev_composers, ev_err = search_mb_composer(ev_composer_input.strip())
                             if ev_err:
                                 st.error(f"⚠️ MusicBrainz API エラー: {ev_err}")
                             st.session_state.ev_mb_composers = ev_composers
-                            st.session_state.ev_mb_works     = []
-                            st.session_state.ev_mb_filter    = ev_title_filter
+                            st.session_state.ev_mb_works = []
+                            st.session_state.ev_mb_selected_comp = None
                             if not ev_composers and not ev_err:
                                 st.warning("作曲家が見つかりませんでした。")
                         else:
                             st.warning("作曲家名を入力してください")
 
+                    ev_selected_comp = st.session_state.get("ev_mb_selected_comp")
                     if st.session_state.get("ev_mb_composers"):
-                        ev_composers   = st.session_state.ev_mb_composers
+                        ev_composers = st.session_state.ev_mb_composers
                         ev_comp_labels = [
-                            f"{c['name']}" + (f"（{c['disambiguation']}）" if c['disambiguation'] else "") + (f" [{c['life_span']}–]" if c['life_span'] else "")
+                            f"{c['name']}"
+                            + (f"（{c['disambiguation']}）" if c.get('disambiguation') else "")
+                            + (f" [{c['life_span']}–]" if c.get('life_span') else "")
                             for c in ev_composers
                         ]
-                        ev_sel_idx = st.radio("作曲家を選択", range(len(ev_comp_labels)), format_func=lambda i: ev_comp_labels[i], key="ev_mb_comp_radio")
-                        if st.button("この作曲家の作品一覧を取得", key="ev_mb_fetch_works"):
-                            ev_sel_comp = ev_composers[ev_sel_idx]
-                            with st.spinner(f"{ev_sel_comp['name']} の作品を取得中..."):
-                                ev_works = search_mb_works(ev_sel_comp["id"], st.session_state.get("ev_mb_filter", ""))
+                        ev_sel_idx = st.radio("2. 作曲家を特定", range(len(ev_comp_labels)), format_func=lambda i: ev_comp_labels[i], key="ev_mb_comp_radio")
+                        if st.button("✅ この作曲家で進める", key="ev_mb_pick_comp"):
+                            st.session_state.ev_mb_selected_comp = ev_composers[ev_sel_idx]
+                            st.session_state.ev_mb_works = []
+                            st.rerun()
+                        ev_selected_comp = st.session_state.get("ev_mb_selected_comp")
+                        if ev_selected_comp:
+                            st.success(f"作曲家を確定: {ev_selected_comp.get('name', '')}")
+
+                    if ev_selected_comp:
+                        ev_title_filter = st.text_input("3. 検索ワード（曲名）", placeholder="例: Symphony No.5", key="ev_title_filter")
+                        c_mb1, c_mb2 = st.columns([1, 1])
+                        if c_mb1.button("🔍 曲名で検索", key="ev_mb_fetch_works"):
+                            if not ev_title_filter.strip():
+                                st.warning("曲名を入力してください。")
+                            else:
+                                with st.spinner(f"{ev_selected_comp['name']} の作品を検索中..."):
+                                    ev_works = search_mb_works(ev_selected_comp["id"], ev_title_filter.strip())
+                                st.session_state.ev_mb_works = ev_works
+                        if c_mb2.button("📚 全作品を取得（重い）", key="ev_mb_fetch_all"):
+                            with st.spinner(f"{ev_selected_comp['name']} の全作品を取得中..."):
+                                ev_works = search_mb_works(ev_selected_comp["id"], "")
                             st.session_state.ev_mb_works = ev_works
 
                     if st.session_state.get("ev_mb_works"):
                         ev_works = st.session_state.ev_mb_works
                         st.caption(f"{len(ev_works)} 件の作品　— ボタンで直接追加")
                         for w in ev_works:
-                            label = w["title"] + (f"　{w['disambiguation']}" if w["disambiguation"] else "")
+                            label = w["title"] + (f"　{w['disambiguation']}" if w.get("disambiguation") else "")
                             col_title, col_main, col_enc = st.columns([4, 1.2, 1.2])
                             col_title.markdown(label)
                             if col_main.button("📋 通常", key=f"ev_mb_add_main_{w['id']}"):
@@ -3178,7 +3292,7 @@ if mode == "新規登録":
                                 add_songs_to_slot("ev_setlist_encore", [w["title"]], MAX_ENCORE)
                                 st.rerun()
 
-                elif is_live:
+                if use_itunes:
                     st.caption("🔍 楽曲検索（iTunes）")
                     col_it_art, col_it_title = st.columns([1, 1])
                     it_artist_input = col_it_art.text_input("アーティスト名", placeholder="例: Queen / 米津玄師", key="ev_it_artist")
@@ -3319,7 +3433,7 @@ if mode == "新規登録":
                     main_items   = [x for x in st.session_state.get("ev_setlist_main",   []) if x["title"].strip()]
                     encore_items = [x for x in st.session_state.get("ev_setlist_encore", []) if x["title"].strip()]
                     def fmt(i, item):
-                        suffix = f" [{item['part']}]" if is_performance and item.get("part","").strip() else ""
+                        suffix = f" [{item['part']}]" if is_performance and item.get("played", False) and item.get("part","").strip() else ""
                         return f"{i+1}. {item['title']}{suffix}"
                     lines = [fmt(i, x) for i, x in enumerate(main_items)]
                     if encore_items:
@@ -3346,8 +3460,9 @@ if mode == "新規登録":
                 )
                 if ok:
                     created_setlist = failed_setlist = 0
+                    created_assign = failed_assign = 0
                     setlist_reason = ""
-                    if is_performance and NOTION_SETLIST_DB_ID:
+                    if is_performance and NOTION_SCORE_DB_ID:
                         setlist_main = [x for x in st.session_state.get("ev_setlist_main", []) if (x.get("title") or "").strip()]
                         setlist_encore = [x for x in st.session_state.get("ev_setlist_encore", []) if (x.get("title") or "").strip()]
                         if setlist_main or setlist_encore:
@@ -3355,7 +3470,7 @@ if mode == "新規登録":
                             perf_date = watch_str or start_str or ""
                             score_pages_for_link = _get_score_pages()
                             selected_scores_for_link = st.session_state.get("ev_score_selected", [])
-                            created_setlist, failed_setlist, setlist_reason = create_setlist_rows_for_performance(
+                            created_setlist, failed_setlist, created_assign, failed_assign, setlist_reason = create_setlist_rows_for_performance(
                                 performance_page_id=perf_page_id,
                                 performance_title=event_title,
                                 performance_date=perf_date,
@@ -3374,15 +3489,22 @@ if mode == "新規登録":
                         page_id=st.session_state.get("last_created_page_id"),
                         updated_page=st.session_state.get("last_created_page"),
                     )
-                    if is_performance and NOTION_SETLIST_DB_ID:
+                    if is_performance and NOTION_SCORE_DB_ID:
                         if created_setlist > 0 and failed_setlist == 0:
-                            st.success(f"✅ セットリストDBに {created_setlist} 件登録しました")
+                            st.success(f"✅ 演奏曲DBに {created_setlist} 件登録しました")
                         elif created_setlist > 0 and failed_setlist > 0:
-                            st.warning(f"⚠️ セットリストDB登録: 成功 {created_setlist} 件 / 失敗 {failed_setlist} 件")
+                            st.warning(f"⚠️ 演奏曲DB登録: 成功 {created_setlist} 件 / 失敗 {failed_setlist} 件")
                         elif failed_setlist > 0:
-                            st.warning(f"⚠️ セットリストDB登録に失敗しました（{failed_setlist} 件）")
+                            st.warning(f"⚠️ 演奏曲DB登録に失敗しました（{failed_setlist} 件）")
                         elif setlist_reason:
-                            st.info(f"ℹ️ セットリストDB連携: {setlist_reason}")
+                            st.info(f"ℹ️ 演奏曲DB連携: {setlist_reason}")
+                        if NOTION_ASSIGNMENT_DB_ID:
+                            if created_assign > 0 and failed_assign == 0:
+                                st.success(f"✅ 演奏担当DBに {created_assign} 件登録しました")
+                            elif created_assign > 0 and failed_assign > 0:
+                                st.warning(f"⚠️ 演奏担当DB登録: 成功 {created_assign} 件 / 失敗 {failed_assign} 件")
+                            elif failed_assign > 0:
+                                st.warning(f"⚠️ 演奏担当DB登録に失敗しました（{failed_assign} 件）")
                     show_post_register_ui()
                 else:
                     st.error("❌ 登録失敗")
@@ -5255,6 +5377,8 @@ if mode == "データ管理":
                     comp_col, title_col = st.columns(2)
                     comp_query = comp_col.text_input("作曲家名", key=f"edit_score_comp_{page_id}", placeholder="例: Beethoven / ベートーヴェン")
                     work_filter = title_col.text_input("作品名で絞り込み（任意）", key=f"edit_score_work_filter_{page_id}", placeholder="例: Symphony No. 5")
+                    if comp_query.strip() or work_filter.strip():
+                        st.session_state.focus_page_id = page_id
                     comp_key = f"edit_score_composers_{page_id}"
                     works_key = f"edit_score_works_{page_id}"
                     if comp_key not in st.session_state:
@@ -5457,6 +5581,152 @@ if mode == "データ管理":
                                     p["properties"][k] = v
                         return True
                     return False
+
+                def add_or_create_score_relation(title: str, creator: str = ""):
+                    name = (title or "").strip()
+                    if not name:
+                        return False
+                    found = _find_score_page_by_title(rel_target_pages, name)
+                    if found:
+                        add_rel(found["id"], found["title"])
+                        return persist_relations()
+                    ok_new = create_notion_page(
+                        jp_title=name, en_title=name,
+                        media_type_label="演奏曲",
+                        tmdb_id=None, media_type="score",
+                        cover_url=MB_DEFAULT_COVER,
+                        tmdb_release="",
+                        details={"genres": [], "cast": "", "director": creator or "", "score": None},
+                    )
+                    if not ok_new:
+                        return False
+                    new_id = st.session_state.get("last_created_page_id")
+                    upsert_page_in_state(st.session_state.get("last_created_page"))
+                    _add_score_page_cache(new_id, name)
+                    rel_target_pages.append({"id": new_id, "title": name})
+                    add_rel(new_id, name)
+                    if persist_relations():
+                        sync_notion_after_update(page_id=page_id)
+                    sync_notion_after_update(
+                        page_id=new_id,
+                        updated_page=st.session_state.get("last_created_page"),
+                    )
+                    return True
+
+                if page_media == "出演":
+                    st.caption("🎼 関連曲検索（出演）")
+                    rel_song_mode = st.segmented_control(
+                        "検索方式",
+                        options=["クラシック（MusicBrainz）", "ポピュラー（iTunes）", "両方"],
+                        default="両方",
+                        key=f"edit_rel_song_mode_{page_id}",
+                    )
+                    use_mb_rel = rel_song_mode in ("クラシック（MusicBrainz）", "両方")
+                    use_it_rel = rel_song_mode in ("ポピュラー（iTunes）", "両方")
+
+                    if use_mb_rel:
+                        st.caption("1) 作曲家検索 → 2) 作曲家確定 → 3) 曲名検索 → 4) 追加")
+                        comp_query = st.text_input("作曲家名", key=f"edit_rel_mb_comp_{page_id}", placeholder="例: Beethoven / ベートーヴェン")
+                        comp_list_key = f"edit_rel_mb_comps_{page_id}"
+                        comp_sel_key = f"edit_rel_mb_sel_{page_id}"
+                        work_list_key = f"edit_rel_mb_works_{page_id}"
+                        work_filter = st.text_input("曲名で絞り込み", key=f"edit_rel_mb_filter_{page_id}", placeholder="例: Symphony No. 5")
+                        if comp_query.strip() or work_filter.strip():
+                            st.session_state.focus_page_id = page_id
+                        if comp_list_key not in st.session_state:
+                            st.session_state[comp_list_key] = []
+                        if work_list_key not in st.session_state:
+                            st.session_state[work_list_key] = []
+                        if st.button("🔍 作曲家を検索", key=f"edit_rel_mb_search_{page_id}"):
+                            if comp_query.strip():
+                                st.session_state.focus_page_id = page_id
+                                with st.spinner("作曲家を検索中..."):
+                                    comps, err = search_mb_composer(comp_query.strip())
+                                if err:
+                                    st.warning(f"作曲家検索失敗: {err}")
+                                st.session_state[comp_list_key] = comps
+                                st.session_state[work_list_key] = []
+                                st.session_state.pop(comp_sel_key, None)
+                                st.rerun()
+                            else:
+                                st.warning("作曲家名を入力してください")
+                        comps = st.session_state.get(comp_list_key, [])
+                        selected_comp = None
+                        if comps:
+                            labels = [
+                                f"{c['name']}" + (f"（{c['disambiguation']}）" if c.get("disambiguation") else "")
+                                for c in comps
+                            ]
+                            idx = st.selectbox("作曲家候補", list(range(len(labels))), format_func=lambda i: labels[i], key=f"edit_rel_mb_pick_{page_id}")
+                            if st.button("✅ この作曲家で進める", key=f"edit_rel_mb_pick_btn_{page_id}"):
+                                st.session_state[comp_sel_key] = comps[idx]
+                                st.session_state[work_list_key] = []
+                                st.session_state.focus_page_id = page_id
+                                st.rerun()
+                            selected_comp = st.session_state.get(comp_sel_key)
+                        if selected_comp:
+                            st.success(f"作曲家を確定: {selected_comp.get('name','')}")
+                            c_mb1, c_mb2 = st.columns([1, 1])
+                            if c_mb1.button("🔍 曲名で検索", key=f"edit_rel_mb_work_search_{page_id}"):
+                                st.session_state.focus_page_id = page_id
+                                with st.spinner("作品を検索中..."):
+                                    works = search_mb_works(selected_comp["id"], work_filter.strip())
+                                st.session_state[work_list_key] = works
+                                st.rerun()
+                            if c_mb2.button("📚 全作品を取得（重い）", key=f"edit_rel_mb_work_all_{page_id}"):
+                                st.session_state.focus_page_id = page_id
+                                with st.spinner("全作品を取得中..."):
+                                    works = search_mb_works(selected_comp["id"], "")
+                                st.session_state[work_list_key] = works
+                                st.rerun()
+                        rel_works = st.session_state.get(work_list_key, [])
+                        if rel_works:
+                            st.caption(f"{len(rel_works)} 件")
+                            for i, w in enumerate(rel_works):
+                                title_w = w.get("title", "")
+                                label = title_w + (f"　{w.get('disambiguation','')}" if w.get("disambiguation") else "")
+                                c_t, c_b = st.columns([5, 1.2])
+                                c_t.write(label)
+                                if c_b.button("＋追加", key=f"edit_rel_mb_add_{page_id}_{i}"):
+                                    st.session_state.focus_page_id = page_id
+                                    creator_name = (selected_comp or {}).get("name", "")
+                                    if add_or_create_score_relation(title_w, creator_name):
+                                        st.session_state.pending_notice = f"✅ 関連を追加: {title_w}"
+                                    else:
+                                        st.session_state.pending_warning = f"関連追加に失敗: {title_w}"
+                                    st.rerun()
+
+                    if use_it_rel:
+                        st.caption("🔍 ポピュラー曲検索（iTunes）")
+                        c_art, c_title = st.columns([1, 1])
+                        it_artist = c_art.text_input("アーティスト名", key=f"edit_rel_it_art_{page_id}", placeholder="例: Queen")
+                        it_title = c_title.text_input("曲名", key=f"edit_rel_it_title_{page_id}", placeholder="例: Bohemian Rhapsody")
+                        it_res_key = f"edit_rel_it_res_{page_id}"
+                        if it_artist.strip() or it_title.strip():
+                            st.session_state.focus_page_id = page_id
+                        if st.button("🔍 曲を検索", key=f"edit_rel_it_search_{page_id}"):
+                            q = " ".join(filter(None, [it_artist, it_title])).strip()
+                            if q:
+                                st.session_state.focus_page_id = page_id
+                                with st.spinner("検索中..."):
+                                    res = api_request("get", "https://itunes.apple.com/search", params={"term": q, "entity": "song", "limit": 20, "lang": "ja_jp"})
+                                st.session_state[it_res_key] = (res.json().get("results", []) if res else [])
+                                st.rerun()
+                            else:
+                                st.warning("アーティスト名または曲名を入力してください")
+                        for i, track in enumerate(st.session_state.get(it_res_key, [])):
+                            track_name = track.get("trackName", "")
+                            artist_name = track.get("artistName", "")
+                            c_t, c_b = st.columns([5, 1.2])
+                            c_t.write(f"{track_name} — {artist_name}")
+                            if c_b.button("＋追加", key=f"edit_rel_it_add_{page_id}_{i}"):
+                                st.session_state.focus_page_id = page_id
+                                if add_or_create_score_relation(track_name, artist_name):
+                                    st.session_state.pending_notice = f"✅ 関連を追加: {track_name}"
+                                else:
+                                    st.session_state.pending_warning = f"関連追加に失敗: {track_name}"
+                                st.rerun()
+                    st.divider()
 
                 if rel_matches:
                     if not rel_query:
