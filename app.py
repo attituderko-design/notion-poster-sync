@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.00"
+APP_VERSION = "7.02"
 
 # ============================================================
 # 媒体マッピング
@@ -2461,6 +2461,7 @@ for key, default in {
     "auto_reload_mode":    "manual",
     "created_pages":       [],
     "drive_skip_mode":     False,
+    "app_mode":            "新規登録",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -2560,7 +2561,9 @@ with st.sidebar:
 
         st.divider()
         st.header("動作モード")
-        mode = st.radio("モード", ["新規登録", "データ管理", "自動同期"])
+        if "pending_app_mode" in st.session_state:
+            st.session_state.app_mode = st.session_state.pop("pending_app_mode")
+        mode = st.radio("モード", ["新規登録", "データ管理", "自動同期"], key="app_mode")
         sync_scope = "欠損のみ補填"  # legacy compat
 
         if mode != "新規登録":
@@ -3431,6 +3434,8 @@ if mode == "新規登録":
                                     new_id = st.session_state.get("last_created_page_id")
                                     _add_performance_page_cache(new_id, new_title)
                                     add_selected_perf(new_id, new_title)
+                                    _focus_management_page(new_id, new_title, "出演")
+                                    st.session_state.pending_app_mode = "データ管理"
                                     st.success("✅ 出演データを追加しました")
                                     st.rerun()
                                 else:
@@ -4629,6 +4634,10 @@ if mode == "自動同期" and st.session_state.is_running:
 # ============================================================
 if mode == "データ管理":
     display_pages = get_display_pages()
+    focus_id = st.session_state.get("focus_page_id")
+    if focus_id:
+        display_pages = sorted(display_pages, key=lambda p: 0 if p.get("id") == focus_id else 1)
+        st.session_state.manual_page = 0
 
     st.subheader(f"🗂 データ管理　表示: {len(display_pages)} 件 / 全 {len(target_pages)} 件")
     if diff_filter != "フィルタなし":
@@ -4939,6 +4948,29 @@ if mode == "データ管理":
                         selected.append({"id": pid, "title": title})
                         st.session_state[rel_state_key] = selected
 
+                def persist_relations() -> bool:
+                    rel_ids = [x["id"] for x in st.session_state[rel_state_key] if x.get("id")]
+                    rel_patch = {"relation": [{"id": rid} for rid in rel_ids]}
+                    patch_props = {rel_prop: rel_patch}
+                    # 自己リレーションの片側が書き込み不可扱いでも反映されるように両名へセット
+                    if rel_prop == "出演履歴":
+                        patch_props["演奏曲"] = rel_patch
+                    elif rel_prop == "演奏曲":
+                        patch_props["出演履歴"] = rel_patch
+                    res = api_request(
+                        "patch",
+                        f"https://api.notion.com/v1/pages/{page_id}",
+                        headers=NOTION_HEADERS,
+                        json={"properties": patch_props},
+                    )
+                    if res and res.status_code == 200:
+                        for p in st.session_state.pages:
+                            if p["id"] == page_id:
+                                for k, v in patch_props.items():
+                                    p["properties"][k] = v
+                        return True
+                    return False
+
                 if rel_matches:
                     options = ["（選択してください）"] + [p["title"] for p in rel_matches]
                     sel = st.selectbox("候補", options, key=f"edit_rel_pick_{page_id}")
@@ -4946,6 +4978,11 @@ if mode == "データ管理":
                         picked = rel_matches[options.index(sel) - 1]
                         if st.button("＋ 追加", key=f"edit_rel_add_{page_id}"):
                             add_rel(picked["id"], picked["title"])
+                            if persist_relations():
+                                sync_notion_after_update(page_id=page_id)
+                                st.success("✅ 関連を保存しました")
+                            else:
+                                st.error("❌ 関連保存に失敗しました")
                             st.rerun()
                 elif rel_query:
                     st.caption("候補が見つかりませんでした。")
@@ -4967,6 +5004,8 @@ if mode == "データ管理":
                                 new_id = st.session_state.get("last_created_page_id")
                                 _add_score_page_cache(new_id, new_title)
                                 add_rel(new_id, new_title)
+                                if persist_relations():
+                                    sync_notion_after_update(page_id=page_id)
                                 sync_notion_after_update(
                                     page_id=new_id,
                                     updated_page=st.session_state.get("last_created_page"),
@@ -4987,6 +5026,8 @@ if mode == "データ管理":
                                 new_id = st.session_state.get("last_created_page_id")
                                 _add_performance_page_cache(new_id, new_title)
                                 add_rel(new_id, new_title)
+                                if persist_relations():
+                                    sync_notion_after_update(page_id=page_id)
                                 sync_notion_after_update(
                                     page_id=new_id,
                                     updated_page=st.session_state.get("last_created_page"),
@@ -5004,18 +5045,13 @@ if mode == "データ管理":
                             st.session_state[rel_state_key] = [
                                 x for j, x in enumerate(st.session_state[rel_state_key]) if j != i
                             ]
+                            if persist_relations():
+                                sync_notion_after_update(page_id=page_id)
                             st.rerun()
 
                 if st.button("💾 関連を保存", key=f"save_rel_{page_id}"):
-                    rel_ids = [x["id"] for x in st.session_state[rel_state_key]]
-                    patch_props = {rel_prop: {"relation": [{"id": rid} for rid in rel_ids]}}
-                    res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}",
-                                      headers=NOTION_HEADERS, json={"properties": patch_props})
-                    if res and res.status_code == 200:
+                    if persist_relations():
                         st.success("✅ 更新しました")
-                        for p in st.session_state.pages:
-                            if p["id"] == page_id:
-                                p["properties"][rel_prop] = patch_props[rel_prop]
                         sync_notion_after_update(page_id=page_id)
                     else:
                         st.error("❌ 更新失敗")
