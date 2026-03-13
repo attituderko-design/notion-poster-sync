@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.19"
+APP_VERSION = "7.21"
 
 # ============================================================
 # 媒体マッピング
@@ -315,12 +315,26 @@ def make_filename(title: str, tmdb_id) -> str:
     return f"{sanitize_filename(title)}_{tmdb_id}.jpg"
 
 def get_title(props):
-    jp = "".join([t["plain_text"] for t in props.get("タイトル", {}).get("title", [])])
-    en = "".join([t["plain_text"] for t in props.get("International Title", {}).get("rich_text", [])])
+    def _texts(items):
+        vals = []
+        for t in (items or []):
+            if not isinstance(t, dict):
+                continue
+            if t.get("plain_text") is not None:
+                vals.append(t.get("plain_text", ""))
+                continue
+            vals.append(((t.get("text") or {}).get("content") or ""))
+        return "".join(vals)
+    jp = _texts((props.get("タイトル") or {}).get("title", []))
+    en = _texts((props.get("International Title") or {}).get("rich_text", []))
     return (jp if jp else en), jp, en
 
 def get_season_number(props) -> int | None:
-    en = "".join([t["plain_text"] for t in props.get("International Title", {}).get("rich_text", [])])
+    en = "".join(
+        (t.get("plain_text") if isinstance(t, dict) and t.get("plain_text") is not None else ((t.get("text") or {}).get("content") if isinstance(t, dict) else ""))
+        or ""
+        for t in (props.get("International Title") or {}).get("rich_text", [])
+    )
     m = re.search(r'[Ss]eason\s*(\d+)', en)
     return int(m.group(1)) if m else None
 
@@ -2496,7 +2510,7 @@ for key, default in {
     "refresh_success_log": [],
     "refresh_maintain_log": [],
     "refresh_error_log":   [],
-    "auto_reload_mode":    "manual",
+    "auto_reload_mode":    "partial",
     "created_pages":       [],
     "drive_skip_mode":     False,
     "app_mode":            "新規登録",
@@ -2523,7 +2537,7 @@ with st.sidebar:
     if st.session_state.get("drive_skip_mode"):
         st.caption("Drive連携はスキップ中です（判定/保存/一覧取得）。")
     if "auto_reload_mode" not in st.session_state:
-        st.session_state.auto_reload_mode = "manual"
+        st.session_state.auto_reload_mode = "partial"
     current_label = (
         "手動" if st.session_state.auto_reload_mode == "manual"
         else "自動（全件）" if st.session_state.auto_reload_mode == "full"
@@ -2558,35 +2572,6 @@ with st.sidebar:
                 st.session_state.pop("score_pages_cache", None)
                 st.session_state.pop("performance_pages_cache", None)
                 st.success(f"{len(st.session_state.pages)} 件取得しました（全媒体: {len(st.session_state.all_pages)} 件）")
-    if st.button("🛠 媒体名一括変換: 演奏会（出演）→出演", use_container_width=True, key="migrate_media_performance"):
-        with st.spinner("Notionの媒体名を一括変換中..."):
-            target_count, updated_count = migrate_media_label_in_notion("演奏会（出演）", "出演")
-            if target_count == 0:
-                st.info("変換対象はありませんでした。")
-            else:
-                st.success(f"変換完了: {updated_count} / {target_count} 件")
-            all_pages = load_notion_data()
-            if st.session_state.get("last_notion_load_ok", True):
-                st.session_state.all_pages      = all_pages
-                st.session_state.pages          = filter_target_pages(all_pages)
-                st.session_state.pages_loaded   = True
-                st.session_state.search_results = {}
-                st.session_state.manual_page    = 0
-                st.session_state.performance_pages_cache = [
-                    {"id": p["id"], "title": get_title(p["properties"])[0]}
-                    for p in st.session_state.pages
-                    if get_page_media(p) == "出演"
-                ]
-            else:
-                st.warning("再取得に失敗しました。手動でNotionデータ取得を再実行してください。")
-    if st.button("🗂 Drive一覧を再取得", use_container_width=True, key="reload_drive_list"):
-        with st.spinner("Drive一覧を取得中..."):
-            refresh_drive_files()
-            cnt = len(st.session_state.get("drive_files_cache", {}))
-            if cnt > 0:
-                st.success(f"Drive一覧を更新しました（{cnt} 件）")
-            else:
-                st.warning("Drive一覧が空です。接続またはフォルダ設定をご確認ください。")
 
     if not st.session_state.pages_loaded:
         st.caption("👆 まずデータを取得してください")
@@ -4999,13 +4984,20 @@ if mode == "データ管理":
                         if st.button("候補を反映", key=f"edit_score_work_apply_{page_id}"):
                             picked = works[w_options.index(w_pick)]
                             title_val = picked.get("title", "")
+                            composer_name = ""
+                            comp_idx_key = f"edit_score_comp_pick_{page_id}"
+                            idx = st.session_state.get(comp_idx_key, 0)
+                            if composers and isinstance(idx, int) and 0 <= idx < len(composers):
+                                composer_name = composers[idx].get("name", "")
                             st.session_state[f"pending_edit_jp_{page_id}"] = title_val
                             st.session_state[f"pending_edit_en_{page_id}"] = title_val
                             # 反映後の再描画で確実に見えるよう、Notionにも即保存する
                             patch = {
                                 "タイトル": {"title": [{"type": "text", "text": {"content": title_val}}]},
-                                "International Title": {"rich_text": [{"type": "text", "text": {"content": title_val}}]},
+                                "International Title": {"rich_text": [{"type": "text", "text": {"content": title_val}, "annotations": {"italic": True}}]},
                             }
+                            if composer_name:
+                                patch["クリエイター"] = {"rich_text": [{"type": "text", "text": {"content": composer_name}}]}
                             res = api_request(
                                 "patch",
                                 f"https://api.notion.com/v1/pages/{page_id}",
@@ -5017,6 +5009,8 @@ if mode == "データ管理":
                                     if p.get("id") == page_id:
                                         p["properties"]["タイトル"] = patch["タイトル"]
                                         p["properties"]["International Title"] = patch["International Title"]
+                                        if "クリエイター" in patch:
+                                            p["properties"]["クリエイター"] = patch["クリエイター"]
                                 st.success("タイトル欄に反映して保存しました")
                             else:
                                 st.warning("候補は反映しましたが保存に失敗しました。基本を保存を押してください。")
@@ -5044,7 +5038,7 @@ if mode == "データ管理":
                     if new_jp != existing_jp:
                         patch_props["タイトル"] = {"title": [{"type": "text", "text": {"content": new_jp}}]}
                     if new_en != existing_en:
-                        patch_props["International Title"] = {"rich_text": [{"type": "text", "text": {"content": new_en}}]}
+                        patch_props["International Title"] = {"rich_text": [{"type": "text", "text": {"content": new_en}, "annotations": {"italic": True}}]}
                     if new_release != existing_release_edit and new_release:
                         patch_props["リリース日"] = {"date": {"start": new_release}}
                     if patch_props:
@@ -5182,7 +5176,6 @@ if mode == "データ管理":
                                 cover_url=MB_DEFAULT_COVER,
                                 tmdb_release="",
                                 details={"genres": [], "cast": "", "director": "", "score": None},
-                                memo=f"作成時検索語: {new_title}",
                             )
                             if ok:
                                 new_id = st.session_state.get("last_created_page_id")
@@ -5196,7 +5189,7 @@ if mode == "データ管理":
                                     updated_page=st.session_state.get("last_created_page"),
                                 )
                                 _focus_management_page(new_id, draft_title, "演奏曲")
-                                st.session_state.pending_notice = "✅ 演奏曲を追加しました（仮タイトルで作成。候補検索で確定してください）"
+                                st.session_state.pending_notice = f"✅ 演奏曲を追加しました（検索語: {new_title} / 仮タイトルで作成。候補検索で確定してください）"
                                 st.rerun()
                         else:
                             ok = create_notion_page(
