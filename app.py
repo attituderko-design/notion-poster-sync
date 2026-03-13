@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.11"
+APP_VERSION = "7.14"
 
 # ============================================================
 # 媒体マッピング
@@ -4920,85 +4920,119 @@ if mode == "データ管理":
 
             # ── 基本 ──
             st.divider()
-            st.caption("✏️ 基本")
-            existing_rating = (props.get("評価") or {}).get("select") or {}
-            existing_rating = existing_rating.get("name", "") if isinstance(existing_rating, dict) else ""
-            existing_memo   = "".join(t["plain_text"] for t in (props.get("メモ") or {}).get("rich_text", []))
-            existing_date_start = ((props.get("鑑賞日") or {}).get("date") or {}).get("start", "") or ""
-            edit_col1, edit_col2, edit_col3 = st.columns([1.5, 3, 1.2])
-            new_rating = edit_col1.selectbox(
-                "評価", RATING_OPTIONS,
-                index=RATING_OPTIONS.index(existing_rating) if existing_rating in RATING_OPTIONS else 0,
-                key=f"edit_rating_{page_id}",
-            )
-            new_memo   = edit_col2.text_input("メモ", value=existing_memo, key=f"edit_memo_{page_id}")
-            new_date   = edit_col3.text_input("鑑賞日", value=existing_date_start, placeholder="YYYY-MM-DD", key=f"edit_date_{page_id}")
+            with st.expander("✏️ 基本", expanded=False):
+                existing_rating = (props.get("評価") or {}).get("select") or {}
+                existing_rating = existing_rating.get("name", "") if isinstance(existing_rating, dict) else ""
+                existing_memo   = "".join(t["plain_text"] for t in (props.get("メモ") or {}).get("rich_text", []))
+                existing_date_start = ((props.get("鑑賞日") or {}).get("date") or {}).get("start", "") or ""
+                edit_col1, edit_col2, edit_col3 = st.columns([1.5, 3, 1.2])
+                new_rating = edit_col1.selectbox(
+                    "評価", RATING_OPTIONS,
+                    index=RATING_OPTIONS.index(existing_rating) if existing_rating in RATING_OPTIONS else 0,
+                    key=f"edit_rating_{page_id}",
+                )
+                new_memo   = edit_col2.text_input("メモ", value=existing_memo, key=f"edit_memo_{page_id}")
+                new_date   = edit_col3.text_input("鑑賞日", value=existing_date_start, placeholder="YYYY-MM-DD", key=f"edit_date_{page_id}")
 
-            # タイトル編集（全媒体）
-            existing_jp = jp or ""
-            existing_en = en or ""
-            title_c1, title_c2 = st.columns(2)
-            new_jp = clearable_text_input("日本語タイトル", f"edit_jp_{page_id}", value=existing_jp, container=title_c1)
-            new_en = clearable_text_input("英語タイトル",   f"edit_en_{page_id}", value=existing_en, container=title_c2)
-            if page_media == "演奏曲":
-                cand_key = f"score_title_cands_{page_id}"
-                if cand_key not in st.session_state:
-                    st.session_state[cand_key] = []
-                c_search, c_pick, c_apply = st.columns([1.2, 2.8, 1.2])
-                if c_search.button("候補検索", key=f"score_title_search_{page_id}"):
-                    with st.spinner("MusicBrainzで候補検索中..."):
-                        cands, err = search_mb_works_by_title(new_jp or new_en or existing_jp or existing_en, limit=12)
-                    if err:
-                        st.warning(f"候補検索失敗: {err}")
-                    st.session_state[cand_key] = cands
-                cands = st.session_state.get(cand_key, [])
-                if cands:
-                    options = [f"{c['title']}" + (f" ({c['disambiguation']})" if c.get("disambiguation") else "") for c in cands]
-                    picked = c_pick.selectbox("検索候補", options, key=f"score_title_pick_{page_id}")
-                    if c_apply.button("候補を反映", key=f"score_title_apply_{page_id}"):
-                        sel = cands[options.index(picked)]
-                        st.session_state[f"_cti_edit_jp_{page_id}"] = sel.get("title", "")
-                        st.session_state[f"_cti_edit_en_{page_id}"] = sel.get("title", "")
-                        st.success("タイトル欄に反映しました")
-                        st.rerun()
+                # タイトル編集（全媒体）
+                existing_jp = jp or ""
+                existing_en = en or ""
+                title_c1, title_c2 = st.columns(2)
+                new_jp = clearable_text_input("日本語タイトル", f"edit_jp_{page_id}", value=existing_jp, container=title_c1)
+                new_en = clearable_text_input("英語タイトル",   f"edit_en_{page_id}", value=existing_en, container=title_c2)
+                if page_media == "演奏曲":
+                    st.caption("🔎 作曲家→作品で候補検索（MusicBrainz）")
+                    comp_col, title_col = st.columns(2)
+                    comp_query = comp_col.text_input("作曲家名", key=f"edit_score_comp_{page_id}", placeholder="例: Beethoven / ベートーヴェン")
+                    work_filter = title_col.text_input("作品名で絞り込み（任意）", key=f"edit_score_work_filter_{page_id}", placeholder="例: Symphony No. 5")
+                    comp_key = f"edit_score_composers_{page_id}"
+                    works_key = f"edit_score_works_{page_id}"
+                    if comp_key not in st.session_state:
+                        st.session_state[comp_key] = []
+                    if works_key not in st.session_state:
+                        st.session_state[works_key] = []
 
-            # リリース日編集（全媒体）
-            existing_release_edit = ((props.get("リリース日") or {}).get("date") or {}).get("start", "") or ""
-            new_release = st.text_input("📅 リリース日", value=existing_release_edit, placeholder="YYYY-MM-DD", key=f"edit_release_{page_id}")
+                    c1, c2 = st.columns([1, 1])
+                    if c1.button("作曲家を検索", key=f"edit_score_comp_search_{page_id}"):
+                        if comp_query.strip():
+                            with st.spinner("作曲家を検索中..."):
+                                composers, err = search_mb_composer(comp_query.strip())
+                            if err:
+                                st.warning(f"作曲家検索失敗: {err}")
+                            st.session_state[comp_key] = composers
+                            st.session_state[works_key] = []
+                        else:
+                            st.warning("作曲家名を入力してください")
 
-            if edit_col1.button("💾 基本を保存", key=f"save_basic_{page_id}"):
-                patch_props = {}
-                if new_rating != existing_rating:
-                    patch_props["評価"] = {"select": {"name": new_rating} if new_rating else None}
-                if new_memo != existing_memo:
-                    patch_props["メモ"] = {"rich_text": [{"type": "text", "text": {"content": new_memo}}]}
-                if new_date != existing_date_start and new_date:
-                    patch_props["鑑賞日"] = {"date": {"start": new_date}}
-                if new_jp != existing_jp:
-                    patch_props["タイトル"] = {"title": [{"type": "text", "text": {"content": new_jp}}]}
-                if new_en != existing_en:
-                    patch_props["International Title"] = {"rich_text": [{"type": "text", "text": {"content": new_en}}]}
-                if new_release != existing_release_edit and new_release:
-                    patch_props["リリース日"] = {"date": {"start": new_release}}
-                if patch_props:
-                    res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}",
-                                      headers=NOTION_HEADERS, json={"properties": patch_props})
-                    if res and res.status_code == 200:
-                        st.success("✅ 更新しました")
-                        for p in st.session_state.pages:
-                            if p["id"] == page_id:
-                                for k, v in patch_props.items():
-                                    p["properties"][k] = v
-                        sync_notion_after_update(page_id=page_id)
+                    composers = st.session_state.get(comp_key, [])
+                    if composers:
+                        labels = [
+                            f"{c['name']}" + (f"（{c['disambiguation']}）" if c.get("disambiguation") else "")
+                            for c in composers
+                        ]
+                        sel_idx = st.selectbox("作曲家候補", options=list(range(len(labels))), format_func=lambda i: labels[i], key=f"edit_score_comp_pick_{page_id}")
+                        if c2.button("この作曲家の作品を取得", key=f"edit_score_work_fetch_{page_id}"):
+                            composer = composers[sel_idx]
+                            with st.spinner("作品一覧を取得中..."):
+                                works = search_mb_works(composer["id"], work_filter.strip())
+                            st.session_state[works_key] = works
+
+                    works = st.session_state.get(works_key, [])
+                    if works:
+                        w_options = [w["title"] + (f"　{w['disambiguation']}" if w.get("disambiguation") else "") for w in works]
+                        w_pick = st.selectbox("作品候補", w_options, key=f"edit_score_work_pick_{page_id}")
+                        if st.button("候補を反映", key=f"edit_score_work_apply_{page_id}"):
+                            picked = works[w_options.index(w_pick)]
+                            title_val = picked.get("title", "")
+                            st.session_state[f"_cti_edit_jp_{page_id}"] = title_val
+                            st.session_state[f"_cti_edit_en_{page_id}"] = title_val
+                            st.success("タイトル欄に反映しました")
+                            st.rerun()
+                    elif work_filter.strip() and st.button("タイトルのみで候補検索", key=f"edit_score_title_only_{page_id}"):
+                        with st.spinner("タイトル候補を検索中..."):
+                            cands, err = search_mb_works_by_title(work_filter.strip(), limit=12)
+                        if err:
+                            st.warning(f"候補検索失敗: {err}")
+                        else:
+                            st.session_state[works_key] = [{"title": c["title"], "disambiguation": c.get("disambiguation", "")} for c in cands]
+
+                # リリース日編集（全媒体）
+                existing_release_edit = ((props.get("リリース日") or {}).get("date") or {}).get("start", "") or ""
+                new_release = st.text_input("📅 リリース日", value=existing_release_edit, placeholder="YYYY-MM-DD", key=f"edit_release_{page_id}")
+
+                if edit_col1.button("💾 基本を保存", key=f"save_basic_{page_id}"):
+                    patch_props = {}
+                    if new_rating != existing_rating:
+                        patch_props["評価"] = {"select": {"name": new_rating} if new_rating else None}
+                    if new_memo != existing_memo:
+                        patch_props["メモ"] = {"rich_text": [{"type": "text", "text": {"content": new_memo}}]}
+                    if new_date != existing_date_start and new_date:
+                        patch_props["鑑賞日"] = {"date": {"start": new_date}}
+                    if new_jp != existing_jp:
+                        patch_props["タイトル"] = {"title": [{"type": "text", "text": {"content": new_jp}}]}
+                    if new_en != existing_en:
+                        patch_props["International Title"] = {"rich_text": [{"type": "text", "text": {"content": new_en}}]}
+                    if new_release != existing_release_edit and new_release:
+                        patch_props["リリース日"] = {"date": {"start": new_release}}
+                    if patch_props:
+                        res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}",
+                                          headers=NOTION_HEADERS, json={"properties": patch_props})
+                        if res and res.status_code == 200:
+                            st.success("✅ 更新しました")
+                            for p in st.session_state.pages:
+                                if p["id"] == page_id:
+                                    for k, v in patch_props.items():
+                                        p["properties"][k] = v
+                            sync_notion_after_update(page_id=page_id)
+                        else:
+                            st.error("❌ 更新失敗")
                     else:
-                        st.error("❌ 更新失敗")
-                else:
-                    st.info("変更なし")
+                        st.info("変更なし")
 
             # ── 関連（出演 ↔ 演奏曲）──
-            if page_media in ("出演", "演奏曲"):
-                st.divider()
-                st.caption("🔗 関連")
+            st.divider()
+            with st.expander("🔗 関連", expanded=False):
+              if page_media in ("出演", "演奏曲"):
                 rel_prop = "演奏曲" if page_media == "出演" else "出演履歴"
                 target_pages = _get_score_pages() if page_media == "出演" else _get_performance_pages()
                 rel_state_key = f"edit_rel_{page_id}"
@@ -5101,27 +5135,30 @@ if mode == "データ管理":
                         if not new_title:
                             st.warning("新規作成するタイトルを入力してください。")
                         elif page_media == "出演":
+                            # 検索語をそのままタイトルにせず、仮タイトルで作成して詳細編集で確定する
+                            draft_title = "（演奏曲・要編集）"
                             ok = create_notion_page(
-                                jp_title=new_title, en_title=new_title,
+                                jp_title=draft_title, en_title=draft_title,
                                 media_type_label="演奏曲",
                                 tmdb_id=None, media_type="score",
                                 cover_url=MB_DEFAULT_COVER,
                                 tmdb_release="",
                                 details={"genres": [], "cast": "", "director": "", "score": None},
+                                memo=f"作成時検索語: {new_title}",
                             )
                             if ok:
                                 new_id = st.session_state.get("last_created_page_id")
                                 upsert_page_in_state(st.session_state.get("last_created_page"))
-                                _add_score_page_cache(new_id, new_title)
-                                add_rel(new_id, new_title)
+                                _add_score_page_cache(new_id, draft_title)
+                                add_rel(new_id, draft_title)
                                 if persist_relations():
                                     sync_notion_after_update(page_id=page_id)
                                 sync_notion_after_update(
                                     page_id=new_id,
                                     updated_page=st.session_state.get("last_created_page"),
                                 )
-                                _focus_management_page(new_id, new_title, "演奏曲")
-                                st.session_state.pending_notice = "✅ 演奏曲を追加しました（詳細編集を開きます）"
+                                _focus_management_page(new_id, draft_title, "演奏曲")
+                                st.session_state.pending_notice = "✅ 演奏曲を追加しました（仮タイトルで作成。候補検索で確定してください）"
                                 st.rerun()
                         else:
                             ok = create_notion_page(
@@ -5166,98 +5203,100 @@ if mode == "データ管理":
                         sync_notion_after_update(page_id=page_id)
                     else:
                         st.error("❌ 更新失敗")
+              else:
+                st.caption("この媒体には関連編集はありません。")
 
             # ── メタ / ID ──
             st.divider()
-            st.caption("🧩 メタ / ID")
-            existing_genres = " / ".join(g["name"] for g in (props.get("ジャンル") or {}).get("multi_select", []))
-            existing_creator = "".join(t["plain_text"] for t in (props.get("クリエイター") or {}).get("rich_text", []))
-            existing_cast = "".join(t["plain_text"] for t in (props.get("キャスト・関係者") or {}).get("rich_text", []))
-            meta_c1, meta_c2 = st.columns(2)
-            new_genres = meta_c1.text_input("ジャンル（区切り: / または , ）", value=existing_genres, key=f"edit_genres_{page_id}")
-            new_creator = meta_c2.text_input("クリエイター", value=existing_creator, key=f"edit_creator_{page_id}")
-            new_cast = st.text_input("キャスト・関係者", value=existing_cast, key=f"edit_cast_{page_id}")
+            with st.expander("🧩 メタ / ID", expanded=False):
+                existing_genres = " / ".join(g["name"] for g in (props.get("ジャンル") or {}).get("multi_select", []))
+                existing_creator = "".join(t["plain_text"] for t in (props.get("クリエイター") or {}).get("rich_text", []))
+                existing_cast = "".join(t["plain_text"] for t in (props.get("キャスト・関係者") or {}).get("rich_text", []))
+                meta_c1, meta_c2 = st.columns(2)
+                new_genres = meta_c1.text_input("ジャンル（区切り: / または , ）", value=existing_genres, key=f"edit_genres_{page_id}")
+                new_creator = meta_c2.text_input("クリエイター", value=existing_creator, key=f"edit_creator_{page_id}")
+                new_cast = st.text_input("キャスト・関係者", value=existing_cast, key=f"edit_cast_{page_id}")
 
-            media_c1, media_c2 = st.columns([1.2, 2.8])
-            with media_c1:
-                new_media = st.selectbox(
-                    "媒体",
-                    options=list(MEDIA_ICON_MAP.keys()),
-                    index=list(MEDIA_ICON_MAP.keys()).index(page_media) if page_media in MEDIA_ICON_MAP else 0,
-                    key=f"edit_media_{page_id}",
-                )
-            tmdb_input = None
-            with media_c2:
-                if new_media in ("映画", "ドラマ"):
-                    current_tmdb = (props.get("TMDB_ID") or {}).get("number") or 0
-                    tmdb_input = st.number_input(
-                        "TMDB_ID",
-                        value=int(current_tmdb) if current_tmdb else 0,
-                        min_value=0,
-                        step=1,
-                        key=f"edit_tmdb_{page_id}",
+                media_c1, media_c2 = st.columns([1.2, 2.8])
+                with media_c1:
+                    new_media = st.selectbox(
+                        "媒体",
+                        options=list(MEDIA_ICON_MAP.keys()),
+                        index=list(MEDIA_ICON_MAP.keys()).index(page_media) if page_media in MEDIA_ICON_MAP else 0,
+                        key=f"edit_media_{page_id}",
                     )
+                tmdb_input = None
+                with media_c2:
+                    if new_media in ("映画", "ドラマ"):
+                        current_tmdb = (props.get("TMDB_ID") or {}).get("number") or 0
+                        tmdb_input = st.number_input(
+                            "TMDB_ID",
+                            value=int(current_tmdb) if current_tmdb else 0,
+                            min_value=0,
+                            step=1,
+                            key=f"edit_tmdb_{page_id}",
+                        )
 
-            id_c1, id_c2, id_c3, id_c4 = st.columns(4)
-            current_isbn = "".join(t["plain_text"] for t in (props.get("ISBN") or {}).get("rich_text", []))
-            new_isbn = id_c1.text_input("ISBN", value=current_isbn, key=f"edit_isbn_{page_id}")
-            current_anilist = (props.get("AniList_ID") or {}).get("number") or 0
-            new_anilist = id_c2.number_input("AniList_ID", value=int(current_anilist) if current_anilist else 0, min_value=0, step=1, key=f"edit_anilist_{page_id}")
-            current_igdb = (props.get("IGDB_ID") or {}).get("number") or 0
-            new_igdb = id_c3.number_input("IGDB_ID", value=int(current_igdb) if current_igdb else 0, min_value=0, step=1, key=f"edit_igdb_{page_id}")
-            current_itunes = (props.get("iTunes_ID") or {}).get("number") or 0
-            new_itunes = id_c4.number_input("iTunes_ID", value=int(current_itunes) if current_itunes else 0, min_value=0, step=1, key=f"edit_itunes_{page_id}")
+                id_c1, id_c2, id_c3, id_c4 = st.columns(4)
+                current_isbn = "".join(t["plain_text"] for t in (props.get("ISBN") or {}).get("rich_text", []))
+                new_isbn = id_c1.text_input("ISBN", value=current_isbn, key=f"edit_isbn_{page_id}")
+                current_anilist = (props.get("AniList_ID") or {}).get("number") or 0
+                new_anilist = id_c2.number_input("AniList_ID", value=int(current_anilist) if current_anilist else 0, min_value=0, step=1, key=f"edit_anilist_{page_id}")
+                current_igdb = (props.get("IGDB_ID") or {}).get("number") or 0
+                new_igdb = id_c3.number_input("IGDB_ID", value=int(current_igdb) if current_igdb else 0, min_value=0, step=1, key=f"edit_igdb_{page_id}")
+                current_itunes = (props.get("iTunes_ID") or {}).get("number") or 0
+                new_itunes = id_c4.number_input("iTunes_ID", value=int(current_itunes) if current_itunes else 0, min_value=0, step=1, key=f"edit_itunes_{page_id}")
 
-            if st.button("💾 メタ/IDを保存", key=f"save_meta_{page_id}"):
-                patch_props = {}
-                patch_icon = None
-                if new_media != page_media:
-                    patch_props["媒体"] = {"multi_select": [{"name": new_media}]}
-                    icon_url = get_media_icon_url(new_media)
-                    if icon_url:
-                        patch_icon = {"type": "external", "external": {"url": icon_url}}
-                if new_genres != existing_genres:
-                    genres_list = [g.strip() for g in re.split(r'[/,、]', new_genres) if g.strip()]
-                    patch_props["ジャンル"] = {"multi_select": [{"name": g} for g in genres_list]}
-                if new_creator != existing_creator:
-                    patch_props["クリエイター"] = {"rich_text": [{"type": "text", "text": {"content": new_creator}}]}
-                if new_cast != existing_cast:
-                    patch_props["キャスト・関係者"] = {"rich_text": [{"type": "text", "text": {"content": new_cast}}]}
-                if tmdb_input is not None:
-                    if tmdb_input != ((props.get("TMDB_ID") or {}).get("number") or 0):
-                        patch_props["TMDB_ID"] = {"number": int(tmdb_input)} if tmdb_input else {"number": None}
-                if new_isbn != current_isbn:
-                    patch_props["ISBN"] = {"rich_text": [{"type": "text", "text": {"content": new_isbn}}]} if new_isbn else {"rich_text": []}
-                if new_anilist != current_anilist:
-                    patch_props["AniList_ID"] = {"number": int(new_anilist)} if new_anilist else {"number": None}
-                if new_igdb != current_igdb:
-                    patch_props["IGDB_ID"] = {"number": int(new_igdb)} if new_igdb else {"number": None}
-                if new_itunes != current_itunes:
-                    patch_props["iTunes_ID"] = {"number": int(new_itunes)} if new_itunes else {"number": None}
-                if patch_props:
-                    payload = {"properties": patch_props}
-                    if patch_icon:
-                        payload["icon"] = patch_icon
-                    res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}",
-                                      headers=NOTION_HEADERS, json=payload)
-                    if res and res.status_code == 200:
-                        st.success("✅ 更新しました")
-                        for p in st.session_state.pages:
-                            if p["id"] == page_id:
-                                for k, v in patch_props.items():
-                                    p["properties"][k] = v
-                                if patch_icon:
-                                    p["icon"] = patch_icon
-                                if "TMDB_ID" in patch_props:
-                                    if tmdb_input:
-                                        st.session_state.tmdb_id_cache[page_id] = int(tmdb_input)
-                                    else:
-                                        st.session_state.tmdb_id_cache.pop(page_id, None)
-                        sync_notion_after_update(page_id=page_id)
+                if st.button("💾 メタ/IDを保存", key=f"save_meta_{page_id}"):
+                    patch_props = {}
+                    patch_icon = None
+                    if new_media != page_media:
+                        patch_props["媒体"] = {"multi_select": [{"name": new_media}]}
+                        icon_url = get_media_icon_url(new_media)
+                        if icon_url:
+                            patch_icon = {"type": "external", "external": {"url": icon_url}}
+                    if new_genres != existing_genres:
+                        genres_list = [g.strip() for g in re.split(r'[/,、]', new_genres) if g.strip()]
+                        patch_props["ジャンル"] = {"multi_select": [{"name": g} for g in genres_list]}
+                    if new_creator != existing_creator:
+                        patch_props["クリエイター"] = {"rich_text": [{"type": "text", "text": {"content": new_creator}}]}
+                    if new_cast != existing_cast:
+                        patch_props["キャスト・関係者"] = {"rich_text": [{"type": "text", "text": {"content": new_cast}}]}
+                    if tmdb_input is not None:
+                        if tmdb_input != ((props.get("TMDB_ID") or {}).get("number") or 0):
+                            patch_props["TMDB_ID"] = {"number": int(tmdb_input)} if tmdb_input else {"number": None}
+                    if new_isbn != current_isbn:
+                        patch_props["ISBN"] = {"rich_text": [{"type": "text", "text": {"content": new_isbn}}]} if new_isbn else {"rich_text": []}
+                    if new_anilist != current_anilist:
+                        patch_props["AniList_ID"] = {"number": int(new_anilist)} if new_anilist else {"number": None}
+                    if new_igdb != current_igdb:
+                        patch_props["IGDB_ID"] = {"number": int(new_igdb)} if new_igdb else {"number": None}
+                    if new_itunes != current_itunes:
+                        patch_props["iTunes_ID"] = {"number": int(new_itunes)} if new_itunes else {"number": None}
+                    if patch_props:
+                        payload = {"properties": patch_props}
+                        if patch_icon:
+                            payload["icon"] = patch_icon
+                        res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}",
+                                          headers=NOTION_HEADERS, json=payload)
+                        if res and res.status_code == 200:
+                            st.success("✅ 更新しました")
+                            for p in st.session_state.pages:
+                                if p["id"] == page_id:
+                                    for k, v in patch_props.items():
+                                        p["properties"][k] = v
+                                    if patch_icon:
+                                        p["icon"] = patch_icon
+                                    if "TMDB_ID" in patch_props:
+                                        if tmdb_input:
+                                            st.session_state.tmdb_id_cache[page_id] = int(tmdb_input)
+                                        else:
+                                            st.session_state.tmdb_id_cache.pop(page_id, None)
+                            sync_notion_after_update(page_id=page_id)
+                        else:
+                            st.error("❌ 更新失敗")
                     else:
-                        st.error("❌ 更新失敗")
-                else:
-                    st.info("変更なし")
+                        st.info("変更なし")
 
             # ── 出演セットリスト編集 ──
             if page_media == "出演":
@@ -5283,97 +5322,97 @@ if mode == "データ管理":
 
             # ── ロケーション編集 ──
             st.divider()
-            st.caption("📍 ロケーション")
-            place_prop = (props.get("ロケーション") or {}).get("place") or {}
-            if place_prop:
-                place_label = place_prop.get("name") or place_prop.get("address") or "設定済み"
-                st.caption(f"現在: {place_label}")
-            else:
-                st.caption("現在: 未設定")
+            with st.expander("📍 ロケーション", expanded=False):
+                place_prop = (props.get("ロケーション") or {}).get("place") or {}
+                if place_prop:
+                    place_label = place_prop.get("name") or place_prop.get("address") or "設定済み"
+                    st.caption(f"現在: {place_label}")
+                else:
+                    st.caption("現在: 未設定")
 
-            new_location = location_search_ui(f"mgmt_{page_id}", page_media)
-            loc_c1, loc_c2 = st.columns([1, 1])
-            with loc_c1:
-                if st.button("💾 ロケーションを保存", key=f"save_loc_{page_id}"):
-                    if new_location and new_location.get("lat") and new_location.get("lon"):
-                        place_payload = {
-                            "lat":  new_location["lat"],
-                            "lon":  new_location["lon"],
-                            "name": new_location.get("name", ""),
-                        }
-                        if new_location.get("address"):
-                            place_payload["address"] = new_location["address"]
+                new_location = location_search_ui(f"mgmt_{page_id}", page_media)
+                loc_c1, loc_c2 = st.columns([1, 1])
+                with loc_c1:
+                    if st.button("💾 ロケーションを保存", key=f"save_loc_{page_id}"):
+                        if new_location and new_location.get("lat") and new_location.get("lon"):
+                            place_payload = {
+                                "lat":  new_location["lat"],
+                                "lon":  new_location["lon"],
+                                "name": new_location.get("name", ""),
+                            }
+                            if new_location.get("address"):
+                                place_payload["address"] = new_location["address"]
+                            res = api_request(
+                                "patch",
+                                f"https://api.notion.com/v1/pages/{page_id}",
+                                headers=NOTION_HEADERS,
+                                json={"properties": {"ロケーション": {"place": place_payload}}},
+                            )
+                            if res and res.status_code == 200:
+                                st.success("✅ ロケーションを更新しました")
+                                for p in st.session_state.pages:
+                                    if p["id"] == page_id:
+                                        p["properties"]["ロケーション"] = {"place": place_payload}
+                                sync_notion_after_update(page_id=page_id)
+                            else:
+                                st.error("❌ ロケーション更新失敗")
+                        else:
+                            st.warning("ロケーションを選択してください")
+                with loc_c2:
+                    if st.button("🗑 ロケーションをクリア", key=f"clear_loc_{page_id}"):
                         res = api_request(
                             "patch",
                             f"https://api.notion.com/v1/pages/{page_id}",
                             headers=NOTION_HEADERS,
-                            json={"properties": {"ロケーション": {"place": place_payload}}},
+                            json={"properties": {"ロケーション": {"place": None}}},
                         )
                         if res and res.status_code == 200:
-                            st.success("✅ ロケーションを更新しました")
+                            st.success("✅ ロケーションをクリアしました")
                             for p in st.session_state.pages:
                                 if p["id"] == page_id:
-                                    p["properties"]["ロケーション"] = {"place": place_payload}
+                                    p["properties"]["ロケーション"] = {"place": None}
                             sync_notion_after_update(page_id=page_id)
                         else:
                             st.error("❌ ロケーション更新失敗")
-                    else:
-                        st.warning("ロケーションを選択してください")
-            with loc_c2:
-                if st.button("🗑 ロケーションをクリア", key=f"clear_loc_{page_id}"):
-                    res = api_request(
-                        "patch",
-                        f"https://api.notion.com/v1/pages/{page_id}",
-                        headers=NOTION_HEADERS,
-                        json={"properties": {"ロケーション": {"place": None}}},
-                    )
-                    if res and res.status_code == 200:
-                        st.success("✅ ロケーションをクリアしました")
-                        for p in st.session_state.pages:
-                            if p["id"] == page_id:
-                                p["properties"]["ロケーション"] = {"place": None}
-                        sync_notion_after_update(page_id=page_id)
-                    else:
-                        st.error("❌ ロケーション更新失敗")
 
             # ── カバー画像アップロード ──
             st.divider()
-            st.caption("🖼 カバー画像を差し替え")
-            uploaded_cover = st.file_uploader(
-                "画像をアップロード（JPG / PNG）",
-                type=["jpg", "jpeg", "png"],
-                key=f"cover_upload_{page_id}",
-            )
-            if uploaded_cover is not None:
-                img_bytes = uploaded_cover.read()
-                mimetype  = "image/jpeg" if uploaded_cover.type == "image/jpeg" else "image/png"
-                st.image(img_bytes, width=160, caption="プレビュー")
-                if st.button("💾 Driveに保存してNotionに反映", key=f"save_cover_{page_id}"):
-                    with st.spinner("アップロード中..."):
-                        file_id = save_to_drive("", log_title, page_id, image_bytes=img_bytes, mimetype=mimetype)
-                        if file_id:
-                            public_url = f"https://drive.google.com/uc?id={file_id}"
-                            # Drive公開設定
-                            try:
-                                svc = get_drive_service_safe()
-                                svc.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
-                            except Exception:
-                                st.warning("Driveの公開設定に失敗しました。")
-                            # Notionカバー更新
-                            res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}",
-                                              headers=NOTION_HEADERS,
-                                              json={"cover": {"type": "external", "external": {"url": public_url}}})
-                            if res and res.status_code == 200:
-                                st.success(f"✅ カバーを更新しました")
-                                for p in st.session_state.pages:
-                                    if p["id"] == page_id:
-                                        p["cover"] = {"type": "external", "external": {"url": public_url}}
-                                sync_notion_after_update(page_id=page_id)
-                                st.rerun()
+            with st.expander("🖼 カバー画像を差し替え", expanded=False):
+                uploaded_cover = st.file_uploader(
+                    "画像をアップロード（JPG / PNG）",
+                    type=["jpg", "jpeg", "png"],
+                    key=f"cover_upload_{page_id}",
+                )
+                if uploaded_cover is not None:
+                    img_bytes = uploaded_cover.read()
+                    mimetype  = "image/jpeg" if uploaded_cover.type == "image/jpeg" else "image/png"
+                    st.image(img_bytes, width=160, caption="プレビュー")
+                    if st.button("💾 Driveに保存してNotionに反映", key=f"save_cover_{page_id}"):
+                        with st.spinner("アップロード中..."):
+                            file_id = save_to_drive("", log_title, page_id, image_bytes=img_bytes, mimetype=mimetype)
+                            if file_id:
+                                public_url = f"https://drive.google.com/uc?id={file_id}"
+                                # Drive公開設定
+                                try:
+                                    svc = get_drive_service_safe()
+                                    svc.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
+                                except Exception:
+                                    st.warning("Driveの公開設定に失敗しました。")
+                                # Notionカバー更新
+                                res = api_request("patch", f"https://api.notion.com/v1/pages/{page_id}",
+                                                  headers=NOTION_HEADERS,
+                                                  json={"cover": {"type": "external", "external": {"url": public_url}}})
+                                if res and res.status_code == 200:
+                                    st.success(f"✅ カバーを更新しました")
+                                    for p in st.session_state.pages:
+                                        if p["id"] == page_id:
+                                            p["cover"] = {"type": "external", "external": {"url": public_url}}
+                                    sync_notion_after_update(page_id=page_id)
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Notion更新失敗")
                             else:
-                                st.error("❌ Notion更新失敗")
-                        else:
-                            st.error("❌ Drive保存失敗")
+                                st.error("❌ Drive保存失敗")
 
             # TMDB検索UI（映画・ドラマのみ）
             if is_tmdb_media:
