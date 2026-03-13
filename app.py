@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.26"
+APP_VERSION = "7.27"
 
 # ============================================================
 # 媒体マッピング
@@ -107,7 +107,22 @@ def emit_scroll_top_script():
         }
         function _doScrollTop() {
           _scrollTopSafe(window);
-          try { _scrollTopSafe(window.parent); } catch (e) {}
+          try {
+            _scrollTopSafe(window.parent);
+            const d = window.parent.document;
+            const sels = [
+              '[data-testid="stAppViewContainer"]',
+              '[data-testid="stMain"]',
+              '.stMain',
+              'section.main',
+              '.main'
+            ];
+            sels.forEach((s) => {
+              d.querySelectorAll(s).forEach((el) => {
+                try { el.scrollTop = 0; } catch (e1) {}
+              });
+            });
+          } catch (e) {}
         }
         setTimeout(_doScrollTop, 0);
         setTimeout(_doScrollTop, 120);
@@ -4840,6 +4855,8 @@ if mode == "データ管理":
         ]
         st.caption(f"「{search_query}」に一致: {len(display_pages)} 件")
         st.session_state.manual_page = 0
+        if len(display_pages) == 1:
+            st.session_state.focus_page_id = display_pages[0].get("id")
     # 検索条件でフォーカス対象が落ちても先頭に差し込んで編集導線を維持
     if focus_id and not any(p.get("id") == focus_id for p in display_pages):
         focus_page = next((p for p in target_pages if p.get("id") == focus_id), None)
@@ -4877,7 +4894,10 @@ if mode == "データ管理":
         is_tmdb_media = page_media in ("映画", "ドラマ")
         is_event_media = page_media in ("出演", "演奏会（鑑賞）", "ライブ/ショー", "展示会", "イベント")
 
-        with st.expander(f"{log_title}", expanded=(st.session_state.get("focus_page_id") == page_id)):
+        with st.expander(
+            f"{log_title}",
+            expanded=(st.session_state.get("focus_page_id") == page_id or len(page_items) == 1),
+        ):
             # 候補反映でセットしたタイトルを、次runで入力欄へ確実に反映
             pending_jp_key = f"pending_edit_jp_{page_id}"
             pending_en_key = f"pending_edit_en_{page_id}"
