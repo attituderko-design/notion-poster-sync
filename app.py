@@ -36,7 +36,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.41"
+APP_VERSION = "7.42"
 
 # ============================================================
 # 媒体マッピング
@@ -2501,6 +2501,27 @@ def create_song_assignment_rows(
     if not score_rows:
         return 0, 0, "対象曲なし"
 
+    def pick_prop(candidates: list[str], p_type: str) -> str | None:
+        for c in candidates:
+            if type_map.get(c) == p_type:
+                return c
+        return None
+
+    relation_props = [k for k, v in type_map.items() if v == "relation"]
+    score_rel_prop = pick_prop(["演奏曲", "演奏曲DB", "曲", "楽曲"], "relation")
+    cast_rel_prop = pick_prop(["演奏会出演者", "出演者", "参加者", "演奏会参加者"], "relation")
+    if score_rel_prop is None and relation_props:
+        score_rel_prop = relation_props[0]
+    if cast_rel_prop is None and relation_props:
+        if len(relation_props) >= 2:
+            cast_rel_prop = relation_props[1] if relation_props[0] == score_rel_prop else relation_props[0]
+        else:
+            cast_rel_prop = relation_props[0]
+
+    title_prop = pick_prop(["タイトル", "Name", "名前"], "title")
+    display_prop = pick_prop(["表示名", "Display Name"], "formula") or pick_prop(["表示名", "Display Name"], "rich_text")
+    inst_prop = pick_prop(["担当楽器", "楽器"], "multi_select") or pick_prop(["担当楽器", "楽器"], "select")
+
     created, failed = 0, 0
     for row in score_rows:
         score_row_id = row.get("id")
@@ -2519,11 +2540,16 @@ def create_song_assignment_rows(
                 failed += 1
                 continue
             props = {}
-            _put_notion_prop(props, type_map, "タイトル", f"{row.get('title','')} / {nm}")
-            _put_notion_prop(props, type_map, "演奏曲", score_row_id)
-            _put_notion_prop(props, type_map, "演奏会出演者", cast_row_id)
-            _put_notion_prop(props, type_map, "担当楽器", instruments)
-            _put_notion_prop(props, type_map, "表示名", f"{row.get('title','')} / {nm}")
+            if title_prop:
+                _put_notion_prop(props, type_map, title_prop, f"{row.get('title','')} / {nm}")
+            if score_rel_prop:
+                _put_notion_prop(props, type_map, score_rel_prop, score_row_id)
+            if cast_rel_prop:
+                _put_notion_prop(props, type_map, cast_rel_prop, cast_row_id)
+            if inst_prop:
+                _put_notion_prop(props, type_map, inst_prop, instruments)
+            if display_prop:
+                _put_notion_prop(props, type_map, display_prop, f"{row.get('title','')} / {nm}")
             if not props:
                 failed += 1
                 continue
