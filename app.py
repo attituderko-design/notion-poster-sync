@@ -35,7 +35,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.37"
+APP_VERSION = "7.38"
 
 # ============================================================
 # 媒体マッピング
@@ -167,6 +167,7 @@ def reset_new_register_state():
         "event_loc_query", "event_loc_results", "event_loc_selected",
         # 演奏会（出演）- 演奏曲関連
         "ev_score_query", "ev_score_selected",
+        "ev_participants", "ev_part_name", "ev_part_instruments", "ev_part_memo",
         # 演奏曲 - 演奏会（出演）関連
         "score_perf_query", "score_perf_selected",
         "score_perf_selected_ids",
@@ -2322,6 +2323,82 @@ def _put_notion_prop(properties: dict, type_map: dict, name: str, value):
 def _split_instruments(part: str) -> list[str]:
     return [x.strip() for x in re.split(r'[/／,、・\s]+', part or "") if x.strip()]
 
+def _find_or_create_performer_id(name: str) -> str | None:
+    performer_name = (name or "").strip()
+    if not performer_name or not NOTION_PERFORMER_DB_ID:
+        return None
+    res = api_request(
+        "post",
+        f"https://api.notion.com/v1/databases/{NOTION_PERFORMER_DB_ID}/query",
+        headers=NOTION_HEADERS,
+        json={"filter": {"property": "名前", "title": {"equals": performer_name}}, "page_size": 1},
+    )
+    if res is not None and res.status_code == 200:
+        rows = (res.json() or {}).get("results", [])
+        if rows:
+            return rows[0].get("id")
+    props = get_notion_db_property_types(NOTION_PERFORMER_DB_ID)
+    payload_props = {}
+    _put_notion_prop(payload_props, props, "名前", performer_name)
+    if not payload_props:
+        return None
+    cres = api_request(
+        "post",
+        "https://api.notion.com/v1/pages",
+        headers=NOTION_HEADERS,
+        json={"parent": {"database_id": NOTION_PERFORMER_DB_ID}, "properties": payload_props},
+    )
+    if cres is not None and cres.status_code == 200:
+        return (cres.json() or {}).get("id")
+    return None
+
+def create_performance_participant_rows(
+    performance_page_id: str,
+    performance_title: str,
+    participants: list[dict],
+) -> tuple[int, int, str]:
+    if not NOTION_ASSIGNMENT_DB_ID:
+        return 0, 0, "NOTION_ASSIGNMENT_DB_ID 未設定"
+    type_map = get_notion_db_property_types(NOTION_ASSIGNMENT_DB_ID)
+    if not type_map:
+        return 0, 0, "演奏会参加者DBのプロパティ取得失敗（Integration接続/DB IDを確認）"
+    rows = [x for x in (participants or []) if (x.get("name") or "").strip()]
+    if not rows:
+        return 0, 0, "参加者入力なし"
+
+    created, failed = 0, 0
+    for i, row in enumerate(rows, start=1):
+        name = (row.get("name") or "").strip()
+        memo = (row.get("memo") or "").strip()
+        instruments = _split_instruments(row.get("instruments") or "")
+        performer_id = _find_or_create_performer_id(name)
+        if not performer_id:
+            failed += 1
+            continue
+
+        props = {}
+        _put_notion_prop(props, type_map, "タイトル", f"{performance_title} / {name}")
+        _put_notion_prop(props, type_map, "出演", performance_page_id)
+        _put_notion_prop(props, type_map, "出演者", performer_id)
+        _put_notion_prop(props, type_map, "担当楽器", instruments)
+        _put_notion_prop(props, type_map, "メモ", memo)
+        _put_notion_prop(props, type_map, "表示名", f"{i:02d} / {name}")
+
+        if not props:
+            failed += 1
+            continue
+        res = api_request(
+            "post",
+            "https://api.notion.com/v1/pages",
+            headers=NOTION_HEADERS,
+            json={"parent": {"database_id": NOTION_ASSIGNMENT_DB_ID}, "properties": props},
+        )
+        if res is not None and res.status_code == 200:
+            created += 1
+        else:
+            failed += 1
+    return created, failed, ""
+
 def create_setlist_rows_for_performance(
     performance_page_id: str,
     performance_title: str,
@@ -2705,6 +2782,7 @@ for key, default in {
     "album_tracks_id":    None,
     "ev_setlist_main":    [],
     "ev_setlist_encore":  [],
+    "ev_participants":    [],
     "refresh_targets_ids": [],
     "refresh_cursor":      0,
     "refresh_success_log": [],
@@ -3356,6 +3434,41 @@ if mode == "新規登録":
                             st.rerun()
                     related_score_ids = [x["id"] for x in st.session_state.ev_score_selected]
 
+                st.divider()
+                st.subheader("👥 演奏会参加者（任意）")
+                if "ev_participants" not in st.session_state:
+                    st.session_state.ev_participants = []
+                p_c1, p_c2, p_c3, p_c4 = st.columns([2, 2, 2, 1])
+                p_name = p_c1.text_input("出演者名", key="ev_part_name", placeholder="例: 山田太郎")
+                p_inst = p_c2.text_input("担当楽器", key="ev_part_instruments", placeholder="例: Timpani / Perc.")
+                p_memo = p_c3.text_input("メモ", key="ev_part_memo", placeholder="任意")
+                if p_c4.button("＋追加", key="ev_part_add"):
+                    if p_name.strip():
+                        st.session_state.ev_participants.append({
+                            "name": p_name.strip(),
+                            "instruments": p_inst.strip(),
+                            "memo": p_memo.strip(),
+                        })
+                        st.session_state.pop("ev_part_name", None)
+                        st.session_state.pop("ev_part_instruments", None)
+                        st.session_state.pop("ev_part_memo", None)
+                        st.rerun()
+                    else:
+                        st.warning("出演者名を入力してください。")
+
+                if st.session_state.ev_participants:
+                    st.caption("登録予定の参加者")
+                    for i, row in enumerate(st.session_state.ev_participants):
+                        c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
+                        c1.write(row.get("name", ""))
+                        c2.write(row.get("instruments", ""))
+                        c3.write(row.get("memo", ""))
+                        if c4.button("✕", key=f"ev_part_rm_{i}"):
+                            st.session_state.ev_participants = [
+                                x for j, x in enumerate(st.session_state.ev_participants) if j != i
+                            ]
+                            st.rerun()
+
             st.divider()
             event_location = location_search_ui("event", media_label)
             if st.button("📥 登録する", type="primary", key="event_register", disabled=not event_title):
@@ -3397,6 +3510,8 @@ if mode == "新規登録":
                 if ok:
                     created_setlist = failed_setlist = 0
                     setlist_reason = ""
+                    created_participants = failed_participants = 0
+                    participants_reason = ""
                     if is_performance and NOTION_SCORE_DB_ID:
                         setlist_main = [x for x in st.session_state.get("ev_setlist_main", []) if (x.get("title") or "").strip()]
                         setlist_encore = [x for x in st.session_state.get("ev_setlist_encore", []) if (x.get("title") or "").strip()]
@@ -3416,8 +3531,16 @@ if mode == "新規登録":
                             )
                         else:
                             setlist_reason = "セットリスト入力なし"
+                    if is_performance and NOTION_ASSIGNMENT_DB_ID:
+                        perf_page_id = st.session_state.get("last_created_page_id", "")
+                        participants = st.session_state.get("ev_participants", [])
+                        created_participants, failed_participants, participants_reason = create_performance_participant_rows(
+                            performance_page_id=perf_page_id,
+                            performance_title=event_title,
+                            participants=participants,
+                        )
                     for key in ["ev_mb_composers", "ev_mb_works", "ev_mb_filter",
-                                "ev_it_results", "ev_setlist_main", "ev_setlist_encore"]:
+                                "ev_it_results", "ev_setlist_main", "ev_setlist_encore", "ev_participants"]:
                         st.session_state.pop(key, None)
                     reset_new_register_state()
                     sync_notion_after_update(
@@ -3433,6 +3556,15 @@ if mode == "新規登録":
                             st.warning(f"⚠️ 演奏曲DB登録に失敗しました（{failed_setlist} 件）")
                         elif setlist_reason:
                             st.info(f"ℹ️ 演奏曲DB連携: {setlist_reason}")
+                    if is_performance and NOTION_ASSIGNMENT_DB_ID:
+                        if created_participants > 0 and failed_participants == 0:
+                            st.success(f"✅ 演奏会参加者DBに {created_participants} 件登録しました")
+                        elif created_participants > 0 and failed_participants > 0:
+                            st.warning(f"⚠️ 演奏会参加者DB登録: 成功 {created_participants} 件 / 失敗 {failed_participants} 件")
+                        elif failed_participants > 0:
+                            st.warning(f"⚠️ 演奏会参加者DB登録に失敗しました（{failed_participants} 件）")
+                        elif participants_reason:
+                            st.info(f"ℹ️ 演奏会参加者DB連携: {participants_reason}")
                     show_post_register_ui()
                 else:
                     st.error("❌ 登録失敗")
