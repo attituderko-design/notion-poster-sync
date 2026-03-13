@@ -26,8 +26,10 @@
 - 登録リスト（カート）による一括登録
 - ロケーション検索（Nominatim）とNotion `place` 保存
 - 既存データのリフレッシュ同期（全件/個別）
+- リフレッシュ後の整合チェック修復（手動/半自動/自動）
 - 失敗ログからの個別再実行
-- 演奏会（出演）⇔ 演奏曲のリレーション連携
+- 出演 ⇔ 演奏曲 ⇔ 演奏会参加者/楽曲別担当者 の連携
+- 出演者管理モード（出演者マスタ連携、CSV一括取り込み）
 - Driveデータスキップモード（ネットワーク制限時テスト用）
 
 ---
@@ -59,7 +61,7 @@
 |---|---|---|
 | `タイトル` | Title | 必須 |
 | `International Title` | Rich text | 英語タイトル |
-| `媒体` | Multi-select | 映画 / ドラマ / アニメ / 演奏会（鑑賞） / 演奏会（出演） / 展示会 / ライブ/ショー / 書籍 / 漫画 / 音楽アルバム / ゲーム / 演奏曲 |
+| `媒体` | Multi-select | 映画 / ドラマ / アニメ / 演奏会（鑑賞） / 出演 / 展示会 / ライブ/ショー / 書籍 / 漫画 / 音楽アルバム / ゲーム / 演奏曲 |
 | `鑑賞日` | Date | 任意 |
 | `リリース日` | Date | 任意 |
 | `クリエイター` | Rich text | 監督 / 著者 / アーティスト / 開発元 / 作曲者など |
@@ -75,13 +77,27 @@
 | `IGDB_ID` | Number | ゲームで使用 |
 | `iTunes_ID` | Number | 音楽アルバムで使用 |
 | `TMDB_score` | Number | 任意 |
-| `演奏曲` | Relation | 推奨（演奏会（出演）連携） |
+| `演奏曲` | Relation | 推奨（出演連携） |
 | `出演履歴` | Relation | 推奨（演奏曲連携） |
 
 ### Schema Notes
 
 - 現行仕様は `媒体` を正とします。
 - `MEDIA_TYPE` は旧仕様です。現行では不要です。
+- 旧媒体名 `演奏会（出演）` は現行では `出演` に統一されています。
+
+### Optional DBs (出演拡張)
+
+出演関連の拡張を使う場合は、以下DB IDを `secrets.toml` に設定します。
+
+```toml
+NOTION_SCORE_DB_ID = "..."
+NOTION_PERFORMER_DB_ID = "..."
+NOTION_PERFORMANCE_CAST_DB_ID = "..."
+NOTION_SONG_ASSIGN_DB_ID = "..."
+NOTION_PERFORMER_MASTER_DB_ID = "..."
+DEFAULT_PERFORMER_NAME = "..."
+```
 
 ---
 
@@ -123,6 +139,14 @@ streamlit run app.py
 ```text
 New project/
 ├── app.py
+├── components/
+│   └── form_inputs.py
+├── services/
+│   ├── notion_read.py
+│   ├── performance_ops.py
+│   ├── reconcile.py
+│   ├── relation_utils.py
+│   └── sync_logs.py
 ├── requirements.txt
 ├── README.md
 └── docs/
