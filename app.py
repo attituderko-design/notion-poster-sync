@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.07"
+APP_VERSION = "7.08"
 
 # ============================================================
 # 媒体マッピング
@@ -4697,11 +4697,11 @@ if mode == "データ管理":
     pending_focus_id = st.session_state.pop("pending_focus_page_id", None)
     if pending_focus_id:
         st.session_state.focus_page_id = pending_focus_id
+        # フォーカス遷移時は検索欄も対象タイトルへ同期（前回検索の残りで隠れないようにする）
+        pending_q = st.session_state.get("pending_manual_search_query", "")
+        st.session_state["_cti_manual_search_query"] = pending_q
+        st.session_state["manual_search_query"] = pending_q
     focus_id = st.session_state.get("focus_page_id")
-    if focus_id and not any(p.get("id") == focus_id for p in display_pages):
-        focus_page = next((p for p in target_pages if p.get("id") == focus_id), None)
-        if focus_page is not None:
-            display_pages = [focus_page] + display_pages
     if focus_id:
         display_pages = sorted(display_pages, key=lambda p: 0 if p.get("id") == focus_id else 1)
         st.session_state.manual_page = 0
@@ -4726,6 +4726,11 @@ if mode == "データ管理":
         ]
         st.caption(f"「{search_query}」に一致: {len(display_pages)} 件")
         st.session_state.manual_page = 0
+    # 検索条件でフォーカス対象が落ちても先頭に差し込んで編集導線を維持
+    if focus_id and not any(p.get("id") == focus_id for p in display_pages):
+        focus_page = next((p for p in target_pages if p.get("id") == focus_id), None)
+        if focus_page is not None:
+            display_pages = [focus_page] + display_pages
 
     PAGE_SIZE         = 20
     total_pages_count = max(1, (len(display_pages) + PAGE_SIZE - 1) // PAGE_SIZE)
