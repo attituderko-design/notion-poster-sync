@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.03"
+APP_VERSION = "7.04"
 
 # ============================================================
 # 媒体マッピング
@@ -2257,7 +2257,13 @@ def _get_score_pages(force_refresh: bool = False) -> list[dict]:
     """演奏曲ページ一覧を取得（[{id, title}]）。セッションキャッシュあり。"""
     if (not force_refresh) and "score_pages_cache" in st.session_state:
         return st.session_state.score_pages_cache
-    if st.session_state.get("pages_loaded") and st.session_state.get("pages"):
+    if force_refresh:
+        pages = load_notion_data()
+        if st.session_state.get("last_notion_load_ok", True):
+            st.session_state.all_pages = pages
+            st.session_state.pages = filter_target_pages(pages)
+            st.session_state.pages_loaded = True
+    elif st.session_state.get("pages_loaded") and st.session_state.get("pages"):
         pages = st.session_state.pages
     else:
         pages = load_notion_data()
@@ -2297,7 +2303,13 @@ def _get_performance_pages(force_refresh: bool = False) -> list[dict]:
     """出演ページ一覧を取得（[{id, title}]）。セッションキャッシュあり。"""
     if (not force_refresh) and "performance_pages_cache" in st.session_state:
         return st.session_state.performance_pages_cache
-    if st.session_state.get("pages_loaded") and st.session_state.get("pages"):
+    if force_refresh:
+        pages = load_notion_data()
+        if st.session_state.get("last_notion_load_ok", True):
+            st.session_state.all_pages = pages
+            st.session_state.pages = filter_target_pages(pages)
+            st.session_state.pages_loaded = True
+    elif st.session_state.get("pages_loaded") and st.session_state.get("pages"):
         pages = st.session_state.pages
     else:
         pages = load_notion_data()
@@ -2471,6 +2483,7 @@ for key, default in {
     "created_pages":       [],
     "drive_skip_mode":     False,
     "app_mode":            "新規登録",
+    "app_mode_widget":     "新規登録",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -2574,7 +2587,11 @@ with st.sidebar:
         st.header("動作モード")
         if "pending_app_mode" in st.session_state:
             st.session_state.app_mode = st.session_state.pop("pending_app_mode")
-        mode = st.radio("モード", ["新規登録", "データ管理", "自動同期"], key="app_mode")
+            st.session_state.app_mode_widget = st.session_state.app_mode
+        if "app_mode_widget" not in st.session_state:
+            st.session_state.app_mode_widget = st.session_state.get("app_mode", "新規登録")
+        mode = st.radio("モード", ["新規登録", "データ管理", "自動同期"], key="app_mode_widget")
+        st.session_state.app_mode = mode
         sync_scope = "欠損のみ補填"  # legacy compat
 
         if mode != "新規登録":
