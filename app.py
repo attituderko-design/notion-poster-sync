@@ -32,7 +32,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.30"
+APP_VERSION = "7.31"
 
 # ============================================================
 # 媒体マッピング
@@ -2317,12 +2317,12 @@ def create_setlist_rows_for_performance(
     encore_items: list[dict],
     selected_scores: list[dict],
     score_pages: list[dict],
-) -> tuple[int, int]:
+) -> tuple[int, int, str]:
     if not NOTION_SETLIST_DB_ID:
-        return 0, 0
+        return 0, 0, "NOTION_SETLIST_DB_ID 未設定"
     type_map = get_notion_db_property_types(NOTION_SETLIST_DB_ID)
     if not type_map:
-        return 0, 0
+        return 0, 0, "セットリストDBのプロパティ取得失敗（Integration接続/DB IDを確認）"
 
     title_to_id = {}
     for s in (selected_scores or []):
@@ -2333,6 +2333,8 @@ def create_setlist_rows_for_performance(
 
     created, failed = 0, 0
     rows = [("通常", x) for x in (main_items or [])] + [("アンコール", x) for x in (encore_items or [])]
+    if not rows:
+        return 0, 0, "セットリスト入力なし"
     order = 1
     for section, item in rows:
         song_title = (item.get("title") or "").strip()
@@ -2369,7 +2371,7 @@ def create_setlist_rows_for_performance(
         else:
             failed += 1
         order += 1
-    return created, failed
+    return created, failed, ""
 
 def is_japanese_name(name: str) -> bool:
     """漢字・ひらがな・カタカナを含む場合は日本語著者名とみなす"""
@@ -3344,6 +3346,7 @@ if mode == "新規登録":
                 )
                 if ok:
                     created_setlist = failed_setlist = 0
+                    setlist_reason = ""
                     if is_performance and NOTION_SETLIST_DB_ID:
                         setlist_main = [x for x in st.session_state.get("ev_setlist_main", []) if (x.get("title") or "").strip()]
                         setlist_encore = [x for x in st.session_state.get("ev_setlist_encore", []) if (x.get("title") or "").strip()]
@@ -3352,7 +3355,7 @@ if mode == "新規登録":
                             perf_date = watch_str or start_str or ""
                             score_pages_for_link = _get_score_pages()
                             selected_scores_for_link = st.session_state.get("ev_score_selected", [])
-                            created_setlist, failed_setlist = create_setlist_rows_for_performance(
+                            created_setlist, failed_setlist, setlist_reason = create_setlist_rows_for_performance(
                                 performance_page_id=perf_page_id,
                                 performance_title=event_title,
                                 performance_date=perf_date,
@@ -3361,6 +3364,8 @@ if mode == "新規登録":
                                 selected_scores=selected_scores_for_link,
                                 score_pages=score_pages_for_link,
                             )
+                        else:
+                            setlist_reason = "セットリスト入力なし"
                     for key in ["ev_mb_composers", "ev_mb_works", "ev_mb_filter",
                                 "ev_it_results", "ev_setlist_main", "ev_setlist_encore"]:
                         st.session_state.pop(key, None)
@@ -3369,13 +3374,15 @@ if mode == "新規登録":
                         page_id=st.session_state.get("last_created_page_id"),
                         updated_page=st.session_state.get("last_created_page"),
                     )
-                    if is_performance and NOTION_SETLIST_DB_ID and (created_setlist or failed_setlist):
-                        if failed_setlist == 0:
+                    if is_performance and NOTION_SETLIST_DB_ID:
+                        if created_setlist > 0 and failed_setlist == 0:
                             st.success(f"✅ セットリストDBに {created_setlist} 件登録しました")
-                        elif created_setlist > 0:
+                        elif created_setlist > 0 and failed_setlist > 0:
                             st.warning(f"⚠️ セットリストDB登録: 成功 {created_setlist} 件 / 失敗 {failed_setlist} 件")
-                        else:
+                        elif failed_setlist > 0:
                             st.warning(f"⚠️ セットリストDB登録に失敗しました（{failed_setlist} 件）")
+                        elif setlist_reason:
+                            st.info(f"ℹ️ セットリストDB連携: {setlist_reason}")
                     show_post_register_ui()
                 else:
                     st.error("❌ 登録失敗")
