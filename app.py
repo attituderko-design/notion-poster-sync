@@ -48,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.01"
+APP_VERSION = "9.02"
 
 # ============================================================
 # 媒体マッピング
@@ -2869,6 +2869,8 @@ for key, default in {
     "reconcile_repair_mode": "partial",
     "refresh_maintenance_enabled": True,
     "refresh_maintenance_mode": "partial",
+    "refresh_maintenance_scope": "auto",
+    "refresh_touched_performance": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -2991,6 +2993,21 @@ with st.sidebar:
         if mode == "自動同期":
             st.divider()
             st.toggle("リフレッシュ時に整合チェック修復を実行", key="refresh_maintenance_enabled")
+            rm_scope_label = (
+                "常に実行" if st.session_state.get("refresh_maintenance_scope") == "always"
+                else "出演/演奏曲を更新した時だけ実行（推奨）"
+            )
+            st.radio(
+                "整合修復の実行条件",
+                options=["出演/演奏曲を更新した時だけ実行（推奨）", "常に実行"],
+                index=["出演/演奏曲を更新した時だけ実行（推奨）", "常に実行"].index(rm_scope_label),
+                key="refresh_maintenance_scope_display",
+            )
+            st.session_state.refresh_maintenance_scope = (
+                "always"
+                if st.session_state.get("refresh_maintenance_scope_display") == "常に実行"
+                else "auto"
+            )
             rm_label = (
                 "手動（実行のみ）" if st.session_state.get("refresh_maintenance_mode") == "manual"
                 else "自動（高確度＋重複整理）" if st.session_state.get("refresh_maintenance_mode") == "full"
@@ -3022,6 +3039,7 @@ with st.sidebar:
                 st.session_state.refresh_success_log = []
                 st.session_state.refresh_maintain_log = []
                 st.session_state.refresh_error_log = []
+                st.session_state.refresh_touched_performance = False
                 st.rerun()
             st.caption("IDを基にすべてのフィールドを強制上書きします\nIDのないデータは情報の正規化のみ実施")
             if st.button("⏹ 停止", use_container_width=True):
@@ -5096,6 +5114,8 @@ if mode == "自動同期" and st.session_state.is_running:
             props     = item["properties"]
             log_title, jp, en = get_title(props)
             media_label_val = get_page_media(item)
+            if is_refresh and media_label_val in ("出演", "演奏曲"):
+                st.session_state.refresh_touched_performance = True
             notion_ok_now, drive_ok_now = get_diff_status(item)
             is_movie_drama = any(
                 m["name"] in ["映画", "ドラマ"]
@@ -5502,7 +5522,11 @@ if mode == "自動同期" and st.session_state.is_running:
         if st.session_state.is_running and st.session_state.refresh_cursor < total_count:
             st.rerun()
         if st.session_state.refresh_cursor >= total_count:
+            should_run_maintenance = False
             if st.session_state.get("refresh_maintenance_enabled", True):
+                scope = st.session_state.get("refresh_maintenance_scope", "auto")
+                should_run_maintenance = (scope == "always") or bool(st.session_state.get("refresh_touched_performance", False))
+            if should_run_maintenance:
                 with st.spinner("整合チェック修復を実行中..."):
                     report = analyze_performance_relation_integrity(force_refresh=False)
                     if report.get("error"):
@@ -5521,8 +5545,11 @@ if mode == "自動同期" and st.session_state.is_running:
                         st.session_state.pending_notice = msg
                         if errs:
                             st.session_state.pending_warning = "整合修復で一部失敗があります（出演者管理の整合チェックで要確認）"
+            elif st.session_state.get("refresh_maintenance_enabled", True):
+                st.session_state.pending_notice = "⏭ 整合修復を省略: 今回の更新対象に出演/演奏曲が含まれなかったため"
             st.session_state.is_running = False
             st.session_state.refresh_targets_ids = []
+            st.session_state.refresh_touched_performance = False
     else:
         st.session_state.is_running = False
 
