@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.16"
+APP_VERSION = "7.17"
 
 # ============================================================
 # 媒体マッピング
@@ -2359,12 +2359,13 @@ def _prune_selected_relations(selected: list[dict], valid_pages: list[dict]) -> 
     return pruned
 
 
-def _get_page_from_state_or_api(page_id: str) -> dict | None:
+def _get_page_from_state_or_api(page_id: str, force_api: bool = False) -> dict | None:
     if not page_id:
         return None
-    for p in st.session_state.get("pages", []):
-        if p.get("id") == page_id:
-            return p
+    if not force_api:
+        for p in st.session_state.get("pages", []):
+            if p.get("id") == page_id:
+                return p
     res = api_request("get", f"https://api.notion.com/v1/pages/{page_id}", headers=NOTION_HEADERS)
     if res is not None and res.status_code == 200:
         page = res.json()
@@ -4770,6 +4771,16 @@ if mode == "データ管理":
         is_event_media = page_media in ("出演", "演奏会（鑑賞）", "ライブ/ショー", "展示会", "イベント")
 
         with st.expander(f"{log_title}", expanded=(st.session_state.get("focus_page_id") == page_id)):
+            # 候補反映でセットしたタイトルを、次runで入力欄へ確実に反映
+            pending_jp_key = f"pending_edit_jp_{page_id}"
+            pending_en_key = f"pending_edit_en_{page_id}"
+            if pending_jp_key in st.session_state:
+                st.session_state[f"_cti_edit_jp_{page_id}"] = st.session_state.pop(pending_jp_key)
+                st.session_state.pop(f"edit_jp_{page_id}", None)
+            if pending_en_key in st.session_state:
+                st.session_state[f"_cti_edit_en_{page_id}"] = st.session_state.pop(pending_en_key)
+                st.session_state.pop(f"edit_en_{page_id}", None)
+
             def run_single_refresh():
                 media = page_media
                 existing_release = ((props.get("リリース日") or {}).get("date") or {}).get("start") or None
@@ -4937,14 +4948,6 @@ if mode == "データ管理":
                 # タイトル編集（全媒体）
                 existing_jp = jp or ""
                 existing_en = en or ""
-                pending_jp_key = f"pending_edit_jp_{page_id}"
-                pending_en_key = f"pending_edit_en_{page_id}"
-                if pending_jp_key in st.session_state:
-                    st.session_state[f"_cti_edit_jp_{page_id}"] = st.session_state.pop(pending_jp_key)
-                    st.session_state.pop(f"edit_jp_{page_id}", None)
-                if pending_en_key in st.session_state:
-                    st.session_state[f"_cti_edit_en_{page_id}"] = st.session_state.pop(pending_en_key)
-                    st.session_state.pop(f"edit_en_{page_id}", None)
                 title_c1, title_c2 = st.columns(2)
                 new_jp = clearable_text_input("日本語タイトル", f"edit_jp_{page_id}", value=existing_jp, container=title_c1)
                 new_en = clearable_text_input("英語タイトル",   f"edit_en_{page_id}", value=existing_en, container=title_c2)
@@ -5045,6 +5048,8 @@ if mode == "データ管理":
                 target_pages = _get_score_pages() if page_media == "出演" else _get_performance_pages()
                 rel_state_key = f"edit_rel_{page_id}"
                 id_to_title = {p["id"]: p["title"] for p in target_pages}
+                live_page = _get_page_from_state_or_api(page_id, force_api=True)
+                live_props = (live_page or {}).get("properties", {}) or props
 
                 def build_rel_items(rel_ids: list[str]) -> list[dict]:
                     items = []
@@ -5057,11 +5062,11 @@ if mode == "データ管理":
                         items.append({"id": rid, "title": title})
                     return items
 
-                existing_rel_ids = [r.get("id") for r in ((props.get(rel_prop) or {}).get("relation", [])) if r.get("id")]
-                # 逆側プロパティに入っているケースも救済（既存データ互換）
-                if not existing_rel_ids:
-                    alt_prop = "出演履歴" if rel_prop == "演奏曲" else "演奏曲"
-                    existing_rel_ids = [r.get("id") for r in ((props.get(alt_prop) or {}).get("relation", [])) if r.get("id")]
+                existing_rel_ids = [r.get("id") for r in ((live_props.get(rel_prop) or {}).get("relation", [])) if r.get("id")]
+                alt_prop = "出演履歴" if rel_prop == "演奏曲" else "演奏曲"
+                alt_rel_ids = [r.get("id") for r in ((live_props.get(alt_prop) or {}).get("relation", [])) if r.get("id")]
+                # 主/逆の両方を統合（既存データ互換）
+                existing_rel_ids = _clean_relation_ids(existing_rel_ids + alt_rel_ids)
                 if rel_state_key not in st.session_state:
                     st.session_state[rel_state_key] = build_rel_items(existing_rel_ids)
                 else:
@@ -5072,12 +5077,12 @@ if mode == "データ管理":
                         st.session_state[rel_state_key].extend(build_rel_items(missing_ids))
                 if st.button("🔄 関連候補を再読み込み", key=f"edit_rel_reload_{page_id}"):
                     target_pages = _get_score_pages(force_refresh=True) if page_media == "出演" else _get_performance_pages(force_refresh=True)
-                    refreshed_page = _get_page_from_state_or_api(page_id)
+                    refreshed_page = _get_page_from_state_or_api(page_id, force_api=True)
                     refreshed_props = (refreshed_page or {}).get("properties", {}) or props
                     refreshed_rel_ids = [r.get("id") for r in ((refreshed_props.get(rel_prop) or {}).get("relation", [])) if r.get("id")]
-                    if not refreshed_rel_ids:
-                        alt_prop = "出演履歴" if rel_prop == "演奏曲" else "演奏曲"
-                        refreshed_rel_ids = [r.get("id") for r in ((refreshed_props.get(alt_prop) or {}).get("relation", [])) if r.get("id")]
+                    alt_prop = "出演履歴" if rel_prop == "演奏曲" else "演奏曲"
+                    refreshed_alt_ids = [r.get("id") for r in ((refreshed_props.get(alt_prop) or {}).get("relation", [])) if r.get("id")]
+                    refreshed_rel_ids = _clean_relation_ids(refreshed_rel_ids + refreshed_alt_ids)
                     id_to_title = {p["id"]: p["title"] for p in target_pages}
                     st.session_state[rel_state_key] = build_rel_items(refreshed_rel_ids)
                     st.rerun()
