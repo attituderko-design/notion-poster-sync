@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.15"
+APP_VERSION = "7.16"
 
 # ============================================================
 # 媒体マッピング
@@ -290,9 +290,6 @@ def clearable_text_input(label: str, key: str, placeholder: str = "", value: str
     ss_key = f"_cti_{key}"
     if ss_key not in st.session_state:
         st.session_state[ss_key] = value
-    # 外部処理で _cti 側を書き換えた場合、次runでウィジェット初期値にも反映する
-    if key in st.session_state and st.session_state.get(key) != st.session_state.get(ss_key):
-        st.session_state[key] = st.session_state[ss_key]
     # 外部から value が明示的に渡された場合（初期値設定）は上書きしない
     inp_col, btn_col = (container or st).columns([10, 1])
     val = inp_col.text_input(label, value=st.session_state[ss_key],
@@ -4940,6 +4937,14 @@ if mode == "データ管理":
                 # タイトル編集（全媒体）
                 existing_jp = jp or ""
                 existing_en = en or ""
+                pending_jp_key = f"pending_edit_jp_{page_id}"
+                pending_en_key = f"pending_edit_en_{page_id}"
+                if pending_jp_key in st.session_state:
+                    st.session_state[f"_cti_edit_jp_{page_id}"] = st.session_state.pop(pending_jp_key)
+                    st.session_state.pop(f"edit_jp_{page_id}", None)
+                if pending_en_key in st.session_state:
+                    st.session_state[f"_cti_edit_en_{page_id}"] = st.session_state.pop(pending_en_key)
+                    st.session_state.pop(f"edit_en_{page_id}", None)
                 title_c1, title_c2 = st.columns(2)
                 new_jp = clearable_text_input("日本語タイトル", f"edit_jp_{page_id}", value=existing_jp, container=title_c1)
                 new_en = clearable_text_input("英語タイトル",   f"edit_en_{page_id}", value=existing_en, container=title_c2)
@@ -4987,8 +4992,8 @@ if mode == "データ管理":
                         if st.button("候補を反映", key=f"edit_score_work_apply_{page_id}"):
                             picked = works[w_options.index(w_pick)]
                             title_val = picked.get("title", "")
-                            st.session_state[f"_cti_edit_jp_{page_id}"] = title_val
-                            st.session_state[f"_cti_edit_en_{page_id}"] = title_val
+                            st.session_state[f"pending_edit_jp_{page_id}"] = title_val
+                            st.session_state[f"pending_edit_en_{page_id}"] = title_val
                             st.success("タイトル欄に反映しました")
                             st.rerun()
                     elif work_filter.strip() and st.button("タイトルのみで候補検索", key=f"edit_score_title_only_{page_id}"):
