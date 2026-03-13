@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "6.02"
+APP_VERSION = "6.03"
 
 # ============================================================
 # 媒体マッピング
@@ -4878,9 +4878,12 @@ if mode == "データ管理":
                             st.rerun()
                 elif rel_query:
                     st.caption("候補が見つかりませんでした。")
+                if rel_query:
                     if st.button("＋ 新規作成して追加", key=f"edit_rel_create_{page_id}"):
-                        if page_media == "演奏会（出演）":
-                            new_title = rel_query
+                        new_title = rel_query.strip()
+                        if not new_title:
+                            st.warning("新規作成するタイトルを入力してください。")
+                        elif page_media == "演奏会（出演）":
                             ok = create_notion_page(
                                 jp_title=new_title, en_title=new_title,
                                 media_type_label="演奏曲",
@@ -4901,7 +4904,6 @@ if mode == "データ管理":
                                 st.success("✅ 演奏曲を追加しました")
                                 st.rerun()
                         else:
-                            new_title = rel_query
                             ok = create_notion_page(
                                 jp_title=new_title, en_title=new_title,
                                 media_type_label="演奏会（出演）",
