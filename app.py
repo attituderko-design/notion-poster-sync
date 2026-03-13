@@ -2,7 +2,6 @@ import re
 import requests
 import time
 import streamlit as st
-from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
@@ -12,6 +11,17 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 import io
 import uuid
+from components.form_inputs import clearable_text_input as _clearable_text_input_component
+from services.notion_read import query_notion_database_all as _query_notion_database_all_service
+from services.relation_utils import clean_relation_ids as _clean_relation_ids_service
+from services.relation_utils import prune_selected_relations as _prune_selected_relations_service
+from services.reconcile import analyze_performance_relation_integrity_service as _analyze_reconcile_service
+from services.reconcile import run_performance_relation_repair_service as _run_reconcile_repair_service
+from services.sync_logs import build_update_log as _build_update_log_service
+from services.performance_ops import create_performance_participant_rows_service as _create_participants_service
+from services.performance_ops import create_setlist_rows_for_performance_service as _create_setlist_service
+from services.performance_ops import create_song_assignment_rows_service as _create_song_assign_service
+from services.performance_ops import get_cast_row_map_for_performance_service as _get_cast_row_map_service
 
 # ============================================================
 # 設定（secrets.toml から読み込み）
@@ -38,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.00"
+APP_VERSION = "9.01"
 
 # ============================================================
 # 媒体マッピング
@@ -346,37 +356,15 @@ def clearable_text_input(
     refresh_on_value_change: bool = False,
     **kwargs
 ) -> str:
-    """× ボタン付き text_input。セッションステートで値を管理する。"""
-    ss_key = f"_cti_{key}"
-    if ss_key not in st.session_state:
-        st.session_state[ss_key] = value
-    elif refresh_on_value_change and value != st.session_state.get(ss_key, ""):
-        st.session_state[ss_key] = value
-        st.session_state.pop(key, None)
-
-    inp_col, btn_col = (container or st).columns([10, 1])
-    # key が既に存在する状態で value を同時指定すると Streamlit 警告になるため分岐
-    if key in st.session_state:
-        val = inp_col.text_input(
-            label,
-            placeholder=placeholder,
-            key=key,
-            **kwargs,
-        )
-    else:
-        val = inp_col.text_input(
-            label,
-            value=st.session_state[ss_key],
-            placeholder=placeholder,
-            key=key,
-            **kwargs,
-        )
-    st.session_state[ss_key] = val
-    if btn_col.button("×", key=f"_clr_{key}", help="クリア"):
-        st.session_state[ss_key] = ""
-        st.session_state.pop(key, None)
-        st.rerun()
-    return st.session_state[ss_key]
+    return _clearable_text_input_component(
+        label=label,
+        key=key,
+        placeholder=placeholder,
+        value=value,
+        container=container,
+        refresh_on_value_change=refresh_on_value_change,
+        **kwargs,
+    )
 
 def clean_author(name: str) -> str:
     """著者名クリーニング: 接尾語除去 + スペース正規化（半角スペース1個に統一）"""
@@ -665,22 +653,7 @@ def load_notion_data() -> list:
     return all_results
 
 def query_notion_database_all(database_id: str) -> list:
-    if not database_id:
-        return []
-    url = f"https://api.notion.com/v1/databases/{database_id}/query"
-    all_results, has_more, next_cursor = [], True, None
-    while has_more:
-        payload = {"page_size": 100}
-        if next_cursor:
-            payload["start_cursor"] = next_cursor
-        res = api_request("post", url, headers=NOTION_HEADERS, json=payload)
-        if res is None or res.status_code != 200:
-            return all_results
-        data = res.json()
-        all_results.extend(data.get("results", []))
-        has_more = data.get("has_more", False)
-        next_cursor = data.get("next_cursor")
-    return all_results
+    return _query_notion_database_all_service(api_request, NOTION_HEADERS, database_id)
 
 # ユニークキーを持つ媒体（自動補填対象）
 UNIQUE_KEY_MEDIA = {"映画", "ドラマ", "アニメ", "書籍", "漫画", "音楽アルバム", "ゲーム"}
@@ -2449,121 +2422,17 @@ def create_performance_participant_rows(
     performance_title: str,
     participants: list[dict],
 ) -> tuple[int, int, str, dict]:
-    if not NOTION_PERFORMANCE_CAST_DB_ID:
-        return 0, 0, "NOTION_PERFORMANCE_CAST_DB_ID 未設定", {}
-    type_map = get_notion_db_property_types(NOTION_PERFORMANCE_CAST_DB_ID)
-    if not type_map:
-        return 0, 0, "演奏会参加者DBのプロパティ取得失敗（Integration接続/DB IDを確認）", {}
-    relation_props = [k for k, v in type_map.items() if v == "relation"]
-    perf_rel_prop = next((k for k in ["出演", "演奏会", "公演"] if type_map.get(k) == "relation"), None)
-    perf_rel_prop = perf_rel_prop or (relation_props[0] if relation_props else None)
-    performer_rel_prop = next((k for k in ["出演者", "奏者", "演奏者"] if type_map.get(k) == "relation"), None)
-    if performer_rel_prop is None and relation_props:
-        performer_rel_prop = relation_props[1] if len(relation_props) >= 2 and relation_props[0] == perf_rel_prop else relation_props[0]
-    inst_prop = "担当楽器" if type_map.get("担当楽器") in ("multi_select", "select") else None
-    memo_prop = "メモ" if type_map.get("メモ") == "rich_text" else None
-    title_prop = "タイトル" if type_map.get("タイトル") == "title" else ("Name" if type_map.get("Name") == "title" else None)
-    display_prop = "表示名" if type_map.get("表示名") in ("rich_text", "formula") else None
-
-    rows = [x for x in (participants or []) if (x.get("name") or "").strip()]
-    if not rows:
-        return 0, 0, "参加者入力なし", {}
-    unique_rows = []
-    seen_names = set()
-    for r in rows:
-        key = _normalize_person_name(r.get("name", ""))
-        if not key or key in seen_names:
-            continue
-        seen_names.add(key)
-        unique_rows.append(r)
-    rows = unique_rows
-    existing_performer_ids = set()
-    existing_cast_row_by_performer = {}
-    if perf_rel_prop and performer_rel_prop:
-        q = {
-            "filter": {"property": perf_rel_prop, "relation": {"contains": performance_page_id}},
-            "page_size": 100,
-        }
-        res = api_request(
-            "post",
-            f"https://api.notion.com/v1/databases/{NOTION_PERFORMANCE_CAST_DB_ID}/query",
-            headers=NOTION_HEADERS,
-            json=q,
-        )
-        if res is not None and res.status_code == 200:
-            for pg in (res.json() or {}).get("results", []):
-                cast_row_id = pg.get("id")
-                rels = (((pg.get("properties", {}) or {}).get(performer_rel_prop) or {}).get("relation", []))
-                for r in rels:
-                    rid = r.get("id")
-                    if rid:
-                        existing_performer_ids.add(rid)
-                        if cast_row_id:
-                            existing_cast_row_by_performer[rid] = cast_row_id
-
-    created, failed = 0, 0
-    cast_row_map = {}
-    for i, row in enumerate(rows, start=1):
-        name = (row.get("name") or "").strip()
-        memo = (row.get("memo") or "").strip()
-        instruments = _split_instruments(row.get("instruments") or "")
-        performer_id = _find_or_create_performer_id(name)
-        if not performer_id:
-            failed += 1
-            continue
-        if performer_id in existing_performer_ids:
-            # 既存行は重複作成せず、入力があれば更新して実運用での手戻りを防ぐ
-            existing_row_id = existing_cast_row_by_performer.get(performer_id)
-            if existing_row_id:
-                update_props = {}
-                if inst_prop:
-                    _put_notion_prop(update_props, type_map, inst_prop, instruments)
-                if memo_prop:
-                    _put_notion_prop(update_props, type_map, memo_prop, memo)
-                if update_props:
-                    pres = api_request(
-                        "patch",
-                        f"https://api.notion.com/v1/pages/{existing_row_id}",
-                        headers=NOTION_HEADERS,
-                        json={"properties": update_props},
-                    )
-                    if pres is None or pres.status_code != 200:
-                        failed += 1
-            cast_row_map[_normalize_person_name(name)] = existing_row_id
-            continue
-
-        props = {}
-        if title_prop:
-            _put_notion_prop(props, type_map, title_prop, f"{performance_title} / {name}")
-        if perf_rel_prop:
-            _put_notion_prop(props, type_map, perf_rel_prop, performance_page_id)
-        if performer_rel_prop:
-            _put_notion_prop(props, type_map, performer_rel_prop, performer_id)
-        if inst_prop:
-            _put_notion_prop(props, type_map, inst_prop, instruments)
-        if memo_prop:
-            _put_notion_prop(props, type_map, memo_prop, memo)
-        if display_prop:
-            _put_notion_prop(props, type_map, display_prop, f"{i:02d} / {name}")
-
-        if not props:
-            failed += 1
-            continue
-        res = api_request(
-            "post",
-            "https://api.notion.com/v1/pages",
-            headers=NOTION_HEADERS,
-            json={"parent": {"database_id": NOTION_PERFORMANCE_CAST_DB_ID}, "properties": props},
-        )
-        if res is not None and res.status_code == 200:
-            created += 1
-            cast_row_id = (res.json() or {}).get("id")
-            if cast_row_id:
-                cast_row_map[_normalize_person_name(name)] = cast_row_id
-            existing_performer_ids.add(performer_id)
-        else:
-            failed += 1
-    return created, failed, "", cast_row_map
+    ctx = {
+        "NOTION_PERFORMANCE_CAST_DB_ID": NOTION_PERFORMANCE_CAST_DB_ID,
+        "get_notion_db_property_types": get_notion_db_property_types,
+        "normalize_person_name": _normalize_person_name,
+        "split_instruments": _split_instruments,
+        "find_or_create_performer_id": _find_or_create_performer_id,
+        "put_notion_prop": _put_notion_prop,
+        "api_request": api_request,
+        "NOTION_HEADERS": NOTION_HEADERS,
+    }
+    return _create_participants_service(ctx, performance_page_id, performance_title, participants)
 
 def create_setlist_rows_for_performance(
     performance_page_id: str,
@@ -2574,145 +2443,39 @@ def create_setlist_rows_for_performance(
     selected_scores: list[dict],
     score_pages: list[dict],
 ) -> tuple[int, int, str, list[dict]]:
-    if not NOTION_SCORE_DB_ID:
-        return 0, 0, "NOTION_SCORE_DB_ID 未設定", []
-    type_map = get_notion_db_property_types(NOTION_SCORE_DB_ID)
-    if not type_map:
-        return 0, 0, "演奏曲DBのプロパティ取得失敗（Integration接続/DB IDを確認）", []
-
-    title_to_id = {}
-    for s in (selected_scores or []):
-        t = (s.get("title") or "").strip().lower()
-        sid = s.get("id")
-        if t and sid and t not in title_to_id:
-            title_to_id[t] = sid
-
-    created, failed = 0, 0
-    created_rows: list[dict] = []
-    rows = [("本編", x) for x in (main_items or [])] + [("Encore", x) for x in (encore_items or [])]
-    if not rows:
-        return 0, 0, "セットリスト入力なし", []
-
-    order = 1
-    for section, item in rows:
-        song_title = (item.get("title") or "").strip()
-        if not song_title:
-            continue
-        part = (item.get("part") or "").strip()
-        played = bool(item.get("played", False) or part)
-        score_id = title_to_id.get(song_title.lower())
-        if not score_id:
-            found = _find_score_page_by_title(score_pages or [], song_title)
-            score_id = (found or {}).get("id")
-
-        props = {}
-        _put_notion_prop(props, type_map, "タイトル", song_title)
-        _put_notion_prop(props, type_map, "出演", performance_page_id)
-        _put_notion_prop(props, type_map, "出演日", performance_date)
-        _put_notion_prop(props, type_map, "区分", section)
-        _put_notion_prop(props, type_map, "担当楽器", _split_instruments(part) if played else [])
-        _put_notion_prop(props, type_map, "曲順", order)
-        _put_notion_prop(props, type_map, "演奏曲", score_id)
-        _put_notion_prop(props, type_map, "表示名", f"{performance_title} / {order:02d} / {section} / {song_title}")
-
-        if not props:
-            failed += 1
-            order += 1
-            continue
-        payload = {"parent": {"database_id": NOTION_SCORE_DB_ID}, "properties": props}
-        res = api_request("post", "https://api.notion.com/v1/pages", headers=NOTION_HEADERS, json=payload)
-        if res is not None and res.status_code == 200:
-            created += 1
-            row_id = (res.json() or {}).get("id")
-            if row_id:
-                created_rows.append(
-                    {
-                        "id": row_id,
-                        "title": song_title,
-                        "players": item.get("players", []) or [],
-                        "instruments": _split_instruments(part) if played else [],
-                    }
-                )
-        else:
-            failed += 1
-        order += 1
-    return created, failed, "", created_rows
+    ctx = {
+        "NOTION_SCORE_DB_ID": NOTION_SCORE_DB_ID,
+        "get_notion_db_property_types": get_notion_db_property_types,
+        "find_score_page_by_title": _find_score_page_by_title,
+        "put_notion_prop": _put_notion_prop,
+        "split_instruments": _split_instruments,
+        "api_request": api_request,
+        "NOTION_HEADERS": NOTION_HEADERS,
+    }
+    return _create_setlist_service(
+        ctx,
+        performance_page_id,
+        performance_title,
+        performance_date,
+        main_items,
+        encore_items,
+        selected_scores,
+        score_pages,
+    )
 
 def create_song_assignment_rows(
     score_rows: list[dict],
     cast_row_map: dict,
 ) -> tuple[int, int, str]:
-    if not NOTION_SONG_ASSIGN_DB_ID:
-        return 0, 0, "NOTION_SONG_ASSIGN_DB_ID 未設定"
-    type_map = get_notion_db_property_types(NOTION_SONG_ASSIGN_DB_ID)
-    if not type_map:
-        return 0, 0, "楽曲別担当者DBのプロパティ取得失敗（Integration接続/DB IDを確認）"
-    if not score_rows:
-        return 0, 0, "対象曲なし"
-
-    def pick_prop(candidates: list[str], p_type: str) -> str | None:
-        for c in candidates:
-            if type_map.get(c) == p_type:
-                return c
-        return None
-
-    relation_props = [k for k, v in type_map.items() if v == "relation"]
-    score_rel_prop = pick_prop(["演奏曲", "演奏曲DB", "曲", "楽曲"], "relation")
-    cast_rel_prop = pick_prop(["演奏会出演者", "出演者", "参加者", "演奏会参加者"], "relation")
-    if score_rel_prop is None and relation_props:
-        score_rel_prop = relation_props[0]
-    if cast_rel_prop is None and relation_props:
-        if len(relation_props) >= 2:
-            cast_rel_prop = relation_props[1] if relation_props[0] == score_rel_prop else relation_props[0]
-        else:
-            cast_rel_prop = relation_props[0]
-
-    title_prop = pick_prop(["タイトル", "Name", "名前"], "title")
-    display_prop = pick_prop(["表示名", "Display Name"], "formula") or pick_prop(["表示名", "Display Name"], "rich_text")
-    inst_prop = pick_prop(["担当楽器", "楽器"], "multi_select") or pick_prop(["担当楽器", "楽器"], "select")
-
-    created, failed = 0, 0
-    for row in score_rows:
-        score_row_id = row.get("id")
-        players = row.get("players", []) or []
-        instruments = row.get("instruments", []) or []
-        if not score_row_id or not players:
-            continue
-        seen = set()
-        for nm in players:
-            key = _normalize_person_name(nm)
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            cast_row_id = cast_row_map.get(key)
-            if not cast_row_id:
-                failed += 1
-                continue
-            props = {}
-            if title_prop:
-                _put_notion_prop(props, type_map, title_prop, f"{row.get('title','')} / {nm}")
-            if score_rel_prop:
-                _put_notion_prop(props, type_map, score_rel_prop, score_row_id)
-            if cast_rel_prop:
-                _put_notion_prop(props, type_map, cast_rel_prop, cast_row_id)
-            if inst_prop:
-                _put_notion_prop(props, type_map, inst_prop, instruments)
-            if display_prop:
-                _put_notion_prop(props, type_map, display_prop, f"{row.get('title','')} / {nm}")
-            if not props:
-                failed += 1
-                continue
-            res = api_request(
-                "post",
-                "https://api.notion.com/v1/pages",
-                headers=NOTION_HEADERS,
-                json={"parent": {"database_id": NOTION_SONG_ASSIGN_DB_ID}, "properties": props},
-            )
-            if res is not None and res.status_code == 200:
-                created += 1
-            else:
-                failed += 1
-    return created, failed, ""
+    ctx = {
+        "NOTION_SONG_ASSIGN_DB_ID": NOTION_SONG_ASSIGN_DB_ID,
+        "get_notion_db_property_types": get_notion_db_property_types,
+        "normalize_person_name": _normalize_person_name,
+        "put_notion_prop": _put_notion_prop,
+        "api_request": api_request,
+        "NOTION_HEADERS": NOTION_HEADERS,
+    }
+    return _create_song_assign_service(ctx, score_rows, cast_row_map)
 
 def _pick_prop_name(type_map: dict, candidates: list[str], p_type: str) -> str | None:
     for c in candidates:
@@ -2745,324 +2508,45 @@ def _tail_person_name(text: str) -> str:
     return parts[-1] if parts else ""
 
 def _get_cast_row_map_for_performance(performance_page_id: str) -> dict:
-    """演奏会参加者DBから「名前(normalized) -> 行ID」のマップを作る。"""
-    out = {}
-    if not performance_page_id or not NOTION_PERFORMANCE_CAST_DB_ID:
-        return out
-
-    cast_rows = query_notion_database_all(NOTION_PERFORMANCE_CAST_DB_ID)
-    cast_type = get_notion_db_property_types(NOTION_PERFORMANCE_CAST_DB_ID)
-    rel_props = [k for k, v in cast_type.items() if v == "relation"]
-    perf_rel = _pick_prop_name(cast_type, ["出演", "演奏会", "公演"], "relation")
-    perf_rel = perf_rel or (rel_props[0] if rel_props else None)
-    performer_rel = _pick_prop_name(cast_type, ["出演者", "奏者", "演奏者"], "relation")
-    if performer_rel is None and rel_props:
-        performer_rel = rel_props[1] if len(rel_props) >= 2 and rel_props[0] == perf_rel else rel_props[0]
-    title_prop = _pick_prop_name(cast_type, ["タイトル", "Name", "名前"], "title")
-
-    performer_name_by_id = {}
-    if NOTION_PERFORMER_DB_ID:
-        p_rows = query_notion_database_all(NOTION_PERFORMER_DB_ID)
-        p_type = get_notion_db_property_types(NOTION_PERFORMER_DB_ID)
-        for pg in p_rows:
-            pid = pg.get("id")
-            nm = _extract_page_title_by_type(pg.get("properties", {}), p_type, ["名前", "タイトル", "Name"])
-            if pid and nm:
-                performer_name_by_id[pid] = nm
-
-    for row in cast_rows:
-        props = row.get("properties", {})
-        perf_ids = _extract_relation_ids(props, perf_rel)
-        if performance_page_id not in perf_ids:
-            continue
-        name = ""
-        performer_ids = _extract_relation_ids(props, performer_rel)
-        if performer_ids:
-            name = performer_name_by_id.get(performer_ids[0], "")
-        if not name and title_prop:
-            name = _tail_person_name(plain_text_join((props.get(title_prop) or {}).get("title", [])))
-        key = _normalize_person_name(name)
-        rid = row.get("id")
-        if key and rid and key not in out:
-            out[key] = rid
-    return out
+    ctx = {
+        "NOTION_PERFORMANCE_CAST_DB_ID": NOTION_PERFORMANCE_CAST_DB_ID,
+        "NOTION_PERFORMER_DB_ID": NOTION_PERFORMER_DB_ID,
+        "query_notion_database_all": query_notion_database_all,
+        "get_notion_db_property_types": get_notion_db_property_types,
+        "pick_prop_name": _pick_prop_name,
+        "extract_relation_ids": _extract_relation_ids,
+        "extract_page_title_by_type": _extract_page_title_by_type,
+        "tail_person_name": _tail_person_name,
+        "plain_text_join": plain_text_join,
+        "normalize_person_name": _normalize_person_name,
+    }
+    return _get_cast_row_map_service(ctx, performance_page_id)
 
 def analyze_performance_relation_integrity(force_refresh: bool = False) -> dict:
-    if not NOTION_PERFORMANCE_CAST_DB_ID:
-        return {"error": "NOTION_PERFORMANCE_CAST_DB_ID 未設定"}
-    perf_pages = _get_performance_pages(force_refresh=force_refresh)
-    perf_title_by_id = {p.get("id"): (p.get("title") or "") for p in perf_pages if p.get("id")}
-
-    cast_rows = query_notion_database_all(NOTION_PERFORMANCE_CAST_DB_ID)
-    score_rows = query_notion_database_all(NOTION_SCORE_DB_ID) if NOTION_SCORE_DB_ID else []
-    assign_rows = query_notion_database_all(NOTION_SONG_ASSIGN_DB_ID) if NOTION_SONG_ASSIGN_DB_ID else []
-    performer_rows = query_notion_database_all(NOTION_PERFORMER_DB_ID) if NOTION_PERFORMER_DB_ID else []
-
-    cast_type = get_notion_db_property_types(NOTION_PERFORMANCE_CAST_DB_ID)
-    score_type = get_notion_db_property_types(NOTION_SCORE_DB_ID) if NOTION_SCORE_DB_ID else {}
-    assign_type = get_notion_db_property_types(NOTION_SONG_ASSIGN_DB_ID) if NOTION_SONG_ASSIGN_DB_ID else {}
-    performer_type = get_notion_db_property_types(NOTION_PERFORMER_DB_ID) if NOTION_PERFORMER_DB_ID else {}
-
-    cast_rel_props = [k for k, v in cast_type.items() if v == "relation"]
-    cast_perf_prop = _pick_prop_name(cast_type, ["出演", "演奏会", "公演"], "relation")
-    cast_perf_prop = cast_perf_prop or (cast_rel_props[0] if cast_rel_props else None)
-    cast_performer_prop = _pick_prop_name(cast_type, ["出演者", "奏者", "演奏者"], "relation")
-    if cast_performer_prop is None and cast_rel_props:
-        cast_performer_prop = cast_rel_props[1] if len(cast_rel_props) >= 2 and cast_rel_props[0] == cast_perf_prop else cast_rel_props[0]
-
-    cast_title_prop = _pick_prop_name(cast_type, ["タイトル", "Name", "名前"], "title")
-    score_perf_prop = _pick_prop_name(score_type, ["出演", "演奏会", "公演"], "relation")
-    if score_perf_prop is None:
-        rels = [k for k, v in score_type.items() if v == "relation"]
-        score_perf_prop = rels[0] if rels else None
-    assign_score_prop = _pick_prop_name(assign_type, ["演奏曲", "演奏曲DB", "曲", "楽曲"], "relation")
-    assign_cast_prop = _pick_prop_name(assign_type, ["演奏会出演者", "出演者", "参加者", "演奏会参加者"], "relation")
-    assign_title_prop = _pick_prop_name(assign_type, ["タイトル", "Name", "名前"], "title")
-    assign_rel_props = [k for k, v in assign_type.items() if v == "relation"]
-    if assign_score_prop is None and assign_rel_props:
-        assign_score_prop = assign_rel_props[0]
-    if assign_cast_prop is None and assign_rel_props:
-        assign_cast_prop = assign_rel_props[1] if len(assign_rel_props) >= 2 and assign_rel_props[0] == assign_score_prop else assign_rel_props[0]
-
-    performer_name_by_id = {}
-    performer_ids_by_name = defaultdict(list)
-    for pg in performer_rows:
-        props = pg.get("properties", {})
-        nm = _extract_page_title_by_type(props, performer_type, ["名前", "タイトル", "Name"])
-        if not nm:
-            nm = _extract_name_title(pg)
-        pid = pg.get("id")
-        if pid and nm:
-            performer_name_by_id[pid] = nm
-            performer_ids_by_name[_normalize_person_name(nm)].append(pid)
-
-    def _new_perf_stat(pid: str, title: str) -> dict:
-        return {
-            "performance_id": pid,
-            "title": title or "(タイトル未設定)",
-            "cast_total": 0,
-            "cast_missing_performer": 0,
-            "cast_duplicates": 0,
-            "score_total": 0,
-            "assign_total": 0,
-            "assign_missing_cast": 0,
-            "assign_missing_score": 0,
-            "fixable_cast_missing_performer": 0,
-            "fixable_assign_missing_cast": 0,
-            "issue_count": 0,
-        }
-
-    perf_stats = {pid: _new_perf_stat(pid, ttl) for pid, ttl in perf_title_by_id.items()}
-    cast_key_to_rows = defaultdict(list)
-    cast_row_to_perf = {}
-    cast_row_name = {}
-    cast_name_index = defaultdict(lambda: defaultdict(list))  # perf_id -> normalized_name -> [cast_row_id]
-    fix_cast_missing_performer = []
-    duplicate_archive_ids = []
-
-    for row in cast_rows:
-        row_id = row.get("id")
-        props = row.get("properties", {})
-        perf_ids = _extract_relation_ids(props, cast_perf_prop)
-        performer_ids = _extract_relation_ids(props, cast_performer_prop)
-        row_title = ""
-        if cast_title_prop:
-            row_title = plain_text_join((props.get(cast_title_prop) or {}).get("title", []))
-        row_name = performer_name_by_id.get(performer_ids[0], "") if performer_ids else ""
-        if not row_name:
-            row_name = _tail_person_name(row_title)
-        norm_row_name = _normalize_person_name(row_name)
-        if row_id and norm_row_name:
-            cast_row_name[row_id] = norm_row_name
-
-        if not perf_ids:
-            continue
-
-        for pid in perf_ids:
-            if pid not in perf_stats:
-                perf_stats[pid] = _new_perf_stat(pid, perf_title_by_id.get(pid, "（出演DB外のID）"))
-            stt = perf_stats[pid]
-            stt["cast_total"] += 1
-            cast_row_to_perf[row_id] = pid
-            if row_id and norm_row_name:
-                cast_name_index[pid][norm_row_name].append(row_id)
-            if not performer_ids:
-                stt["cast_missing_performer"] += 1
-                candidate_ids = performer_ids_by_name.get(norm_row_name, []) if norm_row_name else []
-                if row_id and len(candidate_ids) == 1:
-                    fix_cast_missing_performer.append(
-                        {"row_id": row_id, "performer_id": candidate_ids[0], "performance_id": pid}
-                    )
-                    stt["fixable_cast_missing_performer"] += 1
-            if performer_ids:
-                dkey = (pid, performer_ids[0])
-                cast_key_to_rows[dkey].append(row_id)
-
-    for (pid, _performer_id), row_ids in cast_key_to_rows.items():
-        if len(row_ids) > 1:
-            extra = row_ids[1:]
-            perf_stats[pid]["cast_duplicates"] += len(extra)
-            duplicate_archive_ids.extend([rid for rid in extra if rid])
-
-    score_row_to_perf = {}
-    for row in score_rows:
-        row_id = row.get("id")
-        props = row.get("properties", {})
-        perf_ids = _extract_relation_ids(props, score_perf_prop)
-        if not row_id or not perf_ids:
-            continue
-        pid = perf_ids[0]
-        score_row_to_perf[row_id] = pid
-        if pid not in perf_stats:
-            perf_stats[pid] = _new_perf_stat(pid, perf_title_by_id.get(pid, "（出演DB外のID）"))
-        perf_stats[pid]["score_total"] += 1
-
-    fix_assign_missing_cast = []
-    unresolved_assign_missing_score = 0
-    for row in assign_rows:
-        row_id = row.get("id")
-        props = row.get("properties", {})
-        score_ids = _extract_relation_ids(props, assign_score_prop)
-        cast_ids = _extract_relation_ids(props, assign_cast_prop)
-        pid = score_row_to_perf.get(score_ids[0]) if score_ids else None
-        if (not pid) and cast_ids:
-            pid = cast_row_to_perf.get(cast_ids[0])
-        if not score_ids:
-            if pid:
-                if pid not in perf_stats:
-                    perf_stats[pid] = _new_perf_stat(pid, perf_title_by_id.get(pid, "（出演DB外のID）"))
-                perf_stats[pid]["assign_total"] += 1
-                perf_stats[pid]["assign_missing_score"] += 1
-            else:
-                unresolved_assign_missing_score += 1
-            continue
-        if not pid:
-            continue
-        if pid not in perf_stats:
-            perf_stats[pid] = _new_perf_stat(pid, perf_title_by_id.get(pid, "（出演DB外のID）"))
-        stt = perf_stats[pid]
-        stt["assign_total"] += 1
-        if cast_ids:
-            continue
-        stt["assign_missing_cast"] += 1
-        assign_title = ""
-        if assign_title_prop:
-            assign_title = plain_text_join((props.get(assign_title_prop) or {}).get("title", []))
-        candidate_name = _normalize_person_name(_tail_person_name(assign_title))
-        candidate_rows = cast_name_index.get(pid, {}).get(candidate_name, [])
-        if row_id and len(candidate_rows) == 1:
-            fix_assign_missing_cast.append(
-                {"row_id": row_id, "cast_row_id": candidate_rows[0], "performance_id": pid}
-            )
-            stt["fixable_assign_missing_cast"] += 1
-
-    rows = []
-    totals = {
-        "performance_count": 0,
-        "issue_performance_count": 0,
-        "cast_total": 0,
-        "cast_missing_performer": 0,
-        "cast_duplicates": 0,
-        "assign_total": 0,
-        "assign_missing_cast": 0,
-        "assign_missing_score_unresolved": 0,
-        "fixable_cast_missing_performer": len(fix_cast_missing_performer),
-        "fixable_assign_missing_cast": len(fix_assign_missing_cast),
-        "duplicate_archive_candidates": len(duplicate_archive_ids),
+    ctx = {
+        "NOTION_PERFORMANCE_CAST_DB_ID": NOTION_PERFORMANCE_CAST_DB_ID,
+        "NOTION_SCORE_DB_ID": NOTION_SCORE_DB_ID,
+        "NOTION_SONG_ASSIGN_DB_ID": NOTION_SONG_ASSIGN_DB_ID,
+        "NOTION_PERFORMER_DB_ID": NOTION_PERFORMER_DB_ID,
+        "get_performance_pages": _get_performance_pages,
+        "query_notion_database_all": query_notion_database_all,
+        "get_notion_db_property_types": get_notion_db_property_types,
+        "pick_prop_name": _pick_prop_name,
+        "extract_relation_ids": _extract_relation_ids,
+        "extract_page_title_by_type": _extract_page_title_by_type,
+        "extract_name_title": _extract_name_title,
+        "normalize_person_name": _normalize_person_name,
+        "tail_person_name": _tail_person_name,
+        "plain_text_join": plain_text_join,
     }
-    for pid, stt in perf_stats.items():
-        stt["issue_count"] = (
-            stt["cast_missing_performer"]
-            + stt["cast_duplicates"]
-            + stt["assign_missing_cast"]
-            + stt["assign_missing_score"]
-        )
-        rows.append(stt)
-        totals["performance_count"] += 1
-        totals["cast_total"] += stt["cast_total"]
-        totals["cast_missing_performer"] += stt["cast_missing_performer"]
-        totals["cast_duplicates"] += stt["cast_duplicates"]
-        totals["assign_total"] += stt["assign_total"]
-        totals["assign_missing_cast"] += stt["assign_missing_cast"]
-        if stt["issue_count"] > 0:
-            totals["issue_performance_count"] += 1
-    totals["assign_missing_score_unresolved"] = unresolved_assign_missing_score
-    rows.sort(key=lambda x: (x["issue_count"], x["cast_total"] + x["assign_total"], x["title"]), reverse=True)
-
-    return {
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "rows": rows,
-        "totals": totals,
-        "fix_candidates": {
-            "cast_missing_performer": fix_cast_missing_performer,
-            "assign_missing_cast": fix_assign_missing_cast,
-            "cast_duplicate_archive": duplicate_archive_ids,
-        },
-        "props": {
-            "cast_performer_prop": cast_performer_prop,
-            "assign_cast_prop": assign_cast_prop,
-        },
-        "error": "",
-    }
+    return _analyze_reconcile_service(ctx, force_refresh=force_refresh)
 
 def run_performance_relation_repair(report: dict, mode: str = "partial") -> tuple[dict, list[str]]:
-    stats = {
-        "cast_missing_performer_fixed": 0,
-        "assign_missing_cast_fixed": 0,
-        "duplicates_archived": 0,
-        "failed": 0,
+    ctx = {
+        "api_request": api_request,
+        "NOTION_HEADERS": NOTION_HEADERS,
     }
-    errors = []
-    if not report or report.get("error"):
-        return stats, ["整合チェック結果がありません。先にチェックを実行してください。"]
-    if mode == "manual":
-        return stats, ["手動モードのため自動修復は実行しません。"]
-
-    cast_performer_prop = (report.get("props") or {}).get("cast_performer_prop")
-    assign_cast_prop = (report.get("props") or {}).get("assign_cast_prop")
-
-    for c in (report.get("fix_candidates") or {}).get("cast_missing_performer", []):
-        row_id = c.get("row_id")
-        performer_id = c.get("performer_id")
-        if not row_id or not performer_id or not cast_performer_prop:
-            continue
-        payload = {"properties": {cast_performer_prop: {"relation": [{"id": performer_id}]}}}
-        res = api_request("patch", f"https://api.notion.com/v1/pages/{row_id}", headers=NOTION_HEADERS, json=payload)
-        if res is not None and res.status_code == 200:
-            stats["cast_missing_performer_fixed"] += 1
-        else:
-            stats["failed"] += 1
-            errors.append(f"出演者補完失敗: {row_id}")
-
-    for c in (report.get("fix_candidates") or {}).get("assign_missing_cast", []):
-        row_id = c.get("row_id")
-        cast_row_id = c.get("cast_row_id")
-        if not row_id or not cast_row_id or not assign_cast_prop:
-            continue
-        payload = {"properties": {assign_cast_prop: {"relation": [{"id": cast_row_id}]}}}
-        res = api_request("patch", f"https://api.notion.com/v1/pages/{row_id}", headers=NOTION_HEADERS, json=payload)
-        if res is not None and res.status_code == 200:
-            stats["assign_missing_cast_fixed"] += 1
-        else:
-            stats["failed"] += 1
-            errors.append(f"楽曲別担当者補完失敗: {row_id}")
-
-    if mode == "full":
-        for row_id in (report.get("fix_candidates") or {}).get("cast_duplicate_archive", []):
-            if not row_id:
-                continue
-            res = api_request(
-                "patch",
-                f"https://api.notion.com/v1/pages/{row_id}",
-                headers=NOTION_HEADERS,
-                json={"archived": True},
-            )
-            if res is not None and res.status_code == 200:
-                stats["duplicates_archived"] += 1
-            else:
-                stats["failed"] += 1
-                errors.append(f"重複行アーカイブ失敗: {row_id}")
-    return stats, errors
+    return _run_reconcile_repair_service(ctx, report, mode=mode)
 
 def is_japanese_name(name: str) -> bool:
     """漢字・ひらがな・カタカナを含む場合は日本語著者名とみなす"""
@@ -3233,24 +2717,10 @@ def _add_performance_page_cache(page_id: str, title: str):
 
 
 def _clean_relation_ids(ids: list | None) -> list[str]:
-    cleaned = []
-    seen = set()
-    for rid in (ids or []):
-        if isinstance(rid, str) and rid.strip():
-            v = rid.strip()
-            if v not in seen:
-                cleaned.append(v)
-                seen.add(v)
-    return cleaned
+    return _clean_relation_ids_service(ids)
 
 def _prune_selected_relations(selected: list[dict], valid_pages: list[dict]) -> list[dict]:
-    valid_ids = {p.get("id") for p in valid_pages if p.get("id")}
-    pruned = []
-    for x in (selected or []):
-        xid = x.get("id")
-        if xid in valid_ids:
-            pruned.append(x)
-    return pruned
+    return _prune_selected_relations_service(selected, valid_pages)
 
 
 def _get_page_from_state_or_api(page_id: str, force_api: bool = False) -> dict | None:
@@ -3308,18 +2778,17 @@ def check_duplicate(tmdb_id: int, pages: list) -> list:
     return [p for p in pages if p["properties"].get("TMDB_ID", {}).get("number") == tmdb_id]
 
 def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_ok, meta_ok, updated, is_refresh=False) -> str:
-    parts = []
-    if is_refresh:
-        parts.append("🔄 リフレッシュ")
-    if need_notion:
-        parts.append("Notion " + ("✅" if notion_ok else "❌"))
-    if need_drive:
-        parts.append("Drive " + ("✅" if drive_ok else "❌"))
-    if updated:
-        parts.append("メタデータ[" + " / ".join(updated) + "] " + ("✅" if meta_ok else "❌"))
-    if not parts:
-        return f"⏸️ 維持(OK): {log_title}"
-    return f"{log_title}　{src}　{'　'.join(parts)}"
+    return _build_update_log_service(
+        log_title=log_title,
+        src=src,
+        need_notion=need_notion,
+        notion_ok=notion_ok,
+        need_drive=need_drive,
+        drive_ok=drive_ok,
+        meta_ok=meta_ok,
+        updated=updated,
+        is_refresh=is_refresh,
+    )
 
 # ============================================================
 # アプリ初期化
