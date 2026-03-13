@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.09"
+APP_VERSION = "7.11"
 
 # ============================================================
 # 媒体マッピング
@@ -4707,7 +4707,6 @@ if mode == "データ管理":
         # フォーカス遷移時は検索欄も対象タイトルへ同期（前回検索の残りで隠れないようにする）
         pending_q = st.session_state.get("pending_manual_search_query", "")
         st.session_state["_cti_manual_search_query"] = pending_q
-        st.session_state["manual_search_query"] = pending_q
     focus_id = st.session_state.get("focus_page_id")
     if focus_id:
         display_pages = sorted(display_pages, key=lambda p: 0 if p.get("id") == focus_id else 1)
@@ -5003,23 +5002,39 @@ if mode == "データ管理":
                 rel_prop = "演奏曲" if page_media == "出演" else "出演履歴"
                 target_pages = _get_score_pages() if page_media == "出演" else _get_performance_pages()
                 rel_state_key = f"edit_rel_{page_id}"
+                id_to_title = {p["id"]: p["title"] for p in target_pages}
+
+                def build_rel_items(rel_ids: list[str]) -> list[dict]:
+                    items = []
+                    for rid in _clean_relation_ids(rel_ids):
+                        title = id_to_title.get(rid, "（不明）")
+                        if title == "（不明）":
+                            page_obj = _get_page_from_state_or_api(rid)
+                            if page_obj:
+                                title = get_title(page_obj.get("properties", {}))[0] or "（不明）"
+                        items.append({"id": rid, "title": title})
+                    return items
+
+                existing_rel_ids = [
+                    r.get("id") for r in ((props.get(rel_prop) or {}).get("relation", [])) if r.get("id")
+                ]
                 if rel_state_key not in st.session_state:
-                    existing_rel = (props.get(rel_prop) or {}).get("relation", [])
-                    id_to_title = {p["id"]: p["title"] for p in target_pages}
-                    st.session_state[rel_state_key] = [
-                        {"id": r.get("id"), "title": id_to_title.get(r.get("id"), "（不明）")}
-                        for r in existing_rel if r.get("id")
-                    ]
-                st.session_state[rel_state_key] = _prune_selected_relations(
-                    st.session_state.get(rel_state_key, []),
-                    target_pages,
-                )
+                    st.session_state[rel_state_key] = build_rel_items(existing_rel_ids)
+                else:
+                    # 既存関連が増えている場合はUIにも追従
+                    selected_ids = {x.get("id") for x in st.session_state.get(rel_state_key, []) if x.get("id")}
+                    missing_ids = [rid for rid in existing_rel_ids if rid not in selected_ids]
+                    if missing_ids:
+                        st.session_state[rel_state_key].extend(build_rel_items(missing_ids))
                 if st.button("🔄 関連候補を再読み込み", key=f"edit_rel_reload_{page_id}"):
                     target_pages = _get_score_pages(force_refresh=True) if page_media == "出演" else _get_performance_pages(force_refresh=True)
-                    st.session_state[rel_state_key] = _prune_selected_relations(
-                        st.session_state.get(rel_state_key, []),
-                        target_pages,
-                    )
+                    refreshed_page = _get_page_from_state_or_api(page_id)
+                    refreshed_props = (refreshed_page or {}).get("properties", {}) or props
+                    refreshed_rel_ids = [
+                        r.get("id") for r in ((refreshed_props.get(rel_prop) or {}).get("relation", [])) if r.get("id")
+                    ]
+                    id_to_title = {p["id"]: p["title"] for p in target_pages}
+                    st.session_state[rel_state_key] = build_rel_items(refreshed_rel_ids)
                     st.rerun()
 
                 rel_query = st.text_input(
@@ -5031,6 +5046,8 @@ if mode == "データ管理":
                 if rel_query:
                     q = rel_query.strip().lower()
                     rel_matches = [p for p in target_pages if q in (p.get("title") or "").strip().lower()]
+                else:
+                    rel_matches = target_pages[:20]
 
                 def add_rel(pid, title):
                     selected = st.session_state[rel_state_key]
@@ -5062,6 +5079,8 @@ if mode == "データ管理":
                     return False
 
                 if rel_matches:
+                    if not rel_query:
+                        st.caption("検索語未入力のため候補を先頭20件表示しています。")
                     options = ["（選択してください）"] + [p["title"] for p in rel_matches]
                     sel = st.selectbox("候補", options, key=f"edit_rel_pick_{page_id}")
                     if sel != "（選択してください）":
