@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.27"
+APP_VERSION = "7.29"
 
 # ============================================================
 # 媒体マッピング
@@ -2507,7 +2507,7 @@ def _focus_management_page(page_id: str, title: str, media_label: str | None = N
     current_filter = st.session_state.get("sidebar_media_filter", [])
     if media_label:
         if current_filter and media_label not in current_filter:
-            st.session_state["sidebar_media_filter"] = list(current_filter) + [media_label]
+            st.session_state["pending_sidebar_media_filter"] = list(current_filter) + [media_label]
 
 def check_duplicate(tmdb_id: int, pages: list) -> list:
     """TMDB_IDが一致する既存ページを返す"""
@@ -2684,11 +2684,29 @@ with st.sidebar:
         mode = st.radio("モード", ["新規登録", "データ管理", "自動同期"], key="app_mode_widget")
         st.session_state.app_mode = mode
         sync_scope = "欠損のみ補填"  # legacy compat
+        if mode == "データ管理":
+            if "manual_sort_order" not in st.session_state:
+                st.session_state.manual_sort_order = "鑑賞日（新しい順）"
+            st.selectbox(
+                "一覧ソート",
+                options=[
+                    "鑑賞日（新しい順）",
+                    "鑑賞日（古い順）",
+                    "リリース日（新しい順）",
+                    "リリース日（古い順）",
+                    "更新日時（新しい順）",
+                    "タイトル（A-Z）",
+                    "媒体 → タイトル",
+                ],
+                key="manual_sort_order",
+            )
 
         if mode != "新規登録":
             st.divider()
             st.header("媒体フィルタ")
             media_filter_options = list(MEDIA_ICON_MAP.keys())
+            if "pending_sidebar_media_filter" in st.session_state:
+                st.session_state["sidebar_media_filter"] = st.session_state.pop("pending_sidebar_media_filter")
             selected_media_filter = st.multiselect(
                 "媒体を絞り込む",
                 options=media_filter_options,
@@ -4315,7 +4333,28 @@ def get_display_pages():
     # 媒体フィルタ
     if selected_media_filter:
         base = [p for p in base if get_page_media(p) in selected_media_filter]
-    return apply_diff_filter(base, diff_filter)
+    base = apply_diff_filter(base, diff_filter)
+    if mode == "データ管理":
+        sort_mode = st.session_state.get("manual_sort_order", "鑑賞日（新しい順）")
+        def _d(page, prop):
+            return (((page.get("properties", {}).get(prop) or {}).get("date") or {}).get("start") or "")
+        def _t(page):
+            return (get_title(page.get("properties", {}))[0] or "").lower()
+        if sort_mode == "鑑賞日（新しい順）":
+            base = sorted(base, key=lambda p: (_d(p, "鑑賞日"), _t(p)), reverse=True)
+        elif sort_mode == "鑑賞日（古い順）":
+            base = sorted(base, key=lambda p: (_d(p, "鑑賞日"), _t(p)))
+        elif sort_mode == "リリース日（新しい順）":
+            base = sorted(base, key=lambda p: (_d(p, "リリース日"), _t(p)), reverse=True)
+        elif sort_mode == "リリース日（古い順）":
+            base = sorted(base, key=lambda p: (_d(p, "リリース日"), _t(p)))
+        elif sort_mode == "タイトル（A-Z）":
+            base = sorted(base, key=lambda p: _t(p))
+        elif sort_mode == "媒体 → タイトル":
+            base = sorted(base, key=lambda p: ((get_page_media(p) or ""), _t(p)))
+        elif sort_mode == "更新日時（新しい順）":
+            base = sorted(base, key=lambda p: ((p.get("last_edited_time") or ""), _t(p)), reverse=True)
+    return base
 
 def resolve_needs(notion_ok_now, drive_ok_now):
     if diff_filter == "Notionのみ更新（Driveあり・Notionカバーなし）": return True, False
