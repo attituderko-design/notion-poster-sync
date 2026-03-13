@@ -2722,6 +2722,49 @@ def _tail_person_name(text: str) -> str:
     parts = [x.strip() for x in (text or "").split("/") if x.strip()]
     return parts[-1] if parts else ""
 
+def _get_cast_row_map_for_performance(performance_page_id: str) -> dict:
+    """演奏会参加者DBから「名前(normalized) -> 行ID」のマップを作る。"""
+    out = {}
+    if not performance_page_id or not NOTION_PERFORMANCE_CAST_DB_ID:
+        return out
+
+    cast_rows = query_notion_database_all(NOTION_PERFORMANCE_CAST_DB_ID)
+    cast_type = get_notion_db_property_types(NOTION_PERFORMANCE_CAST_DB_ID)
+    rel_props = [k for k, v in cast_type.items() if v == "relation"]
+    perf_rel = _pick_prop_name(cast_type, ["出演", "演奏会", "公演"], "relation")
+    perf_rel = perf_rel or (rel_props[0] if rel_props else None)
+    performer_rel = _pick_prop_name(cast_type, ["出演者", "奏者", "演奏者"], "relation")
+    if performer_rel is None and rel_props:
+        performer_rel = rel_props[1] if len(rel_props) >= 2 and rel_props[0] == perf_rel else rel_props[0]
+    title_prop = _pick_prop_name(cast_type, ["タイトル", "Name", "名前"], "title")
+
+    performer_name_by_id = {}
+    if NOTION_PERFORMER_DB_ID:
+        p_rows = query_notion_database_all(NOTION_PERFORMER_DB_ID)
+        p_type = get_notion_db_property_types(NOTION_PERFORMER_DB_ID)
+        for pg in p_rows:
+            pid = pg.get("id")
+            nm = _extract_page_title_by_type(pg.get("properties", {}), p_type, ["名前", "タイトル", "Name"])
+            if pid and nm:
+                performer_name_by_id[pid] = nm
+
+    for row in cast_rows:
+        props = row.get("properties", {})
+        perf_ids = _extract_relation_ids(props, perf_rel)
+        if performance_page_id not in perf_ids:
+            continue
+        name = ""
+        performer_ids = _extract_relation_ids(props, performer_rel)
+        if performer_ids:
+            name = performer_name_by_id.get(performer_ids[0], "")
+        if not name and title_prop:
+            name = _tail_person_name(plain_text_join((props.get(title_prop) or {}).get("title", [])))
+        key = _normalize_person_name(name)
+        rid = row.get("id")
+        if key and rid and key not in out:
+            out[key] = rid
+    return out
+
 def analyze_performance_relation_integrity(force_refresh: bool = False) -> dict:
     if not NOTION_PERFORMANCE_CAST_DB_ID:
         return {"error": "NOTION_PERFORMANCE_CAST_DB_ID 未設定"}
@@ -2853,20 +2896,30 @@ def analyze_performance_relation_integrity(force_refresh: bool = False) -> dict:
         perf_stats[pid]["score_total"] += 1
 
     fix_assign_missing_cast = []
+    unresolved_assign_missing_score = 0
     for row in assign_rows:
         row_id = row.get("id")
         props = row.get("properties", {})
         score_ids = _extract_relation_ids(props, assign_score_prop)
         cast_ids = _extract_relation_ids(props, assign_cast_prop)
         pid = score_row_to_perf.get(score_ids[0]) if score_ids else None
+        if (not pid) and cast_ids:
+            pid = cast_row_to_perf.get(cast_ids[0])
+        if not score_ids:
+            if pid:
+                if pid not in perf_stats:
+                    perf_stats[pid] = _new_perf_stat(pid, perf_title_by_id.get(pid, "（出演DB外のID）"))
+                perf_stats[pid]["assign_total"] += 1
+                perf_stats[pid]["assign_missing_score"] += 1
+            else:
+                unresolved_assign_missing_score += 1
+            continue
         if not pid:
             continue
         if pid not in perf_stats:
             perf_stats[pid] = _new_perf_stat(pid, perf_title_by_id.get(pid, "（出演DB外のID）"))
         stt = perf_stats[pid]
         stt["assign_total"] += 1
-        if not score_ids:
-            stt["assign_missing_score"] += 1
         if cast_ids:
             continue
         stt["assign_missing_cast"] += 1
@@ -2890,6 +2943,7 @@ def analyze_performance_relation_integrity(force_refresh: bool = False) -> dict:
         "cast_duplicates": 0,
         "assign_total": 0,
         "assign_missing_cast": 0,
+        "assign_missing_score_unresolved": 0,
         "fixable_cast_missing_performer": len(fix_cast_missing_performer),
         "fixable_assign_missing_cast": len(fix_assign_missing_cast),
         "duplicate_archive_candidates": len(duplicate_archive_ids),
@@ -2910,6 +2964,7 @@ def analyze_performance_relation_integrity(force_refresh: bool = False) -> dict:
         totals["assign_missing_cast"] += stt["assign_missing_cast"]
         if stt["issue_count"] > 0:
             totals["issue_performance_count"] += 1
+    totals["assign_missing_score_unresolved"] = unresolved_assign_missing_score
     rows.sort(key=lambda x: (x["issue_count"], x["cast_total"] + x["assign_total"], x["title"]), reverse=True)
 
     return {
@@ -3321,6 +3376,8 @@ for key, default in {
     "app_mode_widget":     "新規登録",
     "reconcile_report":    None,
     "reconcile_repair_mode": "partial",
+    "refresh_maintenance_enabled": True,
+    "refresh_maintenance_mode": "partial",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -3442,6 +3499,25 @@ with st.sidebar:
 
         if mode == "自動同期":
             st.divider()
+            st.toggle("リフレッシュ時に整合チェック修復を実行", key="refresh_maintenance_enabled")
+            rm_label = (
+                "手動（実行のみ）" if st.session_state.get("refresh_maintenance_mode") == "manual"
+                else "自動（高確度＋重複整理）" if st.session_state.get("refresh_maintenance_mode") == "full"
+                else "半自動（高確度のみ）"
+            )
+            st.radio(
+                "整合修復モード",
+                options=["手動（実行のみ）", "半自動（高確度のみ）", "自動（高確度＋重複整理）"],
+                index=["手動（実行のみ）", "半自動（高確度のみ）", "自動（高確度＋重複整理）"].index(rm_label),
+                key="refresh_maintenance_mode_display",
+            )
+            disp_rm = st.session_state.get("refresh_maintenance_mode_display", rm_label)
+            if disp_rm == "手動（実行のみ）":
+                st.session_state.refresh_maintenance_mode = "manual"
+            elif disp_rm == "自動（高確度＋重複整理）":
+                st.session_state.refresh_maintenance_mode = "full"
+            else:
+                st.session_state.refresh_maintenance_mode = "partial"
             if st.button("🚀 自動同期", use_container_width=True):
                 st.session_state.is_running = True
                 st.session_state.sync_mode  = "normal"
@@ -4024,6 +4100,9 @@ if mode == "新規登録":
                     )
                     if ok:
                         created_setlist = failed_setlist = 0
+                        created_setlist_rows = []
+                        created_assign = failed_assign = 0
+                        assign_reason = ""
                         setlist_reason = ""
                         if is_performance and NOTION_SCORE_DB_ID:
                             setlist_main = [x for x in st.session_state.get("ev_setlist_main", []) if (x.get("title") or "").strip()]
@@ -4033,7 +4112,7 @@ if mode == "新規登録":
                                 perf_date = watch_str or start_str or ""
                                 score_pages_for_link = _get_score_pages()
                                 selected_scores_for_link = st.session_state.get("ev_score_selected", [])
-                                created_setlist, failed_setlist, setlist_reason, _ = create_setlist_rows_for_performance(
+                                created_setlist, failed_setlist, setlist_reason, created_setlist_rows = create_setlist_rows_for_performance(
                                     performance_page_id=perf_page_id,
                                     performance_title=event_title,
                                     performance_date=perf_date,
@@ -4042,6 +4121,12 @@ if mode == "新規登録":
                                     selected_scores=selected_scores_for_link,
                                     score_pages=score_pages_for_link,
                                 )
+                                if NOTION_SONG_ASSIGN_DB_ID and created_setlist_rows:
+                                    cast_row_map = _get_cast_row_map_for_performance(perf_page_id)
+                                    created_assign, failed_assign, assign_reason = create_song_assignment_rows(
+                                        score_rows=created_setlist_rows,
+                                        cast_row_map=cast_row_map,
+                                    )
                             else:
                                 setlist_reason = "セットリスト入力なし"
                         for key in ["ev_mb_composers", "ev_mb_works", "ev_mb_filter",
@@ -4061,6 +4146,15 @@ if mode == "新規登録":
                             st.warning(f"⚠️ 演奏曲DB登録に失敗しました（{failed_setlist} 件）")
                         elif setlist_reason:
                             st.info(f"ℹ️ 演奏曲DB連携: {setlist_reason}")
+                        if is_performance and NOTION_SONG_ASSIGN_DB_ID:
+                            if created_assign > 0 and failed_assign == 0:
+                                st.success(f"✅ 楽曲別担当者DBに {created_assign} 件登録しました")
+                            elif created_assign > 0 and failed_assign > 0:
+                                st.warning(f"⚠️ 楽曲別担当者DB登録: 成功 {created_assign} 件 / 失敗 {failed_assign} 件")
+                            elif failed_assign > 0:
+                                st.warning(f"⚠️ 楽曲別担当者DB登録に失敗しました（{failed_assign} 件）")
+                            elif assign_reason:
+                                st.info(f"ℹ️ 楽曲別担当者DB連携: {assign_reason}")
                         show_post_register_ui()
                     else:
                         st.error("❌ 登録失敗")
@@ -5200,6 +5294,8 @@ if mode == "出演者管理":
                     f"高確度修復候補: 出演者補完 {totals.get('fixable_cast_missing_performer', 0)} 件 / "
                     f"楽曲別担当者補完 {totals.get('fixable_assign_missing_cast', 0)} 件"
                 )
+                if totals.get("assign_missing_score_unresolved", 0) > 0:
+                    st.caption(f"未解決の楽曲別担当者（演奏曲リンク欠損）: {totals.get('assign_missing_score_unresolved', 0)} 件")
                 mode_label = st.radio(
                     "修復モード",
                     ["手動", "半自動（高確度のみ）", "自動（高確度＋重複整理）"],
@@ -5837,6 +5933,25 @@ if mode == "自動同期" and st.session_state.is_running:
         if st.session_state.is_running and st.session_state.refresh_cursor < total_count:
             st.rerun()
         if st.session_state.refresh_cursor >= total_count:
+            if st.session_state.get("refresh_maintenance_enabled", True):
+                with st.spinner("整合チェック修復を実行中..."):
+                    report = analyze_performance_relation_integrity(force_refresh=False)
+                    if report.get("error"):
+                        st.warning(f"整合修復をスキップ: {report.get('error')}")
+                    else:
+                        m_mode = st.session_state.get("refresh_maintenance_mode", "partial")
+                        stats, errs = run_performance_relation_repair(report, mode=m_mode)
+                        msg = (
+                            "🔧 整合修復: "
+                            f"出演者補完 {stats.get('cast_missing_performer_fixed', 0)} 件 / "
+                            f"楽曲別担当者補完 {stats.get('assign_missing_cast_fixed', 0)} 件 / "
+                            f"重複整理 {stats.get('duplicates_archived', 0)} 件"
+                        )
+                        if stats.get("failed", 0) > 0:
+                            msg += f" / 失敗 {stats.get('failed', 0)} 件"
+                        st.session_state.pending_notice = msg
+                        if errs:
+                            st.session_state.pending_warning = "整合修復で一部失敗があります（出演者管理の整合チェックで要確認）"
             st.session_state.is_running = False
             st.session_state.refresh_targets_ids = []
     else:
