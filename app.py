@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.14"
+APP_VERSION = "7.15"
 
 # ============================================================
 # 媒体マッピング
@@ -290,6 +290,9 @@ def clearable_text_input(label: str, key: str, placeholder: str = "", value: str
     ss_key = f"_cti_{key}"
     if ss_key not in st.session_state:
         st.session_state[ss_key] = value
+    # 外部処理で _cti 側を書き換えた場合、次runでウィジェット初期値にも反映する
+    if key in st.session_state and st.session_state.get(key) != st.session_state.get(ss_key):
+        st.session_state[key] = st.session_state[ss_key]
     # 外部から value が明示的に渡された場合（初期値設定）は上書きしない
     inp_col, btn_col = (container or st).columns([10, 1])
     val = inp_col.text_input(label, value=st.session_state[ss_key],
@@ -5049,9 +5052,11 @@ if mode == "データ管理":
                         items.append({"id": rid, "title": title})
                     return items
 
-                existing_rel_ids = [
-                    r.get("id") for r in ((props.get(rel_prop) or {}).get("relation", [])) if r.get("id")
-                ]
+                existing_rel_ids = [r.get("id") for r in ((props.get(rel_prop) or {}).get("relation", [])) if r.get("id")]
+                # 逆側プロパティに入っているケースも救済（既存データ互換）
+                if not existing_rel_ids:
+                    alt_prop = "出演履歴" if rel_prop == "演奏曲" else "演奏曲"
+                    existing_rel_ids = [r.get("id") for r in ((props.get(alt_prop) or {}).get("relation", [])) if r.get("id")]
                 if rel_state_key not in st.session_state:
                     st.session_state[rel_state_key] = build_rel_items(existing_rel_ids)
                 else:
@@ -5064,9 +5069,10 @@ if mode == "データ管理":
                     target_pages = _get_score_pages(force_refresh=True) if page_media == "出演" else _get_performance_pages(force_refresh=True)
                     refreshed_page = _get_page_from_state_or_api(page_id)
                     refreshed_props = (refreshed_page or {}).get("properties", {}) or props
-                    refreshed_rel_ids = [
-                        r.get("id") for r in ((refreshed_props.get(rel_prop) or {}).get("relation", [])) if r.get("id")
-                    ]
+                    refreshed_rel_ids = [r.get("id") for r in ((refreshed_props.get(rel_prop) or {}).get("relation", [])) if r.get("id")]
+                    if not refreshed_rel_ids:
+                        alt_prop = "出演履歴" if rel_prop == "演奏曲" else "演奏曲"
+                        refreshed_rel_ids = [r.get("id") for r in ((refreshed_props.get(alt_prop) or {}).get("relation", [])) if r.get("id")]
                     id_to_title = {p["id"]: p["title"] for p in target_pages}
                     st.session_state[rel_state_key] = build_rel_items(refreshed_rel_ids)
                     st.rerun()
