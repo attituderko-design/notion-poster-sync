@@ -38,7 +38,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "8.00"
+APP_VERSION = "9.00"
 
 # ============================================================
 # 媒体マッピング
@@ -2478,6 +2478,7 @@ def create_performance_participant_rows(
         unique_rows.append(r)
     rows = unique_rows
     existing_performer_ids = set()
+    existing_cast_row_by_performer = {}
     if perf_rel_prop and performer_rel_prop:
         q = {
             "filter": {"property": perf_rel_prop, "relation": {"contains": performance_page_id}},
@@ -2491,11 +2492,14 @@ def create_performance_participant_rows(
         )
         if res is not None and res.status_code == 200:
             for pg in (res.json() or {}).get("results", []):
+                cast_row_id = pg.get("id")
                 rels = (((pg.get("properties", {}) or {}).get(performer_rel_prop) or {}).get("relation", []))
                 for r in rels:
                     rid = r.get("id")
                     if rid:
                         existing_performer_ids.add(rid)
+                        if cast_row_id:
+                            existing_cast_row_by_performer[rid] = cast_row_id
 
     created, failed = 0, 0
     cast_row_map = {}
@@ -2508,6 +2512,24 @@ def create_performance_participant_rows(
             failed += 1
             continue
         if performer_id in existing_performer_ids:
+            # 既存行は重複作成せず、入力があれば更新して実運用での手戻りを防ぐ
+            existing_row_id = existing_cast_row_by_performer.get(performer_id)
+            if existing_row_id:
+                update_props = {}
+                if inst_prop:
+                    _put_notion_prop(update_props, type_map, inst_prop, instruments)
+                if memo_prop:
+                    _put_notion_prop(update_props, type_map, memo_prop, memo)
+                if update_props:
+                    pres = api_request(
+                        "patch",
+                        f"https://api.notion.com/v1/pages/{existing_row_id}",
+                        headers=NOTION_HEADERS,
+                        json={"properties": update_props},
+                    )
+                    if pres is None or pres.status_code != 200:
+                        failed += 1
+            cast_row_map[_normalize_person_name(name)] = existing_row_id
             continue
 
         props = {}
@@ -5350,7 +5372,12 @@ if mode == "出演者管理":
                             f"楽曲別担当者欠損 {r.get('assign_missing_cast',0)}"
                         )
 
-    perf_pages = _get_performance_pages(force_refresh=True)
+    col_reload_perf, col_reload_master = st.columns([1, 1])
+    if col_reload_perf.button("🔄 出演一覧を再読込", key="cast_mode_reload_perf"):
+        st.session_state.pop("performance_pages_cache", None)
+    if col_reload_master.button("🔄 演奏者マスタ再読込", key="cast_mode_reload_master"):
+        st.session_state.pop("cast_mode_master_names_cache", None)
+    perf_pages = _get_performance_pages(force_refresh=False)
     if not perf_pages:
         st.info("出演データが見つかりません。先にNotionデータ取得を実行してください。")
         st.stop()
@@ -5369,10 +5396,16 @@ if mode == "出演者管理":
         else:
             st.success(f"✅ 追加 {c} 件 / 既存 {s} 件")
 
-    master_names = get_performer_master_names()
+    if "cast_mode_master_names_cache" not in st.session_state:
+        st.session_state.cast_mode_master_names_cache = get_performer_master_names()
+    master_names = st.session_state.get("cast_mode_master_names_cache", [])
     if selected_perf:
         st.caption(f"対象出演: {selected_perf.get('title','')}")
         if "cast_mode_participants" not in st.session_state:
+            st.session_state.cast_mode_participants = []
+        perf_switch_key = "cast_mode_selected_perf_id"
+        if st.session_state.get(perf_switch_key) != selected_perf.get("id"):
+            st.session_state[perf_switch_key] = selected_perf.get("id")
             st.session_state.cast_mode_participants = []
         if st.button("既定参加者をクリア", key="cast_mode_clear"):
             st.session_state.cast_mode_participants = []
@@ -5384,6 +5417,64 @@ if mode == "出演者管理":
             for x in st.session_state.cast_mode_participants
         ):
             st.session_state.cast_mode_participants.insert(0, {"name": default_self, "instruments": "", "memo": ""})
+
+        with st.expander("📄 CSVで一括登録", expanded=False):
+            perf_title = selected_perf.get("title", "")
+            template_lines = ["演奏会名,出演者名,担当楽器,メモ"]
+            for _ in range(100):
+                template_lines.append(f"\"{perf_title}\",,,")
+            template_csv = "\n".join(template_lines).encode("utf-8-sig")
+            st.download_button(
+                "テンプレートCSVをダウンロード（100行）",
+                data=template_csv,
+                file_name=f"cast_template_{perf_title[:24] or 'performance'}.csv",
+                mime="text/csv",
+                key="cast_mode_csv_template_dl",
+            )
+            csv_file = st.file_uploader(
+                "出演者CSVを読み込む",
+                type=["csv"],
+                key="cast_mode_csv_uploader",
+                help="必須列: 演奏会名, 出演者名。演奏会名は現在選択中の出演と一致する行のみ取り込みます。",
+            )
+            if csv_file is not None and st.button("CSVを登録予定に取り込む", key="cast_mode_csv_import_btn"):
+                try:
+                    raw = csv_file.getvalue()
+                    try:
+                        text = raw.decode("utf-8-sig")
+                    except Exception:
+                        text = raw.decode("cp932", errors="ignore")
+                    import csv as _csv
+                    rows = list(_csv.DictReader(io.StringIO(text)))
+                    added = updated = skipped = 0
+                    perf_norm = _normalize_person_name(perf_title)
+                    for r in rows:
+                        row_perf = (r.get("演奏会名") or "").strip()
+                        row_name = (r.get("出演者名") or "").strip()
+                        if not row_perf or not row_name:
+                            skipped += 1
+                            continue
+                        if _normalize_person_name(row_perf) != perf_norm:
+                            skipped += 1
+                            continue
+                        row_inst = (r.get("担当楽器") or "").strip()
+                        row_memo = (r.get("メモ") or "").strip()
+                        key = _normalize_person_name(row_name)
+                        idx = next(
+                            (i for i, x in enumerate(st.session_state.cast_mode_participants) if _normalize_person_name(x.get("name", "")) == key),
+                            None,
+                        )
+                        row_obj = {"name": row_name, "instruments": row_inst, "memo": row_memo}
+                        if idx is None:
+                            st.session_state.cast_mode_participants.append(row_obj)
+                            added += 1
+                        else:
+                            st.session_state.cast_mode_participants[idx] = row_obj
+                            updated += 1
+                    st.success(f"✅ CSV取込: 追加 {added} 件 / 更新 {updated} 件 / スキップ {skipped} 件")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"CSV取込に失敗しました: {e}")
 
         with st.expander("参加者を追加", expanded=True):
             if master_names:
@@ -5418,14 +5509,23 @@ if mode == "出演者管理":
                 st.caption("登録予定")
                 for i, row in enumerate(st.session_state.cast_mode_participants):
                     rc1, rc2, rc3, rc4 = st.columns([2, 2, 2, 1])
-                    rc1.write(row.get("name", ""))
-                    rc2.write(row.get("instruments", ""))
-                    rc3.write(row.get("memo", ""))
+                    row["name"] = rc1.text_input("出演者名", value=row.get("name", ""), key=f"cast_mode_row_name_{i}", label_visibility="collapsed")
+                    row["instruments"] = rc2.text_input("担当楽器", value=row.get("instruments", ""), key=f"cast_mode_row_inst_{i}", label_visibility="collapsed")
+                    row["memo"] = rc3.text_input("メモ", value=row.get("memo", ""), key=f"cast_mode_row_memo_{i}", label_visibility="collapsed")
                     if rc4.button("✕", key=f"cast_mode_rm_{i}"):
                         st.session_state.cast_mode_participants = [x for j, x in enumerate(st.session_state.cast_mode_participants) if j != i]
                         st.rerun()
 
         if st.button("📥 この出演に参加者を登録", type="primary", key="cast_mode_submit"):
+            self_name = (DEFAULT_PERFORMER_NAME or "").strip()
+            if self_name:
+                self_row = next(
+                    (x for x in st.session_state.cast_mode_participants if _normalize_person_name(x.get("name", "")) == _normalize_person_name(self_name)),
+                    None,
+                )
+                if self_row is not None and not (self_row.get("instruments", "") or "").strip():
+                    st.warning("自分の担当楽器が未入力です。登録予定欄で入力してから保存してください。")
+                    st.stop()
             with st.spinner("登録中..."):
                 c, f, msg, _ = create_performance_participant_rows(
                     performance_page_id=selected_perf["id"],
