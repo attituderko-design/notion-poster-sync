@@ -31,7 +31,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "7.25"
+APP_VERSION = "7.26"
 
 # ============================================================
 # 媒体マッピング
@@ -4877,8 +4877,7 @@ if mode == "データ管理":
         is_tmdb_media = page_media in ("映画", "ドラマ")
         is_event_media = page_media in ("出演", "演奏会（鑑賞）", "ライブ/ショー", "展示会", "イベント")
 
-        exp_default = (st.session_state.get("focus_page_id") == page_id) or bool(search_query)
-        with st.expander(f"{log_title}", expanded=exp_default):
+        with st.expander(f"{log_title}", expanded=(st.session_state.get("focus_page_id") == page_id)):
             # 候補反映でセットしたタイトルを、次runで入力欄へ確実に反映
             pending_jp_key = f"pending_edit_jp_{page_id}"
             pending_en_key = f"pending_edit_en_{page_id}"
