@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.79"
+APP_VERSION = "9.80"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -6543,7 +6543,8 @@ if mode == "新規登録":
                                     continue
                                 tkey = _norm_game_match_key(g.get("title", ""))
                                 akeys = {_norm_game_match_key(a) for a in (g.get("alt_titles") or []) if (a or "").strip()}
-                                if (tkey and any(k in tkey for k in q_keys)) or any(any(k in ak for k in q_keys) for ak in akeys):
+                                # 取り込みは厳格一致（部分一致はノイズ混入の原因）
+                                if (tkey and tkey in q_keys) or bool(akeys & q_keys):
                                     extra.append(g)
                                     seen_id.add(g.get("id"))
                             if extra:
