@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.66"
+APP_VERSION = "9.67"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -3415,8 +3415,10 @@ def _search_games_for_ui(query: str, include_images: bool = False) -> list:
     for cand in base:
         en_title = (cand.get("title") or "").strip()
         row = dict(cand)
-        # 作品一覧表示は軽量化のためJP逆引きを遅延（確定時に実施）
-        row["jp_title"] = ""
+        # IGDBが返すJPタイトルは最優先で保持（精度優先）
+        row["jp_title"] = (cand.get("jp_title") or "").strip()
+        row["jp_source"] = (cand.get("jp_source") or "").strip()
+        row["jp_confidence"] = (cand.get("jp_confidence") or "").strip()
         row["series_title"] = _derive_game_series_title(en_title)
         row["variant_label"] = _game_variant_label(en_title)
         if include_images:
@@ -6330,29 +6332,20 @@ if mode == "新規登録":
                             if "game_jp_resolve_cache" not in st.session_state:
                                 st.session_state.game_jp_resolve_cache = {}
                             jp_resolve_cache = st.session_state.game_jp_resolve_cache
-                            # 待ち時間対策: 一括解決は先頭だけに限定し、残りは選択後に個別解決
-                            unresolved_titles = [
-                                w.get("title", "")
-                                for w in work_list
-                                if (w.get("title", "").strip() and not (w.get("jp_title") or "").strip() and not jp_resolve_cache.get(w.get("title", "")))
-                            ]
-                            bulk_probe_limit = 8
-                            bulk_jp_map = resolve_game_jp_titles_bulk(tuple(unresolved_titles[:bulk_probe_limit])) if unresolved_titles else {}
-                            if bulk_jp_map:
-                                jp_resolve_cache.update(bulk_jp_map)
-                                st.session_state.game_jp_resolve_cache = jp_resolve_cache
+                            # 一覧では誤補完を避けるため、IGDB/学習済みのみ表示（未解決は明示）
                             # 補完進捗の内部情報は画面に出さない
                             jp_infos = []
                             for w in work_list:
                                 en_t = w.get("title", "")
                                 jp_t = (
                                     w.get("jp_title")
+                                    or _lookup_game_jp_learned(en_t, w.get("id"))
                                     or jp_resolve_cache.get(en_t, "")
                                 )
                                 src = (w.get("jp_source") or "").strip()
                                 conf = (w.get("jp_confidence") or "").strip()
                                 if not src and jp_t:
-                                    src = "Wikipedia(langlinks)"
+                                    src = "学習済み"
                                     conf = conf or "中"
                                 if jp_t and not conf:
                                     conf = "中"
@@ -6363,7 +6356,7 @@ if mode == "新規登録":
                                         "conf": conf if jp_t else "",
                                     }
                                 )
-                            # 表示確定したJPタイトルはソースに関わらず辞書へ永続化
+                            # 自動保存は高信頼（IGDB由来）のみ。低信頼は手動確定で保存する。
                             if "game_jp_autosaved" not in st.session_state:
                                 st.session_state.game_jp_autosaved = set()
                             autosaved = st.session_state.game_jp_autosaved
@@ -6375,7 +6368,10 @@ if mode == "新規登録":
                                 key = f"{w.get('id') or ''}:{en_t}:{jp_t}"
                                 if key in autosaved:
                                     continue
+                                src = (jp_infos[idx].get("src") or "")
                                 conf = jp_infos[idx].get("conf") or ("高" if w.get("jp_source") else "中")
+                                if not (src.startswith("IGDB") or conf == "高"):
+                                    continue
                                 saved_ok = _learn_game_jp_title(
                                     en_t,
                                     jp_t,
