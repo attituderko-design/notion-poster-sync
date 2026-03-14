@@ -48,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.07"
+APP_VERSION = "9.08"
 
 # ============================================================
 # 媒体マッピング
