@@ -48,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.04"
+APP_VERSION = "9.05"
 
 # ============================================================
 # 媒体マッピング
@@ -3264,36 +3264,70 @@ if mode == "新規登録":
             has_setlist     = is_concert or is_live
 
             # ── 基本情報 ──
+            event_title_placeholder = {
+                "出演": "例: Osaka Pastoral Symphony Orchestra 第5回演奏会",
+                "演奏会（鑑賞）": "例: 大阪フィルハーモニー交響楽団 第588回定期演奏会",
+                "展示会": "例: モネ展（大阪中之島美術館）",
+                "ライブ/ショー": "例: 〇〇 LIVE TOUR 2025",
+                "イベント": "例: 〇〇花火大会 2026",
+            }
+            creator_label = (
+                "指揮者" if is_concert else
+                "アーティスト" if is_live else
+                "主催者・キュレーター" if media_label == "展示会" else
+                "主催者"
+            )
+            creator_placeholder = (
+                "例: 井上道義" if is_concert else
+                "例: Queen / 米津玄師" if is_live else
+                "例: ○○美術館 / ○○実行委員会" if media_label == "展示会" else
+                "例: ○○実行委員会"
+            )
+            cast_label = (
+                "演奏団体" if is_concert else
+                "出演者・バンド" if is_live else
+                "関係者（任意）" if media_label == "展示会" else
+                "出演者・登壇者（任意）"
+            )
+            cast_placeholder = (
+                "例: 大阪フィルハーモニー交響楽団" if is_concert else
+                "例: Queen" if is_live else
+                "例: 学芸員 / 監修者" if media_label == "展示会" else
+                "例: アーティスト / ゲスト"
+            )
+            genre_placeholder = (
+                "例: クラシック / 室内楽" if is_concert else
+                "例: ロック / J-POP" if is_live else
+                "例: 絵画 / 写真 / 現代美術" if media_label == "展示会" else
+                "例: 祭り / 花火 / フェス"
+            )
             event_title = st.text_input(
                 "公演名 *",
-                placeholder="例: 〇〇室内楽演奏会 / 定期演奏会" if is_performance else
-                            "例: 大阪フィルハーモニー交響楽団 第588回定期演奏会" if is_concert else
-                            "例: 〇〇 LIVE TOUR 2025",
+                placeholder=event_title_placeholder.get(media_label, "例: タイトルを入力"),
                 key="ev_title",
             )
             event_creator = st.text_input(
-                "指揮者" if is_performance else ("アーティスト" if is_live else "クリエイター"),
-                placeholder="例: 井上道義" if is_performance else
-                            "例: Queen / 米津玄師" if is_live else
-                            "例: 指揮者・キュレーターなど",
+                creator_label,
+                placeholder=creator_placeholder,
                 key="ev_creator",
             )
             col_cast, col_genre = st.columns([1, 1])
             event_cast = col_cast.text_input(
-                "演奏団体" if is_concert else "出演者・バンド",
-                placeholder="例: 大阪フィルハーモニー交響楽団" if is_concert else "例: Queen",
+                cast_label,
+                placeholder=cast_placeholder,
                 key="ev_cast",
             )
             event_genre = col_genre.text_input(
                 "ジャンル",
-                placeholder="例: クラシック / 室内楽" if is_concert else "例: ロック / J-POP",
+                placeholder=genre_placeholder,
                 key="ev_genre",
             )
-            if media_label == "展示会":
+            if media_label in ("展示会", "イベント"):
                 col_start, col_end, col_watch = st.columns([1, 1, 1])
                 event_start = col_start.date_input("開催開始日", value=None, key="ev_start")
                 event_end   = col_end.date_input("開催終了日",   value=None, key="ev_end")
-                event_watch = col_watch.date_input("鑑賞日",     value=None, key="ev_watch")
+                watch_label = "鑑賞日" if media_label == "展示会" else "参加日"
+                event_watch = col_watch.date_input(watch_label, value=None, key="ev_watch")
             else:
                 col_watch2, _ = st.columns([1, 1])
                 date_label_ev = "出演日" if is_performance else ("鑑賞日" if is_concert else "参加日")
@@ -4234,12 +4268,26 @@ if mode == "新規登録":
                 cast_input    = ""
                 en_input      = ""
             else:
+                jp_ph = "例: 千と千尋の神隠し"
+                en_ph = "例: Spirited Away"
+                creator_ph = "例: 宮崎駿 / 道尾秀介"
+                cast_ph = "例: 木村拓哉"
+                if media_label in ("映画", "ドラマ"):
+                    jp_ph = "例: ガーディアンズ・オブ・ギャラクシー"
+                    en_ph = "例: Guardians of the Galaxy"
+                    creator_ph = "例: ジェームズ・ガン"
+                    cast_ph = "例: クリス・プラット"
+                elif media_label == "書籍":
+                    jp_ph = "例: 蜜蜂と遠雷"
+                    en_ph = "例: Honeybees and Distant Thunder"
+                    creator_ph = "例: 恩田陸"
+                    cast_ph = "例: 出版社名（任意）"
                 col_jp, col_en = st.columns([1, 1])
-                jp_input      = clearable_text_input("日本語タイトル", "inp_jp_main", placeholder="例: 千と千尋の神隠し", container=col_jp)
-                en_input      = clearable_text_input("英語タイトル（検索用）", "inp_en_main", placeholder="例: Spirited Away", container=col_en)
+                jp_input      = clearable_text_input("日本語タイトル", "inp_jp_main", placeholder=jp_ph, container=col_jp)
+                en_input      = clearable_text_input("英語タイトル（検索用）", "inp_en_main", placeholder=en_ph, container=col_en)
                 col_creator, col_cast = st.columns([1, 1])
-                creator_input = clearable_text_input("クリエイター（著者・監督）", "inp_creator_main", placeholder="例: 宮崎駿 / 道尾秀介", container=col_creator)
-                cast_input    = clearable_text_input("キャスト・関係者", "inp_cast_main", placeholder="例: 木村拓哉", container=col_cast)
+                creator_input = clearable_text_input("クリエイター（著者・監督）", "inp_creator_main", placeholder=creator_ph, container=col_creator)
+                cast_input    = clearable_text_input("キャスト・関係者", "inp_cast_main", placeholder=cast_ph, container=col_cast)
 
             if st.button("🔍 検索", key="new_search"):
                 query = en_input if en_input else jp_input
