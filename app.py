@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.59"
+APP_VERSION = "9.60"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -3046,15 +3046,27 @@ def _upsert_game_jp_dict_notion(igdb_id: int | None, en_title: str, jp_title: st
     if igdb_id:
         page_id = id_to_page.get(str(int(igdb_id)), "")
 
+    # DB実プロパティ名に合わせる（ユーザー側の命名差異を吸収）
+    db_meta = api_request("get", f"https://api.notion.com/v1/databases/{NOTION_GAME_JP_DICT_DB_ID}")
+    db_props = (db_meta.json().get("properties", {}) if db_meta and db_meta.status_code == 200 else {}) or {}
+    title_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "title"), "名前")
+    jp_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "rich_text" and ("日本語" in k or "JP" in k.upper())), "日本語タイトル")
+    en_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "rich_text" and ("英語" in k or "EN" in k.upper())), "英語タイトル")
+    id_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "number" and ("IGDB" in k.upper() or "ID" in k.upper())), "IGDB_ID")
+    conf_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "select" and ("信頼" in k or "CONF" in k.upper())), "信頼度")
+    upd_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "date" and ("更新" in k or "DATE" in k.upper())), "更新日")
+
     props = {
-        "名前": {"title": [{"type": "text", "text": {"content": f"{igdb_id if igdb_id else '-'}:{en}"}}]},
-        "英語タイトル": {"rich_text": [{"type": "text", "text": {"content": en}}]},
-        "日本語タイトル": {"rich_text": [{"type": "text", "text": {"content": jp}}]},
-        "信頼度": {"select": {"name": confidence or "手動"}},
-        "更新日": {"date": {"start": date.today().isoformat()}},
+        title_prop: {"title": [{"type": "text", "text": {"content": f"{igdb_id if igdb_id else '-'}:{en}"}}]},
+        en_prop: {"rich_text": [{"type": "text", "text": {"content": en}}]},
+        jp_prop: {"rich_text": [{"type": "text", "text": {"content": jp}}]},
     }
-    if igdb_id:
-        props["IGDB_ID"] = {"number": int(igdb_id)}
+    if conf_prop in db_props:
+        props[conf_prop] = {"select": {"name": confidence or "手動"}}
+    if upd_prop in db_props:
+        props[upd_prop] = {"date": {"start": date.today().isoformat()}}
+    if igdb_id and id_prop in db_props:
+        props[id_prop] = {"number": int(igdb_id)}
 
     try:
         if page_id:
@@ -3070,6 +3082,10 @@ def _upsert_game_jp_dict_notion(igdb_id: int | None, en_title: str, jp_title: st
             )
         _invalidate_game_jp_dict_cache()
     except Exception:
+        # 失敗を握りつぶさず、1run中1回だけ表示
+        if not st.session_state.get("_game_dict_upsert_warned"):
+            st.session_state["_game_dict_upsert_warned"] = True
+            st.warning("⚠️ ゲームJP辞書DBへの保存に失敗しました。プロパティ名/型をご確認ください。")
         return
 
 
