@@ -49,7 +49,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.54"
+APP_VERSION = "9.55"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -5976,10 +5976,8 @@ if mode == "新規登録":
                         if stitle not in seen_series:
                             series_order.append(stitle)
                             seen_series.add(stitle)
-                    series_labels = []
-                    for s in series_order:
-                        s_jp = search_game_jp_title_precise(s)
-                        series_labels.append(f"{s_jp} / {s}" if s_jp else s)
+                    # 候補タブの体感速度を優先し、シリーズ名は即時表示
+                    series_labels = series_order
                     selected_series = st.selectbox(
                         "① シリーズ候補",
                         options=list(range(len(series_order))),
@@ -5999,7 +5997,9 @@ if mode == "新規登録":
                             rc = int(x.get("rating_count") or 0)
                             has_rel = bool(x.get("release"))
                             has_company = bool((x.get("developer") or "").strip() or (x.get("publisher") or "").strip())
-                            return rc >= 20 or (has_rel and has_company)
+                            cat = int(x.get("category") or -1)
+                            is_main_cat = cat in (0, 8, 9)
+                            return (is_main_cat and has_rel and has_company) or rc >= 100
                         filtered = [g for g in work_list if _is_official_like(g)]
                         if filtered:
                             work_list = filtered
@@ -6021,10 +6021,7 @@ if mode == "新規登録":
                             user_jp_query = (st.session_state.get("inp_jp_main") or st.session_state.get("last_game_query_jp") or "").strip()
                             if "game_jp_resolve_cache" not in st.session_state:
                                 st.session_state.game_jp_resolve_cache = {}
-                            if "game_jp_diag_cache" not in st.session_state:
-                                st.session_state.game_jp_diag_cache = {}
                             jp_resolve_cache = st.session_state.game_jp_resolve_cache
-                            jp_diag_cache = st.session_state.game_jp_diag_cache
                             # 待ち時間対策: 一括解決は先頭だけに限定し、残りは選択後に個別解決
                             unresolved_titles = [
                                 w.get("title", "")
@@ -6057,38 +6054,27 @@ if mode == "新規登録":
                                         "jp": jp_t if jp_t else "（JP未解決）",
                                         "src": src if jp_t else "",
                                         "conf": conf if jp_t else "",
-                                        "reason": jp_diag_cache.get(en_t, "") if not jp_t else "",
                                     }
                                 )
                             pick_idx = st.radio(
                                 "作品を選択",
                                 options=list(range(len(work_list))),
-                                format_func=lambda i: f"{jp_infos[i]['jp']}  /  {work_list[i].get('title','')}  /  {work_list[i].get('release','不明')}  /  {('・'.join((work_list[i].get('platforms') or [])[:3]) or 'ハード不明')}  /  {work_list[i].get('variant_label') or _game_variant_label(work_list[i].get('title',''))}{('  /  ' + jp_infos[i]['src'] + '・' + jp_infos[i]['conf']) if jp_infos[i].get('src') else ''}{('  /  理由:' + jp_infos[i]['reason']) if jp_infos[i].get('reason') else ''}",
+                                format_func=lambda i: f"{jp_infos[i]['jp']}  /  {work_list[i].get('title','')}  /  {work_list[i].get('release','不明')}  /  {('・'.join((work_list[i].get('platforms') or [])[:3]) or 'ハード不明')}  /  {work_list[i].get('variant_label') or _game_variant_label(work_list[i].get('title',''))}{('  /  ' + jp_infos[i]['src'] + '・' + jp_infos[i]['conf']) if jp_infos[i].get('src') else ''}",
                                 key="game_work_pick",
                             )
                             picked = dict(work_list[pick_idx])
                             picked["jp_title"] = jp_infos[pick_idx]["jp"] if jp_infos[pick_idx]["jp"] != "（JP未解決）" else picked.get("jp_title", "")
                             picked["jp_source"] = jp_infos[pick_idx].get("src", "")
                             picked["jp_confidence"] = jp_infos[pick_idx].get("conf", "")
-                            picked["jp_reason"] = jp_infos[pick_idx].get("reason", "")
                             if (not picked.get("jp_title")) and st.button("🇯🇵 選択作品のJP候補を取得", key="game_resolve_selected_jp"):
                                 resolved, reason = diagnose_game_jp_resolution(picked.get("title", ""), user_jp_query)
                                 if resolved:
                                     jp_resolve_cache[picked.get("title", "")] = resolved
                                     st.session_state.game_jp_resolve_cache = jp_resolve_cache
-                                    jp_diag_cache[picked.get("title", "")] = ""
-                                    st.session_state.game_jp_diag_cache = jp_diag_cache
                                     st.success(f"JP候補を取得: {resolved}")
                                     st.rerun()
                                 else:
-                                    jp_diag_cache[picked.get("title", "")] = reason or "一致なし"
-                                    st.session_state.game_jp_diag_cache = jp_diag_cache
                                     st.warning(f"この作品の日本語タイトル候補は見つかりませんでした（{reason or '一致なし'}）")
-                            if st.button("🧪 JP解決診断", key="game_diag_selected_jp"):
-                                _, reason = diagnose_game_jp_resolution(picked.get("title", ""), user_jp_query)
-                                jp_diag_cache[picked.get("title", "")] = reason or "一致なし"
-                                st.session_state.game_jp_diag_cache = jp_diag_cache
-                                st.info(f"診断結果: {reason or '解決済み'}")
                             if st.button("🖼 画像候補を取得", key="game_fetch_cover_cands"):
                                 q_hint = (st.session_state.get("inp_en_main") or st.session_state.get("inp_jp_main") or "")
                                 cands = _build_game_cover_candidates(picked, query_hint=q_hint)
