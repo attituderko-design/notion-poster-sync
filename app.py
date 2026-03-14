@@ -3362,11 +3362,24 @@ if mode == "新規登録":
                             current.append({"title": title, "part": "", "played": True, "players": []})
                     st.session_state[slot_key] = current
 
-                # ── 通常セットリスト ──
-                render_song_list("ev_setlist_main", MAX_MAIN, f"📋 通常セットリスト（最大{MAX_MAIN}曲）")
+                setlist_tab = st.segmented_control(
+                    "セットリスト入力ビュー",
+                    options=["楽曲検索・追加", "セットリスト確認"],
+                    key="ev_setlist_ui_tab",
+                )
+                main_count = len([x for x in st.session_state.get("ev_setlist_main", []) if (x.get("title") or "").strip()])
+                enc_count = len([x for x in st.session_state.get("ev_setlist_encore", []) if (x.get("title") or "").strip()])
+                c_info, c_btn = st.columns([4, 1])
+                c_info.caption(f"現在の登録: 通常 {main_count} 曲 / アンコール {enc_count} 曲")
+                if c_btn.button("確認へ", key="ev_setlist_goto_review"):
+                    st.session_state.ev_setlist_ui_tab = "セットリスト確認"
+                    st.rerun()
 
-                # ── アンコール ──
-                render_song_list("ev_setlist_encore", MAX_ENCORE, f"🎊 アンコール（最大{MAX_ENCORE}曲）")
+                if setlist_tab == "セットリスト確認":
+                    # ── 通常セットリスト ──
+                    render_song_list("ev_setlist_main", MAX_MAIN, f"📋 通常セットリスト（最大{MAX_MAIN}曲）")
+                    # ── アンコール ──
+                    render_song_list("ev_setlist_encore", MAX_ENCORE, f"🎊 アンコール（最大{MAX_ENCORE}曲）")
 
                 # ── 楽曲検索（出演はクラシック/ポピュラーを切替可）──
                 st.divider()
@@ -3382,7 +3395,7 @@ if mode == "新規登録":
                     use_mb = search_mode in ("クラシック（MusicBrainz）", "両方")
                     use_itunes = search_mode in ("ポピュラー（iTunes）", "両方")
 
-                if use_mb:
+                if setlist_tab == "楽曲検索・追加" and use_mb:
                     st.caption("🔍 楽曲検索（MusicBrainz）")
                     st.caption("1) 作曲家を検索 → 2) 作曲家を確定 → 3) 曲名で検索 → 4) 曲を追加")
                     ev_composer_input = st.text_input(
@@ -3451,7 +3464,7 @@ if mode == "新規登録":
                                 add_songs_to_slot("ev_setlist_encore", [w["title"]], MAX_ENCORE)
                                 st.rerun()
 
-                if use_itunes:
+                if setlist_tab == "楽曲検索・追加" and use_itunes:
                     st.caption("🔍 楽曲検索（iTunes）")
                     col_it_art, col_it_title = st.columns([1, 1])
                     it_artist_input = col_it_art.text_input("アーティスト名", placeholder="例: Queen / 米津玄師", key="ev_it_artist")
