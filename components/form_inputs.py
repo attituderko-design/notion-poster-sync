@@ -16,15 +16,19 @@ def clearable_text_input(
 
     # クリア要求は次runの描画前に反映（Widget生成後のstate書き換えエラー回避）
     if st.session_state.get(clear_flag):
-        st.session_state[ss_key] = ""
         st.session_state.pop(key, None)
+        st.session_state.pop(ss_key, None)
         st.session_state.pop(clear_flag, None)
 
     if ss_key not in st.session_state:
-        st.session_state[ss_key] = value
-    elif refresh_on_value_change and value != st.session_state.get(ss_key, ""):
+        st.session_state[ss_key] = value or ""
+    elif refresh_on_value_change and (value or "") != st.session_state.get(ss_key, ""):
         st.session_state[ss_key] = value
         st.session_state.pop(key, None)
+
+    # value引数とSession Stateの二重指定警告を避けるため、widget key側へ事前注入して描画
+    if key not in st.session_state:
+        st.session_state[key] = st.session_state.get(ss_key, "")
 
     host = (container or st)
     # ラベル行と入力行を明示的に分けて、ボタン位置を揃える
@@ -32,26 +36,15 @@ def clearable_text_input(
         lbl_col, _ = host.columns([12, 1])
         lbl_col.markdown(f"**{label}**")
     inp_col, btn_col = host.columns([12, 1])
-    if key in st.session_state:
-        val = inp_col.text_input(
-            label,
-            placeholder=placeholder,
-            key=key,
-            label_visibility="collapsed",
-            **kwargs,
-        )
-    else:
-        val = inp_col.text_input(
-            label,
-            value=st.session_state[ss_key],
-            placeholder=placeholder,
-            key=key,
-            label_visibility="collapsed",
-            **kwargs,
-        )
+    val = inp_col.text_input(
+        label,
+        placeholder=placeholder,
+        key=key,
+        label_visibility="collapsed",
+        **kwargs,
+    )
     st.session_state[ss_key] = val
-    btn_col.markdown("&nbsp;", unsafe_allow_html=True)
-    if btn_col.button("×", key=f"_clr_{key}", help="クリア"):
+    if btn_col.button("×", key=f"_clr_{key}", help="クリア", use_container_width=True):
         st.session_state[clear_flag] = True
         st.rerun()
     return st.session_state[ss_key]
