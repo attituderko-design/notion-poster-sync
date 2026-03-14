@@ -48,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.23"
+APP_VERSION = "9.24"
 
 # ============================================================
 # 媒体マッピング
@@ -1721,11 +1721,23 @@ def search_games(query: str) -> list:
         for qv in _jp_game_query_variants(q):
             if qv not in queries:
                 queries.append(qv)
-        en_hint = _wikipedia_en_title_from_japanese(q)
+        # 日本語クエリは、派生形ごとに英題ヒントを引く（1発失敗を避ける）
+        for qv in _jp_game_query_variants(q):
+            en_try = _wikipedia_en_title_from_japanese(qv)
+            if en_try:
+                en_hint = en_try
+                break
         if en_hint and en_hint not in queries:
             queries.append(en_hint)
+            for c in _build_wiki_title_candidates(en_hint):
+                if c not in queries:
+                    queries.append(c)
         if "ゼルダ" in q and "The Legend of Zelda" not in queries:
             queries.append("The Legend of Zelda")
+        if "ゼルダ" in q and ("ブレス" in q or "ワイルド" in q):
+            for zq in ["breath of the wild", "the legend of zelda breath of the wild"]:
+                if zq not in queries:
+                    queries.append(zq)
     if q.lower().startswith("the "):
         queries.append(q[4:].strip())
     all_results, seen = [], set()
