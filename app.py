@@ -48,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.22"
+APP_VERSION = "9.23"
 
 # ============================================================
 # 媒体マッピング
@@ -1596,6 +1596,40 @@ def get_igdb_token() -> str:
     return ""
 
 def search_games(query: str) -> list:
+    def _norm(s: str) -> str:
+        return re.sub(r"[\s:\-_'\"!！?？・、。]+", "", (s or "").lower())
+
+    def _title_rank_score(title: str, base_queries: list[str], en_hint: str = "") -> int:
+        t = _norm(title)
+        score = 0
+        for qx in base_queries:
+            qn = _norm(qx)
+            if not qn:
+                continue
+            if t == qn:
+                score += 300
+            elif t.startswith(qn):
+                score += 220
+            elif qn in t:
+                score += 140
+        if en_hint:
+            en = _norm(en_hint)
+            if t == en:
+                score += 280
+            elif t.startswith(en):
+                score += 200
+            elif en in t:
+                score += 120
+        bad_words = [
+            "patch", "mod", "multiplayer", "mottzilla", "unreal engine",
+            "bonus disc", "master quest", "second wind", "netherforce",
+        ]
+        lowered = (title or "").lower()
+        for bw in bad_words:
+            if bw in lowered:
+                score -= 180
+        return score
+
     def _jp_game_query_variants(text: str) -> list[str]:
         q = (text or "").strip()
         if not q:
@@ -1622,8 +1656,8 @@ def search_games(query: str) -> list:
         if not safe_q:
             return []
         bodies = [
-            f'search "{safe_q}"; fields name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,summary; limit 20;',
-            f'fields name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,summary; where name ~ *"{safe_q}"*; limit 20;',
+            f'search "{safe_q}"; fields name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,summary,total_rating_count,rating,category; limit 20;',
+            f'fields name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,summary,total_rating_count,rating,category; where name ~ *"{safe_q}"*; limit 20;',
         ]
         raw_items = []
         for body in bodies:
@@ -1665,6 +1699,9 @@ def search_games(query: str) -> list:
                 "developer":   developer,
                 "publisher":   publisher,
                 "media_type":  "game",
+                "rating_count": int(item.get("total_rating_count") or 0),
+                "rating": float(item.get("rating") or 0.0),
+                "category": int(item.get("category") or -1),
             })
         return rows
 
@@ -1679,6 +1716,7 @@ def search_games(query: str) -> list:
     if not q:
         return []
     queries = [q]
+    en_hint = ""
     if re.search(r"[\u3040-\u30ff\u3400-\u9fff]", q):
         for qv in _jp_game_query_variants(q):
             if qv not in queries:
@@ -1698,6 +1736,18 @@ def search_games(query: str) -> list:
                 continue
             seen.add(gid)
             all_results.append(row)
+    if all_results:
+        base_queries = [q] + [x for x in queries if x != q]
+        def _row_sort_key(r: dict):
+            title = r.get("title", "")
+            score = _title_rank_score(title, base_queries, en_hint=en_hint)
+            cat = r.get("category", -1)
+            cat_bonus = 30 if cat == 0 else (10 if cat in (8, 9) else 0)
+            pop = min(int(r.get("rating_count") or 0), 5000) // 25
+            rt = int(float(r.get("rating") or 0.0))
+            rel_bonus = 20 if r.get("release") else 0
+            return -(score + cat_bonus + pop + rt + rel_bonus)
+        all_results = sorted(all_results, key=_row_sort_key)
     return all_results
 
 def fetch_game_by_id(game_id: int) -> dict | None:
