@@ -18,12 +18,17 @@ def clearable_text_input(
         st.session_state[ss_key] = value
         st.session_state.pop(key, None)
 
-    inp_col, btn_col = (container or st).columns([10, 1])
+    host = (container or st)
+    # ラベル行と入力行を分けることで、クリアボタンの縦位置ズレを抑える
+    if label:
+        host.markdown(f"<div style='margin: 0 0 .25rem 0; font-weight: 600;'>{label}</div>", unsafe_allow_html=True)
+    inp_col, btn_col = host.columns([12, 1])
     if key in st.session_state:
         val = inp_col.text_input(
             label,
             placeholder=placeholder,
             key=key,
+            label_visibility="collapsed",
             **kwargs,
         )
     else:
@@ -32,9 +37,11 @@ def clearable_text_input(
             value=st.session_state[ss_key],
             placeholder=placeholder,
             key=key,
+            label_visibility="collapsed",
             **kwargs,
         )
     st.session_state[ss_key] = val
+    btn_col.markdown("<div style='margin-top: .20rem;'></div>", unsafe_allow_html=True)
     if btn_col.button("×", key=f"_clr_{key}", help="クリア"):
         st.session_state[ss_key] = ""
         st.session_state.pop(key, None)
