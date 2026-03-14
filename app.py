@@ -49,7 +49,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.52"
+APP_VERSION = "9.53"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 
 # ============================================================
@@ -2818,6 +2818,93 @@ def search_game_jp_title_from_query(jp_query: str, en_title: str = "") -> str:
     except Exception:
         return ""
     return ""
+
+
+def diagnose_game_jp_resolution(en_title: str, jp_query: str = "") -> tuple[str, str]:
+    """
+    戻り値: (jp_title, reason)
+    reason は jp_title が空の時のみ意味を持つ:
+      - Wikipedia不可
+      - Wikidata不可
+      - 一致なし
+    """
+    title = (en_title or "").strip()
+    if not title:
+        return "", "一致なし"
+    learned = _lookup_game_jp_learned(title)
+    if learned:
+        return learned, ""
+
+    wiki_ok = True
+    wd_ok = True
+
+    # 1) Wikipedia langlinks（ENタイトル直指定）
+    try:
+        r = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "query",
+                "prop": "langlinks",
+                "lllang": "ja",
+                "redirects": 1,
+                "titles": title,
+                "format": "json",
+            },
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if r.status_code == 200:
+            pages = (r.json().get("query") or {}).get("pages") or {}
+            for p in pages.values():
+                ll = p.get("langlinks") or []
+                if ll:
+                    jp = (ll[0].get("*") or "").strip()
+                    if jp:
+                        return jp, ""
+        else:
+            wiki_ok = False
+    except Exception:
+        wiki_ok = False
+
+    # 2) Wikidata（EN wiki title -> jawiki/ja label）
+    try:
+        wres = requests.get(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbgetentities",
+                "sites": "enwiki",
+                "titles": title,
+                "props": "labels|sitelinks",
+                "languages": "ja",
+                "format": "json",
+            },
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if wres.status_code == 200:
+            entities = (wres.json().get("entities") or {})
+            for ent in entities.values():
+                sitelinks = ent.get("sitelinks") or {}
+                jawiki = ((sitelinks.get("jawiki") or {}).get("title") or "").strip()
+                ja_label = (((ent.get("labels") or {}).get("ja") or {}).get("value") or "").strip()
+                if jawiki:
+                    return jawiki, ""
+                if ja_label:
+                    return ja_label, ""
+        else:
+            wd_ok = False
+    except Exception:
+        wd_ok = False
+
+    # 3) クエリヒント経由
+    if jp_query:
+        jp = search_game_jp_title_from_query(jp_query, title)
+        if jp:
+            return jp, ""
+
+    if not wiki_ok:
+        return "", "Wikipedia不可"
+    if not wd_ok:
+        return "", "Wikidata不可"
+    return "", "一致なし"
 
 @st.cache_data(ttl=86400)
 def _wiki_page_image_from_title(title: str, lang: str = "ja") -> str:
@@ -5929,7 +6016,10 @@ if mode == "新規登録":
                             user_jp_query = (st.session_state.get("inp_jp_main") or st.session_state.get("last_game_query_jp") or "").strip()
                             if "game_jp_resolve_cache" not in st.session_state:
                                 st.session_state.game_jp_resolve_cache = {}
+                            if "game_jp_diag_cache" not in st.session_state:
+                                st.session_state.game_jp_diag_cache = {}
                             jp_resolve_cache = st.session_state.game_jp_resolve_cache
+                            jp_diag_cache = st.session_state.game_jp_diag_cache
                             # 待ち時間対策: 一括解決は先頭だけに限定し、残りは選択後に個別解決
                             unresolved_titles = [
                                 w.get("title", "")
@@ -5962,30 +6052,38 @@ if mode == "新規登録":
                                         "jp": jp_t if jp_t else "（JP未解決）",
                                         "src": src if jp_t else "",
                                         "conf": conf if jp_t else "",
+                                        "reason": jp_diag_cache.get(en_t, "") if not jp_t else "",
                                     }
                                 )
                             pick_idx = st.radio(
                                 "作品を選択",
                                 options=list(range(len(work_list))),
-                                format_func=lambda i: f"{jp_infos[i]['jp']}  /  {work_list[i].get('title','')}  /  {work_list[i].get('release','不明')}  /  {('・'.join((work_list[i].get('platforms') or [])[:3]) or 'ハード不明')}  /  {work_list[i].get('variant_label') or _game_variant_label(work_list[i].get('title',''))}{('  /  ' + jp_infos[i]['src'] + '・' + jp_infos[i]['conf']) if jp_infos[i].get('src') else ''}",
+                                format_func=lambda i: f"{jp_infos[i]['jp']}  /  {work_list[i].get('title','')}  /  {work_list[i].get('release','不明')}  /  {('・'.join((work_list[i].get('platforms') or [])[:3]) or 'ハード不明')}  /  {work_list[i].get('variant_label') or _game_variant_label(work_list[i].get('title',''))}{('  /  ' + jp_infos[i]['src'] + '・' + jp_infos[i]['conf']) if jp_infos[i].get('src') else ''}{('  /  理由:' + jp_infos[i]['reason']) if jp_infos[i].get('reason') else ''}",
                                 key="game_work_pick",
                             )
                             picked = dict(work_list[pick_idx])
                             picked["jp_title"] = jp_infos[pick_idx]["jp"] if jp_infos[pick_idx]["jp"] != "（JP未解決）" else picked.get("jp_title", "")
                             picked["jp_source"] = jp_infos[pick_idx].get("src", "")
                             picked["jp_confidence"] = jp_infos[pick_idx].get("conf", "")
+                            picked["jp_reason"] = jp_infos[pick_idx].get("reason", "")
                             if (not picked.get("jp_title")) and st.button("🇯🇵 選択作品のJP候補を取得", key="game_resolve_selected_jp"):
-                                resolved = (
-                                    search_game_jp_title_precise(picked.get("title", ""))
-                                    or search_game_jp_title_from_query(user_jp_query, picked.get("title", ""))
-                                )
+                                resolved, reason = diagnose_game_jp_resolution(picked.get("title", ""), user_jp_query)
                                 if resolved:
                                     jp_resolve_cache[picked.get("title", "")] = resolved
                                     st.session_state.game_jp_resolve_cache = jp_resolve_cache
+                                    jp_diag_cache[picked.get("title", "")] = ""
+                                    st.session_state.game_jp_diag_cache = jp_diag_cache
                                     st.success(f"JP候補を取得: {resolved}")
                                     st.rerun()
                                 else:
-                                    st.warning("この作品の日本語タイトル候補は見つかりませんでした")
+                                    jp_diag_cache[picked.get("title", "")] = reason or "一致なし"
+                                    st.session_state.game_jp_diag_cache = jp_diag_cache
+                                    st.warning(f"この作品の日本語タイトル候補は見つかりませんでした（{reason or '一致なし'}）")
+                            if st.button("🧪 JP解決診断", key="game_diag_selected_jp"):
+                                _, reason = diagnose_game_jp_resolution(picked.get("title", ""), user_jp_query)
+                                jp_diag_cache[picked.get("title", "")] = reason or "一致なし"
+                                st.session_state.game_jp_diag_cache = jp_diag_cache
+                                st.info(f"診断結果: {reason or '解決済み'}")
                             if st.button("🖼 画像候補を取得", key="game_fetch_cover_cands"):
                                 q_hint = (st.session_state.get("inp_en_main") or st.session_state.get("inp_jp_main") or "")
                                 cands = _build_game_cover_candidates(picked, query_hint=q_hint)
