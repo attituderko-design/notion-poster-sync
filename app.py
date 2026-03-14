@@ -34,6 +34,7 @@ NOTION_PERFORMER_DB_ID = st.secrets.get("NOTION_PERFORMER_DB_ID", "")
 NOTION_PERFORMANCE_CAST_DB_ID = st.secrets.get("NOTION_PERFORMANCE_CAST_DB_ID", st.secrets.get("NOTION_ASSIGNMENT_DB_ID", ""))
 NOTION_SONG_ASSIGN_DB_ID = st.secrets.get("NOTION_SONG_ASSIGN_DB_ID", "")
 NOTION_PERFORMER_MASTER_DB_ID = st.secrets.get("NOTION_PERFORMER_MASTER_DB_ID", "")
+NOTION_GAME_JP_DICT_DB_ID = st.secrets.get("NOTION_GAME_JP_DICT_DB_ID", "3234532d7d5680639809cb0d2a5da940")
 DEFAULT_PERFORMER_NAME = st.secrets.get("DEFAULT_PERFORMER_NAME", "")
 TMDB_API_KEY         = st.secrets["TMDB_API_KEY"]
 RAKUTEN_APP_ID = st.secrets.get("RAKUTEN_APP_ID", "")
@@ -49,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.58"
+APP_VERSION = "9.59"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -2974,6 +2975,104 @@ def _norm_game_title_key(title: str) -> str:
     return t
 
 
+def _plain_text_from_rich(prop: dict) -> str:
+    vals = (prop or {}).get("rich_text", []) or []
+    return "".join((x.get("plain_text") or "") for x in vals).strip()
+
+
+def _title_text_from_prop(prop: dict) -> str:
+    vals = (prop or {}).get("title", []) or []
+    return "".join((x.get("plain_text") or "") for x in vals).strip()
+
+
+def _load_game_jp_dict_from_notion() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """
+    returns:
+      by_id: {igdb_id(str): jp_title}
+      by_title: {normalized_en_title: jp_title}
+      id_to_page: {igdb_id(str): notion_page_id}
+    """
+    by_id: dict[str, str] = {}
+    by_title: dict[str, str] = {}
+    id_to_page: dict[str, str] = {}
+    if not NOTION_GAME_JP_DICT_DB_ID:
+        return by_id, by_title, id_to_page
+    try:
+        res = _query_notion_database_all_service(NOTION_GAME_JP_DICT_DB_ID, NOTION_HEADERS)
+        for page in res or []:
+            props = page.get("properties", {}) or {}
+            jp = _plain_text_from_rich(props.get("日本語タイトル", {}))
+            en = _plain_text_from_rich(props.get("英語タイトル", {}))
+            if not jp:
+                continue
+            igdb_val = (props.get("IGDB_ID", {}) or {}).get("number")
+            if igdb_val is not None:
+                igdb_key = str(int(igdb_val))
+                by_id[igdb_key] = jp
+                id_to_page[igdb_key] = page.get("id", "")
+            if en:
+                by_title[_norm_game_title_key(en)] = jp
+            name_title = _title_text_from_prop(props.get("名前", {}))
+            if name_title and ":" in name_title:
+                maybe_en = name_title.split(":", 1)[1].strip()
+                if maybe_en:
+                    by_title.setdefault(_norm_game_title_key(maybe_en), jp)
+    except Exception:
+        return {}, {}, {}
+    return by_id, by_title, id_to_page
+
+
+def _get_game_jp_dict_cache() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    key = "_game_jp_notion_cache"
+    if key not in st.session_state:
+        st.session_state[key] = _load_game_jp_dict_from_notion()
+    return st.session_state[key]
+
+
+def _invalidate_game_jp_dict_cache() -> None:
+    st.session_state.pop("_game_jp_notion_cache", None)
+
+
+def _upsert_game_jp_dict_notion(igdb_id: int | None, en_title: str, jp_title: str, confidence: str = "手動") -> None:
+    if not NOTION_GAME_JP_DICT_DB_ID:
+        return
+    en = (en_title or "").strip()
+    jp = (jp_title or "").strip()
+    if not en or not jp:
+        return
+
+    page_id = ""
+    by_id, _, id_to_page = _get_game_jp_dict_cache()
+    if igdb_id:
+        page_id = id_to_page.get(str(int(igdb_id)), "")
+
+    props = {
+        "名前": {"title": [{"type": "text", "text": {"content": f"{igdb_id if igdb_id else '-'}:{en}"}}]},
+        "英語タイトル": {"rich_text": [{"type": "text", "text": {"content": en}}]},
+        "日本語タイトル": {"rich_text": [{"type": "text", "text": {"content": jp}}]},
+        "信頼度": {"select": {"name": confidence or "手動"}},
+        "更新日": {"date": {"start": date.today().isoformat()}},
+    }
+    if igdb_id:
+        props["IGDB_ID"] = {"number": int(igdb_id)}
+
+    try:
+        if page_id:
+            api_request("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
+        else:
+            api_request(
+                "post",
+                "https://api.notion.com/v1/pages",
+                json={
+                    "parent": {"database_id": NOTION_GAME_JP_DICT_DB_ID},
+                    "properties": props,
+                },
+            )
+        _invalidate_game_jp_dict_cache()
+    except Exception:
+        return
+
+
 def _load_game_jp_learned_map() -> dict[str, str]:
     try:
         if GAME_JP_LEARNED_MAP_PATH.exists():
@@ -2992,10 +3091,23 @@ def _get_game_jp_learned_map() -> dict[str, str]:
     return st.session_state[key]
 
 
-def _lookup_game_jp_learned(en_title: str) -> str:
+def _lookup_game_jp_learned(en_title: str, igdb_id: int | None = None) -> str:
     title = (en_title or "").strip()
     if not title:
         return ""
+    # 1) Notion辞書（本番永続）
+    try:
+        by_id, by_title, _ = _get_game_jp_dict_cache()
+        if igdb_id is not None:
+            jp = by_id.get(str(int(igdb_id)), "")
+            if jp:
+                return jp
+        jp = by_title.get(_norm_game_title_key(title), "")
+        if jp:
+            return jp
+    except Exception:
+        pass
+    # 2) ローカル学習（フォールバック）
     learned = _get_game_jp_learned_map()
     if not learned:
         return ""
@@ -3007,7 +3119,7 @@ def _lookup_game_jp_learned(en_title: str) -> str:
     return learned.get(base_key, "")
 
 
-def _learn_game_jp_title(en_title: str, jp_title: str) -> None:
+def _learn_game_jp_title(en_title: str, jp_title: str, igdb_id: int | None = None, confidence: str = "手動", persist_notion: bool = True) -> None:
     en = (en_title or "").strip()
     jp = (jp_title or "").strip()
     if not en or not jp or not _contains_japanese(jp):
@@ -3026,6 +3138,8 @@ def _learn_game_jp_title(en_title: str, jp_title: str) -> None:
         )
     except Exception:
         pass
+    if persist_notion:
+        _upsert_game_jp_dict_notion(igdb_id, en, jp, confidence=confidence)
 
 def _expand_game_query_aliases(query: str) -> list[str]:
     q = (query or "").strip()
@@ -5940,7 +6054,7 @@ if mode == "新規登録":
                                 )
                                 if ok:
                                     if reg["media_type"] == "game":
-                                        _learn_game_jp_title(final_en, final_jp)
+                                        _learn_game_jp_title(final_en, final_jp, igdb_id=reg.get("igdb_id"), confidence="手動")
                                     if reg["media_type"] in ("movie", "tv"):
                                         save_to_drive(reg["cover_url"], final_jp or final_en, reg["tmdb_id"])
                                     st.session_state.confirm_reg        = None
@@ -6082,6 +6196,29 @@ if mode == "新規登録":
                             if bulk_jp_map:
                                 jp_resolve_cache.update(bulk_jp_map)
                                 st.session_state.game_jp_resolve_cache = jp_resolve_cache
+                                # 検索で解決できたJPタイトルは即時に辞書へ反映（本番永続）
+                                if "game_jp_autosaved" not in st.session_state:
+                                    st.session_state.game_jp_autosaved = set()
+                                autosaved = st.session_state.game_jp_autosaved
+                                for w in work_list:
+                                    en_t = (w.get("title") or "").strip()
+                                    if not en_t:
+                                        continue
+                                    jp_t = (bulk_jp_map.get(en_t) or "").strip()
+                                    if not jp_t:
+                                        continue
+                                    key = f"{w.get('id') or ''}:{en_t}:{jp_t}"
+                                    if key in autosaved:
+                                        continue
+                                    _learn_game_jp_title(
+                                        en_t,
+                                        jp_t,
+                                        igdb_id=w.get("id"),
+                                        confidence="中",
+                                        persist_notion=True,
+                                    )
+                                    autosaved.add(key)
+                                st.session_state.game_jp_autosaved = autosaved
                             if unresolved_titles:
                                 st.caption(f"JP自動補完: 先頭{min(bulk_probe_limit, len(unresolved_titles))}件を事前解決（残りは選択後に解決）")
                             jp_infos = []
@@ -6488,7 +6625,7 @@ if mode == "新規登録":
                             )
                             if ok:
                                 if item["media_type"] == "game":
-                                    _learn_game_jp_title(item.get("en_title", ""), item.get("jp_title", ""))
+                                    _learn_game_jp_title(item.get("en_title", ""), item.get("jp_title", ""), igdb_id=item.get("igdb_id"), confidence="手動")
                                 if item["media_type"] in ("movie", "tv"):
                                     save_to_drive(item["cover_url"], item["jp_title"] or item.get("en_title",""), item["tmdb_id"])
                                 success_count += 1
