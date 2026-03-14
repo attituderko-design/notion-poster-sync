@@ -48,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.26"
+APP_VERSION = "9.30"
 
 # ============================================================
 # 媒体マッピング
@@ -184,6 +184,7 @@ def reset_new_register_state():
         # 演奏曲 - 演奏会（出演）関連
         "score_perf_query", "score_perf_selected",
         "score_perf_selected_ids",
+        "game_work_selected",
     ]
     for k in keys:
         st.session_state.pop(k, None)
@@ -2258,7 +2259,36 @@ def _dedupe_keep_order(seq: list[str]) -> list[str]:
             seen.add(x)
     return out
 
-def _search_games_for_ui(query: str) -> list:
+def _derive_game_series_title(title: str) -> str:
+    t = (title or "").strip()
+    if not t:
+        return "その他"
+    low = t.lower()
+    if low.startswith("the legend of zelda"):
+        return "The Legend of Zelda"
+    if ":" in t:
+        return t.split(":", 1)[0].strip()
+    return t
+
+def _game_variant_label(title: str) -> str:
+    low = (title or "").lower()
+    if any(k in low for k in ["dlc", "expansion", "season pass", "episode"]):
+        return "追加コンテンツ"
+    if any(k in low for k in ["edition", "bundle", "collection", "pack"]):
+        return "特装/同梱"
+    return "本編候補"
+
+def _build_game_cover_candidates(cand: dict, query_hint: str = "") -> list[str]:
+    en_title = (cand.get("title") or "").strip()
+    jp_title = (cand.get("jp_title") or "").strip()
+    if not jp_title and query_hint and _contains_japanese(query_hint):
+        jp_title = search_wikipedia_jp_title(en_title) or query_hint
+    ja_img = _wiki_page_image_from_title(jp_title, "ja") if jp_title else ""
+    en_img = _wiki_page_image_from_title(en_title, "en") if en_title else ""
+    igdb_img = cand.get("cover_url", "")
+    return _dedupe_keep_order([ja_img, igdb_img, en_img])
+
+def _search_games_for_ui(query: str, include_images: bool = False) -> list:
     q = (query or "").strip()
     if not q:
         return []
@@ -2285,15 +2315,15 @@ def _search_games_for_ui(query: str) -> list:
         jp_title = search_wikipedia_jp_title(en_title) if en_title else ""
         if not jp_title and _contains_japanese(q):
             jp_title = q
-        ja_img = _wiki_page_image_from_title(jp_title, "ja") if jp_title else ""
-        en_img = _wiki_page_image_from_title(en_title, "en") if en_title else ""
-        igdb_img = cand.get("cover_url", "")
-        cover_candidates = _dedupe_keep_order([ja_img, igdb_img, en_img])
         row = dict(cand)
         row["jp_title"] = jp_title or en_title
-        row["cover_candidates"] = cover_candidates
-        if cover_candidates:
-            row["cover_url"] = cover_candidates[0]
+        row["series_title"] = _derive_game_series_title(en_title)
+        row["variant_label"] = _game_variant_label(en_title)
+        if include_images:
+            cover_candidates = _build_game_cover_candidates(row, q)
+            row["cover_candidates"] = cover_candidates
+            if cover_candidates:
+                row["cover_url"] = cover_candidates[0]
         enriched.append(row)
     return enriched
 
@@ -4820,6 +4850,7 @@ if mode == "新規登録":
                     st.session_state.new_search_done     = True
                     st.session_state.confirm_reg         = None
                     st.session_state.bulk_checked        = {}
+                    st.session_state.pop("game_work_selected", None)
                     st.session_state.rakuten_page        = 1
                     st.session_state.rakuten_query_key   = f"{media_label}|{query}|{creator_input}"
                     st.session_state.active_reg_tab_next = "候補"
@@ -5061,7 +5092,75 @@ if mode == "新規登録":
                         for t in excluded_list:
                             st.caption(f"・{t}")
     
-                if results_list:
+                if results_list and media_label == "ゲーム":
+                    # ゲームは「シリーズ→作品」の2段階で候補を絞る（画像は作品確定後に取得）
+                    series_order = []
+                    seen_series = set()
+                    for g in results_list:
+                        stitle = g.get("series_title") or _derive_game_series_title(g.get("title", ""))
+                        if stitle not in seen_series:
+                            series_order.append(stitle)
+                            seen_series.add(stitle)
+                    selected_series = st.selectbox("① シリーズ候補", series_order, key="game_series_pick")
+                    work_list = [g for g in results_list if (g.get("series_title") or _derive_game_series_title(g.get("title", ""))) == selected_series]
+                    st.caption(f"② 作品候補: {len(work_list)}件（タイトル一覧）")
+                    if work_list:
+                        pick_idx = st.radio(
+                            "作品を選択",
+                            options=list(range(len(work_list))),
+                            format_func=lambda i: f"{work_list[i].get('title','')}  /  {work_list[i].get('release','不明')}  /  {work_list[i].get('variant_label') or _game_variant_label(work_list[i].get('title',''))}",
+                            key="game_work_pick",
+                        )
+                        picked = dict(work_list[pick_idx])
+                        if st.button("🖼 画像候補を取得", key="game_fetch_cover_cands"):
+                            q_hint = (st.session_state.get("inp_en_main") or st.session_state.get("inp_jp_main") or "")
+                            cands = _build_game_cover_candidates(picked, query_hint=q_hint)
+                            picked["cover_candidates"] = cands
+                            picked["cover_url"] = cands[0] if cands else picked.get("cover_url", "")
+                            st.session_state.game_work_selected = picked
+                            st.rerun()
+                    selected_work = st.session_state.get("game_work_selected")
+                    if selected_work:
+                        cover_cands = selected_work.get("cover_candidates") or []
+                        if cover_cands:
+                            cv_idx = st.selectbox(
+                                "③ ジャケットを選択",
+                                options=list(range(len(cover_cands))),
+                                format_func=lambda i: f"{i+1}. {format_cover_url(cover_cands[i], max_len=90)}",
+                                key="game_cover_pick",
+                            )
+                            selected_work["cover_url"] = cover_cands[cv_idx]
+                            st.image(selected_work["cover_url"], width=240)
+                        c1, c2 = st.columns(2)
+                        if c1.button("✅ 単体登録", key="game_single_from_selected"):
+                            st.session_state.confirm_reg = {
+                                "tmdb_id": 0, "cover_url": selected_work.get("cover_url", ""),
+                                "tmdb_release": selected_work.get("release", ""), "media_type": "game",
+                                "cand_en": selected_work.get("title", ""), "jp_input": selected_work.get("jp_title") or selected_work.get("title", ""),
+                                "book_authors": [selected_work.get("developer", "")], "book_genres": selected_work.get("genres", []),
+                                "isbn": "", "game_publisher": selected_work.get("publisher", ""),
+                                "igdb_id": selected_work.get("id"),
+                                "cover_candidates": selected_work.get("cover_candidates", []),
+                            }
+                            st.session_state.active_reg_tab_next = "確認"
+                            st.rerun()
+                        if c2.button("📋 登録リストに追加", key="game_cart_from_selected"):
+                            st.session_state.reg_cart.append({
+                                "jp_title":   selected_work.get("jp_title") or selected_work.get("title", ""),
+                                "en_title":   selected_work.get("title", ""),
+                                "cover_url":  selected_work.get("cover_url", ""),
+                                "cover_candidates": selected_work.get("cover_candidates", []),
+                                "release":    selected_work.get("release", ""),
+                                "watched": "", "rating": "", "wlflg": False,
+                                "media_type": "game", "tmdb_id": 0,
+                                "details":    {"genres": selected_work.get("genres", []), "cast": selected_work.get("publisher", ""), "director": clean_author(selected_work.get("developer", "")), "score": None},
+                                "isbn": "", "igdb_id": selected_work.get("id"),
+                                "location": None, "media_label": media_label,
+                            })
+                            st.success("✅ 登録リストに追加しました")
+                            st.session_state.active_reg_tab_next = "登録リスト"
+                            st.rerun()
+                elif results_list:
                     for row_start in range(0, len(results_list), 3):
                         cols = st.columns(3)
                         for col_idx, cand in enumerate(results_list[row_start:row_start + 3]):
