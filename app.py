@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.72"
+APP_VERSION = "9.73"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -3105,6 +3105,18 @@ def cleanup_game_jp_dict_noise(max_rows: int = 200) -> dict[str, int]:
     db_props, jp_prop, en_prop, id_prop = _resolve_game_jp_dict_schema()
     conf_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "select" and ("信頼" in k or "CONF" in k.upper())), "")
     upd_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "date" and ("更新" in k or "DATE" in k.upper())), "")
+    high_en_keys = set()
+    for p in rows:
+        props0 = p.get("properties", {}) or {}
+        en0 = _plain_text_from_rich(props0.get(en_prop, {})) if en_prop else _plain_text_from_rich(props0.get("英語タイトル", {}))
+        if not en0:
+            name_title0 = _title_text_from_prop(props0.get("名前", {}))
+            if ":" in name_title0:
+                en0 = name_title0.split(":", 1)[1].strip()
+        conf0 = (((props0.get(conf_prop, {}) or {}).get("select") or {}).get("name") or "").strip() if conf_prop else ""
+        if en0 and conf0 in ("高", "手動"):
+            high_en_keys.add(_norm_game_title_key(en0))
+
     scanned = 0
     for p in rows:
         if scanned >= max_rows:
@@ -3116,6 +3128,10 @@ def cleanup_game_jp_dict_noise(max_rows: int = 200) -> dict[str, int]:
             continue
         jp = _plain_text_from_rich(props.get(jp_prop, {})) if jp_prop else _plain_text_from_rich(props.get("日本語タイトル", {}))
         en = _plain_text_from_rich(props.get(en_prop, {})) if en_prop else _plain_text_from_rich(props.get("英語タイトル", {}))
+        if not en:
+            name_title = _title_text_from_prop(props.get("名前", {}))
+            if ":" in name_title:
+                en = name_title.split(":", 1)[1].strip()
         conf = (((props.get(conf_prop, {}) or {}).get("select") or {}).get("name") or "").strip() if conf_prop else ""
         igdb_val = (props.get(id_prop, {}) or {}).get("number")
         if not jp or jp == "（JP未解決）":
@@ -3129,6 +3145,12 @@ def cleanup_game_jp_dict_noise(max_rows: int = 200) -> dict[str, int]:
                 r = api_request("patch", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS, json={"archived": True})
                 if r is not None and r.status_code == 200:
                     stats["archived"] += 1
+            continue
+        # 同一英題で高信頼/手動が既にある中低信頼は整理
+        if conf in ("", "中", "低") and en and _norm_game_title_key(en) in high_en_keys:
+            r = api_request("patch", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS, json={"archived": True})
+            if r is not None and r.status_code == 200:
+                stats["archived"] += 1
             continue
         # 中/低信頼でノイズ語を含むタイトルは辞書用途から除外
         if conf in ("", "中", "低") and _is_noisy_game_title(en):
@@ -3144,6 +3166,11 @@ def cleanup_game_jp_dict_noise(max_rows: int = 200) -> dict[str, int]:
             continue
         igdb_jp = (game.get("jp_title") or "").strip()
         igdb_en = (game.get("title") or "").strip()
+        if conf in ("", "中", "低") and _is_noisy_game_title(igdb_en or en):
+            r = api_request("patch", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS, json={"archived": True})
+            if r is not None and r.status_code == 200:
+                stats["archived"] += 1
+            continue
         if not igdb_jp:
             continue
         if igdb_jp == jp and (not igdb_en or not en or igdb_en == en):
