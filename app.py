@@ -49,7 +49,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.45"
+APP_VERSION = "9.46"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 
 # ============================================================
@@ -1766,6 +1766,12 @@ def search_games(query: str) -> list:
                 queries.append(qv)
         # 日本語クエリは、Wikipedia言語リンクから英題候補を複数取り込む
         en_title_candidates = _wikipedia_en_title_candidates_from_japanese(q, limit=8)
+        # さらにシリーズ候補のENも合流（固有名詞辞書に依存しない）
+        series_candidates = search_game_series_candidates(q, limit=8)
+        for sc in series_candidates:
+            en_s = (sc.get("en") or "").strip()
+            if en_s and en_s not in en_title_candidates:
+                en_title_candidates.append(en_s)
         if en_title_candidates:
             en_hint = en_title_candidates[0]
         # 旧フォールバック（単一候補）
@@ -2586,6 +2592,55 @@ def search_game_jp_title_precise(en_title: str) -> str:
     except Exception:
         return ""
     return ""
+
+
+@st.cache_data(ttl=3600)
+def resolve_game_jp_titles_bulk(en_titles: tuple[str, ...]) -> dict[str, str]:
+    titles = [t.strip() for t in en_titles if (t or "").strip()]
+    if not titles:
+        return {}
+    out: dict[str, str] = {}
+    # 1) learned cache
+    for t in titles:
+        learned = _lookup_game_jp_learned(t)
+        if learned:
+            out[t] = learned
+    unresolved = [t for t in titles if t not in out]
+    if not unresolved:
+        return out
+    # 2) Wikipedia langlinks一括（高速）
+    try:
+        chunk = 40
+        for i in range(0, len(unresolved), chunk):
+            part = unresolved[i:i + chunk]
+            res = requests.get(
+                "https://en.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "prop": "langlinks",
+                    "lllang": "ja",
+                    "redirects": 1,
+                    "titles": "|".join(part),
+                    "format": "json",
+                },
+                timeout=DEFAULT_TIMEOUT,
+            )
+            if res.status_code != 200:
+                continue
+            pages = (res.json().get("query") or {}).get("pages") or {}
+            for p in pages.values():
+                en_title = (p.get("title") or "").strip()
+                if not en_title:
+                    continue
+                ll = p.get("langlinks") or []
+                if not ll:
+                    continue
+                ja = (ll[0].get("*") or "").strip()
+                if ja:
+                    out[en_title] = ja
+    except Exception:
+        pass
+    return out
 
 @st.cache_data(ttl=86400)
 def search_game_jp_title_from_query(jp_query: str, en_title: str = "") -> str:
@@ -5751,18 +5806,24 @@ if mode == "新規登録":
                             work_list = work_list[:max_show]
                         if work_list:
                             user_jp_query = (st.session_state.get("inp_jp_main") or st.session_state.get("last_game_query_jp") or "").strip()
+                            bulk_jp_map = resolve_game_jp_titles_bulk(
+                                tuple(
+                                    w.get("title", "")
+                                    for w in work_list
+                                    if not (w.get("jp_title") or "").strip()
+                                )
+                            )
                             jp_infos = []
                             for w in work_list:
                                 en_t = w.get("title", "")
                                 jp_t = (
                                     w.get("jp_title")
-                                    or search_game_jp_title_precise(en_t)
-                                    or search_game_jp_title_from_query(user_jp_query, en_t)
+                                    or bulk_jp_map.get(en_t, "")
                                 )
                                 src = (w.get("jp_source") or "").strip()
                                 conf = (w.get("jp_confidence") or "").strip()
                                 if not src and jp_t:
-                                    src = "Wikipedia/Wikidata"
+                                    src = "Wikipedia(langlinks)"
                                     conf = conf or "中"
                                 if jp_t and not conf:
                                     conf = "中"
