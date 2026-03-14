@@ -48,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.30"
+APP_VERSION = "9.31"
 
 # ============================================================
 # 媒体マッピング
@@ -173,6 +173,7 @@ def reset_new_register_state():
         "ev_title", "ev_creator", "ev_cast", "ev_genre",
         "ev_start", "ev_end", "ev_watch", "ev_watch2", "ev_rating", "ev_wl",
         "new_search_results", "new_search_done", "new_search_excluded",
+        "new_search_raw_count",
         "bulk_checked", "confirm_reg", "reg_cart",
         "album_tracks_cache", "album_tracks_id",
         # location_search_ui
@@ -2213,6 +2214,43 @@ def _wikipedia_en_title_candidates_from_japanese(title: str, limit: int = 8) -> 
                             return out
     except Exception:
         return out
+    if out:
+        return out
+    # Wikipedia検索で拾えない短い別称向け: Wikidata検索 -> enwiki sitelink
+    try:
+        wres = requests.get(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbsearchentities",
+                "search": q,
+                "language": "ja",
+                "type": "item",
+                "limit": max(1, min(limit, 10)),
+                "format": "json",
+            },
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if wres.status_code == 200:
+            for item in wres.json().get("search", []) or []:
+                qid = (item.get("id") or "").strip()
+                if not qid:
+                    continue
+                dres = requests.get(
+                    f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
+                    timeout=DEFAULT_TIMEOUT,
+                )
+                if dres.status_code != 200:
+                    continue
+                ent = ((dres.json().get("entities") or {}).get(qid)) or {}
+                sitelinks = ent.get("sitelinks") or {}
+                enwiki = ((sitelinks.get("enwiki") or {}).get("title") or "").strip()
+                if enwiki and enwiki not in seen:
+                    out.append(enwiki)
+                    seen.add(enwiki)
+                    if len(out) >= limit:
+                        return out
+    except Exception:
+        return out
     return out
 
 @st.cache_data(ttl=86400)
@@ -3353,6 +3391,7 @@ for key, default in {
     "manual_page":        0,
     "sync_mode":          "normal",
     "new_search_results": [],
+    "new_search_raw_count": 0,
     "new_search_done":    False,
     "confirm_reg":        None,
     "registering":        False,
@@ -4845,6 +4884,7 @@ if mode == "新規登録":
                             results = search_tmdb(query, media_type=tmdb_mt)
                     reg_ids = get_registered_ids(st.session_state.pages)
                     filtered, excluded = filter_registered(results, media_label, reg_ids)
+                    st.session_state.new_search_raw_count = len(results or [])
                     st.session_state.new_search_results  = filtered[:20]
                     st.session_state.new_search_excluded = excluded
                     st.session_state.new_search_done     = True
@@ -5086,6 +5126,11 @@ if mode == "新規登録":
                     results_list = []
     
                 st.caption(f"{len(results_list)} 件の候補　チェックして登録リストに追加できます")
+                if media_label == "ゲーム":
+                    st.caption(
+                        f"検索取得: {st.session_state.get('new_search_raw_count', 0)} 件 / "
+                        f"除外: {len(excluded_list)} 件 / 表示: {len(results_list)} 件"
+                    )
                 if excluded_list:
                     st.caption(f"⚠️ {len(excluded_list)} 件は登録済みのため除外")
                     with st.expander("除外されたタイトルを表示"):
