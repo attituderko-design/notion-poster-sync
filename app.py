@@ -48,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.20"
+APP_VERSION = "9.21"
 
 # ============================================================
 # 媒体マッピング
@@ -1097,9 +1097,12 @@ def _wiki_image_from_page(wiki_url: str) -> tuple[str | None, str | None]:
             return None, None
         pages = (res.json().get("query") or {}).get("pages") or {}
         for page in pages.values():
+            pageprops = page.get("pageprops") or {}
+            if pageprops.get("disambiguation") is not None:
+                continue
             img = ((page.get("original") or {}).get("source")
                    or (page.get("thumbnail") or {}).get("source"))
-            qid = ((page.get("pageprops") or {}).get("wikibase_item"))
+            qid = pageprops.get("wikibase_item")
             if img:
                 return img, qid
             if qid:
@@ -1148,9 +1151,12 @@ def _wiki_search_image(query: str, lang: str = "ja") -> tuple[str | None, str | 
                 continue
             pages = (pres.json().get("query") or {}).get("pages") or {}
             for page in pages.values():
+                pageprops = page.get("pageprops") or {}
+                if pageprops.get("disambiguation") is not None:
+                    continue
                 img = ((page.get("original") or {}).get("source")
                        or (page.get("thumbnail") or {}).get("source"))
-                qid = ((page.get("pageprops") or {}).get("wikibase_item"))
+                qid = pageprops.get("wikibase_item")
                 if img:
                     return img, qid
                 if qid:
@@ -1232,6 +1238,34 @@ def _composer_query_variants(name: str) -> list[str]:
             seen.add(v)
     return out
 
+def _wikidata_search_qids(query: str, lang: str = "en", limit: int = 5) -> list[str]:
+    q = (query or "").strip()
+    if not q:
+        return []
+    try:
+        res = requests.get(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbsearchentities",
+                "search": q,
+                "language": lang,
+                "type": "item",
+                "limit": limit,
+                "format": "json",
+            },
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if res.status_code != 200:
+            return []
+        out = []
+        for x in res.json().get("search", []) or []:
+            qid = (x.get("id") or "").strip()
+            if qid and qid.startswith("Q"):
+                out.append(qid)
+        return out
+    except Exception:
+        return []
+
 def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
     """
     1. Driveに既存の肖像画があればそのURLを返す
@@ -1262,7 +1296,9 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
         )
         if res.status_code != 200:
             return None
-        relations = res.json().get("relations", [])
+        artist_data = res.json()
+        relations = artist_data.get("relations", [])
+        artist_name = (artist_data.get("name") or "").strip()
         wiki_urls, qid = _extract_mb_wiki_relations(relations)
         image_candidates = []
 
@@ -1280,8 +1316,13 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
             image_candidates.append(wd_img)
 
         # 3) 名前検索フォールバック（日本語→英語）
+        all_names = _composer_query_variants(composer_name)
+        if artist_name:
+            for n in _composer_query_variants(artist_name):
+                if n not in all_names:
+                    all_names.append(n)
         if not image_candidates:
-            for cand_name in _composer_query_variants(composer_name):
+            for cand_name in all_names:
                 img_ja, qid_ja = _wiki_search_image(cand_name, "ja")
                 if img_ja:
                     image_candidates.append(img_ja)
@@ -1290,13 +1331,19 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
                 if image_candidates:
                     break
         if not image_candidates:
-            for cand_name in _composer_query_variants(composer_name):
+            for cand_name in all_names:
                 img_en, qid_en = _wiki_search_image(cand_name, "en")
                 if img_en:
                     image_candidates.append(img_en)
                 if not qid and qid_en:
                     qid = qid_en
                 if image_candidates:
+                    break
+        if not qid:
+            for cand_name in all_names:
+                qids = _wikidata_search_qids(cand_name, "en", limit=3)
+                if qids:
+                    qid = qids[0]
                     break
         if not image_candidates and qid:
             wd_img = _wikidata_p18_image_url(qid)
@@ -1458,7 +1505,27 @@ def _format_wikidata_time(value: str) -> str:
     return f"{y}-{mm}-{dd}"
 
 @st.cache_data(ttl=86400)
-def get_mb_work_premiere_date(work_id: str) -> str:
+def get_mb_work_premiere_date(work_id: str, work_title: str = "", composer_name: str = "") -> str:
+    def _extract_dates_from_qid(qid: str) -> list[str]:
+        if not qid:
+            return []
+        dres = requests.get(
+            f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if dres.status_code != 200:
+            return []
+        entity = ((dres.json().get("entities") or {}).get(qid)) or {}
+        claims = entity.get("claims") or {}
+        candidates = []
+        for pid in ["P571", "P577"]:
+            for c in claims.get(pid, []) or []:
+                val = ((((c.get("mainsnak") or {}).get("datavalue") or {}).get("value")) or {}).get("time")
+                dt = _format_wikidata_time(val)
+                if dt:
+                    candidates.append(dt)
+        return candidates
+
     work_id = (work_id or "").strip()
     if not work_id:
         return ""
@@ -1480,23 +1547,22 @@ def get_mb_work_premiere_date(work_id: str) -> str:
                 if qid_from_wiki:
                     qid = qid_from_wiki
                     break
-        if not qid:
-            return ""
-        dres = requests.get(
-            f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
-            timeout=DEFAULT_TIMEOUT,
-        )
-        if dres.status_code != 200:
-            return ""
-        entity = ((dres.json().get("entities") or {}).get(qid)) or {}
-        claims = entity.get("claims") or {}
         candidates = []
-        for pid in ["P571", "P577"]:
-            for c in claims.get(pid, []) or []:
-                val = ((((c.get("mainsnak") or {}).get("datavalue") or {}).get("value")) or {}).get("time")
-                dt = _format_wikidata_time(val)
-                if dt:
-                    candidates.append(dt)
+        if qid:
+            candidates.extend(_extract_dates_from_qid(qid))
+        if not candidates:
+            title = (work_title or "").strip()
+            comp = (composer_name or "").strip()
+            search_queries = []
+            if title and comp:
+                search_queries.append(f"{title} {comp}")
+            if title:
+                search_queries.append(title)
+            for sq in search_queries:
+                for sq_qid in _wikidata_search_qids(sq, "en", limit=4):
+                    candidates.extend(_extract_dates_from_qid(sq_qid))
+                if candidates:
+                    break
         return sorted(candidates)[0] if candidates else ""
     except Exception:
         return ""
@@ -1522,12 +1588,30 @@ def get_igdb_token() -> str:
 
 def search_games(query: str) -> list:
     def _search_igdb_once(q: str, headers: dict) -> list:
-        body = f'search "{q}"; fields name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,summary; limit 20;'
-        res = requests.post("https://api.igdb.com/v4/games", headers=headers, data=body, timeout=DEFAULT_TIMEOUT)
-        if res.status_code != 200:
+        safe_q = (q or "").replace('"', "").strip()
+        if not safe_q:
+            return []
+        bodies = [
+            f'search "{safe_q}"; fields name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,summary; limit 20;',
+            f'fields name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,summary; where name ~ *"{safe_q}"*; limit 20;',
+        ]
+        raw_items = []
+        for body in bodies:
+            res = requests.post("https://api.igdb.com/v4/games", headers=headers, data=body, timeout=DEFAULT_TIMEOUT)
+            if res.status_code != 200:
+                continue
+            raw_items.extend(res.json() or [])
+            if raw_items:
+                break
+        if not raw_items:
             return []
         rows = []
-        for item in res.json():
+        seen_row = set()
+        for item in raw_items:
+            gid = item.get("id")
+            if gid in seen_row:
+                continue
+            seen_row.add(gid)
             cover_url = ""
             if item.get("cover", {}).get("url"):
                 cover_url = "https:" + item["cover"]["url"].replace("t_thumb", "t_cover_big")
@@ -1569,6 +1653,10 @@ def search_games(query: str) -> list:
         en_hint = _wikipedia_en_title_from_japanese(q)
         if en_hint and en_hint not in queries:
             queries.append(en_hint)
+        if "ゼルダ" in q and "The Legend of Zelda" not in queries:
+            queries.append("The Legend of Zelda")
+    if q.lower().startswith("the "):
+        queries.append(q[4:].strip())
     all_results, seen = [], set()
     for q_try in queries:
         for row in _search_igdb_once(q_try, headers):
@@ -1929,7 +2017,7 @@ def _wikipedia_en_title_from_japanese(title: str) -> str:
                 "action": "query",
                 "list": "search",
                 "srsearch": q,
-                "srlimit": 1,
+                "srlimit": 5,
                 "format": "json",
             },
             timeout=DEFAULT_TIMEOUT,
@@ -1939,27 +2027,28 @@ def _wikipedia_en_title_from_japanese(title: str) -> str:
         items = ja_res.json().get("query", {}).get("search", [])
         if not items:
             return ""
-        page_title = items[0].get("title", "")
-        if not page_title:
-            return ""
-        ll_res = requests.get(
-            "https://ja.wikipedia.org/w/api.php",
-            params={
-                "action": "query",
-                "prop": "langlinks",
-                "lllang": "en",
-                "titles": page_title,
-                "format": "json",
-            },
-            timeout=DEFAULT_TIMEOUT,
-        )
-        if ll_res.status_code != 200:
-            return ""
-        pages = ll_res.json().get("query", {}).get("pages", {})
-        for page in pages.values():
-            langlinks = page.get("langlinks", [])
-            if langlinks:
-                return (langlinks[0].get("*") or "").strip()
+        for item in items:
+            page_title = (item.get("title") or "").strip()
+            if not page_title:
+                continue
+            ll_res = requests.get(
+                "https://ja.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "prop": "langlinks",
+                    "lllang": "en",
+                    "titles": page_title,
+                    "format": "json",
+                },
+                timeout=DEFAULT_TIMEOUT,
+            )
+            if ll_res.status_code != 200:
+                continue
+            pages = ll_res.json().get("query", {}).get("pages", {})
+            for page in pages.values():
+                langlinks = page.get("langlinks", [])
+                if langlinks:
+                    return (langlinks[0].get("*") or "").strip()
     except Exception:
         return ""
     return ""
@@ -4335,7 +4424,11 @@ if mode == "新規登録":
                         for w in selected_works:
                             work_release = (w.get("first_release_date") or "").strip()
                             if not work_release:
-                                work_release = get_mb_work_premiere_date(w.get("id", ""))
+                                work_release = get_mb_work_premiere_date(
+                                    w.get("id", ""),
+                                    work_title=w.get("title", ""),
+                                    composer_name=comp_name,
+                                )
                             st.session_state.reg_cart.append({
                                 "cart_uid":    f"score_{uuid.uuid4().hex[:10]}",
                                 "jp_title":    w["title"],
