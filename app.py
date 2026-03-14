@@ -49,7 +49,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.48"
+APP_VERSION = "9.49"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 
 # ============================================================
@@ -2202,7 +2202,6 @@ def _wikidata_en_title_from_ja_wikipedia_title(title: str) -> str:
         return ""
 
 
-@st.cache_data(ttl=86400)
 def search_wikipedia_jp_title(title: str) -> str:
     """Wikipediaの言語リンク/検索から日本語タイトルを取得（見つからなければ空文字）"""
     candidates = _build_wiki_title_candidates(title)
@@ -2287,7 +2286,6 @@ def search_wikipedia_jp_title(title: str) -> str:
         return ""
     return ""
 
-@st.cache_data(ttl=86400)
 def _wikipedia_en_title_from_japanese(title: str) -> str:
     q = (title or "").strip()
     if not q:
@@ -2335,7 +2333,6 @@ def _wikipedia_en_title_from_japanese(title: str) -> str:
         return ""
     return ""
 
-@st.cache_data(ttl=86400)
 def _wikipedia_en_title_candidates_from_japanese(title: str, limit: int = 8) -> list[str]:
     q = (title or "").strip()
     if not q:
@@ -2534,7 +2531,6 @@ def _wikipedia_en_title_candidates_from_japanese(title: str, limit: int = 8) -> 
         return out
     return out
 
-@st.cache_data(ttl=86400)
 def search_game_series_candidates(query: str, limit: int = 8) -> list[dict]:
     q = (query or "").strip()
     if not q:
@@ -2596,7 +2592,6 @@ def search_game_series_candidates(query: str, limit: int = 8) -> list[dict]:
             continue
     return out
 
-@st.cache_data(ttl=86400)
 def search_game_jp_title_precise(en_title: str) -> str:
     title = (en_title or "").strip()
     if not title:
