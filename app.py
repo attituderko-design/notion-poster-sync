@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.68"
+APP_VERSION = "9.69"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -1675,32 +1675,6 @@ def search_games(query: str) -> list:
                 seen.add(v)
         return out
 
-    def _extract_jp_name_from_igdb_item(item: dict) -> tuple[str, str, str]:
-        # 1) game_localizations（最優先）
-        for loc in item.get("game_localizations", []) or []:
-            name = (loc.get("name") or "").strip() if isinstance(loc, dict) else ""
-            if name and _contains_japanese(name):
-                return name, "IGDB-localization", "高"
-        # 2) alternative_names（commentに日本語注記があれば優先）
-        jp_with_tag = []
-        jp_plain = []
-        for alt in item.get("alternative_names", []) or []:
-            if not isinstance(alt, dict):
-                continue
-            name = (alt.get("name") or "").strip()
-            comment = (alt.get("comment") or "").strip().lower()
-            if not name or not _contains_japanese(name):
-                continue
-            if any(k in comment for k in ["japanese", "japan", "日本", "jp title", "jp"]):
-                jp_with_tag.append(name)
-            else:
-                jp_plain.append(name)
-        if jp_with_tag:
-            return jp_with_tag[0], "IGDB-alt(JP注記)", "高"
-        if jp_plain:
-            return jp_plain[0], "IGDB-alt", "中"
-        return "", "", ""
-
     def _search_igdb_once(q: str, headers: dict) -> list:
         safe_q = (q or "").replace('"', "").strip()
         if not safe_q:
@@ -1861,7 +1835,12 @@ def fetch_game_by_id(game_id: int) -> dict | None:
         "Client-ID":     IGDB_CLIENT_ID,
         "Authorization": f"Bearer {token}",
     }
-    body = f'fields name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,summary; where id = {int(game_id)};'
+    body = (
+        "fields name,cover.url,first_release_date,genres.name,"
+        "involved_companies.company.name,involved_companies.developer,involved_companies.publisher,"
+        "summary,alternative_names.name,alternative_names.comment,game_localizations.name,game_localizations.region;"
+        f" where id = {int(game_id)};"
+    )
     res = requests.post("https://api.igdb.com/v4/games", headers=headers, data=body, timeout=DEFAULT_TIMEOUT)
     if res.status_code != 200:
         return None
@@ -1869,6 +1848,7 @@ def fetch_game_by_id(game_id: int) -> dict | None:
     if not items:
         return None
     item = items[0]
+    jp_name, jp_source, jp_conf = _extract_jp_name_from_igdb_item(item)
     cover_url = ""
     if item.get("cover", {}).get("url"):
         cover_url = "https:" + item["cover"]["url"].replace("t_thumb", "t_cover_big")
@@ -1884,6 +1864,9 @@ def fetch_game_by_id(game_id: int) -> dict | None:
     return {
         "id":          item["id"],
         "title":       item.get("name", ""),
+        "jp_title":    jp_name,
+        "jp_source":   jp_source,
+        "jp_confidence": jp_conf,
         "cover_url":   cover_url,
         "release":     release_year,
         "genres":      genres,
@@ -3100,6 +3083,79 @@ def _dedupe_game_jp_dict_all(max_groups: int = 300) -> int:
     return archived_total
 
 
+def cleanup_game_jp_dict_noise(max_rows: int = 200) -> dict[str, int]:
+    """
+    ゲームJP辞書DBの軽量クリーンアップ。
+    - 重複整理（IGDB_ID/英語タイトル）
+    - 空/未解決JPのアーカイブ
+    - IGDB_IDあり行はIGDB由来JPで上書き補正（手動確定は温存）
+    """
+    stats = {"archived": 0, "patched": 0, "scanned": 0}
+    if not NOTION_GAME_JP_DICT_DB_ID:
+        return stats
+    stats["archived"] += _dedupe_game_jp_dict_all(max_groups=max_rows)
+    rows = _query_game_jp_dict_rows()
+    if not rows:
+        return stats
+    db_props, jp_prop, en_prop, id_prop = _resolve_game_jp_dict_schema()
+    conf_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "select" and ("信頼" in k or "CONF" in k.upper())), "")
+    upd_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "date" and ("更新" in k or "DATE" in k.upper())), "")
+    scanned = 0
+    for p in rows:
+        if scanned >= max_rows:
+            break
+        scanned += 1
+        props = p.get("properties", {}) or {}
+        pid = p.get("id", "")
+        if not pid:
+            continue
+        jp = _plain_text_from_rich(props.get(jp_prop, {})) if jp_prop else _plain_text_from_rich(props.get("日本語タイトル", {}))
+        en = _plain_text_from_rich(props.get(en_prop, {})) if en_prop else _plain_text_from_rich(props.get("英語タイトル", {}))
+        conf = (((props.get(conf_prop, {}) or {}).get("select") or {}).get("name") or "").strip() if conf_prop else ""
+        igdb_val = (props.get(id_prop, {}) or {}).get("number")
+        if not jp or jp == "（JP未解決）":
+            r = api_request("patch", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS, json={"archived": True})
+            if r is not None and r.status_code == 200:
+                stats["archived"] += 1
+            continue
+        if igdb_val is None:
+            # IGDB IDなし・低信頼は辞書ノイズとして退避
+            if conf in ("", "中", "低"):
+                r = api_request("patch", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS, json={"archived": True})
+                if r is not None and r.status_code == 200:
+                    stats["archived"] += 1
+            continue
+        # 手動確定は尊重。それ以外はIGDB由来JPで補正
+        if conf == "手動":
+            continue
+        game = fetch_game_by_id(int(igdb_val))
+        if not game:
+            continue
+        igdb_jp = (game.get("jp_title") or "").strip()
+        igdb_en = (game.get("title") or "").strip()
+        if not igdb_jp:
+            continue
+        if igdb_jp == jp and (not igdb_en or not en or igdb_en == en):
+            continue
+        patch_props = {}
+        if jp_prop:
+            patch_props[jp_prop] = {"rich_text": [{"type": "text", "text": {"content": igdb_jp}}]}
+        if en_prop and igdb_en and igdb_en != en:
+            patch_props[en_prop] = {"rich_text": [{"type": "text", "text": {"content": igdb_en}}]}
+        if conf_prop:
+            patch_props[conf_prop] = {"select": {"name": "高"}}
+        if upd_prop:
+            patch_props[upd_prop] = {"date": {"start": date.today().isoformat()}}
+        if not patch_props:
+            continue
+        r = api_request("patch", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS, json={"properties": patch_props})
+        if r is not None and r.status_code == 200:
+            stats["patched"] += 1
+    stats["scanned"] = scanned
+    _invalidate_game_jp_dict_cache()
+    return stats
+
+
 def _load_game_jp_dict_from_notion() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     """
     returns:
@@ -3356,6 +3412,32 @@ def _game_base_title_candidates(title: str) -> list[str]:
         if t3 and t3 not in cands:
             cands.append(t3)
     return cands
+
+def _extract_jp_name_from_igdb_item(item: dict) -> tuple[str, str, str]:
+    # 1) game_localizations（最優先）
+    for loc in item.get("game_localizations", []) or []:
+        name = (loc.get("name") or "").strip() if isinstance(loc, dict) else ""
+        if name and _contains_japanese(name):
+            return name, "IGDB-localization", "高"
+    # 2) alternative_names（commentに日本語注記があれば優先）
+    jp_with_tag = []
+    jp_plain = []
+    for alt in item.get("alternative_names", []) or []:
+        if not isinstance(alt, dict):
+            continue
+        name = (alt.get("name") or "").strip()
+        comment = (alt.get("comment") or "").strip().lower()
+        if not name or not _contains_japanese(name):
+            continue
+        if any(k in comment for k in ["japanese", "japan", "日本", "jp title", "jp"]):
+            jp_with_tag.append(name)
+        else:
+            jp_plain.append(name)
+    if jp_with_tag:
+        return jp_with_tag[0], "IGDB-alt(JP注記)", "高"
+    if jp_plain:
+        return jp_plain[0], "IGDB-alt", "中"
+    return "", "", ""
 
 def _build_game_cover_candidates(cand: dict, query_hint: str = "") -> list[str]:
     en_title = (cand.get("title") or "").strip()
@@ -4561,6 +4643,10 @@ with st.sidebar:
                 st.session_state.pop("score_pages_cache", None)
                 st.session_state.pop("performance_pages_cache", None)
                 st.success(f"{len(st.session_state.pages)} 件取得しました（全媒体: {len(st.session_state.all_pages)} 件）")
+    if st.button("🧹 ゲームJP辞書をクリーンアップ", use_container_width=True, key="cleanup_game_jp_dict"):
+        with st.spinner("ゲームJP辞書DBを整備中..."):
+            s = cleanup_game_jp_dict_noise(max_rows=300)
+            st.success(f"完了: 走査 {s.get('scanned', 0)} / 補正 {s.get('patched', 0)} / 整理 {s.get('archived', 0)}")
 
     if not st.session_state.pages_loaded:
         st.caption("👆 まず「最新データを読み込む」を実行してください")
