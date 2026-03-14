@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.76"
+APP_VERSION = "9.77"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -3490,6 +3490,22 @@ def _is_noisy_game_title(title: str) -> bool:
     ]
     return any(t in low for t in noisy_terms)
 
+def _norm_game_match_key(text: str) -> str:
+    t = (text or "").strip().lower()
+    t = re.sub(r"[\s:\-_'\"!！?？・、。]+", "", t)
+    return t
+
+def _is_specific_game_query(query: str) -> bool:
+    q = (query or "").strip()
+    if not q:
+        return False
+    # 作品単位を示しやすい: 数字 / ローマ数字
+    if re.search(r"\d", q):
+        return True
+    if re.search(r"\b(i|ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii|xiii|xiv|xv|xvi)\b", q, re.IGNORECASE):
+        return True
+    return False
+
 def _extract_jp_name_from_igdb_item(item: dict) -> tuple[str, str, str]:
     # 1) game_localizations（最優先）
     for loc in item.get("game_localizations", []) or []:
@@ -3579,6 +3595,24 @@ def _search_games_for_ui(query: str, include_images: bool = False) -> list:
                     seen.add(rid)
                 if len(base) >= 120:
                     break
+    # 作品特定クエリ（数字/ローマ数字あり）は、タイトル厳格一致を優先してノイズ候補を削減
+    if _is_specific_game_query(q):
+        match_keys = {_norm_game_match_key(v) for v in expanded_queries if v}
+        if _contains_japanese(q):
+            try:
+                for e in _wikipedia_en_title_candidates_from_japanese(q, limit=6):
+                    if e:
+                        match_keys.add(_norm_game_match_key(e))
+            except Exception:
+                pass
+        strict = []
+        for r in base:
+            t = (r.get("title") or "").strip()
+            tk = _norm_game_match_key(t)
+            if tk in match_keys:
+                strict.append(r)
+        if strict:
+            base = strict
     enriched = []
     for cand in base:
         en_title = (cand.get("title") or "").strip()
