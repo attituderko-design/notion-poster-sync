@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.75"
+APP_VERSION = "9.76"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -3169,11 +3169,10 @@ def cleanup_game_jp_dict_noise(max_rows: int = 200) -> dict[str, int]:
         if not game:
             continue
         has_company = bool((game.get("developer") or "").strip() or (game.get("publisher") or "").strip())
-        rc = int(game.get("rating_count") or 0)
         cat = int(game.get("category") or -1)
-        # 中低信頼で、公式性が乏しいレコード（会社情報なし & 低評価件数 or 非本編カテゴリ）は辞書から除外
+        # 中低信頼で、公式性が乏しいレコード（会社情報なし or 非本編カテゴリ）は辞書から除外
         if conf in ("", "中", "低"):
-            if (not has_company and rc < 80) or (cat not in (0, 8, 9)):
+            if (not has_company) or (cat not in (0, 8, 9)):
                 r = api_request("patch", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS, json={"archived": True})
                 if r is not None and r.status_code == 200:
                     stats["archived"] += 1
@@ -3221,12 +3220,14 @@ def _load_game_jp_dict_from_notion() -> tuple[dict[str, str], dict[str, str], di
     if not NOTION_GAME_JP_DICT_DB_ID:
         return by_id, by_title, id_to_page
     try:
-        _, jp_prop, en_prop, id_prop = _resolve_game_jp_dict_schema()
+        db_props, jp_prop, en_prop, id_prop = _resolve_game_jp_dict_schema()
+        conf_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "select" and ("信頼" in k or "CONF" in k.upper())), "")
         res = _query_game_jp_dict_rows()
         for page in res or []:
             props = page.get("properties", {}) or {}
             jp = _plain_text_from_rich(props.get(jp_prop, {})) if jp_prop else _plain_text_from_rich(props.get("日本語タイトル", {}))
             en = _plain_text_from_rich(props.get(en_prop, {})) if en_prop else _plain_text_from_rich(props.get("英語タイトル", {}))
+            conf = (((props.get(conf_prop, {}) or {}).get("select") or {}).get("name") or "").strip() if conf_prop else ""
             if not jp:
                 continue
             igdb_val = (props.get(id_prop, {}) or {}).get("number")
@@ -3235,7 +3236,8 @@ def _load_game_jp_dict_from_notion() -> tuple[dict[str, str], dict[str, str], di
                 # 既存重複がある場合は「先勝ち」にして upsert 側で整理
                 by_id.setdefault(igdb_key, jp)
                 id_to_page.setdefault(igdb_key, page.get("id", ""))
-            if en:
+            # タイトル辞書は高信頼/手動のみ採用（誤学習の波及防止）
+            if en and conf in ("高", "手動") and not _is_noisy_game_title(en):
                 by_title[_norm_game_title_key(en)] = jp
             name_title = _title_text_from_prop(props.get("名前", {}))
             if name_title and ":" in name_title:
@@ -3353,6 +3355,10 @@ def _lookup_game_jp_learned(en_title: str, igdb_id: int | None = None, allow_tit
             jp = by_id.get(str(int(igdb_id)), "")
             if jp:
                 return jp
+            # 同名別ID（移植/再販）向け: 高信頼タイトル辞書のみ限定で参照
+            jp_same_title = by_title.get(_norm_game_title_key(title), "")
+            if jp_same_title:
+                return jp_same_title
         if allow_title_fallback:
             jp = by_title.get(_norm_game_title_key(title), "")
             if jp:
@@ -6483,8 +6489,7 @@ if mode == "新規登録":
                             cat = int(x.get("category") or -1)
                             is_main_cat = cat in (0, 8, 9)
                             has_company = bool((x.get("developer") or "").strip() or (x.get("publisher") or "").strip())
-                            rc = int(x.get("rating_count") or 0)
-                            return is_main_cat and has_rel and (has_company or rc >= 80)
+                            return is_main_cat and has_rel and has_company
                         filtered = [g for g in work_list if _is_official_like(g)]
                         if filtered:
                             work_list = filtered
