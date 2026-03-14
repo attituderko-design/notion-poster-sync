@@ -48,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.41"
+APP_VERSION = "9.43"
 
 # ============================================================
 # 媒体マッピング
@@ -1663,8 +1663,8 @@ def search_games(query: str) -> list:
         if not safe_q:
             return []
         bodies = [
-            f'search "{safe_q}"; fields name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,platforms.name,summary,total_rating_count,rating,category; limit 100;',
-            f'fields name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,platforms.name,summary,total_rating_count,rating,category; where name ~ *"{safe_q}"*; limit 100;',
+            f'search "{safe_q}"; fields name,alternative_names.name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,platforms.name,summary,total_rating_count,rating,category; limit 100;',
+            f'fields name,alternative_names.name,cover.url,first_release_date,genres.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,platforms.name,summary,total_rating_count,rating,category; where name ~ *"{safe_q}"*; limit 100;',
         ]
         raw_items = []
         for body in bodies:
@@ -1698,9 +1698,12 @@ def search_games(query: str) -> list:
                     developer = name
                 if c.get("publisher"):
                     publisher = name
+            alt_titles = [a.get("name", "") for a in item.get("alternative_names", []) if a.get("name")]
+            jp_alt = next((t for t in alt_titles if _contains_japanese(t)), "")
             rows.append({
                 "id":          item["id"],
                 "title":       item.get("name", ""),
+                "jp_title":    jp_alt,
                 "cover_url":   cover_url,
                 "release":     release_year,
                 "genres":      genres,
@@ -1711,6 +1714,7 @@ def search_games(query: str) -> list:
                 "rating_count": int(item.get("total_rating_count") or 0),
                 "rating": float(item.get("rating") or 0.0),
                 "category": int(item.get("category") or -1),
+                "alt_titles":  alt_titles,
             })
         return rows
 
@@ -2076,6 +2080,54 @@ def _build_wiki_title_candidates(title: str) -> list[str]:
     return uniq
 
 
+def _wikidata_ja_label_from_en_wikipedia_title(title: str) -> str:
+    """EN WikipediaタイトルからWikidataを引いてJAラベル/JAサイトリンクを取得"""
+    t = (title or "").strip()
+    if not t:
+        return ""
+    try:
+        r = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "query",
+                "prop": "pageprops",
+                "titles": t,
+                "redirects": 1,
+                "format": "json",
+            },
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if r.status_code != 200:
+            return ""
+        pages = (r.json().get("query") or {}).get("pages") or {}
+        qid = ""
+        for p in pages.values():
+            qid = ((p.get("pageprops") or {}).get("wikibase_item") or "").strip()
+            if qid:
+                break
+        if not qid:
+            return ""
+        dres = requests.get(
+            f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if dres.status_code != 200:
+            return ""
+        entity = ((dres.json().get("entities") or {}).get(qid)) or {}
+        sitelinks = entity.get("sitelinks") or {}
+        jawiki = ((sitelinks.get("jawiki") or {}).get("title") or "").strip()
+        if jawiki:
+            return jawiki
+        labels = entity.get("labels") or {}
+        ja_label = ((labels.get("ja") or {}).get("value") or "").strip()
+        if ja_label:
+            return ja_label
+    except Exception:
+        return ""
+    return ""
+
+
+@st.cache_data(ttl=86400)
 def search_wikipedia_jp_title(title: str) -> str:
     """Wikipediaの言語リンク/検索から日本語タイトルを取得（見つからなければ空文字）"""
     candidates = _build_wiki_title_candidates(title)
@@ -2083,6 +2135,30 @@ def search_wikipedia_jp_title(title: str) -> str:
         return ""
     try:
         for cand in candidates:
+            # 1) まずENタイトルをそのまま引いて langlinks を確認（最も精度が高い）
+            direct_res = requests.get(
+                "https://en.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "prop": "langlinks",
+                    "lllang": "ja",
+                    "titles": cand,
+                    "format": "json",
+                },
+                timeout=DEFAULT_TIMEOUT,
+            )
+            if direct_res.status_code == 200:
+                pages = direct_res.json().get("query", {}).get("pages", {})
+                for page in pages.values():
+                    langlinks = page.get("langlinks", [])
+                    if langlinks:
+                        return langlinks[0].get("*", "") or ""
+
+            # 2) Wikidata経由でJAタイトルを取得（langlinks欠損時の汎用フォールバック）
+            wd_jp = _wikidata_ja_label_from_en_wikipedia_title(cand)
+            if wd_jp:
+                return wd_jp
+
             search_res = requests.get(
                 "https://en.wikipedia.org/w/api.php",
                 params={
@@ -2483,14 +2559,10 @@ def search_game_jp_title_from_query(jp_query: str, en_title: str = "") -> str:
     q = (jp_query or "").strip()
     if not q:
         return ""
-    q_compact = re.sub(r"\s+", "", q)
-    en_low = (en_title or "").lower()
-    if "ブレスオブザワイルド" in q_compact and "the legend of zelda" in en_low and "breath of the wild" in en_low:
-        return "ゼルダの伝説 ブレス オブ ザ ワイルド"
     probes = [q, f"{q} ゲーム"]
     en = (en_title or "").lower()
     if "the legend of zelda" in en:
-        probes.extend([f"ゼルダの伝説 {q}", "ゼルダの伝説 ブレス オブ ザ ワイルド" if "breath of the wild" in en else ""])
+        probes.append(f"ゼルダの伝説 {q}")
     probes = [p for p in _dedupe_keep_order(probes) if p]
     try:
         for p in probes:
@@ -2508,10 +2580,35 @@ def search_game_jp_title_from_query(jp_query: str, en_title: str = "") -> str:
             if res.status_code != 200:
                 continue
             items = res.json().get("query", {}).get("search", []) or []
-            if items:
-                t = (items[0].get("title") or "").strip()
-                if t:
+            for item in items:
+                t = (item.get("title") or "").strip()
+                if not t:
+                    continue
+                if not en_title:
                     return t
+                # ENタイトルがある場合は逆言語リンクで照合し、誤マッチを避ける
+                ll = requests.get(
+                    "https://ja.wikipedia.org/w/api.php",
+                    params={
+                        "action": "query",
+                        "prop": "langlinks",
+                        "lllang": "en",
+                        "titles": t,
+                        "format": "json",
+                    },
+                    timeout=DEFAULT_TIMEOUT,
+                )
+                if ll.status_code != 200:
+                    continue
+                pages = ll.json().get("query", {}).get("pages", {}) or {}
+                for page in pages.values():
+                    for l in (page.get("langlinks") or []):
+                        en_link = (l.get("*") or "").strip().lower()
+                        en_ref = (en_title or "").strip().lower()
+                        if not en_link or not en_ref:
+                            continue
+                        if en_link == en_ref or en_ref in en_link or en_link in en_ref:
+                            return t
     except Exception:
         return ""
     return ""
@@ -2564,11 +2661,7 @@ GAME_QUERY_ALIASES = {
     "ゼルダ": ["ゼルダの伝説", "The Legend of Zelda"],
 }
 
-GAME_TITLE_JP_MANUAL = {
-    "the legend of zelda: breath of the wild": "ゼルダの伝説 ブレス オブ ザ ワイルド",
-    "the legend of zelda: breath of the wild - the champions' ballad": "ゼルダの伝説 ブレス オブ ザ ワイルド 英傑たちの詩",
-    "the legend of zelda: breath of the wild - the master trials": "ゼルダの伝説 ブレス オブ ザ ワイルド 試練の覇者",
-}
+GAME_TITLE_JP_MANUAL = {}
 
 def _norm_game_title_key(title: str) -> str:
     t = (title or "").strip().lower()
@@ -5583,7 +5676,6 @@ if mode == "新規登録":
                                 jp_t = (
                                     w.get("jp_title")
                                     or search_game_jp_title_precise(en_t)
-                                    or search_game_jp_title_from_query(user_jp_query, en_t)
                                 )
                                 jp_labels.append(jp_t if jp_t else "（JP未解決）")
                             pick_idx = st.radio(
