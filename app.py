@@ -48,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.36"
+APP_VERSION = "9.37"
 
 # ============================================================
 # 媒体マッピング
@@ -2367,9 +2367,11 @@ def search_game_series_candidates(query: str, limit: int = 8) -> list[dict]:
     q = (query or "").strip()
     if not q:
         return []
-    series_queries = _dedupe_keep_order([
-        q, f"{q} シリーズ", f"{q} の伝説", f"{q} ゲーム", q.replace(" ", ""), q.replace("　", "")
-    ])
+    seeds = _expand_game_query_aliases(q)
+    series_queries = []
+    for s in seeds:
+        series_queries.extend([s, f"{s} シリーズ", f"{s} の伝説", f"{s} ゲーム", s.replace(" ", ""), s.replace("　", "")])
+    series_queries = _dedupe_keep_order(series_queries)
     out = []
     seen = set()
     for sq in series_queries:
@@ -2509,6 +2511,20 @@ def _dedupe_keep_order(seq: list[str]) -> list[str]:
             seen.add(x)
     return out
 
+GAME_QUERY_ALIASES = {
+    "ゼルダ": ["ゼルダの伝説", "The Legend of Zelda"],
+}
+
+def _expand_game_query_aliases(query: str) -> list[str]:
+    q = (query or "").strip()
+    if not q:
+        return []
+    expanded = [q]
+    for k, vals in GAME_QUERY_ALIASES.items():
+        if k in q:
+            expanded.extend(vals)
+    return _dedupe_keep_order(expanded)
+
 def _derive_game_series_title(title: str) -> str:
     t = (title or "").strip()
     if not t:
@@ -2559,7 +2575,16 @@ def _search_games_for_ui(query: str, include_images: bool = False) -> list:
     q = (query or "").strip()
     if not q:
         return []
-    base = search_games(q)
+    expanded_queries = _expand_game_query_aliases(q)
+    base = []
+    seen_ids = set()
+    for eq in expanded_queries:
+        for r in search_games(eq):
+            rid = r.get("id")
+            if rid in seen_ids:
+                continue
+            seen_ids.add(rid)
+            base.append(r)
     # JP入力でIGDBが弱い時は、Wikipedia言語リンク候補から英題検索を追加
     if _contains_japanese(q):
         en_candidates = _wikipedia_en_title_candidates_from_japanese(q, limit=8)
@@ -2604,7 +2629,7 @@ def _search_games_for_ui(query: str, include_images: bool = False) -> list:
         en_title = (cand.get("title") or "").strip()
         row = dict(cand)
         # 作品一覧表示は軽量化のためJP逆引きを遅延（確定時に実施）
-        row["jp_title"] = ""
+        row["jp_title"] = q if _contains_japanese(q) else ""
         row["series_title"] = _derive_game_series_title(en_title)
         row["variant_label"] = _game_variant_label(en_title)
         if include_images:
@@ -5480,7 +5505,13 @@ if mode == "新規登録":
                             st.image(selected_work["cover_url"], width=240)
                         c1, c2 = st.columns(2)
                         if c1.button("✅ 単体登録", key="game_single_from_selected"):
-                            picked_jp = selected_work.get("jp_title") or search_game_jp_title_precise(selected_work.get("title", "")) or selected_work.get("title", "")
+                            user_jp_query = (st.session_state.get("inp_jp_main") or "").strip()
+                            picked_jp = (
+                                selected_work.get("jp_title")
+                                or search_game_jp_title_precise(selected_work.get("title", ""))
+                                or (user_jp_query if _contains_japanese(user_jp_query) else "")
+                                or selected_work.get("title", "")
+                            )
                             st.session_state.confirm_reg = {
                                 "tmdb_id": 0, "cover_url": selected_work.get("cover_url", ""),
                                 "tmdb_release": selected_work.get("release", ""), "media_type": "game",
@@ -5493,7 +5524,13 @@ if mode == "新規登録":
                             st.session_state.active_reg_tab_next = "確認"
                             st.rerun()
                         if c2.button("📋 登録リストに追加", key="game_cart_from_selected"):
-                            picked_jp = selected_work.get("jp_title") or search_game_jp_title_precise(selected_work.get("title", "")) or selected_work.get("title", "")
+                            user_jp_query = (st.session_state.get("inp_jp_main") or "").strip()
+                            picked_jp = (
+                                selected_work.get("jp_title")
+                                or search_game_jp_title_precise(selected_work.get("title", ""))
+                                or (user_jp_query if _contains_japanese(user_jp_query) else "")
+                                or selected_work.get("title", "")
+                            )
                             st.session_state.reg_cart.append({
                                 "jp_title":   picked_jp,
                                 "en_title":   selected_work.get("title", ""),
