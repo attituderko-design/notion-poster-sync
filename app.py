@@ -2884,7 +2884,7 @@ for key, default in {
 # Sidebar
 # ============================================================
 with st.sidebar:
-    st.header("操作パネル")
+    st.header("ナビゲーション")
     with st.expander("📘 操作ガイド", expanded=False):
         guide_md = load_user_guide_markdown()
         if guide_md:
@@ -2894,9 +2894,9 @@ with st.sidebar:
         st.markdown("[GitHubで見る](https://github.com/attituderko-design/artemis-cers/blob/main/docs/USER_GUIDE.md)")
 
     st.divider()
-    st.toggle("Driveデータスキップ機能ON", key="drive_skip_mode")
+    st.toggle("Drive連携を一時停止（テスト用）", key="drive_skip_mode")
     if st.session_state.get("drive_skip_mode"):
-        st.caption("Drive連携はスキップ中です（判定/保存/一覧取得）。")
+        st.caption("Drive連携は停止中です（判定/保存/一覧取得をスキップ）。")
     if "auto_reload_mode" not in st.session_state:
         st.session_state.auto_reload_mode = "partial"
     current_label = (
@@ -2905,7 +2905,7 @@ with st.sidebar:
         else "半自動（該当ページ）"
     )
     st.radio(
-        "更新後の同期方式",
+        "保存後の反映方法",
         options=["手動", "自動（全件）", "半自動（該当ページ）"],
         index=["手動", "自動（全件）", "半自動（該当ページ）"].index(current_label),
         key="auto_reload_mode_display",
@@ -2918,7 +2918,7 @@ with st.sidebar:
         st.session_state.auto_reload_mode = "full"
     elif display == "半自動（該当ページ）":
         st.session_state.auto_reload_mode = "partial"
-    if st.button("📥 Notionデータ取得", use_container_width=True, key="load_notion", type="primary"):
+    if st.button("📥 最新データを読み込む", use_container_width=True, key="load_notion", type="primary"):
         with st.spinner("Notionからデータ取得中..."):
             all_pages = load_notion_data()
             if not st.session_state.get("last_notion_load_ok", True):
@@ -2935,7 +2935,7 @@ with st.sidebar:
                 st.success(f"{len(st.session_state.pages)} 件取得しました（全媒体: {len(st.session_state.all_pages)} 件）")
 
     if not st.session_state.pages_loaded:
-        st.caption("👆 まずデータを取得してください")
+        st.caption("👆 まず「最新データを読み込む」を実行してください")
         mode = "新規登録"  # dummy
         sync_scope = "欠損のみ補填"
         selected_media_filter = []
@@ -2947,7 +2947,7 @@ with st.sidebar:
         st.caption(f"✅ {loaded_count} 件取得済（全媒体: {all_count} 件）")
 
         st.divider()
-        st.header("動作モード")
+        st.header("やりたいこと")
         if st.session_state.get("pending_focus_page_id"):
             st.session_state.app_mode = "データ管理"
             st.session_state.app_mode_widget = "データ管理"
@@ -2997,13 +2997,13 @@ with st.sidebar:
 
         if mode == "自動同期":
             st.divider()
-            st.toggle("リフレッシュ時に整合チェック修復を実行", key="refresh_maintenance_enabled")
+            st.toggle("リフレッシュ後に出演リンクを自動で整える", key="refresh_maintenance_enabled")
             rm_scope_label = (
                 "常に実行" if st.session_state.get("refresh_maintenance_scope") == "always"
                 else "出演/演奏曲を更新した時だけ実行（推奨）"
             )
             st.radio(
-                "整合修復の実行条件",
+                "リンク整備の実行条件",
                 options=["出演/演奏曲を更新した時だけ実行（推奨）", "常に実行"],
                 index=["出演/演奏曲を更新した時だけ実行（推奨）", "常に実行"].index(rm_scope_label),
                 key="refresh_maintenance_scope_display",
@@ -3019,7 +3019,7 @@ with st.sidebar:
                 else "半自動（高確度のみ）"
             )
             st.radio(
-                "整合修復モード",
+                "リンク整備モード",
                 options=["手動（実行のみ）", "半自動（高確度のみ）", "自動（高確度＋重複整理）"],
                 index=["手動（実行のみ）", "半自動（高確度のみ）", "自動（高確度＋重複整理）"].index(rm_label),
                 key="refresh_maintenance_mode_display",
@@ -3035,7 +3035,7 @@ with st.sidebar:
                 st.session_state.is_running = True
                 st.session_state.sync_mode  = "normal"
                 st.rerun()
-            st.caption("IDを持つ媒体の欠損フィールドを補填します")
+            st.caption("IDを持つデータの不足項目だけを補います")
             if st.button("🔄 リフレッシュ", use_container_width=True):
                 st.session_state.is_running = True
                 st.session_state.sync_mode  = "refresh"
@@ -3051,7 +3051,7 @@ with st.sidebar:
                 st.session_state.refresh_last_maintenance_seconds = None
                 st.session_state.refresh_last_maintenance_applied = False
                 st.rerun()
-            st.caption("IDを基にすべてのフィールドを強制上書きします\nIDのないデータは情報の正規化のみ実施")
+            st.caption("IDを基に情報を再取得し、カバー/メタデータを再整備します")
             last_sec = st.session_state.get("refresh_last_seconds")
             if isinstance(last_sec, (int, float)):
                 mm = int(last_sec // 60)
@@ -4803,9 +4803,9 @@ def resolve_needs(notion_ok_now, drive_ok_now):
 if mode == "出演者管理":
     st.subheader("👥 出演者管理")
 
-    with st.expander("🧪 演奏会リンク整合チェック（演奏会単位サマリ）", expanded=False):
-        st.caption("人数が多い運用向けに、明細ではなく演奏会単位の件数サマリで表示します。")
-        if st.button("🔍 整合チェックを実行", key="reconcile_run"):
+    with st.expander("🧪 出演データのつながりを自動で整える", expanded=False):
+        st.caption("欠けたリンク補完と重複整理を、演奏会単位サマリで確認します。")
+        if st.button("🔍 リンク状態をチェック", key="reconcile_run"):
             with st.spinner("整合チェック実行中..."):
                 _t0 = time.time()
                 st.session_state.reconcile_report = analyze_performance_relation_integrity(force_refresh=False)
@@ -4830,7 +4830,7 @@ if mode == "出演者管理":
                 if totals.get("assign_missing_score_unresolved", 0) > 0:
                     st.caption(f"未解決の楽曲別担当者（演奏曲リンク欠損）: {totals.get('assign_missing_score_unresolved', 0)} 件")
                 mode_label = st.radio(
-                    "修復モード",
+                    "整える方法",
                     ["手動", "半自動（高確度のみ）", "自動（高確度＋重複整理）"],
                     index=["手動", "半自動（高確度のみ）", "自動（高確度＋重複整理）"].index(
                         "手動" if st.session_state.get("reconcile_repair_mode") == "manual"
@@ -4845,7 +4845,7 @@ if mode == "出演者管理":
                     st.session_state.reconcile_repair_mode = "full"
                 else:
                     st.session_state.reconcile_repair_mode = "partial"
-                if st.button("🛠 高確度修復を実行", key="reconcile_apply"):
+                if st.button("🛠 リンクを整える", key="reconcile_apply"):
                     with st.spinner("修復実行中..."):
                         stats, errs = run_performance_relation_repair(
                             report,
