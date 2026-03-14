@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.69"
+APP_VERSION = "9.70"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -2991,10 +2991,14 @@ def _resolve_game_jp_dict_schema() -> tuple[dict, str, str, str]:
 
 def _query_game_jp_dict_rows() -> list[dict]:
     if not NOTION_GAME_JP_DICT_DB_ID:
+        st.session_state["_game_jp_dict_last_error"] = "NOTION_GAME_JP_DICT_DB_ID が未設定"
         return []
     try:
-        return _query_notion_database_all_service(NOTION_GAME_JP_DICT_DB_ID, NOTION_HEADERS) or []
-    except Exception:
+        rows = _query_notion_database_all_service(NOTION_GAME_JP_DICT_DB_ID, NOTION_HEADERS) or []
+        st.session_state["_game_jp_dict_last_error"] = ""
+        return rows
+    except Exception as e:
+        st.session_state["_game_jp_dict_last_error"] = str(e)
         return []
 
 
@@ -3090,13 +3094,14 @@ def cleanup_game_jp_dict_noise(max_rows: int = 200) -> dict[str, int]:
     - 空/未解決JPのアーカイブ
     - IGDB_IDあり行はIGDB由来JPで上書き補正（手動確定は温存）
     """
-    stats = {"archived": 0, "patched": 0, "scanned": 0}
+    stats = {"archived": 0, "patched": 0, "scanned": 0, "rows": 0}
     if not NOTION_GAME_JP_DICT_DB_ID:
         return stats
     stats["archived"] += _dedupe_game_jp_dict_all(max_groups=max_rows)
     rows = _query_game_jp_dict_rows()
     if not rows:
         return stats
+    stats["rows"] = len(rows)
     db_props, jp_prop, en_prop, id_prop = _resolve_game_jp_dict_schema()
     conf_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "select" and ("信頼" in k or "CONF" in k.upper())), "")
     upd_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "date" and ("更新" in k or "DATE" in k.upper())), "")
@@ -3125,7 +3130,7 @@ def cleanup_game_jp_dict_noise(max_rows: int = 200) -> dict[str, int]:
                 if r is not None and r.status_code == 200:
                     stats["archived"] += 1
             continue
-        # 手動確定は尊重。それ以外はIGDB由来JPで補正
+        # 手動確定は尊重。それ以外（高/中/低）はIGDB由来JPで補正対象
         if conf == "手動":
             continue
         game = fetch_game_by_id(int(igdb_val))
@@ -4646,7 +4651,16 @@ with st.sidebar:
     if st.button("🧹 ゲームJP辞書をクリーンアップ", use_container_width=True, key="cleanup_game_jp_dict"):
         with st.spinner("ゲームJP辞書DBを整備中..."):
             s = cleanup_game_jp_dict_noise(max_rows=300)
-            st.success(f"完了: 走査 {s.get('scanned', 0)} / 補正 {s.get('patched', 0)} / 整理 {s.get('archived', 0)}")
+            err = st.session_state.get("_game_jp_dict_last_error", "")
+            if s.get("rows", 0) == 0:
+                if err:
+                    st.error(f"ゲームJP辞書DBを読めませんでした: {err}")
+                else:
+                    st.warning("ゲームJP辞書DBが0件です（DB ID / Integration接続 / 対象DBの中身をご確認ください）")
+            else:
+                st.success(
+                    f"完了: 対象行 {s.get('rows', 0)} / 走査 {s.get('scanned', 0)} / 補正 {s.get('patched', 0)} / 整理 {s.get('archived', 0)}"
+                )
 
     if not st.session_state.pages_loaded:
         st.caption("👆 まず「最新データを読み込む」を実行してください")
