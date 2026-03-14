@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.77"
+APP_VERSION = "9.78"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -1683,11 +1683,11 @@ def search_games(query: str) -> list:
         bodies = [
             f'search "{safe_q}"; fields {fields}; limit 100;',
             f'fields {fields}; where name ~ *"{safe_q}"*; limit 100;',
+            f'fields {fields}; where alternative_names.name ~ *"{safe_q}"*; limit 100;',
         ]
         if _contains_japanese(safe_q):
             # 日本語検索は title だけだと漏れるので、別名/ローカライズ名でも探索
             bodies.extend([
-                f'fields {fields}; where alternative_names.name ~ *"{safe_q}"*; limit 100;',
                 f'fields {fields}; where game_localizations.name ~ *"{safe_q}"*; limit 100;',
             ])
         raw_items = []
@@ -3609,7 +3609,8 @@ def _search_games_for_ui(query: str, include_images: bool = False) -> list:
         for r in base:
             t = (r.get("title") or "").strip()
             tk = _norm_game_match_key(t)
-            if tk in match_keys:
+            alt_keys = {_norm_game_match_key(a) for a in (r.get("alt_titles") or []) if (a or "").strip()}
+            if tk in match_keys or bool(match_keys & alt_keys):
                 strict.append(r)
         if strict:
             base = strict
