@@ -48,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.11"
+APP_VERSION = "9.12"
 
 # ============================================================
 # 媒体マッピング
@@ -3762,6 +3762,11 @@ if mode == "新規登録":
             score_cart_count = len(st.session_state.get("reg_cart", []))
             score_step = "1/2 検索" if active_score_tab == "検索" else "2/2 登録リスト"
             st.caption(f"進捗: {score_step}  |  登録予定 {score_cart_count} 件")
+            current_score_tab = st.session_state.get("active_score_tab")
+            prev_score_tab = st.session_state.get("_prev_active_score_tab")
+            if prev_score_tab is not None and prev_score_tab != current_score_tab:
+                emit_scroll_top_script()
+            st.session_state["_prev_active_score_tab"] = current_score_tab
             s_nav1, s_nav2 = st.columns(2)
             if s_nav1.button("🔎 検索へ", key="score_nav_search"):
                 st.session_state.active_score_tab_next = "検索"
@@ -4221,6 +4226,11 @@ if mode == "新規登録":
             label_visibility="collapsed",
         )
         reg_cart_count = len(st.session_state.get("reg_cart", []))
+        current_reg_tab = st.session_state.get("active_reg_tab")
+        prev_reg_tab = st.session_state.get("_prev_active_reg_tab")
+        if prev_reg_tab is not None and prev_reg_tab != current_reg_tab:
+            emit_scroll_top_script()
+        st.session_state["_prev_active_reg_tab"] = current_reg_tab
         if active_tab == "検索":
             reg_step = "1/4 検索"
         elif active_tab == "候補":
