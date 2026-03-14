@@ -49,7 +49,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.51"
+APP_VERSION = "9.52"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 
 # ============================================================
@@ -5927,19 +5927,28 @@ if mode == "新規登録":
                             work_list = work_list[:max_show]
                         if work_list:
                             user_jp_query = (st.session_state.get("inp_jp_main") or st.session_state.get("last_game_query_jp") or "").strip()
-                            bulk_jp_map = resolve_game_jp_titles_bulk(
-                                tuple(
-                                    w.get("title", "")
-                                    for w in work_list
-                                    if not (w.get("jp_title") or "").strip()
-                                )
-                            )
+                            if "game_jp_resolve_cache" not in st.session_state:
+                                st.session_state.game_jp_resolve_cache = {}
+                            jp_resolve_cache = st.session_state.game_jp_resolve_cache
+                            # 待ち時間対策: 一括解決は先頭だけに限定し、残りは選択後に個別解決
+                            unresolved_titles = [
+                                w.get("title", "")
+                                for w in work_list
+                                if (w.get("title", "").strip() and not (w.get("jp_title") or "").strip() and not jp_resolve_cache.get(w.get("title", "")))
+                            ]
+                            bulk_probe_limit = 8
+                            bulk_jp_map = resolve_game_jp_titles_bulk(tuple(unresolved_titles[:bulk_probe_limit])) if unresolved_titles else {}
+                            if bulk_jp_map:
+                                jp_resolve_cache.update(bulk_jp_map)
+                                st.session_state.game_jp_resolve_cache = jp_resolve_cache
+                            if unresolved_titles:
+                                st.caption(f"JP自動補完: 先頭{min(bulk_probe_limit, len(unresolved_titles))}件を事前解決（残りは選択後に解決）")
                             jp_infos = []
                             for w in work_list:
                                 en_t = w.get("title", "")
                                 jp_t = (
                                     w.get("jp_title")
-                                    or bulk_jp_map.get(en_t, "")
+                                    or jp_resolve_cache.get(en_t, "")
                                 )
                                 src = (w.get("jp_source") or "").strip()
                                 conf = (w.get("jp_confidence") or "").strip()
@@ -5965,6 +5974,18 @@ if mode == "新規登録":
                             picked["jp_title"] = jp_infos[pick_idx]["jp"] if jp_infos[pick_idx]["jp"] != "（JP未解決）" else picked.get("jp_title", "")
                             picked["jp_source"] = jp_infos[pick_idx].get("src", "")
                             picked["jp_confidence"] = jp_infos[pick_idx].get("conf", "")
+                            if (not picked.get("jp_title")) and st.button("🇯🇵 選択作品のJP候補を取得", key="game_resolve_selected_jp"):
+                                resolved = (
+                                    search_game_jp_title_precise(picked.get("title", ""))
+                                    or search_game_jp_title_from_query(user_jp_query, picked.get("title", ""))
+                                )
+                                if resolved:
+                                    jp_resolve_cache[picked.get("title", "")] = resolved
+                                    st.session_state.game_jp_resolve_cache = jp_resolve_cache
+                                    st.success(f"JP候補を取得: {resolved}")
+                                    st.rerun()
+                                else:
+                                    st.warning("この作品の日本語タイトル候補は見つかりませんでした")
                             if st.button("🖼 画像候補を取得", key="game_fetch_cover_cands"):
                                 q_hint = (st.session_state.get("inp_en_main") or st.session_state.get("inp_jp_main") or "")
                                 cands = _build_game_cover_candidates(picked, query_hint=q_hint)
