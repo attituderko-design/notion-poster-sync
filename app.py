@@ -48,7 +48,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.12"
+APP_VERSION = "9.13"
 
 # ============================================================
 # 媒体マッピング
@@ -4683,7 +4683,7 @@ if mode == "新規登録":
                             }
                         elif media_label == "音楽アルバム":
                             cart_item = {
-                                "jp_title":   cand["title"], "en_title": "",
+                                "jp_title":   cand["title"], "en_title": cand.get("title", ""),
                                 "cover_url":  cand["cover_url"], "release": cand.get("release", ""),
                                 "watched": "", "rating": "", "wlflg": False,
                                 "media_type": "album", "tmdb_id": 0,
