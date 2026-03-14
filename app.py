@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.67"
+APP_VERSION = "9.68"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -3062,16 +3062,25 @@ def _dedupe_game_jp_dict_all(max_groups: int = 300) -> int:
     if not rows:
         return 0
     _, jp_prop, en_prop, id_prop = _resolve_game_jp_dict_schema()
-    grouped: dict[int, list[dict]] = {}
+    grouped: dict[str, list[dict]] = {}
     for p in rows:
         props = p.get("properties", {}) or {}
         v = (props.get(id_prop, {}) or {}).get("number")
-        if v is None:
+        en = _plain_text_from_rich(props.get(en_prop, {})) if en_prop else ""
+        if not en:
+            name_title = _title_text_from_prop(props.get("名前", {}))
+            if ":" in name_title:
+                en = name_title.split(":", 1)[1].strip()
+        if v is not None:
+            key = f"id:{int(v)}"
+        elif en:
+            key = f"en:{_norm_game_title_key(en)}"
+        else:
             continue
-        grouped.setdefault(int(v), []).append(p)
+        grouped.setdefault(key, []).append(p)
     archived_total = 0
     processed = 0
-    for igdb_id, pages in grouped.items():
+    for _dedupe_key, pages in grouped.items():
         if len(pages) <= 1:
             continue
         canonical = _pick_best_game_jp_dict_page(pages, jp_prop, en_prop, id_prop)
@@ -6304,12 +6313,10 @@ if mode == "新規登録":
                                 return False
                             if x.get("variant_label") in ("追加コンテンツ", "特装/同梱"):
                                 return False
-                            rc = int(x.get("rating_count") or 0)
                             has_rel = bool(x.get("release"))
-                            has_company = bool((x.get("developer") or "").strip() or (x.get("publisher") or "").strip())
                             cat = int(x.get("category") or -1)
                             is_main_cat = cat in (0, 8, 9)
-                            return (is_main_cat and has_rel and has_company) or rc >= 100
+                            return is_main_cat and has_rel
                         filtered = [g for g in work_list if _is_official_like(g)]
                         if filtered:
                             work_list = filtered
@@ -6356,32 +6363,7 @@ if mode == "新規登録":
                                         "conf": conf if jp_t else "",
                                     }
                                 )
-                            # 自動保存は高信頼（IGDB由来）のみ。低信頼は手動確定で保存する。
-                            if "game_jp_autosaved" not in st.session_state:
-                                st.session_state.game_jp_autosaved = set()
-                            autosaved = st.session_state.game_jp_autosaved
-                            for idx, w in enumerate(work_list):
-                                en_t = (w.get("title") or "").strip()
-                                jp_t = (jp_infos[idx].get("jp") or "").strip()
-                                if not en_t or not jp_t or jp_t == "（JP未解決）":
-                                    continue
-                                key = f"{w.get('id') or ''}:{en_t}:{jp_t}"
-                                if key in autosaved:
-                                    continue
-                                src = (jp_infos[idx].get("src") or "")
-                                conf = jp_infos[idx].get("conf") or ("高" if w.get("jp_source") else "中")
-                                if not (src.startswith("IGDB") or conf == "高"):
-                                    continue
-                                saved_ok = _learn_game_jp_title(
-                                    en_t,
-                                    jp_t,
-                                    igdb_id=w.get("id"),
-                                    confidence=conf,
-                                    persist_notion=True,
-                                )
-                                if saved_ok:
-                                    autosaved.add(key)
-                            st.session_state.game_jp_autosaved = autosaved
+                            # 候補表示時の辞書自動保存は停止（誤補完による辞書汚染を防止）
                             pick_idx = st.radio(
                                 "作品を選択",
                                 options=list(range(len(work_list))),
