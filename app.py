@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.73"
+APP_VERSION = "9.74"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -3328,7 +3328,7 @@ def _get_game_jp_learned_map() -> dict[str, str]:
     return st.session_state[key]
 
 
-def _lookup_game_jp_learned(en_title: str, igdb_id: int | None = None) -> str:
+def _lookup_game_jp_learned(en_title: str, igdb_id: int | None = None, allow_title_fallback: bool = False) -> str:
     title = (en_title or "").strip()
     if not title:
         return ""
@@ -3339,12 +3339,15 @@ def _lookup_game_jp_learned(en_title: str, igdb_id: int | None = None) -> str:
             jp = by_id.get(str(int(igdb_id)), "")
             if jp:
                 return jp
-        jp = by_title.get(_norm_game_title_key(title), "")
-        if jp:
-            return jp
+        if allow_title_fallback:
+            jp = by_title.get(_norm_game_title_key(title), "")
+            if jp:
+                return jp
     except Exception:
         pass
     # 2) ローカル学習（フォールバック）
+    if not allow_title_fallback:
+        return ""
     learned = _get_game_jp_learned_map()
     if not learned:
         return ""
@@ -3363,8 +3366,13 @@ def _learn_game_jp_title(en_title: str, jp_title: str, igdb_id: int | None = Non
         return False
     key = _norm_game_title_key(en)
     learned = dict(_get_game_jp_learned_map())
+    conf = (confidence or "").strip()
+    can_persist = (
+        conf == "手動"
+        or (igdb_id is not None and (conf.startswith("IGDB") or conf in ("高",)))
+    )
     if learned.get(key) == jp:
-        if persist_notion:
+        if persist_notion and can_persist:
             return _upsert_game_jp_dict_notion(igdb_id, en, jp, confidence=confidence)
         return True
     learned[key] = jp
@@ -3377,7 +3385,7 @@ def _learn_game_jp_title(en_title: str, jp_title: str, igdb_id: int | None = Non
         )
     except Exception:
         pass
-    if persist_notion:
+    if persist_notion and can_persist:
         return _upsert_game_jp_dict_notion(igdb_id, en, jp, confidence=confidence)
     return True
 
