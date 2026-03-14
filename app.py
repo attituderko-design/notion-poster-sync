@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.74"
+APP_VERSION = "9.75"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -1838,7 +1838,8 @@ def fetch_game_by_id(game_id: int) -> dict | None:
     body = (
         "fields name,cover.url,first_release_date,genres.name,"
         "involved_companies.company.name,involved_companies.developer,involved_companies.publisher,"
-        "summary,alternative_names.name,alternative_names.comment,game_localizations.name,game_localizations.region;"
+        "summary,alternative_names.name,alternative_names.comment,game_localizations.name,game_localizations.region,"
+        "total_rating_count,rating,category;"
         f" where id = {int(game_id)};"
     )
     res = requests.post("https://api.igdb.com/v4/games", headers=headers, data=body, timeout=DEFAULT_TIMEOUT)
@@ -1872,6 +1873,9 @@ def fetch_game_by_id(game_id: int) -> dict | None:
         "genres":      genres,
         "developer":   developer,
         "publisher":   publisher,
+        "rating_count": int(item.get("total_rating_count") or 0),
+        "rating": float(item.get("rating") or 0.0),
+        "category": int(item.get("category") or -1),
         "media_type":  "game",
     }
 
@@ -3164,6 +3168,16 @@ def cleanup_game_jp_dict_noise(max_rows: int = 200) -> dict[str, int]:
         game = fetch_game_by_id(int(igdb_val))
         if not game:
             continue
+        has_company = bool((game.get("developer") or "").strip() or (game.get("publisher") or "").strip())
+        rc = int(game.get("rating_count") or 0)
+        cat = int(game.get("category") or -1)
+        # 中低信頼で、公式性が乏しいレコード（会社情報なし & 低評価件数 or 非本編カテゴリ）は辞書から除外
+        if conf in ("", "中", "低"):
+            if (not has_company and rc < 80) or (cat not in (0, 8, 9)):
+                r = api_request("patch", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS, json={"archived": True})
+                if r is not None and r.status_code == 200:
+                    stats["archived"] += 1
+                continue
         igdb_jp = (game.get("jp_title") or "").strip()
         igdb_en = (game.get("title") or "").strip()
         if conf in ("", "中", "低") and _is_noisy_game_title(igdb_en or en):
@@ -6468,7 +6482,9 @@ if mode == "新規登録":
                             has_rel = bool(x.get("release"))
                             cat = int(x.get("category") or -1)
                             is_main_cat = cat in (0, 8, 9)
-                            return is_main_cat and has_rel
+                            has_company = bool((x.get("developer") or "").strip() or (x.get("publisher") or "").strip())
+                            rc = int(x.get("rating_count") or 0)
+                            return is_main_cat and has_rel and (has_company or rc >= 80)
                         filtered = [g for g in work_list if _is_official_like(g)]
                         if filtered:
                             work_list = filtered
