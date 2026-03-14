@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.65"
+APP_VERSION = "9.66"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -2985,6 +2985,112 @@ def _title_text_from_prop(prop: dict) -> str:
     return "".join((x.get("plain_text") or "") for x in vals).strip()
 
 
+def _resolve_game_jp_dict_schema() -> tuple[dict, str, str, str]:
+    """
+    returns: (db_props, jp_prop, en_prop, id_prop)
+    """
+    db_props: dict = {}
+    if not NOTION_GAME_JP_DICT_DB_ID:
+        return db_props, "", "", "IGDB_ID"
+    db_meta = api_request("get", f"https://api.notion.com/v1/databases/{NOTION_GAME_JP_DICT_DB_ID}", headers=NOTION_HEADERS)
+    if db_meta and db_meta.status_code == 200:
+        db_props = (db_meta.json().get("properties", {}) or {})
+    rt_props = [k for k, v in db_props.items() if (v or {}).get("type") == "rich_text"]
+    jp_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "rich_text" and ("日本語" in k or "JP" in k.upper())), "")
+    en_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "rich_text" and ("英語" in k or "EN" in k.upper())), "")
+    if not jp_prop and rt_props:
+        jp_prop = rt_props[0]
+    if not en_prop:
+        en_prop = rt_props[1] if len(rt_props) > 1 else (rt_props[0] if rt_props else "")
+    id_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "number" and ("IGDB" in k.upper() or "ID" in k.upper())), "IGDB_ID")
+    return db_props, jp_prop, en_prop, id_prop
+
+
+def _query_game_jp_dict_rows() -> list[dict]:
+    if not NOTION_GAME_JP_DICT_DB_ID:
+        return []
+    try:
+        return _query_notion_database_all_service(NOTION_GAME_JP_DICT_DB_ID, NOTION_HEADERS) or []
+    except Exception:
+        return []
+
+
+def _pick_best_game_jp_dict_page(pages: list[dict], jp_prop: str, en_prop: str, id_prop: str) -> dict:
+    def _score(page: dict) -> tuple[int, int, int]:
+        props = page.get("properties", {}) or {}
+        jp = _plain_text_from_rich(props.get(jp_prop, {})) if jp_prop else _plain_text_from_rich(props.get("日本語タイトル", {}))
+        en = _plain_text_from_rich(props.get(en_prop, {})) if en_prop else _plain_text_from_rich(props.get("英語タイトル", {}))
+        has_id = 1 if (props.get(id_prop, {}) or {}).get("number") is not None else 0
+        edited = page.get("last_edited_time", "") or ""
+        return (1 if jp else 0, 1 if en else 0, has_id * 10 + (1 if edited else 0))
+    return sorted(pages, key=_score, reverse=True)[0]
+
+
+def _dedupe_game_jp_dict_rows(igdb_id: int) -> tuple[str, int]:
+    """
+    Returns canonical page id and archived duplicate count.
+    """
+    rows = _query_game_jp_dict_rows()
+    if not rows:
+        return "", 0
+    _, jp_prop, en_prop, id_prop = _resolve_game_jp_dict_schema()
+    matched = []
+    for p in rows:
+        props = p.get("properties", {}) or {}
+        v = (props.get(id_prop, {}) or {}).get("number")
+        if v is not None and int(v) == int(igdb_id):
+            matched.append(p)
+    if not matched:
+        return "", 0
+    canonical = _pick_best_game_jp_dict_page(matched, jp_prop, en_prop, id_prop)
+    archived = 0
+    for p in matched:
+        pid = p.get("id", "")
+        if not pid or pid == canonical.get("id", ""):
+            continue
+        try:
+            r = api_request("patch", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS, json={"archived": True})
+            if r is not None and r.status_code == 200:
+                archived += 1
+        except Exception:
+            continue
+    return canonical.get("id", ""), archived
+
+
+def _dedupe_game_jp_dict_all(max_groups: int = 300) -> int:
+    rows = _query_game_jp_dict_rows()
+    if not rows:
+        return 0
+    _, jp_prop, en_prop, id_prop = _resolve_game_jp_dict_schema()
+    grouped: dict[int, list[dict]] = {}
+    for p in rows:
+        props = p.get("properties", {}) or {}
+        v = (props.get(id_prop, {}) or {}).get("number")
+        if v is None:
+            continue
+        grouped.setdefault(int(v), []).append(p)
+    archived_total = 0
+    processed = 0
+    for igdb_id, pages in grouped.items():
+        if len(pages) <= 1:
+            continue
+        canonical = _pick_best_game_jp_dict_page(pages, jp_prop, en_prop, id_prop)
+        for p in pages:
+            pid = p.get("id", "")
+            if not pid or pid == canonical.get("id", ""):
+                continue
+            try:
+                r = api_request("patch", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS, json={"archived": True})
+                if r is not None and r.status_code == 200:
+                    archived_total += 1
+            except Exception:
+                continue
+        processed += 1
+        if processed >= max_groups:
+            break
+    return archived_total
+
+
 def _load_game_jp_dict_from_notion() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     """
     returns:
@@ -2998,18 +3104,20 @@ def _load_game_jp_dict_from_notion() -> tuple[dict[str, str], dict[str, str], di
     if not NOTION_GAME_JP_DICT_DB_ID:
         return by_id, by_title, id_to_page
     try:
-        res = _query_notion_database_all_service(NOTION_GAME_JP_DICT_DB_ID, NOTION_HEADERS)
+        _, jp_prop, en_prop, id_prop = _resolve_game_jp_dict_schema()
+        res = _query_game_jp_dict_rows()
         for page in res or []:
             props = page.get("properties", {}) or {}
-            jp = _plain_text_from_rich(props.get("日本語タイトル", {}))
-            en = _plain_text_from_rich(props.get("英語タイトル", {}))
+            jp = _plain_text_from_rich(props.get(jp_prop, {})) if jp_prop else _plain_text_from_rich(props.get("日本語タイトル", {}))
+            en = _plain_text_from_rich(props.get(en_prop, {})) if en_prop else _plain_text_from_rich(props.get("英語タイトル", {}))
             if not jp:
                 continue
-            igdb_val = (props.get("IGDB_ID", {}) or {}).get("number")
+            igdb_val = (props.get(id_prop, {}) or {}).get("number")
             if igdb_val is not None:
                 igdb_key = str(int(igdb_val))
-                by_id[igdb_key] = jp
-                id_to_page[igdb_key] = page.get("id", "")
+                # 既存重複がある場合は「先勝ち」にして upsert 側で整理
+                by_id.setdefault(igdb_key, jp)
+                id_to_page.setdefault(igdb_key, page.get("id", ""))
             if en:
                 by_title[_norm_game_title_key(en)] = jp
             name_title = _title_text_from_prop(props.get("名前", {}))
@@ -3042,22 +3150,19 @@ def _upsert_game_jp_dict_notion(igdb_id: int | None, en_title: str, jp_title: st
         return False
 
     page_id = ""
-    by_id, _, id_to_page = _get_game_jp_dict_cache()
     if igdb_id:
-        page_id = id_to_page.get(str(int(igdb_id)), "")
+        canonical_id, archived = _dedupe_game_jp_dict_rows(int(igdb_id))
+        if archived > 0:
+            st.session_state["_game_jp_dedupe_archived"] = st.session_state.get("_game_jp_dedupe_archived", 0) + archived
+        page_id = canonical_id
+    if not page_id:
+        _, _, id_to_page = _get_game_jp_dict_cache()
+        if igdb_id:
+            page_id = id_to_page.get(str(int(igdb_id)), "")
 
     # DB実プロパティ名に合わせる（ユーザー側の命名差異を吸収）
-    db_meta = api_request("get", f"https://api.notion.com/v1/databases/{NOTION_GAME_JP_DICT_DB_ID}", headers=NOTION_HEADERS)
-    db_props = (db_meta.json().get("properties", {}) if db_meta and db_meta.status_code == 200 else {}) or {}
+    db_props, jp_prop, en_prop, id_prop = _resolve_game_jp_dict_schema()
     title_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "title"), "名前")
-    jp_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "rich_text" and ("日本語" in k or "JP" in k.upper())), "")
-    en_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "rich_text" and ("英語" in k or "EN" in k.upper())), "")
-    rt_props = [k for k, v in db_props.items() if (v or {}).get("type") == "rich_text"]
-    if not jp_prop and rt_props:
-        jp_prop = rt_props[0]
-    if not en_prop:
-        en_prop = rt_props[1] if len(rt_props) > 1 else (rt_props[0] if rt_props else "")
-    id_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "number" and ("IGDB" in k.upper() or "ID" in k.upper())), "IGDB_ID")
     conf_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "select" and ("信頼" in k or "CONF" in k.upper())), "信頼度")
     upd_prop = next((k for k, v in db_props.items() if (v or {}).get("type") == "date" and ("更新" in k or "DATE" in k.upper())), "更新日")
 
@@ -5863,6 +5968,11 @@ if mode == "新規登録":
                     elif media_label == "ゲーム":
                         gq = query or jp_input
                         st.session_state.last_game_query_jp = jp_input or ""
+                        if not st.session_state.get("_game_jp_dict_dedupe_done"):
+                            archived = _dedupe_game_jp_dict_all(max_groups=500)
+                            st.session_state["_game_jp_dict_dedupe_done"] = True
+                            if archived > 0:
+                                st.info(f"🧹 ゲームJP辞書DBの重複を {archived} 件整理しました")
                         # ゲーム検索ごとに辞書保存トライ状態を初期化
                         st.session_state.pop("game_jp_autosaved", None)
                         st.session_state.pop("_game_dict_upsert_warned", None)
