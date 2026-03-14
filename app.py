@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.78"
+APP_VERSION = "9.79"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -3506,6 +3506,25 @@ def _is_specific_game_query(query: str) -> bool:
         return True
     return False
 
+def _game_query_match_keys(query: str) -> set[str]:
+    q = (query or "").strip()
+    keys = set()
+    if not q:
+        return keys
+    for v in _expand_game_query_aliases(q):
+        k = _norm_game_match_key(v)
+        if k:
+            keys.add(k)
+    if _contains_japanese(q):
+        try:
+            for e in _wikipedia_en_title_candidates_from_japanese(q, limit=6):
+                k = _norm_game_match_key(e)
+                if k:
+                    keys.add(k)
+        except Exception:
+            pass
+    return keys
+
 def _extract_jp_name_from_igdb_item(item: dict) -> tuple[str, str, str]:
     # 1) game_localizations（最優先）
     for loc in item.get("game_localizations", []) or []:
@@ -6512,6 +6531,23 @@ if mode == "新規登録":
                     )
                     selected_series_name = series_order[selected_series]
                     work_list = [g for g in results_list if (g.get("series_title") or _derive_game_series_title(g.get("title", ""))) == selected_series_name]
+                    # 作品特定クエリでは、シリーズ跨ぎでも「クエリ一致」候補を残す
+                    q_raw = (st.session_state.get("last_game_query_jp") or st.session_state.get("inp_jp_main") or "").strip()
+                    if _is_specific_game_query(q_raw):
+                        q_keys = _game_query_match_keys(q_raw)
+                        if q_keys:
+                            extra = []
+                            seen_id = {x.get("id") for x in work_list}
+                            for g in results_list:
+                                if g.get("id") in seen_id:
+                                    continue
+                                tkey = _norm_game_match_key(g.get("title", ""))
+                                akeys = {_norm_game_match_key(a) for a in (g.get("alt_titles") or []) if (a or "").strip()}
+                                if (tkey and any(k in tkey for k in q_keys)) or any(any(k in ak for k in q_keys) for ak in akeys):
+                                    extra.append(g)
+                                    seen_id.add(g.get("id"))
+                            if extra:
+                                work_list.extend(extra)
                     official_only = st.checkbox("公式寄り候補のみ表示", value=True, key="game_official_only")
                     if official_only:
                         def _is_official_like(x: dict) -> bool:
