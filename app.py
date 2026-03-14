@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.81"
+APP_VERSION = "9.82"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -3562,7 +3562,9 @@ def _build_game_cover_candidates(cand: dict, query_hint: str = "") -> list[str]:
     ja_img = _wiki_page_image_from_title(jp_title, "ja") if jp_title else ""
     en_img = _wiki_page_image_from_title(en_title, "en") if en_title else ""
     igdb_img = cand.get("cover_url", "")
-    return _dedupe_keep_order([ja_img, igdb_img, en_img])
+    related = [u for u in (cand.get("related_cover_urls") or []) if u]
+    existing = [u for u in (cand.get("cover_candidates") or []) if u]
+    return _dedupe_keep_order([ja_img, igdb_img, en_img] + related + existing)
 
 def _search_games_for_ui(query: str, include_images: bool = False) -> list:
     q = (query or "").strip()
@@ -6626,6 +6628,16 @@ if mode == "新規登録":
                             picked["jp_title"] = jp_infos[pick_idx]["jp"] if jp_infos[pick_idx]["jp"] != "（JP未解決）" else picked.get("jp_title", "")
                             picked["jp_source"] = jp_infos[pick_idx].get("src", "")
                             picked["jp_confidence"] = jp_infos[pick_idx].get("conf", "")
+                            # 同名候補のカバーも候補に含める（地域版差異の救済）
+                            same_title_covers = []
+                            picked_key = _norm_game_match_key(picked.get("title", ""))
+                            for w in work_list:
+                                if _norm_game_match_key(w.get("title", "")) == picked_key:
+                                    cu = (w.get("cover_url") or "").strip()
+                                    if cu:
+                                        same_title_covers.append(cu)
+                            if same_title_covers:
+                                picked["related_cover_urls"] = _dedupe_keep_order(same_title_covers)
                             if (not picked.get("jp_title")) and st.button("🇯🇵 選択作品のJP候補を取得", key="game_resolve_selected_jp"):
                                 resolved, reason = diagnose_game_jp_resolution(picked.get("title", ""), user_jp_query)
                                 if resolved:
