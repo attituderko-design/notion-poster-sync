@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.84"
+APP_VERSION = "9.85"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -3502,6 +3502,18 @@ def _is_noisy_game_title(title: str) -> bool:
     ]
     return any(t in low for t in noisy_terms)
 
+def _is_official_game_candidate_for_learning(row: dict) -> bool:
+    title = (row.get("title") or "").strip()
+    if not title or _is_noisy_game_title(title):
+        return False
+    if row.get("variant_label") in ("追加コンテンツ", "特装/同梱"):
+        return False
+    has_rel = bool((row.get("release") or "").strip())
+    cat = int(row.get("category") or -1)
+    is_main_cat = cat in (0, 8, 9)
+    has_company = bool((row.get("developer") or "").strip() or (row.get("publisher") or "").strip())
+    return has_rel and is_main_cat and has_company
+
 def _norm_game_match_key(text: str) -> str:
     t = (text or "").strip().lower()
     t = re.sub(r"[\s:\-_'\"!！?？・、。]+", "", t)
@@ -6645,7 +6657,33 @@ if mode == "新規登録":
                                         "conf": conf if jp_t else "",
                                     }
                                 )
-                            # 候補表示時の辞書自動保存は停止（誤補完による辞書汚染を防止）
+                            # 候補表示時の自動学習（高信頼かつ公式性チェック通過のみ）
+                            if "game_jp_autosaved" not in st.session_state:
+                                st.session_state.game_jp_autosaved = set()
+                            autosaved = st.session_state.game_jp_autosaved
+                            for i, w in enumerate(work_list):
+                                if not _is_official_game_candidate_for_learning(w):
+                                    continue
+                                jp_t = (jp_infos[i].get("jp") or "").strip()
+                                if not jp_t or jp_t == "（JP未解決）":
+                                    continue
+                                src = (jp_infos[i].get("src") or "").strip()
+                                conf = (jp_infos[i].get("conf") or "").strip()
+                                # IGDB由来の高信頼のみ自動学習
+                                if not src.startswith("IGDB"):
+                                    continue
+                                if conf not in ("高", "IGDB-localization", "IGDB-alt(JP注記)"):
+                                    continue
+                                en_t = (w.get("title") or "").strip()
+                                igdb_id = w.get("id")
+                                if not en_t or not igdb_id:
+                                    continue
+                                key = f"{igdb_id}:{en_t}:{jp_t}"
+                                if key in autosaved:
+                                    continue
+                                if _learn_game_jp_title(en_t, jp_t, igdb_id=igdb_id, confidence=src, persist_notion=True):
+                                    autosaved.add(key)
+                            st.session_state.game_jp_autosaved = autosaved
                             pick_idx = st.radio(
                                 "作品を選択",
                                 options=list(range(len(work_list))),
