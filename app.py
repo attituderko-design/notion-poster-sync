@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.85"
+APP_VERSION = "9.86"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -1192,13 +1192,9 @@ def _wikidata_p18_image_url(qid: str) -> str | None:
     if not qid:
         return None
     try:
-        dres = wikimedia_get(
-            f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
-            timeout=DEFAULT_TIMEOUT,
-        )
-        if dres.status_code != 200:
+        entity = _wikidata_entity(qid)
+        if not entity:
             return None
-        entity = ((dres.json().get("entities") or {}).get(qid)) or {}
         claims = entity.get("claims") or {}
         p18 = claims.get("P18") or []
         if not p18:
@@ -1206,7 +1202,7 @@ def _wikidata_p18_image_url(qid: str) -> str | None:
         filename = ((((p18[0].get("mainsnak") or {}).get("datavalue") or {}).get("value")) or "").strip()
         if not filename:
             return None
-        cres = requests.get(
+        cres = wikimedia_get(
             "https://commons.wikimedia.org/w/api.php",
             params={
                 "action": "query",
@@ -1229,6 +1225,90 @@ def _wikidata_p18_image_url(qid: str) -> str | None:
         return f"https://commons.wikimedia.org/wiki/Special:FilePath/{quote(filename)}"
     except Exception:
         return None
+
+
+def _wikidata_entity(qid: str) -> dict:
+    if not qid:
+        return {}
+    try:
+        dres = wikimedia_get(
+            f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if dres.status_code != 200:
+            return {}
+        return ((dres.json().get("entities") or {}).get(qid)) or {}
+    except Exception:
+        return {}
+
+
+def _wikidata_sitelink_page_images(qid: str, langs: tuple[str, ...] = ("ja", "en", "de", "fr")) -> list[str]:
+    entity = _wikidata_entity(qid)
+    if not entity:
+        return []
+    sitelinks = entity.get("sitelinks") or {}
+    out = []
+    for lang in langs:
+        site = f"{lang}wiki"
+        title = ((sitelinks.get(site) or {}).get("title") or "").strip()
+        if not title:
+            continue
+        img, _ = _wiki_image_from_page(f"https://{lang}.wikipedia.org/wiki/{quote(title)}")
+        if img:
+            out.append(img)
+    return _dedupe_keep_order(out)
+
+
+def _wikidata_commons_category_images(qid: str, limit: int = 8) -> list[str]:
+    entity = _wikidata_entity(qid)
+    if not entity:
+        return []
+    claims = entity.get("claims") or {}
+    p373 = claims.get("P373") or []
+    if not p373:
+        return []
+    cat = ((((p373[0].get("mainsnak") or {}).get("datavalue") or {}).get("value")) or "").strip()
+    if not cat:
+        return []
+    try:
+        cm = wikimedia_get(
+            "https://commons.wikimedia.org/w/api.php",
+            params={
+                "action": "query",
+                "list": "categorymembers",
+                "cmtitle": f"Category:{cat}",
+                "cmtype": "file",
+                "cmlimit": limit,
+                "format": "json",
+            },
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if cm.status_code != 200:
+            return []
+        files = [x.get("title", "") for x in (cm.json().get("query", {}) or {}).get("categorymembers", []) if x.get("title")]
+        out = []
+        for ft in files:
+            cres = wikimedia_get(
+                "https://commons.wikimedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "titles": ft,
+                    "prop": "imageinfo",
+                    "iiprop": "url",
+                    "format": "json",
+                },
+                timeout=DEFAULT_TIMEOUT,
+            )
+            if cres.status_code != 200:
+                continue
+            pages = (cres.json().get("query") or {}).get("pages") or {}
+            for page in pages.values():
+                infos = page.get("imageinfo") or []
+                if infos and infos[0].get("url"):
+                    out.append(infos[0]["url"])
+        return _dedupe_keep_order(out)
+    except Exception:
+        return []
 
 def _download_image_bytes(url: str) -> tuple[bytes | None, str | None]:
     if not url:
@@ -1324,7 +1404,24 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
         wiki_urls, qid = _extract_mb_wiki_relations(relations)
         image_candidates = []
 
-        # 1) MusicBrainzが持つWikipediaリンクから画像取得（言語問わず）
+        # 1) QID確定（最優先: MBのWikidata、次点: Wikipediaページのwikibase_item）
+        if not qid:
+            for wurl in wiki_urls:
+                _img, qid_from_wiki = _wiki_image_from_page(wurl)
+                if qid_from_wiki:
+                    qid = qid_from_wiki
+                    break
+
+        # 2) Wikidata(P18)を最優先
+        wd_img = _wikidata_p18_image_url(qid) if qid else None
+        if wd_img:
+            image_candidates.append(wd_img)
+
+        # 3) QIDの各言語Wikipediaページ画像（人物写真を拾える確率を上げる）
+        if qid:
+            image_candidates.extend(_wikidata_sitelink_page_images(qid))
+
+        # 4) MusicBrainzが持つWikipediaリンクの画像
         for wurl in wiki_urls:
             img_url, qid_from_wiki = _wiki_image_from_page(wurl)
             if img_url:
@@ -1332,10 +1429,9 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
             if not qid and qid_from_wiki:
                 qid = qid_from_wiki
 
-        # 2) Wikidata(P18)の原画像
-        wd_img = _wikidata_p18_image_url(qid) if qid else None
-        if wd_img:
-            image_candidates.append(wd_img)
+        # 5) Commonsカテゴリ画像（P373）も候補に加える
+        if qid:
+            image_candidates.extend(_wikidata_commons_category_images(qid, limit=10))
 
         # 3) 名前検索フォールバック（日本語→英語）
         all_names = _composer_query_variants(composer_name)
@@ -1361,6 +1457,24 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
                     qid = qid_en
                 if image_candidates:
                     break
+        if not image_candidates:
+            for cand_name in all_names:
+                img_de, qid_de = _wiki_search_image(cand_name, "de")
+                if img_de:
+                    image_candidates.append(img_de)
+                if not qid and qid_de:
+                    qid = qid_de
+                if image_candidates:
+                    break
+        if not image_candidates:
+            for cand_name in all_names:
+                img_fr, qid_fr = _wiki_search_image(cand_name, "fr")
+                if img_fr:
+                    image_candidates.append(img_fr)
+                if not qid and qid_fr:
+                    qid = qid_fr
+                if image_candidates:
+                    break
         if not qid:
             for cand_name in all_names:
                 qids = _wikidata_search_qids(cand_name, "en", limit=3)
@@ -1371,6 +1485,8 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
             wd_img = _wikidata_p18_image_url(qid)
             if wd_img:
                 image_candidates.append(wd_img)
+            image_candidates.extend(_wikidata_sitelink_page_images(qid))
+            image_candidates.extend(_wikidata_commons_category_images(qid, limit=10))
 
         if not image_candidates:
             return None
