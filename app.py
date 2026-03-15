@@ -1784,6 +1784,25 @@ def _date_precision(dt: str) -> str:
         return "year"
     return "unknown"
 
+def _normalize_notion_date_input(value: str) -> str:
+    """手入力日付をNotion向けISO日付(YYYY-MM-DD)へ補正。"""
+    s = (value or "").strip()
+    if not s:
+        return ""
+    s = s.replace("/", "-").replace(".", "-")
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", s)
+    if m:
+        y, mm, dd = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        try:
+            return date(y, mm, dd).isoformat()
+        except Exception:
+            return ""
+    # 既にISO datetimeの場合
+    m2 = re.match(r"^(\d{4}-\d{2}-\d{2})T", s)
+    if m2:
+        return m2.group(1)
+    return ""
+
 def _strip_wiki_markup(text: str) -> str:
     s = (text or "").strip()
     if not s:
@@ -4652,14 +4671,16 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
         **({"TMDB_ID": {"number": tmdb_id}} if tmdb_id else {}),
         "WLflg":              {"checkbox": wlflg},
     }
-    if tmdb_release and str(tmdb_release)[:10]:
-        release_date_str = str(tmdb_release)[:10]
+    release_date_str = _normalize_notion_date_input(str(tmdb_release))
+    if release_date_str:
         date_prop = {"start": release_date_str}
-        if event_end:
-            date_prop["end"] = str(event_end)[:10]
+        end_date_str = _normalize_notion_date_input(str(event_end))
+        if end_date_str:
+            date_prop["end"] = end_date_str
         properties["リリース日"] = {"date": date_prop}
-    if watched_date:
-        properties["鑑賞日"] = {"date": {"start": watched_date}}
+    watched_date_str = _normalize_notion_date_input(str(watched_date))
+    if watched_date_str:
+        properties["鑑賞日"] = {"date": {"start": watched_date_str}}
     if rating:
         properties["評価"] = {"select": {"name": rating}}
     if details.get("genres"):
@@ -4756,7 +4777,7 @@ def _put_notion_prop(properties: dict, type_map: dict, name: str, value):
     elif p_type == "number":
         properties[name] = {"number": value if value is not None else None}
     elif p_type == "date":
-        text = str(value or "").strip()
+        text = _normalize_notion_date_input(str(value or "").strip())
         properties[name] = {"date": {"start": text} if text else None}
     elif p_type == "relation":
         if value is None:
