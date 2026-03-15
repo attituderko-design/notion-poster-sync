@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "10.03"
+APP_VERSION = "10.04"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -1719,7 +1719,7 @@ def _format_wikidata_time(value: str) -> str:
     return f"{y}-{mm}-{dd}"
 
 @st.cache_data(ttl=86400)
-def get_mb_work_premiere_date(work_id: str, work_title: str = "", composer_name: str = "") -> str:
+def get_mb_work_premiere_info(work_id: str, work_title: str = "", composer_name: str = "") -> tuple[str, str]:
     def _extract_dates_from_qid(qid: str) -> list[str]:
         if not qid:
             return []
@@ -1743,7 +1743,7 @@ def get_mb_work_premiere_date(work_id: str, work_title: str = "", composer_name:
 
     work_id = (work_id or "").strip()
     if not work_id:
-        return ""
+        return "", "work-id-empty"
     try:
         time.sleep(1.1)
         wres = requests.get(
@@ -1753,7 +1753,7 @@ def get_mb_work_premiere_date(work_id: str, work_title: str = "", composer_name:
             timeout=DEFAULT_TIMEOUT,
         )
         if wres.status_code != 200:
-            return ""
+            return "", f"mb-work-{wres.status_code}"
         work_data = wres.json()
         # premiere関連リレーションの日付を優先採用
         rel_dates = []
@@ -1765,7 +1765,7 @@ def get_mb_work_premiere_date(work_id: str, work_title: str = "", composer_name:
                     if d:
                         rel_dates.append(d)
         if rel_dates:
-            return sorted(rel_dates)[0]
+            return sorted(rel_dates)[0], "musicbrainz-relation"
 
         # まずはMusicBrainz側で取得できる最古日付を優先
         rec_dates = []
@@ -1774,7 +1774,7 @@ def get_mb_work_premiere_date(work_id: str, work_title: str = "", composer_name:
             if d:
                 rec_dates.append(d)
         if rec_dates:
-            return sorted(rec_dates)[0]
+            return sorted(rec_dates)[0], "musicbrainz-recording"
         relations = work_data.get("relations", [])
         wiki_urls, qid = _extract_mb_wiki_relations(relations)
         if not qid:
@@ -1786,6 +1786,8 @@ def get_mb_work_premiere_date(work_id: str, work_title: str = "", composer_name:
         candidates = []
         if qid:
             candidates.extend(_extract_dates_from_qid(qid))
+            if candidates:
+                return sorted(candidates)[0], "wikidata-qid"
         if not candidates:
             title = (work_title or "").strip()
             comp = (composer_name or "").strip()
@@ -1799,9 +1801,14 @@ def get_mb_work_premiere_date(work_id: str, work_title: str = "", composer_name:
                     candidates.extend(_extract_dates_from_qid(sq_qid))
                 if candidates:
                     break
-        return sorted(candidates)[0] if candidates else ""
+        if candidates:
+            return sorted(candidates)[0], "wikidata-search"
+        return "", "not-found"
     except Exception:
-        return ""
+        return "", "exception"
+
+def get_mb_work_premiere_date(work_id: str, work_title: str = "", composer_name: str = "") -> str:
+    return get_mb_work_premiere_info(work_id, work_title, composer_name)[0]
 
 
 # ============================================================
@@ -6054,6 +6061,10 @@ if mode == "新規登録":
                                 st.caption(f"関連出演履歴: {len(_clean_relation_ids(item.get('relation_ids')))} 件")
                                 if item.get("premiere_missing"):
                                     st.caption("ℹ️ 初演情報を確認できなかったため、リリース日は空欄です（必要なら手入力してください）")
+                                else:
+                                    src = item.get("premiere_source", "")
+                                    if src:
+                                        st.caption(f"ℹ️ 初演情報ソース: {src}")
                             cols = st.columns([2, 1, 2, 2, 1, 1])
                             item["jp_title"] = cols[0].text_input("日本語タイトル", value=item["jp_title"], key=f"cart_jp_{item_uid}")
                             item["release"]  = cols[1].text_input("リリース日", value=item.get("release", ""), key=f"cart_rel_{item_uid}")
@@ -6549,8 +6560,9 @@ if mode == "新規登録":
                             work_disamb = (w.get("disambiguation") or "").strip()
                             register_title = f"{work_title} ({work_disamb})" if work_disamb else work_title
                             work_release = (w.get("first_release_date") or "").strip()
+                            premiere_source = "musicbrainz-work"
                             if not work_release:
-                                work_release = get_mb_work_premiere_date(
+                                work_release, premiere_source = get_mb_work_premiere_info(
                                     w.get("id", ""),
                                     work_title=work_title,
                                     composer_name=comp_name,
@@ -6573,6 +6585,7 @@ if mode == "新規登録":
                                 "relation_prop": "出演履歴" if selected_perf_ids else None,
                                 "relation_ids":  selected_perf_ids,
                                 "premiere_missing": (not bool(work_release)),
+                                "premiere_source": premiere_source if work_release else (premiere_source or "not-found"),
                                 "setlist_order": 0,
                                 "setlist_section": "本編",
                                 "played": True,
