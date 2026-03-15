@@ -146,7 +146,11 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
 
     created, failed = 0, 0
     created_rows = []
-    rows = [("本編", x) for x in (main_items or [])] + [("Encore", x) for x in (encore_items or [])]
+    rows = []
+    for x in (main_items or []):
+        rows.append(((x.get("section") or "本編"), x))
+    for x in (encore_items or []):
+        rows.append(((x.get("section") or "Encore"), x))
     if not rows:
         return 0, 0, "セットリスト入力なし", []
 
@@ -156,8 +160,12 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
         if not song_title:
             continue
         row_order = int(item.get("order") or order)
+        if row_order <= 0:
+            row_order = order
         part = (item.get("part") or "").strip()
         played = bool(item.get("played", False) or part)
+        if section not in ("幕前", "ロビー", "本編", "Encore", "ソリストEncore"):
+            section = "本編"
         score_id = title_to_id.get(song_title.lower())
         if not score_id:
             found = find_score_page_by_title(score_pages or [], song_title)

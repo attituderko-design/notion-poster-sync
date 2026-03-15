@@ -6679,7 +6679,7 @@ if mode == "新規登録":
                                         key=f"cart_ord_{item_uid}",
                                     )
                                 )
-                                section_options = ["本編", "Encore"]
+                                section_options = ["幕前", "ロビー", "本編", "Encore", "ソリストEncore"]
                                 current_section = item.get("setlist_section", "本編")
                                 if current_section not in section_options:
                                     current_section = "本編"
@@ -6799,16 +6799,19 @@ if mode == "新規登録":
                                                     perf_page = _get_page_from_state_or_api(perf_id) or {}
                                                     perf_props = (perf_page.get("properties") or {})
                                                     perf_title = get_title(perf_props)[0] or item.get("jp_title", "")
-                                                    section = "Encore" if item.get("setlist_section") == "Encore" else "本編"
+                                                    section = (item.get("setlist_section") or "本編").strip()
+                                                    if section not in ("幕前", "ロビー", "本編", "Encore", "ソリストEncore"):
+                                                        section = "本編"
                                                     score_item = {
                                                         "title": item.get("jp_title", ""),
                                                         "order": int(item.get("setlist_order", 0) or 0),
                                                         "part": item.get("part", ""),
                                                         "played": bool(item.get("played", True)),
                                                         "players": item.get("players", []) or [],
+                                                        "section": section,
                                                     }
-                                                    main_items = [score_item] if section == "本編" else []
-                                                    encore_items = [score_item] if section == "Encore" else []
+                                                    main_items = [score_item] if section in ("幕前", "ロビー", "本編") else []
+                                                    encore_items = [score_item] if section in ("Encore", "ソリストEncore") else []
                                                     c_set, f_set, _reason_set, created_rows = create_setlist_rows_for_performance(
                                                         performance_page_id=perf_id,
                                                         performance_title=perf_title,
