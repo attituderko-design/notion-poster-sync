@@ -1450,6 +1450,76 @@ def _wikidata_search_qids(query: str, lang: str = "en", limit: int = 5) -> list[
     except Exception:
         return []
 
+@st.cache_data(ttl=86400)
+def collect_composer_portrait_candidates(composer_name: str, artist_id: str, limit: int = 12) -> list[str]:
+    """作曲家肖像の候補URL一覧を返す（選び直し用）。"""
+    artist_id = (artist_id or "").strip()
+    if not artist_id:
+        return []
+    image_candidates = []
+    try:
+        time.sleep(1.1)
+        res = requests.get(
+            f"https://musicbrainz.org/ws/2/artist/{artist_id}",
+            params={"inc": "url-rels", "fmt": "json"},
+            headers=MB_HEADERS,
+            timeout=8,
+        )
+        if res.status_code != 200:
+            return []
+        artist_data = res.json()
+        relations = artist_data.get("relations", [])
+        artist_name = (artist_data.get("name") or "").strip()
+        wiki_urls, qid = _extract_mb_wiki_relations(relations)
+        if not qid:
+            for wurl in wiki_urls:
+                _img, qid_from_wiki = _wiki_image_from_page(wurl)
+                if qid_from_wiki:
+                    qid = qid_from_wiki
+                    break
+        wd_img = _wikidata_p18_image_url(qid) if qid else None
+        if wd_img:
+            image_candidates.append(wd_img)
+        if qid:
+            image_candidates.extend(_wikidata_sitelink_page_images(qid))
+        for wurl in wiki_urls:
+            img_url, qid_from_wiki = _wiki_image_from_page(wurl)
+            if img_url:
+                image_candidates.append(img_url)
+            if not qid and qid_from_wiki:
+                qid = qid_from_wiki
+        if qid:
+            image_candidates.extend(_wikidata_commons_category_images(qid, limit=10))
+
+        all_names = _composer_query_variants(composer_name)
+        if artist_name:
+            for n in _composer_query_variants(artist_name):
+                if n not in all_names:
+                    all_names.append(n)
+        for lang in ("ja", "en", "de", "fr"):
+            for cand_name in all_names:
+                img_url, qid_from_search = _wiki_search_image(cand_name, lang)
+                if img_url:
+                    image_candidates.append(img_url)
+                if not qid and qid_from_search:
+                    qid = qid_from_search
+                if len(image_candidates) >= limit:
+                    break
+            if len(image_candidates) >= limit:
+                break
+    except Exception:
+        pass
+
+    uniq = []
+    seen = set()
+    for u in image_candidates:
+        if u and u not in seen:
+            uniq.append(u)
+            seen.add(u)
+        if len(uniq) >= limit:
+            break
+    return uniq
+
 def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
     """
     1. Driveに既存の肖像画があればそのURLを返す
@@ -6881,6 +6951,49 @@ if mode == "新規登録":
                         else:
                             st.image(portrait_url, width=120, caption=comp_name)
                         cover_url_final = portrait_url
+                        with st.expander("🛠 肖像画を別候補に変更", expanded=False):
+                            cand_key = "mb_portrait_candidates"
+                            cand_comp_key = "mb_portrait_candidates_comp"
+                            if st.button("🔁 別候補を検索", key="mb_portrait_find_alts"):
+                                with st.spinner("肖像候補を収集中..."):
+                                    cands = collect_composer_portrait_candidates(comp_name, artist_id, limit=12)
+                                st.session_state[cand_key] = cands
+                                st.session_state[cand_comp_key] = artist_id
+                            candidates = st.session_state.get(cand_key, [])
+                            if st.session_state.get(cand_comp_key) != artist_id:
+                                candidates = []
+                            if candidates:
+                                pick_idx = st.selectbox(
+                                    "候補を選択",
+                                    options=list(range(len(candidates))),
+                                    format_func=lambda i: f"{i+1}. {format_cover_url(candidates[i], max_len=90)}",
+                                    key="mb_portrait_alt_pick",
+                                )
+                                picked_url = candidates[pick_idx]
+                                st.image(picked_url, width=120, caption="候補プレビュー")
+                                st.markdown(f"🔗 [ソースURLを開く]({picked_url})")
+                                if st.button("✅ この候補を採用", key="mb_portrait_use_alt"):
+                                    img_bytes, mimetype, why = _download_image_bytes(picked_url)
+                                    if not img_bytes:
+                                        st.warning(f"候補画像の取得に失敗しました: {why}")
+                                    else:
+                                        save_name = make_portrait_filename(comp_name)
+                                        file_id = save_bytes_to_drive(
+                                            save_name,
+                                            img_bytes,
+                                            mimetype or "image/jpeg",
+                                            make_public=True,
+                                        )
+                                        if file_id:
+                                            new_url = drive_image_url(file_id)
+                                        else:
+                                            new_url = picked_url
+                                        st.session_state.mb_portrait_url = new_url
+                                        st.session_state.mb_portrait_comp = artist_id
+                                        st.success("肖像画を更新しました")
+                                        st.rerun()
+                            elif cand_key in st.session_state:
+                                st.caption("候補が見つかりませんでした。手動アップロードをご利用ください。")
                     else:
                         st.warning(f"⚠️ {comp_name} の肖像画が見つかりませんでした。画像をアップロードしてください。")
                         uploaded = st.file_uploader("肖像画をアップロード", type=["jpg", "jpeg", "png"], key="mb_portrait_upload")
