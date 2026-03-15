@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.97"
+APP_VERSION = "9.98"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -94,6 +94,10 @@ def queue_new_search_from_enter() -> None:
 
 def queue_action(flag_key: str) -> None:
     st.session_state[flag_key] = True
+
+def drive_image_url(file_id: str) -> str:
+    """Notion/ブラウザで扱いやすいDrive画像URLを返す。"""
+    return f"https://drive.google.com/thumbnail?id={file_id}&sz=w2000"
 
 def get_media_icon_url(media_label: str) -> str:
     normalized = MEDIA_LABEL_ALIASES.get(media_label, media_label)
@@ -589,7 +593,7 @@ def get_drive_public_url(title: str, tmdb_id) -> str | None:
         if service is None:
             return None
         service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
-        return f"https://drive.google.com/uc?id={file_id}"
+        return drive_image_url(file_id)
     except Exception:
         return None
 
@@ -1438,7 +1442,7 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
             service = get_drive_service_safe()
             if service:
                 service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
-            return f"https://drive.google.com/uc?id={file_id}"
+            return drive_image_url(file_id)
         except Exception:
             pass
 
@@ -1577,7 +1581,7 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
         file_id = result["id"]
         st.session_state.drive_files_cache[fname] = file_id
         service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
-        return f"https://drive.google.com/uc?id={file_id}"
+        return drive_image_url(file_id)
 
     except Exception as e:
         st.warning(f"⚠️ 肖像画取得エラー ({composer_name}): {e}")
@@ -4294,11 +4298,6 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
     rel_ids = _clean_relation_ids(relation_ids)
     if relation_prop and rel_ids:
         properties[relation_prop] = {"relation": [{"id": rid} for rid in rel_ids]}
-        # 自己リレーションの片側が書き込み不可扱いでも反映されるように両名へセット
-        if relation_prop == "出演履歴":
-            properties["演奏曲"] = {"relation": [{"id": rid} for rid in rel_ids]}
-        elif relation_prop == "演奏曲":
-            properties["出演履歴"] = {"relation": [{"id": rid} for rid in rel_ids]}
 
     icon_url = get_media_icon_url(media_type_label)
     payload = {
@@ -6065,11 +6064,12 @@ if mode == "新規登録":
                                         created_id = st.session_state.get("last_created_page_id")
                                         if created_id:
                                             rel_patch = {"relation": [{"id": rid} for rid in rel_ids]}
+                                            patch_prop = rel_prop or "出演履歴"
                                             rel_res = api_request(
                                                 "patch",
                                                 f"https://api.notion.com/v1/pages/{created_id}",
                                                 headers=NOTION_HEADERS,
-                                                json={"properties": {"出演履歴": rel_patch, "演奏曲": rel_patch}},
+                                                json={"properties": {patch_prop: rel_patch}},
                                             )
                                             if rel_res is None or rel_res.status_code != 200:
                                                 st.warning(f"関連付け追記に失敗: {rel_res.status_code if rel_res else 'None'}")
@@ -6299,7 +6299,7 @@ if mode == "新規登録":
                                     file_id = result["id"]
                                     st.session_state.drive_files_cache[save_fname] = file_id
                                     service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
-                                    cover_url_final = f"https://drive.google.com/uc?id={file_id}"
+                                    cover_url_final = drive_image_url(file_id)
                                     if custom_fname == default_fname:
                                         st.session_state.mb_portrait_url  = cover_url_final
                                         st.session_state.mb_portrait_comp = artist_id
@@ -9170,7 +9170,7 @@ if mode == "データ管理":
                         with st.spinner("アップロード中..."):
                             file_id = save_to_drive("", log_title, page_id, image_bytes=img_bytes, mimetype=mimetype)
                             if file_id:
-                                public_url = f"https://drive.google.com/uc?id={file_id}"
+                                public_url = drive_image_url(file_id)
                                 # Drive公開設定
                                 try:
                                     svc = get_drive_service_safe()
