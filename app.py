@@ -392,23 +392,50 @@ def fetch_image_bytes(cover_url: str) -> tuple[bytes | None, str | None]:
         mimetype = "image/jpeg"
     return img_res.content, mimetype
 
+def _rank_portrait_candidate_url(url: str) -> int:
+    u = (url or "").lower()
+    score = 0
+    plus_keywords = ["portrait", "head", "bust", "composer", "photo", "photograph"]
+    minus_keywords = ["grave", "memorial", "plaque", "window", "church", "house", "statue", "tomb", "cemetery"]
+    for k in plus_keywords:
+        if k in u:
+            score += 8
+    for k in minus_keywords:
+        if k in u:
+            score -= 10
+    if "commons.wikimedia.org/wiki/special:filepath/" in u:
+        score += 2
+    if "upload.wikimedia.org" in u:
+        score += 1
+    return score
+
 def save_bytes_to_drive(filename: str, image_bytes: bytes, mimetype: str, make_public: bool = False) -> str | None:
     service = get_drive_service_safe()
     if service is None:
         return None
     files = get_drive_files()
     media = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype=mimetype, resumable=False)
+    file_id = None
     if filename in files:
-        file_id = files[filename]
-        service.files().update(fileId=file_id, media_body=media).execute()
-    else:
-        result = service.files().create(
-            body={"name": filename, "parents": [DRIVE_FOLDER_ID]},
-            media_body=media,
-            fields="id",
-        ).execute()
-        file_id = result["id"]
-        st.session_state.drive_files_cache[filename] = file_id
+        cached_id = files[filename]
+        try:
+            service.files().update(fileId=cached_id, media_body=media).execute()
+            file_id = cached_id
+        except Exception:
+            # キャッシュが古い/接続揺らぎ時は新規作成にフォールバック
+            st.session_state.drive_files_cache.pop(filename, None)
+            file_id = None
+    if file_id is None:
+        try:
+            result = service.files().create(
+                body={"name": filename, "parents": [DRIVE_FOLDER_ID]},
+                media_body=media,
+                fields="id",
+            ).execute()
+            file_id = result["id"]
+            st.session_state.drive_files_cache[filename] = file_id
+        except Exception:
+            return None
     if make_public:
         try:
             service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
@@ -1516,9 +1543,8 @@ def collect_composer_portrait_candidates(composer_name: str, artist_id: str, lim
         if u and u not in seen:
             uniq.append(u)
             seen.add(u)
-        if len(uniq) >= limit:
-            break
-    return uniq
+    uniq.sort(key=lambda x: _rank_portrait_candidate_url(x), reverse=True)
+    return uniq[:limit]
 
 def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
     """
@@ -7053,11 +7079,12 @@ if mode == "新規登録":
                                 file_id = save_bytes_to_drive(save_fname, img_bytes_alt, mimetype_alt, make_public=True)
                                 if file_id:
                                     new_url = drive_image_url(file_id)
+                                    st.success("手動アップロード画像を適用しました")
                                 else:
-                                    new_url = MB_DEFAULT_COVER
+                                    st.warning("Drive保存に失敗しました。通信安定後に再度お試しください。")
+                                    new_url = st.session_state.get("mb_portrait_url") or MB_DEFAULT_COVER
                                 st.session_state.mb_portrait_url = new_url
                                 st.session_state.mb_portrait_comp = artist_id
-                                st.success("手動アップロード画像を適用しました")
                                 st.rerun()
                     else:
                         st.warning(f"⚠️ {comp_name} の肖像画が見つかりませんでした。画像をアップロードしてください。")
@@ -7076,23 +7103,15 @@ if mode == "新規登録":
                             img_bytes = uploaded.read()
                             mimetype  = "image/png" if uploaded.name.endswith(".png") else "image/jpeg"
                             with st.spinner("Driveに保存中..."):
-                                service = get_drive_service_safe()
-                                if service is None:
-                                    st.error("Drive接続に失敗しました。後ほど再試行してください。")
-                                    cover_url_final = MB_DEFAULT_COVER
-                                else:
-                                    media   = MediaIoBaseUpload(io.BytesIO(img_bytes), mimetype=mimetype, resumable=False)
-                                    result  = service.files().create(
-                                        body={"name": save_fname, "parents": [DRIVE_FOLDER_ID]},
-                                        media_body=media, fields="id",
-                                    ).execute()
-                                    file_id = result["id"]
-                                    st.session_state.drive_files_cache[save_fname] = file_id
-                                    service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
+                                file_id = save_bytes_to_drive(save_fname, img_bytes, mimetype, make_public=True)
+                                if file_id:
                                     cover_url_final = drive_image_url(file_id)
                                     if custom_fname == default_fname:
                                         st.session_state.mb_portrait_url  = cover_url_final
                                         st.session_state.mb_portrait_comp = artist_id
+                                else:
+                                    st.warning("Drive保存に失敗しました。今回のみアップロード画像を利用します。")
+                                    cover_url_final = MB_DEFAULT_COVER
                             st.image(io.BytesIO(img_bytes), width=120, caption=comp_name)
                         else:
                             cover_url_final = MB_DEFAULT_COVER
