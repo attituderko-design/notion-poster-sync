@@ -1740,6 +1740,143 @@ def _format_wikidata_time(value: str) -> str:
         return f"{y}-{mm}"
     return f"{y}-{mm}-{dd}"
 
+def _normalize_human_date(text: str) -> str:
+    raw = re.sub(r"\s+", " ", (text or "").strip())
+    if not raw:
+        return ""
+    # yyyy-mm-dd / yyyy/mm/dd
+    m = re.search(r"\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b", raw)
+    if m:
+        y, mm, dd = m.group(1), int(m.group(2)), int(m.group(3))
+        return f"{y}-{mm:02d}-{dd:02d}"
+    # yyyy年m月d日
+    m = re.search(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", raw)
+    if m:
+        y, mm, dd = m.group(1), int(m.group(2)), int(m.group(3))
+        return f"{y}-{mm:02d}-{dd:02d}"
+    # yyyy年m月
+    m = re.search(r"(\d{4})\s*年\s*(\d{1,2})\s*月", raw)
+    if m:
+        y, mm = m.group(1), int(m.group(2))
+        return f"{y}-{mm:02d}"
+    # English date formats
+    for fmt in ("%d %B %Y", "%d %b %Y", "%B %d, %Y", "%b %d, %Y"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return dt.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    # year only
+    m = re.search(r"\b(1[5-9]\d{2}|20\d{2})\b", raw)
+    if m:
+        return m.group(1)
+    return ""
+
+def _strip_wiki_markup(text: str) -> str:
+    s = (text or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"<ref[^>]*>.*?</ref>", " ", s, flags=re.IGNORECASE | re.DOTALL)
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = re.sub(r"\{\{[^{}]*\}\}", " ", s)
+    s = re.sub(r"\[\[(?:[^|\]]+\|)?([^\]]+)\]\]", r"\1", s)
+    s = re.sub(r"\[[^\]]+\]", " ", s)
+    s = re.sub(r"''+", "", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def _wiki_premiere_candidates(work_title: str, composer_name: str = "", limit: int = 6) -> list[dict]:
+    title = (work_title or "").strip()
+    if not title:
+        return []
+    queries = []
+    if composer_name:
+        queries.append(f"{title} {composer_name}")
+    queries.append(title)
+    out = []
+    seen = set()
+    for lang in ("ja", "en"):
+        api_url = f"https://{lang}.wikipedia.org/w/api.php"
+        for q in queries:
+            try:
+                sres = wikimedia_get(
+                    api_url,
+                    params={
+                        "action": "query",
+                        "list": "search",
+                        "srsearch": q,
+                        "srlimit": 5,
+                        "format": "json",
+                    },
+                    timeout=DEFAULT_TIMEOUT,
+                )
+                if sres.status_code != 200:
+                    continue
+                items = (sres.json().get("query") or {}).get("search") or []
+                for item in items:
+                    ptitle = (item.get("title") or "").strip()
+                    if not ptitle:
+                        continue
+                    k = f"{lang}:{ptitle}"
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                    pres = wikimedia_get(
+                        api_url,
+                        params={
+                            "action": "query",
+                            "titles": ptitle,
+                            "prop": "revisions",
+                            "rvslots": "main",
+                            "rvprop": "content",
+                            "format": "json",
+                        },
+                        timeout=DEFAULT_TIMEOUT,
+                    )
+                    if pres.status_code != 200:
+                        continue
+                    pages = (pres.json().get("query") or {}).get("pages") or {}
+                    wikitext = ""
+                    for page in pages.values():
+                        revs = page.get("revisions") or []
+                        if revs:
+                            wikitext = (((revs[0].get("slots") or {}).get("main") or {}).get("*") or "")
+                            break
+                    if not wikitext:
+                        continue
+                    lines = wikitext.splitlines()
+                    candidate_line = ""
+                    for ln in lines[:400]:
+                        if re.search(r"^\s*\|\s*(premiere|初演)\s*=", ln, flags=re.IGNORECASE):
+                            candidate_line = ln.split("=", 1)[1].strip()
+                            break
+                    if not candidate_line:
+                        # prose fallback
+                        m = re.search(r"(premier(?:ed|e)\b[^.\n]{0,120}|\b初演[^。\n]{0,120})", wikitext, flags=re.IGNORECASE)
+                        if m:
+                            candidate_line = m.group(1)
+                    if not candidate_line:
+                        continue
+                    cleaned = _strip_wiki_markup(candidate_line)
+                    dt = _normalize_human_date(cleaned)
+                    if not dt:
+                        continue
+                    url = f"https://{lang}.wikipedia.org/wiki/{quote(ptitle)}"
+                    out.append(
+                        {
+                            "qid": "",
+                            "title": ptitle,
+                            "date": dt,
+                            "urls": [url],
+                            "score": 500 if lang == "ja" else 450,
+                        }
+                    )
+                    if len(out) >= limit:
+                        return out
+            except Exception:
+                continue
+    return out[:limit]
+
 @st.cache_data(ttl=86400)
 def get_mb_work_premiere_info(work_id: str, work_title: str = "", composer_name: str = "") -> tuple[str, str]:
     def _extract_dates_from_qid(qid: str, strict_first_perf: bool = False) -> list[str]:
@@ -1946,7 +2083,11 @@ def search_premiere_candidates(work_title: str, composer_name: str = "", limit: 
         )
 
     out.sort(key=lambda x: (-x.get("score", 0), x.get("date", "9999-99-99"), x.get("title", "")))
-    return out[:limit]
+    if out:
+        return out[:limit]
+    # 構造化データで見つからない場合はWikipediaの初演記述を探索
+    wiki_fallback = _wiki_premiere_candidates(work_title, composer_name, limit=limit)
+    return wiki_fallback[:limit]
 
 @st.cache_data(ttl=86400)
 def search_premiere_candidates_from_work(
@@ -2025,7 +2166,8 @@ def search_premiere_candidates_from_work(
         pass
 
     # Work IDで取れない場合のみ、従来検索へフォールバック
-    return search_premiere_candidates(work_title, composer_name, limit=limit)
+    out = search_premiere_candidates(work_title, composer_name, limit=limit)
+    return out[:limit]
 
 
 # ============================================================
