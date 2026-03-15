@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.92"
+APP_VERSION = "9.93"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -1635,6 +1635,24 @@ def search_mb_works_by_title(title: str, limit: int = 10) -> tuple[list, str | N
 @st.cache_data(ttl=3600)
 def search_mb_works(artist_id: str, title_filter: str = "") -> list:
     """作曲家MBIDで作品一覧を取得（上限なし・ページング）"""
+    def _norm_text(s: str) -> str:
+        x = (s or "").lower()
+        x = re.sub(r"\b(no|no\.|nr|nr\.|number)\b", " no ", x)
+        x = re.sub(r"[^0-9a-zA-Z\u00C0-\u024F\u3040-\u30FF\u3400-\u9FFF]+", " ", x)
+        x = re.sub(r"\s+", " ", x).strip()
+        return x
+
+    def _title_match(query: str, title: str) -> bool:
+        q = _norm_text(query)
+        t = _norm_text(title)
+        if not q:
+            return True
+        if q in t:
+            return True
+        q_tokens = [tok for tok in q.split() if tok not in {"no", "opus", "op"}]
+        t_tokens = set(t.split())
+        return bool(q_tokens) and all(tok in t_tokens for tok in q_tokens)
+
     works = []
     offset = 0
     limit  = 100
@@ -1666,7 +1684,7 @@ def search_mb_works(artist_id: str, title_filter: str = "") -> list:
     results = []
     for w in works:
         title = w.get("title", "")
-        if title_filter and title_filter.lower() not in title.lower():
+        if title_filter and not _title_match(title_filter, title):
             continue
         disambiguation = w.get("disambiguation", "")
         results.append({
