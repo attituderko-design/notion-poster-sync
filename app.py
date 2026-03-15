@@ -1948,6 +1948,85 @@ def search_premiere_candidates(work_title: str, composer_name: str = "", limit: 
     out.sort(key=lambda x: (-x.get("score", 0), x.get("date", "9999-99-99"), x.get("title", "")))
     return out[:limit]
 
+@st.cache_data(ttl=86400)
+def search_premiere_candidates_from_work(
+    work_id: str,
+    work_title: str = "",
+    composer_name: str = "",
+    limit: int = 8,
+) -> list[dict]:
+    """MusicBrainz Work IDを起点に初演候補を収集（URL付き）。"""
+    wid = (work_id or "").strip()
+    if not wid:
+        return search_premiere_candidates(work_title, composer_name, limit=limit)
+
+    def _from_qid(qid: str) -> list[dict]:
+        entity = _wikidata_entity(qid)
+        if not entity:
+            return []
+        claims = entity.get("claims") or {}
+        dates = []
+        for c in (claims.get("P1191") or []):
+            val = ((((c.get("mainsnak") or {}).get("datavalue") or {}).get("value")) or {}).get("time")
+            dt = _format_wikidata_time(val)
+            if dt:
+                dates.append(dt)
+        if not dates:
+            return []
+        labels = entity.get("labels") or {}
+        title = ((labels.get("ja") or {}).get("value") or (labels.get("en") or {}).get("value") or qid).strip()
+        sitelinks = entity.get("sitelinks") or {}
+        ja_title = (sitelinks.get("jawiki") or {}).get("title")
+        en_title = (sitelinks.get("enwiki") or {}).get("title")
+        urls = []
+        if ja_title:
+            urls.append(f"https://ja.wikipedia.org/wiki/{quote(ja_title)}")
+        if en_title:
+            urls.append(f"https://en.wikipedia.org/wiki/{quote(en_title)}")
+        if not urls:
+            urls.append(f"https://www.wikidata.org/wiki/{qid}")
+        return [{
+            "qid": qid,
+            "title": title,
+            "date": sorted(dates)[0],
+            "urls": urls,
+            "score": 1000,  # Work ID由来は最優先
+        }]
+
+    try:
+        time.sleep(1.1)
+        wres = requests.get(
+            f"https://musicbrainz.org/ws/2/work/{wid}",
+            params={"inc": "url-rels", "fmt": "json"},
+            headers=MB_HEADERS,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if wres.status_code == 400:
+            time.sleep(1.1)
+            wres = requests.get(
+                f"https://musicbrainz.org/ws/2/work/{wid}",
+                params={"fmt": "json"},
+                headers=MB_HEADERS,
+                timeout=DEFAULT_TIMEOUT,
+            )
+        if wres.status_code == 200:
+            work_data = wres.json()
+            wiki_urls, qid = _extract_mb_wiki_relations(work_data.get("relations", []))
+            if not qid:
+                for wurl in wiki_urls:
+                    _, qid_from_wiki = _wiki_image_from_page(wurl)
+                    if qid_from_wiki:
+                        qid = qid_from_wiki
+                        break
+            out = _from_qid(qid) if qid else []
+            if out:
+                return out[:limit]
+    except Exception:
+        pass
+
+    # Work IDで取れない場合のみ、従来検索へフォールバック
+    return search_premiere_candidates(work_title, composer_name, limit=limit)
+
 
 # ============================================================
 # IGDB（ゲーム）
@@ -6209,8 +6288,9 @@ if mode == "新規登録":
                                     )
                                     if st.button("🔎 初演候補を検索", key=f"premiere_search_btn_{item_uid}"):
                                         with st.spinner("初演候補を検索中..."):
-                                            candidates = search_premiere_candidates(
-                                                item.get("en_title") or item.get("jp_title") or "",
+                                            candidates = search_premiere_candidates_from_work(
+                                                item.get("mb_work_id", ""),
+                                                work_title=item.get("en_title") or item.get("jp_title") or "",
                                                 composer_name=composer_name,
                                                 limit=8,
                                             )
@@ -6775,6 +6855,7 @@ if mode == "新規登録":
                                 "played": True,
                                 "part": "",
                                 "players": [],
+                                "mb_work_id": w.get("id", ""),
                             })
                         st.session_state.mb_checked = {}
                         st.success(f"✅ {len(selected_works)} 件を登録リストに追加しました")
