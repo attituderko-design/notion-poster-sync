@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.90"
+APP_VERSION = "9.91"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -6007,17 +6007,18 @@ if mode == "新規登録":
                 on_change=queue_action,
                 args=("mb_composer_submit",),
             )
-            st.button(
+            mb_composer_clicked = st.button(
                 "🔍 作曲家を検索",
                 key="mb_composer_search",
                 on_click=queue_action,
                 args=("mb_composer_submit",),
             )
-            mb_composer_submit = bool(st.session_state.pop("mb_composer_submit", False))
+            mb_composer_submit = mb_composer_clicked or bool(st.session_state.pop("mb_composer_submit", False))
             if mb_composer_submit:
-                if composer_input.strip():
+                composer_query = (st.session_state.get("mb_composer_query") or composer_input or "").strip()
+                if composer_query:
                     with st.spinner("作曲家を検索中..."):
-                        composers, err = search_mb_composer(composer_input.strip())
+                        composers, err = search_mb_composer(composer_query)
                     if err:
                         st.error(f"⚠️ MusicBrainz API エラー: {err}")
                     st.session_state.mb_composers = composers
@@ -6063,20 +6064,21 @@ if mode == "新規登録":
                     args=("mb_work_submit",),
                 )
                 col_work_search, col_work_all = st.columns([1, 1])
-                col_work_search.button(
+                mb_work_clicked = col_work_search.button(
                     "🔍 曲名で検索",
                     key="mb_fetch_works",
                     on_click=queue_action,
                     args=("mb_work_submit",),
                 )
-                mb_work_submit = bool(st.session_state.pop("mb_work_submit", False))
+                mb_work_submit = mb_work_clicked or bool(st.session_state.pop("mb_work_submit", False))
                 if mb_work_submit:
-                    if not work_title_filter.strip():
+                    work_query = (st.session_state.get("mb_work_title_filter") or work_title_filter or "").strip()
+                    if not work_query:
                         st.warning("曲名の検索ワードを入力してください。")
                     else:
-                        st.session_state.mb_title_filter = work_title_filter.strip()
+                        st.session_state.mb_title_filter = work_query
                         with st.spinner(f"{selected_comp['name']} の作品を検索中..."):
-                            works = search_mb_works(selected_comp["id"], work_title_filter.strip())
+                            works = search_mb_works(selected_comp["id"], work_query)
                         st.session_state.mb_works = works
                         st.session_state.mb_checked = {}
                 if col_work_all.button("📚 全作品を取得（重い）", key="mb_fetch_works_all"):
