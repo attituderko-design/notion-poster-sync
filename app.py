@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.86"
+APP_VERSION = "9.87"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -5947,8 +5947,12 @@ if mode == "新規登録":
                 "1. 作曲家を検索",
                 "mb_composer_query",
                 placeholder="例: Beethoven / ベートーヴェン",
+                on_change=queue_action,
+                args=("mb_composer_enter",),
             )
-            if st.button("🔍 作曲家を検索", key="mb_composer_search"):
+            mb_composer_clicked = st.button("🔍 作曲家を検索", key="mb_composer_search")
+            mb_composer_enter = bool(st.session_state.pop("mb_composer_enter", False))
+            if mb_composer_clicked or mb_composer_enter:
                 if composer_input.strip():
                     with st.spinner("作曲家を検索中..."):
                         composers, err = search_mb_composer(composer_input.strip())
@@ -5993,9 +5997,13 @@ if mode == "新規登録":
                     "3. 検索ワード（曲名）",
                     "mb_work_title_filter",
                     placeholder="例: Symphony no.5 / Piano Concerto",
+                    on_change=queue_action,
+                    args=("mb_work_enter",),
                 )
                 col_work_search, col_work_all = st.columns([1, 1])
-                if col_work_search.button("🔍 曲名で検索", key="mb_fetch_works"):
+                mb_work_clicked = col_work_search.button("🔍 曲名で検索", key="mb_fetch_works")
+                mb_work_enter = bool(st.session_state.pop("mb_work_enter", False))
+                if mb_work_clicked or mb_work_enter:
                     if not work_title_filter.strip():
                         st.warning("曲名の検索ワードを入力してください。")
                     else:
