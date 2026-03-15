@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.94"
+APP_VERSION = "9.95"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -6171,6 +6171,10 @@ if mode == "新規登録":
                         else:
                             st.image(portrait_url, width=120, caption=comp_name)
                         cover_url_final = portrait_url
+                        debug_lines = st.session_state.get("mb_portrait_debug") or []
+                        if debug_lines:
+                            with st.expander("取得ログ（肖像画）", expanded=False):
+                                st.code("\n".join(debug_lines), language="text")
                     else:
                         st.warning(f"⚠️ {comp_name} の肖像画が見つかりませんでした。画像をアップロードしてください。")
                         debug_lines = st.session_state.get("mb_portrait_debug") or []
