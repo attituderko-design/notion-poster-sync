@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.95"
+APP_VERSION = "9.96"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -4614,6 +4614,35 @@ def _get_cast_row_map_for_performance(performance_page_id: str) -> dict:
     }
     return _get_cast_row_map_service(ctx, performance_page_id)
 
+def _get_performance_cast_names(performance_page_id: str) -> list[str]:
+    """演奏会参加者DBから、指定公演の参加者名候補を取得する。"""
+    if not performance_page_id or not NOTION_PERFORMANCE_CAST_DB_ID:
+        return []
+    type_map = get_notion_db_property_types(NOTION_PERFORMANCE_CAST_DB_ID)
+    if not type_map:
+        return []
+    perf_rel_prop = _pick_prop_name(type_map, ["出演", "演奏会", "公演"], "relation")
+    pages = query_notion_database_all(NOTION_PERFORMANCE_CAST_DB_ID)
+    names = []
+    for pg in pages:
+        props = (pg or {}).get("properties", {})
+        rel_ids = _extract_relation_ids(props, perf_rel_prop) if perf_rel_prop else []
+        if performance_page_id not in rel_ids:
+            continue
+        title = _extract_page_title_by_type(props, type_map, ["タイトル", "Name"])
+        nm = _tail_person_name(title) or title
+        if nm and nm.strip():
+            names.append(nm.strip())
+    seen = set()
+    out = []
+    for n in names:
+        k = _normalize_person_name(n)
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append(n)
+    return out
+
 def analyze_performance_relation_integrity(force_refresh: bool = False) -> dict:
     ctx = {
         "NOTION_PERFORMANCE_CAST_DB_ID": NOTION_PERFORMANCE_CAST_DB_ID,
@@ -5969,6 +5998,56 @@ if mode == "新規登録":
                             )
                             if selected_loc:
                                 item["location"] = selected_loc
+                            if item.get("media_type") == "score":
+                                st.markdown("**演奏情報（連動）**")
+                                pcols = st.columns([1, 1, 1, 2])
+                                item["setlist_order"] = int(
+                                    pcols[0].number_input(
+                                        "曲順",
+                                        min_value=0,
+                                        value=int(item.get("setlist_order", 0) or 0),
+                                        step=1,
+                                        key=f"cart_ord_{item_uid}",
+                                    )
+                                )
+                                section_options = ["本編", "Encore"]
+                                current_section = item.get("setlist_section", "本編")
+                                if current_section not in section_options:
+                                    current_section = "本編"
+                                item["setlist_section"] = pcols[1].selectbox(
+                                    "区分",
+                                    section_options,
+                                    index=section_options.index(current_section),
+                                    key=f"cart_sec_{item_uid}",
+                                )
+                                item["played"] = pcols[2].checkbox(
+                                    "演奏した",
+                                    value=bool(item.get("played", True)),
+                                    key=f"cart_played_{item_uid}",
+                                )
+                                item["part"] = pcols[3].text_input(
+                                    "担当楽器（複数は / 区切り）",
+                                    value=item.get("part", ""),
+                                    key=f"cart_part_{item_uid}",
+                                )
+                                rel_ids_for_cast = _clean_relation_ids(item.get("relation_ids"))
+                                cast_options = _get_performance_cast_names(rel_ids_for_cast[0]) if rel_ids_for_cast else []
+                                if cast_options:
+                                    selected_players = st.multiselect(
+                                        "奏者（演奏会参加者DBから）",
+                                        options=cast_options,
+                                        default=[p for p in (item.get("players") or []) if p in cast_options],
+                                        key=f"cart_players_{item_uid}",
+                                    )
+                                    item["players"] = selected_players
+                                else:
+                                    item["players"] = _split_instruments(
+                                        st.text_input(
+                                            "奏者（候補なし時は手入力 / 区切り）",
+                                            value=" / ".join(item.get("players", [])),
+                                            key=f"cart_players_text_{item_uid}",
+                                        )
+                                    )
 
                     for i in sorted(remove_indices, reverse=True):
                         st.session_state.reg_cart.pop(i)
@@ -5984,6 +6063,10 @@ if mode == "新規登録":
                                     st.session_state.pages = filter_target_pages(all_pages)
                                     st.session_state.pages_loaded = True
                             success_count = 0
+                            linked_setlist_created = 0
+                            linked_setlist_failed = 0
+                            linked_assign_created = 0
+                            linked_assign_failed = 0
                             prog = st.progress(0)
                             fallback_perf_ids = _clean_relation_ids(st.session_state.get("score_perf_selected_ids", []))
                             for n, item in enumerate(st.session_state.reg_cart):
@@ -6023,6 +6106,44 @@ if mode == "新規登録":
                                             )
                                             if rel_res is None or rel_res.status_code != 200:
                                                 st.warning(f"関連付け追記に失敗: {rel_res.status_code if rel_res else 'None'}")
+                                            # 演奏曲DB / 楽曲別担当者DB 連動
+                                            if NOTION_SCORE_DB_ID:
+                                                perf_date = item.get("watched") or item.get("release") or ""
+                                                selected_scores_for_link = [{"id": created_id, "title": item.get("jp_title", "")}]
+                                                score_pages_for_link = _get_score_pages()
+                                                for perf_id in rel_ids:
+                                                    perf_page = _get_page_from_state_or_api(perf_id) or {}
+                                                    perf_props = (perf_page.get("properties") or {})
+                                                    perf_title = get_title(perf_props)[0] or item.get("jp_title", "")
+                                                    section = "Encore" if item.get("setlist_section") == "Encore" else "本編"
+                                                    score_item = {
+                                                        "title": item.get("jp_title", ""),
+                                                        "order": int(item.get("setlist_order", 0) or 0),
+                                                        "part": item.get("part", ""),
+                                                        "played": bool(item.get("played", True)),
+                                                        "players": item.get("players", []) or [],
+                                                    }
+                                                    main_items = [score_item] if section == "本編" else []
+                                                    encore_items = [score_item] if section == "Encore" else []
+                                                    c_set, f_set, _reason_set, created_rows = create_setlist_rows_for_performance(
+                                                        performance_page_id=perf_id,
+                                                        performance_title=perf_title,
+                                                        performance_date=perf_date,
+                                                        main_items=main_items,
+                                                        encore_items=encore_items,
+                                                        selected_scores=selected_scores_for_link,
+                                                        score_pages=score_pages_for_link,
+                                                    )
+                                                    linked_setlist_created += c_set
+                                                    linked_setlist_failed += f_set
+                                                    if NOTION_SONG_ASSIGN_DB_ID and created_rows:
+                                                        cast_row_map = _get_cast_row_map_for_performance(perf_id)
+                                                        c_asg, f_asg, _reason_asg = create_song_assignment_rows(
+                                                            score_rows=created_rows,
+                                                            cast_row_map=cast_row_map,
+                                                        )
+                                                        linked_assign_created += c_asg
+                                                        linked_assign_failed += f_asg
                                     success_count += 1
                                 prog.progress((n + 1) / len(st.session_state.reg_cart))
                                 time.sleep(0.2)
@@ -6036,6 +6157,16 @@ if mode == "新規登録":
                                 st.session_state.created_pages = []
                             else:
                                 sync_notion_after_update()
+                            if linked_setlist_created > 0 or linked_setlist_failed > 0:
+                                if linked_setlist_failed == 0:
+                                    st.success(f"✅ 演奏曲DB連動: {linked_setlist_created} 件")
+                                else:
+                                    st.warning(f"⚠️ 演奏曲DB連動: 成功 {linked_setlist_created} 件 / 失敗 {linked_setlist_failed} 件")
+                            if linked_assign_created > 0 or linked_assign_failed > 0:
+                                if linked_assign_failed == 0:
+                                    st.success(f"✅ 楽曲別担当者DB連動: {linked_assign_created} 件")
+                                else:
+                                    st.warning(f"⚠️ 楽曲別担当者DB連動: 成功 {linked_assign_created} 件 / 失敗 {linked_assign_failed} 件")
                             show_post_register_ui()
                     with col_clear:
                         if st.button("登録リストをクリア", key="cart_clear_score"):
@@ -6358,6 +6489,11 @@ if mode == "新規登録":
                                 "media_label": media_label,
                                 "relation_prop": "出演履歴" if selected_perf_ids else None,
                                 "relation_ids":  selected_perf_ids,
+                                "setlist_order": 0,
+                                "setlist_section": "本編",
+                                "played": True,
+                                "part": "",
+                                "players": [],
                             })
                         st.session_state.mb_checked = {}
                         st.success(f"✅ {len(selected_works)} 件を登録リストに追加しました")

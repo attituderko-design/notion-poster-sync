@@ -155,6 +155,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
         song_title = (item.get("title") or "").strip()
         if not song_title:
             continue
+        row_order = int(item.get("order") or order)
         part = (item.get("part") or "").strip()
         played = bool(item.get("played", False) or part)
         score_id = title_to_id.get(song_title.lower())
@@ -168,9 +169,9 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
         put_notion_prop(props, type_map, "出演日", performance_date)
         put_notion_prop(props, type_map, "区分", section)
         put_notion_prop(props, type_map, "担当楽器", split_instruments(part) if played else [])
-        put_notion_prop(props, type_map, "曲順", order)
+        put_notion_prop(props, type_map, "曲順", row_order)
         put_notion_prop(props, type_map, "演奏曲", score_id)
-        put_notion_prop(props, type_map, "表示名", f"{performance_title} / {order:02d} / {section} / {song_title}")
+        put_notion_prop(props, type_map, "表示名", f"{performance_title} / {row_order:02d} / {section} / {song_title}")
 
         if not props:
             failed += 1
