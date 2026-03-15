@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "10.00"
+APP_VERSION = "10.01"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -6541,19 +6541,22 @@ if mode == "新規登録":
                             perf_page = _get_page_from_state_or_api(selected_perf_ids[0])
                             perf_release, perf_watched, perf_rating, perf_location = _extract_performance_defaults(perf_page)
                         for w in selected_works:
+                            work_title = (w.get("title") or "").strip()
+                            work_disamb = (w.get("disambiguation") or "").strip()
+                            register_title = f"{work_title} ({work_disamb})" if work_disamb else work_title
                             work_release = (w.get("first_release_date") or "").strip()
                             if not work_release:
                                 work_release = get_mb_work_premiere_date(
                                     w.get("id", ""),
-                                    work_title=w.get("title", ""),
+                                    work_title=work_title,
                                     composer_name=comp_name,
                                 )
                             st.session_state.reg_cart.append({
                                 "cart_uid":    f"score_{uuid.uuid4().hex[:10]}",
-                                "jp_title":    w["title"],
-                                "en_title":    w["title"],
+                                "jp_title":    register_title,
+                                "en_title":    register_title,
                                 "cover_url":   cover_url_final,
-                                "release":     perf_release or work_release or "",
+                                "release":     work_release or perf_release or "",
                                 "watched":     perf_watched or "",
                                 "rating":      perf_rating or "",
                                 "wlflg":       False,
