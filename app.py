@@ -7073,19 +7073,20 @@ if mode == "新規登録":
                                     value=default_fname,
                                     key="mb_portrait_fname_alt",
                                 )
-                                save_fname = f"portrait_{custom_fname}.jpg"
-                                img_bytes_alt = uploaded_alt.read()
-                                mimetype_alt = "image/png" if uploaded_alt.name.endswith(".png") else "image/jpeg"
-                                file_id = save_bytes_to_drive(save_fname, img_bytes_alt, mimetype_alt, make_public=True)
-                                if file_id:
-                                    new_url = drive_image_url(file_id)
-                                    st.success("手動アップロード画像を適用しました")
-                                else:
-                                    st.warning("Drive保存に失敗しました。通信安定後に再度お試しください。")
-                                    new_url = st.session_state.get("mb_portrait_url") or MB_DEFAULT_COVER
-                                st.session_state.mb_portrait_url = new_url
-                                st.session_state.mb_portrait_comp = artist_id
-                                st.rerun()
+                                if st.button("📤 手動アップロード画像を適用", key="mb_portrait_upload_apply_alt"):
+                                    save_fname = f"portrait_{custom_fname}.jpg"
+                                    img_bytes_alt = uploaded_alt.read()
+                                    mimetype_alt = "image/png" if uploaded_alt.name.endswith(".png") else "image/jpeg"
+                                    file_id = save_bytes_to_drive(save_fname, img_bytes_alt, mimetype_alt, make_public=True)
+                                    if file_id:
+                                        new_url = drive_image_url(file_id)
+                                        st.success("手動アップロード画像を適用しました")
+                                    else:
+                                        st.warning("Drive保存に失敗しました。通信安定後に再度お試しください。")
+                                        new_url = st.session_state.get("mb_portrait_url") or MB_DEFAULT_COVER
+                                    st.session_state.mb_portrait_url = new_url
+                                    st.session_state.mb_portrait_comp = artist_id
+                                    st.rerun()
                     else:
                         st.warning(f"⚠️ {comp_name} の肖像画が見つかりませんでした。画像をアップロードしてください。")
                         uploaded = st.file_uploader("肖像画をアップロード", type=["jpg", "jpeg", "png"], key="mb_portrait_upload")
@@ -7099,20 +7100,21 @@ if mode == "新規登録":
                             )
                             if custom_fname != default_fname:
                                 st.caption("⚠️ 名前を変更すると次回自動使用されません。このセッションのみ有効です。")
-                            save_fname = f"portrait_{custom_fname}.jpg"
-                            img_bytes = uploaded.read()
-                            mimetype  = "image/png" if uploaded.name.endswith(".png") else "image/jpeg"
-                            with st.spinner("Driveに保存中..."):
-                                file_id = save_bytes_to_drive(save_fname, img_bytes, mimetype, make_public=True)
-                                if file_id:
-                                    cover_url_final = drive_image_url(file_id)
-                                    if custom_fname == default_fname:
-                                        st.session_state.mb_portrait_url  = cover_url_final
-                                        st.session_state.mb_portrait_comp = artist_id
-                                else:
-                                    st.warning("Drive保存に失敗しました。今回のみアップロード画像を利用します。")
-                                    cover_url_final = MB_DEFAULT_COVER
-                            st.image(io.BytesIO(img_bytes), width=120, caption=comp_name)
+                            if st.button("📤 手動アップロード画像を適用", key="mb_portrait_upload_apply_default"):
+                                save_fname = f"portrait_{custom_fname}.jpg"
+                                img_bytes = uploaded.read()
+                                mimetype  = "image/png" if uploaded.name.endswith(".png") else "image/jpeg"
+                                with st.spinner("Driveに保存中..."):
+                                    file_id = save_bytes_to_drive(save_fname, img_bytes, mimetype, make_public=True)
+                                    if file_id:
+                                        cover_url_final = drive_image_url(file_id)
+                                        if custom_fname == default_fname:
+                                            st.session_state.mb_portrait_url  = cover_url_final
+                                            st.session_state.mb_portrait_comp = artist_id
+                                    else:
+                                        st.warning("Drive保存に失敗しました。今回のみアップロード画像を利用します。")
+                                        cover_url_final = MB_DEFAULT_COVER
+                                st.image(io.BytesIO(img_bytes), width=120, caption=comp_name)
                         else:
                             cover_url_final = MB_DEFAULT_COVER
 
