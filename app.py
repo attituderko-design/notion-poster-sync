@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.98"
+APP_VERSION = "9.99"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -4609,6 +4609,92 @@ def _get_performance_cast_names(performance_page_id: str) -> list[str]:
         out.append(n)
     return out
 
+def normalize_performance_score_relations(pages: list[dict]) -> dict:
+    """演奏曲/出演ページの自己リレーション向きを整理する。"""
+    stats = {"scanned": 0, "patched": 0, "moved": 0, "failed": 0}
+    for p in (pages or []):
+        media = get_page_media(p)
+        if media not in ("演奏曲", "出演"):
+            continue
+        props = (p.get("properties") or {})
+        perf_ids = _clean_relation_ids(_extract_relation_ids(props, "出演履歴"))
+        score_ids = _clean_relation_ids(_extract_relation_ids(props, "演奏曲"))
+        if not perf_ids and not score_ids:
+            continue
+        stats["scanned"] += 1
+
+        patch_props = {}
+        if media == "演奏曲":
+            # 演奏曲ページは「出演履歴」に寄せる
+            target = perf_ids or score_ids
+            if target != perf_ids:
+                stats["moved"] += 1
+            patch_props["出演履歴"] = {"relation": [{"id": rid} for rid in target]}
+            patch_props["演奏曲"] = {"relation": []}
+        else:
+            # 出演ページは「演奏曲」に寄せる
+            target = score_ids or perf_ids
+            if target != score_ids:
+                stats["moved"] += 1
+            patch_props["演奏曲"] = {"relation": [{"id": rid} for rid in target]}
+            patch_props["出演履歴"] = {"relation": []}
+
+        res = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{p.get('id')}",
+            headers=NOTION_HEADERS,
+            json={"properties": patch_props},
+        )
+        if res is not None and res.status_code == 200:
+            stats["patched"] += 1
+            try:
+                upsert_page_in_state(res.json())
+            except Exception:
+                pass
+        else:
+            stats["failed"] += 1
+    return stats
+
+def migrate_drive_cover_urls(pages: list[dict]) -> dict:
+    """既存ページのDriveカバーURLをNotion表示安定形式に更新する。"""
+    stats = {"scanned": 0, "patched": 0, "failed": 0}
+    for p in (pages or []):
+        cover_url = (((p.get("cover") or {}).get("external") or {}).get("url") or "").strip()
+        if not cover_url:
+            continue
+        # すでに安定形式ならスキップ
+        if "drive.google.com/thumbnail?id=" in cover_url:
+            continue
+
+        file_id = None
+        m = re.search(r"[?&]id=([A-Za-z0-9_-]+)", cover_url)
+        if m:
+            file_id = m.group(1)
+        if not file_id:
+            m = re.search(r"/file/d/([A-Za-z0-9_-]+)", cover_url)
+            if m:
+                file_id = m.group(1)
+        if not file_id:
+            continue
+
+        stats["scanned"] += 1
+        new_url = drive_image_url(file_id)
+        res = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{p.get('id')}",
+            headers=NOTION_HEADERS,
+            json={"cover": {"type": "external", "external": {"url": new_url}}},
+        )
+        if res is not None and res.status_code == 200:
+            stats["patched"] += 1
+            try:
+                upsert_page_in_state(res.json())
+            except Exception:
+                pass
+        else:
+            stats["failed"] += 1
+    return stats
+
 def analyze_performance_relation_integrity(force_refresh: bool = False) -> dict:
     ctx = {
         "NOTION_PERFORMANCE_CAST_DB_ID": NOTION_PERFORMANCE_CAST_DB_ID,
@@ -5034,6 +5120,20 @@ with st.sidebar:
                 st.success(
                     f"完了: 対象行 {s.get('rows', 0)} / 走査 {s.get('scanned', 0)} / 補正 {s.get('patched', 0)} / 整理 {s.get('archived', 0)}"
                 )
+    if st.button("🧹 演奏関連リレーションを整理", use_container_width=True, key="cleanup_perf_score_rel"):
+        with st.spinner("演奏曲⇔出演 のリレーションを整備中..."):
+            base_pages = st.session_state.get("all_pages") or load_notion_data()
+            s = normalize_performance_score_relations(base_pages)
+            st.success(
+                f"完了: 走査 {s.get('scanned', 0)} / 更新 {s.get('patched', 0)} / 向き補正 {s.get('moved', 0)} / 失敗 {s.get('failed', 0)}"
+            )
+    if st.button("🖼 DriveカバーURLを再整形", use_container_width=True, key="cleanup_drive_cover_urls"):
+        with st.spinner("DriveカバーURLを整備中..."):
+            base_pages = st.session_state.get("all_pages") or load_notion_data()
+            s = migrate_drive_cover_urls(base_pages)
+            st.success(
+                f"完了: 対象 {s.get('scanned', 0)} / 更新 {s.get('patched', 0)} / 失敗 {s.get('failed', 0)}"
+            )
 
     if not st.session_state.pages_loaded:
         st.caption("👆 まず「最新データを読み込む」を実行してください")
