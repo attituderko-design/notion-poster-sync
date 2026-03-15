@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.89"
+APP_VERSION = "9.90"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -216,6 +216,32 @@ def reset_new_register_state():
     for k in keys:
         st.session_state.pop(k, None)
         st.session_state.pop(f"_cti_{k}", None)
+
+def reset_score_search_state(clear_cache: bool = False):
+    """演奏曲検索まわりの状態を明示的に初期化する。"""
+    keys = [
+        "mb_composer_query",
+        "mb_work_title_filter",
+        "mb_composers",
+        "mb_works",
+        "mb_checked",
+        "mb_selected_comp",
+        "mb_title_filter",
+        "mb_portrait_url",
+        "mb_portrait_comp",
+        "mb_portrait_debug",
+        "mb_composer_submit",
+        "mb_work_submit",
+        "mb_comp_radio",
+    ]
+    for k in keys:
+        st.session_state.pop(k, None)
+        st.session_state.pop(f"_cti_{k}", None)
+    if clear_cache:
+        try:
+            search_mb_works.clear()
+        except Exception:
+            pass
 
 def upsert_page_in_state(page: dict):
     if not page or "id" not in page:
@@ -5968,6 +5994,11 @@ if mode == "新規登録":
 
             st.divider()
             st.caption("1) 作曲家を検索 → 2) 作曲家を確定 → 3) 曲名で検索 → 4) 曲を選択")
+            c_reset1, _ = st.columns([1, 3])
+            if c_reset1.button("🧹 検索状態リセット", key="score_search_reset"):
+                reset_score_search_state(clear_cache=True)
+                st.success("演奏曲検索の状態とキャッシュをリセットしました。")
+                st.rerun()
 
             composer_input = clearable_text_input(
                 "1. 作曲家を検索",
