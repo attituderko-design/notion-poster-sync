@@ -6999,44 +6999,64 @@ if mode == "新規登録":
                             cand_comp_key = "mb_portrait_candidates_comp"
                             if st.button("🔁 別候補を検索", key="mb_portrait_find_alts"):
                                 with st.spinner("肖像候補を収集中..."):
-                                    cands = collect_composer_portrait_candidates(comp_name, artist_id, limit=12)
+                                    cands = collect_composer_portrait_candidates(comp_name, artist_id, limit=10)
                                 st.session_state[cand_key] = cands
                                 st.session_state[cand_comp_key] = artist_id
                             candidates = st.session_state.get(cand_key, [])
                             if st.session_state.get(cand_comp_key) != artist_id:
                                 candidates = []
                             if candidates:
-                                pick_idx = st.selectbox(
-                                    "候補を選択",
-                                    options=list(range(len(candidates))),
-                                    format_func=lambda i: f"{i+1}. {format_cover_url(candidates[i], max_len=90)}",
-                                    key="mb_portrait_alt_pick",
-                                )
-                                picked_url = candidates[pick_idx]
-                                st.image(picked_url, width=120, caption="候補プレビュー")
-                                st.markdown(f"🔗 [ソースURLを開く]({picked_url})")
-                                if st.button("✅ この候補を採用", key="mb_portrait_use_alt"):
-                                    img_bytes, mimetype, why = _download_image_bytes(picked_url)
-                                    if not img_bytes:
-                                        st.warning(f"候補画像の取得に失敗しました: {why}")
-                                    else:
-                                        save_name = make_portrait_filename(comp_name)
-                                        file_id = save_bytes_to_drive(
-                                            save_name,
-                                            img_bytes,
-                                            mimetype or "image/jpeg",
-                                            make_public=True,
-                                        )
-                                        if file_id:
-                                            new_url = drive_image_url(file_id)
-                                        else:
-                                            new_url = picked_url
-                                        st.session_state.mb_portrait_url = new_url
-                                        st.session_state.mb_portrait_comp = artist_id
-                                        st.success("肖像画を更新しました")
-                                        st.rerun()
+                                st.caption(f"候補を一括表示中: {len(candidates)} 件")
+                                for row_start in range(0, len(candidates), 5):
+                                    row = candidates[row_start:row_start + 5]
+                                    cols = st.columns(5)
+                                    for i, url in enumerate(row):
+                                        idx = row_start + i
+                                        with cols[i]:
+                                            st.image(url, width=120)
+                                            st.markdown(f"[🔗 ソース]({url})")
+                                            if st.button("✅ 採用", key=f"mb_portrait_use_alt_{idx}"):
+                                                img_bytes, mimetype, why = _download_image_bytes(url)
+                                                if not img_bytes:
+                                                    st.warning(f"候補画像の取得に失敗しました: {why}")
+                                                else:
+                                                    save_name = make_portrait_filename(comp_name)
+                                                    file_id = save_bytes_to_drive(
+                                                        save_name,
+                                                        img_bytes,
+                                                        mimetype or "image/jpeg",
+                                                        make_public=True,
+                                                    )
+                                                    if file_id:
+                                                        new_url = drive_image_url(file_id)
+                                                    else:
+                                                        new_url = url
+                                                    st.session_state.mb_portrait_url = new_url
+                                                    st.session_state.mb_portrait_comp = artist_id
+                                                    st.success("肖像画を更新しました")
+                                                    st.rerun()
                             elif cand_key in st.session_state:
                                 st.caption("候補が見つかりませんでした。手動アップロードをご利用ください。")
+                                uploaded_alt = st.file_uploader("肖像画をアップロード（候補なし時）", type=["jpg", "jpeg", "png"], key="mb_portrait_upload_alt")
+                                if uploaded_alt:
+                                    default_fname = sanitize_filename(comp_name)
+                                    custom_fname = st.text_input(
+                                        "Drive保存名（変更可）",
+                                        value=default_fname,
+                                        key="mb_portrait_fname_alt",
+                                    )
+                                    save_fname = f"portrait_{custom_fname}.jpg"
+                                    img_bytes_alt = uploaded_alt.read()
+                                    mimetype_alt = "image/png" if uploaded_alt.name.endswith(".png") else "image/jpeg"
+                                    file_id = save_bytes_to_drive(save_fname, img_bytes_alt, mimetype_alt, make_public=True)
+                                    if file_id:
+                                        new_url = drive_image_url(file_id)
+                                    else:
+                                        new_url = MB_DEFAULT_COVER
+                                    st.session_state.mb_portrait_url = new_url
+                                    st.session_state.mb_portrait_comp = artist_id
+                                    st.success("手動アップロード画像を適用しました")
+                                    st.rerun()
                     else:
                         st.warning(f"⚠️ {comp_name} の肖像画が見つかりませんでした。画像をアップロードしてください。")
                         uploaded = st.file_uploader("肖像画をアップロード", type=["jpg", "jpeg", "png"], key="mb_portrait_upload")
