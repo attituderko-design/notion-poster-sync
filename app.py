@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "10.05"
+APP_VERSION = "10.06"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -1766,15 +1766,42 @@ def get_mb_work_premiere_info(work_id: str, work_title: str = "", composer_name:
         return "", "work-id-empty"
     try:
         time.sleep(1.1)
+        # MusicBrainz側の解釈差に備えて include 指定を段階的にフォールバック
         wres = requests.get(
             f"https://musicbrainz.org/ws/2/work/{work_id}",
-            params={"inc": "url-rels+recordings", "fmt": "json"},
+            params={"inc": "url-rels recordings", "fmt": "json"},
             headers=MB_HEADERS,
             timeout=DEFAULT_TIMEOUT,
         )
-        if wres.status_code != 200:
+        if wres.status_code == 400:
+            time.sleep(1.1)
+            wres = requests.get(
+                f"https://musicbrainz.org/ws/2/work/{work_id}",
+                params={"fmt": "json"},
+                headers=MB_HEADERS,
+                timeout=DEFAULT_TIMEOUT,
+            )
+        if wres.status_code == 400:
+            # UUID直指定が拒否されるケース向けに検索APIで再取得
+            time.sleep(1.1)
+            sres = requests.get(
+                "https://musicbrainz.org/ws/2/work",
+                params={"query": f"wid:{work_id}", "fmt": "json", "limit": 1},
+                headers=MB_HEADERS,
+                timeout=DEFAULT_TIMEOUT,
+            )
+            if sres.status_code == 200:
+                sworks = (sres.json() or {}).get("works", []) or []
+                if sworks:
+                    work_data = sworks[0]
+                else:
+                    return "", "mb-work-400-nohit"
+            else:
+                return "", f"mb-work-{sres.status_code}"
+        elif wres.status_code != 200:
             return "", f"mb-work-{wres.status_code}"
-        work_data = wres.json()
+        else:
+            work_data = wres.json()
         # premiere関連リレーションの日付を優先採用
         rel_dates = []
         for rel in work_data.get("relations", []) or []:
