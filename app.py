@@ -6000,22 +6000,15 @@ if mode == "新規登録":
                 st.success("演奏曲検索の状態とキャッシュをリセットしました。")
                 st.rerun()
 
-            composer_input = clearable_text_input(
-                "1. 作曲家を検索",
-                "mb_composer_query",
-                placeholder="例: Beethoven / ベートーヴェン",
-                on_change=queue_action,
-                args=("mb_composer_submit",),
-            )
-            mb_composer_clicked = st.button(
-                "🔍 作曲家を検索",
-                key="mb_composer_search",
-                on_click=queue_action,
-                args=("mb_composer_submit",),
-            )
-            mb_composer_submit = mb_composer_clicked or bool(st.session_state.pop("mb_composer_submit", False))
+            with st.form("mb_composer_form", clear_on_submit=False):
+                composer_input = st.text_input(
+                    "1. 作曲家を検索",
+                    key="mb_composer_query",
+                    placeholder="例: Beethoven / ベートーヴェン",
+                )
+                mb_composer_submit = st.form_submit_button("🔍 作曲家を検索")
             if mb_composer_submit:
-                composer_query = (st.session_state.get("mb_composer_query") or composer_input or "").strip()
+                composer_query = (composer_input or "").strip()
                 if composer_query:
                     with st.spinner("作曲家を検索中..."):
                         composers, err = search_mb_composer(composer_query)
@@ -6056,23 +6049,17 @@ if mode == "新規登録":
                     st.success(f"作曲家を確定: {selected_comp.get('name', '')}")
 
             if selected_comp:
-                work_title_filter = clearable_text_input(
-                    "3. 検索ワード（曲名）",
-                    "mb_work_title_filter",
-                    placeholder="例: Symphony no.5 / Piano Concerto",
-                    on_change=queue_action,
-                    args=("mb_work_submit",),
-                )
-                col_work_search, col_work_all = st.columns([1, 1])
-                mb_work_clicked = col_work_search.button(
-                    "🔍 曲名で検索",
-                    key="mb_fetch_works",
-                    on_click=queue_action,
-                    args=("mb_work_submit",),
-                )
-                mb_work_submit = mb_work_clicked or bool(st.session_state.pop("mb_work_submit", False))
+                with st.form("mb_work_form", clear_on_submit=False):
+                    work_title_filter = st.text_input(
+                        "3. 検索ワード（曲名）",
+                        key="mb_work_title_filter",
+                        placeholder="例: Symphony no.5 / Piano Concerto",
+                    )
+                    col_work_search, col_work_all = st.columns([1, 1])
+                    mb_work_submit = col_work_search.form_submit_button("🔍 曲名で検索")
+                    mb_fetch_all_submit = col_work_all.form_submit_button("📚 全作品を取得（重い）")
                 if mb_work_submit:
-                    work_query = (st.session_state.get("mb_work_title_filter") or work_title_filter or "").strip()
+                    work_query = (work_title_filter or "").strip()
                     if not work_query:
                         st.warning("曲名の検索ワードを入力してください。")
                     else:
@@ -6081,7 +6068,7 @@ if mode == "新規登録":
                             works = search_mb_works(selected_comp["id"], work_query)
                         st.session_state.mb_works = works
                         st.session_state.mb_checked = {}
-                if col_work_all.button("📚 全作品を取得（重い）", key="mb_fetch_works_all"):
+                if mb_fetch_all_submit:
                     st.session_state.mb_title_filter = ""
                     with st.spinner(f"{selected_comp['name']} の全作品を取得中...（数分かかることがあります）"):
                         works = search_mb_works(selected_comp["id"], "")
