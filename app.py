@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.96"
+APP_VERSION = "9.97"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -94,9 +94,6 @@ def queue_new_search_from_enter() -> None:
 
 def queue_action(flag_key: str) -> None:
     st.session_state[flag_key] = True
-
-def set_portrait_debug(lines: list[str]) -> None:
-    st.session_state["mb_portrait_debug"] = lines
 
 def get_media_icon_url(media_label: str) -> str:
     normalized = MEDIA_LABEL_ALIASES.get(media_label, media_label)
@@ -229,7 +226,6 @@ def reset_score_search_state(clear_cache: bool = False):
         "mb_title_filter",
         "mb_portrait_url",
         "mb_portrait_comp",
-        "mb_portrait_debug",
         "mb_composer_submit",
         "mb_work_submit",
         "mb_comp_radio",
@@ -1432,10 +1428,8 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
     2. なければMusicBrainz → Wikipedia/Wikidata/Commonsで取得してDriveに保存
     3. 取得できなければNoneを返す
     """
-    debug_lines: list[str] = [f"composer={composer_name}", f"artist_id={artist_id}"]
     fname = make_portrait_filename(composer_name)
     files = get_drive_files()
-    debug_lines.append(f"drive_cache_hit={fname in files}")
 
     # Drive既存チェック
     if fname in files:
@@ -1444,11 +1438,8 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
             service = get_drive_service_safe()
             if service:
                 service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
-            debug_lines.append("result=drive-cache")
-            set_portrait_debug(debug_lines)
             return f"https://drive.google.com/uc?id={file_id}"
         except Exception:
-            debug_lines.append("drive_cache_permission=failed")
             pass
 
     # MusicBrainzからWikipedia/Wikidata情報取得
@@ -1459,10 +1450,7 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
             params={"inc": "url-rels", "fmt": "json"},
             headers=MB_HEADERS, timeout=8,
         )
-        debug_lines.append(f"mb_status={res.status_code}")
         if res.status_code != 200:
-            debug_lines.append("result=mb-error")
-            set_portrait_debug(debug_lines)
             return None
         artist_data = res.json()
         relations = artist_data.get("relations", [])
@@ -1554,11 +1542,7 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
             image_candidates.extend(_wikidata_sitelink_page_images(qid))
             image_candidates.extend(_wikidata_commons_category_images(qid, limit=10))
 
-        debug_lines.append(f"qid={qid or 'None'}")
-        debug_lines.append(f"candidates_collected={len(image_candidates)}")
         if not image_candidates:
-            debug_lines.append("result=no-candidate")
-            set_portrait_debug(debug_lines)
             return None
 
         # 同一URLへの再試行を避ける
@@ -1571,29 +1555,17 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
 
         image_bytes, mimetype = None, None
         picked_url = None
-        failed_details = []
         for cand in uniq_candidates:
-            image_bytes, mimetype, why = _download_image_bytes(cand)
+            image_bytes, mimetype, _why = _download_image_bytes(cand)
             if image_bytes:
                 picked_url = cand
                 break
-            if len(failed_details) < 5:
-                failed_details.append(f"{cand} -> {why}")
         if not image_bytes:
-            debug_lines.append(f"download_failed_candidates={len(uniq_candidates)}")
-            if failed_details:
-                debug_lines.append("failed_samples:")
-                debug_lines.extend(failed_details)
-            debug_lines.append("result=download-failed")
-            set_portrait_debug(debug_lines)
             return None
-        debug_lines.append(f"picked_url={picked_url}")
 
         service = get_drive_service_safe()
         if not service:
             # Driveが使えない環境でも、外部URLで表示は継続する
-            debug_lines.append("result=external-url")
-            set_portrait_debug(debug_lines)
             return picked_url
         if not mimetype:
             mimetype = "image/jpeg"
@@ -1605,14 +1577,9 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
         file_id = result["id"]
         st.session_state.drive_files_cache[fname] = file_id
         service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
-        debug_lines.append("result=drive-uploaded")
-        set_portrait_debug(debug_lines)
         return f"https://drive.google.com/uc?id={file_id}"
 
     except Exception as e:
-        debug_lines.append(f"exception={type(e).__name__}: {e}")
-        debug_lines.append("result=exception")
-        set_portrait_debug(debug_lines)
         st.warning(f"⚠️ 肖像画取得エラー ({composer_name}): {e}")
     return None
 
@@ -5016,7 +4983,7 @@ with st.sidebar:
         st.markdown("[GitHubで見る](https://github.com/attituderko-design/artemis-cers/blob/main/docs/USER_GUIDE.md)")
 
     st.divider()
-    st.toggle("Drive連携を一時停止（テスト用）", key="drive_skip_mode")
+    st.toggle("Drive連携を一時停止", key="drive_skip_mode")
     if st.session_state.get("drive_skip_mode"):
         st.caption("Drive連携は停止中です（判定/保存/一覧取得をスキップ）。")
     if "auto_reload_mode" not in st.session_state:
@@ -6302,16 +6269,8 @@ if mode == "新規登録":
                         else:
                             st.image(portrait_url, width=120, caption=comp_name)
                         cover_url_final = portrait_url
-                        debug_lines = st.session_state.get("mb_portrait_debug") or []
-                        if debug_lines:
-                            with st.expander("取得ログ（肖像画）", expanded=False):
-                                st.code("\n".join(debug_lines), language="text")
                     else:
                         st.warning(f"⚠️ {comp_name} の肖像画が見つかりませんでした。画像をアップロードしてください。")
-                        debug_lines = st.session_state.get("mb_portrait_debug") or []
-                        if debug_lines:
-                            with st.expander("取得ログ（肖像画）", expanded=False):
-                                st.code("\n".join(debug_lines), language="text")
                         uploaded = st.file_uploader("肖像画をアップロード", type=["jpg", "jpeg", "png"], key="mb_portrait_upload")
                         if uploaded:
                             default_fname = sanitize_filename(comp_name)
@@ -6328,18 +6287,22 @@ if mode == "新規登録":
                             mimetype  = "image/png" if uploaded.name.endswith(".png") else "image/jpeg"
                             with st.spinner("Driveに保存中..."):
                                 service = get_drive_service_safe()
-                                media   = MediaIoBaseUpload(io.BytesIO(img_bytes), mimetype=mimetype, resumable=False)
-                                result  = service.files().create(
-                                    body={"name": save_fname, "parents": [DRIVE_FOLDER_ID]},
-                                    media_body=media, fields="id",
-                                ).execute()
-                                file_id = result["id"]
-                                st.session_state.drive_files_cache[save_fname] = file_id
-                                service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
-                                cover_url_final = f"https://drive.google.com/uc?id={file_id}"
-                                if custom_fname == default_fname:
-                                    st.session_state.mb_portrait_url  = cover_url_final
-                                    st.session_state.mb_portrait_comp = artist_id
+                                if service is None:
+                                    st.error("Drive接続に失敗しました。後ほど再試行してください。")
+                                    cover_url_final = MB_DEFAULT_COVER
+                                else:
+                                    media   = MediaIoBaseUpload(io.BytesIO(img_bytes), mimetype=mimetype, resumable=False)
+                                    result  = service.files().create(
+                                        body={"name": save_fname, "parents": [DRIVE_FOLDER_ID]},
+                                        media_body=media, fields="id",
+                                    ).execute()
+                                    file_id = result["id"]
+                                    st.session_state.drive_files_cache[save_fname] = file_id
+                                    service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
+                                    cover_url_final = f"https://drive.google.com/uc?id={file_id}"
+                                    if custom_fname == default_fname:
+                                        st.session_state.mb_portrait_url  = cover_url_final
+                                        st.session_state.mb_portrait_comp = artist_id
                             st.image(io.BytesIO(img_bytes), width=120, caption=comp_name)
                         else:
                             cover_url_final = MB_DEFAULT_COVER
@@ -6902,8 +6865,8 @@ if mode == "新規登録":
                 st.caption(f"{len(results_list)} 件の候補　チェックして登録リストに追加できます")
                 if media_label == "ゲーム":
                     st.caption(
-                        f"検索取得: {st.session_state.get('new_search_raw_count', 0)} 件 / "
-                        f"除外: {len(excluded_list)} 件 / 表示: {len(results_list)} 件"
+                        f"検索結果: 取得 {st.session_state.get('new_search_raw_count', 0)} 件 / "
+                        f"登録済み除外 {len(excluded_list)} 件 / 表示 {len(results_list)} 件"
                     )
                 if excluded_list:
                     st.caption(f"⚠️ {len(excluded_list)} 件は登録済みのため除外")
