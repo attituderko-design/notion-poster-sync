@@ -5426,6 +5426,46 @@ def _extract_performance_defaults(page: dict | None) -> tuple[str, str, str, dic
         }
     return release, watched, rating, location
 
+@st.cache_data(ttl=180)
+def _suggest_next_setlist_order(performance_page_id: str) -> int:
+    """既存の演奏曲DBから該当出演の最大曲順+1を返す（取得失敗時は1）。"""
+    perf_id = (performance_page_id or "").strip()
+    if not perf_id or not NOTION_SCORE_DB_ID:
+        return 1
+    try:
+        rows = query_notion_database_all(NOTION_SCORE_DB_ID)
+    except Exception:
+        return 1
+
+    max_order = 0
+    for row in rows:
+        props = row.get("properties", {}) or {}
+        linked = False
+        for meta in props.values():
+            if isinstance(meta, dict) and meta.get("type") == "relation":
+                rels = meta.get("relation") or []
+                if any((r.get("id") or "") == perf_id for r in rels):
+                    linked = True
+                    break
+        if not linked:
+            continue
+        order_num = None
+        if isinstance(props.get("曲順"), dict) and (props.get("曲順") or {}).get("type") == "number":
+            order_num = (props.get("曲順") or {}).get("number")
+        if order_num is None:
+            for key, meta in props.items():
+                if not (isinstance(meta, dict) and meta.get("type") == "number"):
+                    continue
+                if ("順" in key) or ("order" in key.lower()):
+                    order_num = meta.get("number")
+                    break
+        try:
+            if order_num is not None:
+                max_order = max(max_order, int(order_num))
+        except Exception:
+            continue
+    return max(max_order + 1, 1)
+
 
 def _focus_management_page(page_id: str, title: str, media_label: str | None = None):
     if not page_id:
@@ -6634,7 +6674,7 @@ if mode == "新規登録":
                                     pcols[0].number_input(
                                         "曲順",
                                         min_value=0,
-                                        value=int(item.get("setlist_order", 0) or 0),
+                                        value=max(int(item.get("setlist_order", 1) or 1), 0),
                                         step=1,
                                         key=f"cart_ord_{item_uid}",
                                     )
@@ -7149,9 +7189,11 @@ if mode == "新規登録":
                         if not selected_perf_ids:
                             st.warning("出演履歴が未選択です。出演データを紐付ける場合は先に追加してください。")
                         perf_release, perf_watched, perf_rating, perf_location = "", "", "", None
+                        suggested_order = 1
                         if selected_perf_ids:
                             perf_page = _get_page_from_state_or_api(selected_perf_ids[0])
                             perf_release, perf_watched, perf_rating, perf_location = _extract_performance_defaults(perf_page)
+                            suggested_order = _suggest_next_setlist_order(selected_perf_ids[0])
                         for w in selected_works:
                             work_title = (w.get("title") or "").strip()
                             work_disamb = (w.get("disambiguation") or "").strip()
@@ -7193,7 +7235,7 @@ if mode == "新規登録":
                                 "premiere_source": premiere_source if work_release else (premiere_source or "not-found"),
                                 "premiere_partial": release_partial,
                                 "premiere_partial_value": partial_value,
-                                "setlist_order": 0,
+                                "setlist_order": suggested_order,
                                 "setlist_section": "本編",
                                 "played": True,
                                 "part": "",
@@ -7202,6 +7244,7 @@ if mode == "新規登録":
                                 "players": [],
                                 "mb_work_id": w.get("id", ""),
                             })
+                            suggested_order += 1
                         st.session_state.mb_checked = {}
                         st.success(f"✅ {len(selected_works)} 件を登録リストに追加しました")
                         st.session_state.active_score_tab_next = "登録リスト"
