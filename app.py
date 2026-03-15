@@ -50,7 +50,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "9.99"
+APP_VERSION = "10.00"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -1732,7 +1732,8 @@ def get_mb_work_premiere_date(work_id: str, work_title: str = "", composer_name:
         entity = ((dres.json().get("entities") or {}).get(qid)) or {}
         claims = entity.get("claims") or {}
         candidates = []
-        for pid in ["P571", "P577"]:
+        # P1191: date of first performance（最優先）
+        for pid in ["P1191", "P571", "P577"]:
             for c in claims.get(pid, []) or []:
                 val = ((((c.get("mainsnak") or {}).get("datavalue") or {}).get("value")) or {}).get("time")
                 dt = _format_wikidata_time(val)
@@ -1754,6 +1755,18 @@ def get_mb_work_premiere_date(work_id: str, work_title: str = "", composer_name:
         if wres.status_code != 200:
             return ""
         work_data = wres.json()
+        # premiere関連リレーションの日付を優先採用
+        rel_dates = []
+        for rel in work_data.get("relations", []) or []:
+            rtype = (rel.get("type") or "").strip().lower()
+            if "premiere" in rtype or "first performance" in rtype:
+                for key in ("begin", "end"):
+                    d = (rel.get(key) or "").strip()
+                    if d:
+                        rel_dates.append(d)
+        if rel_dates:
+            return sorted(rel_dates)[0]
+
         # まずはMusicBrainz側で取得できる最古日付を優先
         rec_dates = []
         for rec in work_data.get("recordings", []) or []:
