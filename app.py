@@ -5809,6 +5809,26 @@ def refresh_score_db_composer_flag_icons() -> dict:
                 return (((roll.get("date") or {}).get("start")) or "")
         return ""
 
+    def _manual_country_code(row_props: dict) -> str:
+        for key in ("国コード", "CountryCode", "country_code"):
+            meta = row_props.get(key)
+            if not isinstance(meta, dict):
+                continue
+            ptype = meta.get("type")
+            if ptype in ("rich_text", "title", "rollup"):
+                txt = _text_from_prop(meta)
+            elif ptype == "select":
+                txt = ((meta.get("select") or {}).get("name") or "").strip()
+            elif ptype == "multi_select":
+                vals = [((x or {}).get("name") or "").strip() for x in (meta.get("multi_select") or [])]
+                txt = (vals[0] if vals else "")
+            else:
+                txt = ""
+            cc = normalize_country_code_for_flag((txt or "").strip().upper())
+            if cc:
+                return cc
+        return ""
+
     # 演奏曲DBのrelationが未整備でも、親DB(媒体=演奏曲)の同名タイトルから作曲家を補完する
     for pp in st.session_state.get("all_pages", []) or []:
         if get_page_media(pp) != "演奏曲":
@@ -5869,7 +5889,10 @@ def refresh_score_db_composer_flag_icons() -> dict:
             composer = score_parent_creator_by_title.get(_norm_title(row_title), "")
 
         icon_payload = None
-        if composer:
+        manual_cc = _manual_country_code(props)
+        if manual_cc:
+            cc = manual_cc
+        elif composer:
             cc = _resolve_country_code(composer)
             flag = country_code_to_flag(cc) if cc else ""
             if flag:
@@ -5878,6 +5901,13 @@ def refresh_score_db_composer_flag_icons() -> dict:
                 stats["unresolved"] += 1
         else:
             stats["unresolved"] += 1
+
+        if icon_payload is None and manual_cc:
+            flag = country_code_to_flag(manual_cc)
+            if flag:
+                icon_payload = {"type": "emoji", "emoji": flag}
+            else:
+                stats["unresolved"] += 1
 
         if not icon_payload:
             stats["skipped"] += 1
