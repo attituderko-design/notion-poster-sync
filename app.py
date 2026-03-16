@@ -143,6 +143,18 @@ def is_media_icon_url(url: str | None) -> bool:
 
 def country_code_to_flag(code: str) -> str:
     c = (code or "").strip().upper()
+    # 廃止/非推奨コードはNotionで弾かれるため現行コードへ寄せる
+    legacy_map = {
+        "UK": "GB",
+        "SU": "RU",  # Soviet Union -> Russia（便宜上）
+        "DD": "DE",  # East Germany
+        "YU": "RS",  # Yugoslavia
+        "CS": "RS",  # Serbia and Montenegro
+        "TP": "TL",  # East Timor (old code)
+        "AN": "CW",  # Netherlands Antilles (old code; representative)
+        "ZR": "CD",  # Zaire
+    }
+    c = legacy_map.get(c, c)
     if len(c) != 2 or not c.isalpha():
         return ""
     base = ord("🇦") - ord("A")
