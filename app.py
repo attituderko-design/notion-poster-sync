@@ -1883,7 +1883,7 @@ def canonical_mb_composer_name(c: dict) -> str:
 def get_composer_country_code(composer_name: str) -> str:
     """作曲家名からMusicBrainz/Wikidata経由で国コード(ISO2)を推定。"""
     # キャッシュ更新用バージョン（国コード解決ロジック変更時に更新）
-    _resolver_version = "2026-03-16f"
+    _resolver_version = "2026-03-16h"
     name = (composer_name or "").strip()
     if not name:
         return ""
@@ -1949,11 +1949,6 @@ def get_composer_country_code(composer_name: str) -> str:
         if cc:
             return cc
 
-    # 詳細解決で取れなかった場合のみ、検索レスポンスのcountryを最後の救済として使う
-    for c in _pick_candidates():
-        cc = _sanitize_cc(c.get("country") or "")
-        if cc:
-            return cc
     # MBで取れない場合は、名称からWikidata人名検索で救済
     cc = _sanitize_cc(_wikidata_country_iso2_by_person_name(name))
     if cc:
@@ -2189,18 +2184,6 @@ def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
             cc = _wikidata_country_iso2_by_person_name(n)
             if cc:
                 return cc
-
-        # 次点: MBのcountry
-        country = normalize_country_code_for_flag(data.get("country") or "")
-        if country:
-            return country
-
-        # 最後: 地域情報（活動地/出生地）。誤判定を避けるため area を優先し、begin/endは最後
-        for area_key in ("area", "begin-area", "end-area"):
-            area = data.get(area_key) or {}
-            cc = _get_mb_area_iso2(area.get("id") or "")
-            if cc:
-                return cc
     except Exception:
         return ""
     return ""
@@ -2216,7 +2199,16 @@ def _wikidata_country_iso2_by_person_name(person_name: str) -> str:
     if "," in q:
         parts = [p.strip() for p in q.split(",") if p.strip()]
         if len(parts) >= 2:
-            variants.append(" ".join(parts[1:] + [parts[0]]))
+            given = " ".join(parts[1:])
+            family = parts[0]
+            variants.append(f"{given} {family}".strip())
+            gtoks = [t for t in re.split(r"\s+", given) if t]
+            if gtoks:
+                variants.append(f"{gtoks[0]} {family}".strip())
+    toks = [t for t in re.split(r"\s+", q) if t]
+    if len(toks) >= 3:
+        variants.append(f"{toks[0]} {toks[-1]}")
+    variants = list(dict.fromkeys([v.strip() for v in variants if v.strip()]))
     q_tokens = set(re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿĀ-žА-Яа-яЁё]+", q.lower()))
 
     best_cc, best_score = "", -1
