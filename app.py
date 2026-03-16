@@ -1883,7 +1883,7 @@ def canonical_mb_composer_name(c: dict) -> str:
 def get_composer_country_code(composer_name: str) -> str:
     """作曲家名からMusicBrainz/Wikidata経由で国コード(ISO2)を推定。"""
     # キャッシュ更新用バージョン（国コード解決ロジック変更時に更新）
-    _resolver_version = "2026-03-16e"
+    _resolver_version = "2026-03-16f"
     name = (composer_name or "").strip()
     if not name:
         return ""
@@ -2006,6 +2006,7 @@ def _get_wikidata_country_iso2(qid: str) -> str:
         p27 = claims.get("P27") or []   # country of citizenship
         p495 = claims.get("P495") or [] # country of origin
         had_nationality_claim = bool(p27 or p495)
+        p27_claim_count = len(p27)
 
         def _claim_country_codes(claims_list: list) -> list[str]:
             out = []
@@ -2028,7 +2029,8 @@ def _get_wikidata_country_iso2(qid: str) -> str:
         if p495_codes:
             return p495_codes[0]
 
-        # citizenship が複数ある場合は出生地の国と一致するものを優先
+        # citizenship が複数ある場合は出生地の国を優先
+        # （歴史国家QIDで現代ISO化できない国籍が混ざるケースを救済）
         if len(p27_codes) > 1:
             birth_place_qid = ""
             for claim in (claims.get("P19") or []):  # place of birth
@@ -2040,6 +2042,20 @@ def _get_wikidata_country_iso2(qid: str) -> str:
             if birth_place_qid:
                 birth_cc = _resolve_country_iso2_from_place_qid(birth_place_qid, max_depth=3)
                 if birth_cc and birth_cc in p27_codes:
+                    return birth_cc
+
+        # 生のP27が複数あるのにISO化で1件しか残らない場合も、出生地国を優先
+        if p27_claim_count > 1 and len(p27_codes) == 1:
+            birth_place_qid = ""
+            for claim in (claims.get("P19") or []):  # place of birth
+                dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+                pq = (dv.get("id") or "").strip().upper()
+                if re.fullmatch(r"Q[0-9]+", pq):
+                    birth_place_qid = pq
+                    break
+            if birth_place_qid:
+                birth_cc = _resolve_country_iso2_from_place_qid(birth_place_qid, max_depth=3)
+                if birth_cc:
                     return birth_cc
 
         if p27_codes:
