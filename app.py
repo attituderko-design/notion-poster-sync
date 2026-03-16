@@ -7543,6 +7543,7 @@ if mode == "新規登録":
                     # 肖像画取得
                     comp_name  = canonical_mb_composer_name(comp) or comp.get("name", "")
                     artist_id  = comp.get("id", "")
+                    cover_url_final = MB_DEFAULT_COVER
                     if "mb_portrait_url" not in st.session_state or st.session_state.get("mb_portrait_comp") != artist_id:
                         with st.spinner(f"🖼️ {comp_name} の肖像画を取得中..."):
                             portrait_url = get_composer_portrait_url(comp_name, artist_id)
