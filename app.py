@@ -2064,8 +2064,20 @@ def _get_wikidata_country_iso2(qid: str) -> str:
 
         if p27_codes:
             return p27_codes[0]
-        # 国籍/出自があるのに現代ISOへ落ちない場合は、出生地フォールバックで誤判定しない
+        # 国籍/出自があるのに現代ISOへ落ちない場合:
+        # 歴史国家(例: SU)のみで構成されることがあるため、出生地(P19)のみを限定フォールバック
         if had_nationality_claim:
+            birth_place_qid = ""
+            for claim in (claims.get("P19") or []):  # place of birth
+                dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+                pq = (dv.get("id") or "").strip().upper()
+                if re.fullmatch(r"Q[0-9]+", pq):
+                    birth_place_qid = pq
+                    break
+            if birth_place_qid:
+                birth_cc = _resolve_country_iso2_from_place_qid(birth_place_qid, max_depth=3)
+                if birth_cc:
+                    return birth_cc
             return ""
         # 歴史人物でP27/P495が現代ISOに落ちない場合:
         # 出生/死亡/拠点地などの場所QIDから P17(国) を辿って補完
