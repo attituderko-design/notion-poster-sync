@@ -5299,6 +5299,44 @@ def refresh_score_db_composer_flag_icons() -> dict:
 
     return stats
 
+
+def restore_parent_score_media_icons() -> dict:
+    """親DB(芸術鑑賞記録DB)の媒体=演奏曲アイコンを媒体アイコンへ戻す。"""
+    stats = {"scanned": 0, "patched": 0, "skipped": 0, "failed": 0}
+    fallback_icon_url = get_media_icon_url("演奏曲")
+    if not fallback_icon_url:
+        stats["error"] = "演奏曲の媒体アイコンURL未設定"
+        return stats
+
+    pages = query_notion_database_all(NOTION_DB_ID)
+    if not pages:
+        return stats
+
+    target_icon = {"type": "external", "external": {"url": fallback_icon_url}}
+    for p in pages:
+        if get_page_media(p) != "演奏曲":
+            continue
+        stats["scanned"] += 1
+        page_id = p.get("id")
+        if not page_id:
+            stats["skipped"] += 1
+            continue
+        current_icon = p.get("icon") or {}
+        if current_icon == target_icon:
+            stats["skipped"] += 1
+            continue
+        res = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{page_id}",
+            headers=NOTION_HEADERS,
+            json={"icon": target_icon},
+        )
+        if res is not None and res.status_code == 200:
+            stats["patched"] += 1
+        else:
+            stats["failed"] += 1
+    return stats
+
 def migrate_drive_cover_urls(pages: list[dict]) -> dict:
     """既存ページのDriveカバーURLをNotion表示安定形式に更新する。"""
     stats = {"scanned": 0, "patched": 0, "failed": 0}
@@ -8455,7 +8493,8 @@ def resolve_needs(notion_ok_now, drive_ok_now):
 if mode == "出演者管理":
     st.subheader("👥 出演者管理")
 
-    if st.button("🏳️ 演奏曲DBの作曲家アイコンを更新", key="cast_mode_refresh_score_icons"):
+    icon_ops_col1, icon_ops_col2 = st.columns(2)
+    if icon_ops_col1.button("🏳️ 演奏曲DBの作曲家アイコンを更新", key="cast_mode_refresh_score_icons"):
         with st.spinner("演奏曲DBアイコン更新中..."):
             icon_stats = refresh_score_db_composer_flag_icons()
         if icon_stats.get("error"):
@@ -8468,6 +8507,20 @@ if mode == "出演者管理":
                 f"媒体アイコン {icon_stats.get('fallback', 0)} / "
                 f"スキップ {icon_stats.get('skipped', 0)} / "
                 f"失敗 {icon_stats.get('failed', 0)}"
+            )
+
+    if icon_ops_col2.button("🧯 親DBの演奏曲アイコンを復旧", key="cast_mode_restore_parent_score_icons"):
+        with st.spinner("親DBアイコン復旧中..."):
+            restore_stats = restore_parent_score_media_icons()
+        if restore_stats.get("error"):
+            st.error(f"❌ {restore_stats.get('error')}")
+        else:
+            st.success(
+                "✅ 復旧完了: "
+                f"対象 {restore_stats.get('scanned', 0)} / "
+                f"更新 {restore_stats.get('patched', 0)} / "
+                f"スキップ {restore_stats.get('skipped', 0)} / "
+                f"失敗 {restore_stats.get('failed', 0)}"
             )
 
     with st.expander("🧪 出演データのつながりを自動で整える", expanded=False):
