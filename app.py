@@ -1940,17 +1940,18 @@ def get_composer_country_code(composer_name: str) -> str:
     def _sanitize_cc(cc: str) -> str:
         return normalize_country_code_for_flag(cc)
 
-    for c in _pick_candidates():
-        cc = _sanitize_cc(c.get("country") or "")
-        if cc:
-            return cc
-
-    # country が空の場合は artist詳細→area→Wikidata の順で補完
+    # まずは artist詳細で「国籍系(Wikidata)優先」で解決
     for c in _pick_candidates()[:5]:
         mbid = (c.get("id") or "").strip()
         if not mbid:
             continue
         cc = _sanitize_cc(_get_mb_artist_country_code_by_id(mbid))
+        if cc:
+            return cc
+
+    # 詳細解決で取れなかった場合のみ、検索レスポンスのcountryを最後の救済として使う
+    for c in _pick_candidates():
+        cc = _sanitize_cc(c.get("country") or "")
         if cc:
             return cc
     return ""
@@ -2004,6 +2005,7 @@ def _get_wikidata_country_iso2(qid: str) -> str:
         claims = ent.get("claims") or {}
         p27 = claims.get("P27") or []   # country of citizenship
         p495 = claims.get("P495") or [] # country of origin
+        had_nationality_claim = bool(p27 or p495)
         for claim in (p27 + p495):
             dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
             cid = dv.get("id")
@@ -2012,6 +2014,9 @@ def _get_wikidata_country_iso2(qid: str) -> str:
             cc = _get_wikidata_country_iso2_by_country_qid(cid)
             if cc:
                 return cc
+        # 国籍/出自があるのに現代ISOへ落ちない場合は、出生地フォールバックで誤判定しない
+        if had_nationality_claim:
+            return ""
         # 歴史人物でP27/P495が現代ISOに落ちない場合:
         # 出生/死亡/拠点地などの場所QIDから P17(国) を辿って補完
         place_claim_keys = ("P19", "P20", "P937", "P551", "P740")
@@ -2115,17 +2120,7 @@ def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
         if res.status_code != 200:
             return ""
         data = res.json() or {}
-        country = normalize_country_code_for_flag(data.get("country") or "")
-        if country:
-            return country
-
-        for area_key in ("area", "begin-area", "end-area"):
-            area = data.get(area_key) or {}
-            cc = _get_mb_area_iso2(area.get("id") or "")
-            if cc:
-                return cc
-
-        # MBに country がない歴史人物は Wikidata で補完
+        # 国籍はWikidata(P27/P495)を最優先
         for rel in data.get("relations") or []:
             if (rel.get("type") or "").lower() != "wikidata":
                 continue
@@ -2134,6 +2129,18 @@ def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
             if not m:
                 continue
             cc = _get_wikidata_country_iso2(m.group(1))
+            if cc:
+                return cc
+
+        # 次点: MBのcountry
+        country = normalize_country_code_for_flag(data.get("country") or "")
+        if country:
+            return country
+
+        # 最後: 地域情報（活動地/出生地）。誤判定を避けるため area を優先し、begin/endは最後
+        for area_key in ("area", "begin-area", "end-area"):
+            area = data.get(area_key) or {}
+            cc = _get_mb_area_iso2(area.get("id") or "")
             if cc:
                 return cc
     except Exception:
