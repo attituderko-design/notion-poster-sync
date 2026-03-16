@@ -7136,10 +7136,12 @@ if mode == "新規登録":
                                                     st.markdown(f"- [追加ソース]({extra_u})")
                                         if st.button("✅ この初演日をリリース日に反映", key=f"premiere_apply_{item_uid}"):
                                             if picked_precision == "day":
-                                                item["release"] = picked.get("date", "")
+                                                applied_release = picked.get("date", "")
+                                                item["release"] = applied_release
                                                 item["premiere_missing"] = False
                                                 item["premiere_source"] = "wikidata-candidate"
                                             else:
+                                                applied_release = ""
                                                 item["release"] = ""
                                                 item["premiere_missing"] = True
                                                 item["premiere_source"] = "wikidata-candidate-partial"
@@ -7147,6 +7149,9 @@ if mode == "新規登録":
                                                 item["premiere_partial_value"] = picked.get("date", "")
                                             if urls:
                                                 item["premiere_source_url"] = urls[0]
+                                            # text_input(key=cart_rel_*) の既存セッション値を同期しないと
+                                            # rerun後に旧値へ戻るため、明示的に上書きする
+                                            st.session_state[f"cart_rel_{item_uid}"] = applied_release
                                             st.success("初演候補を反映しました（年月日不足の候補は手入力が必要です）")
                                             st.rerun()
                                     elif cand_state_key in st.session_state:
