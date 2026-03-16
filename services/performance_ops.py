@@ -130,6 +130,8 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
     type_map = get_notion_db_property_types(NOTION_SCORE_DB_ID)
     if not type_map:
         return 0, 0, "演奏曲DBのプロパティ取得失敗（Integration接続/DB IDを確認）", []
+    code_prop_candidates = ["国コード", "CountryCode", "country_code"]
+    code_prop = next((k for k in code_prop_candidates if type_map.get(k) in ("rich_text", "title", "select", "multi_select")), None)
 
     find_score_page_by_title = ctx["find_score_page_by_title"]
     put_notion_prop = ctx["put_notion_prop"]
@@ -212,6 +214,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
 
         # 新規作成時点で演奏曲DBアイコンを設定（作曲家国旗優先、未解決は媒体アイコン）
         icon_payload = None
+        resolved_cc = ""
         if callable(country_code_to_flag) and callable(get_composer_country_code):
             composer_name = ""
             if score_id:
@@ -226,14 +229,16 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
                 rt = ((src_props.get("クリエイター") or {}).get("rich_text") or [])
                 composer_name = "".join([(t.get("plain_text") or "") for t in rt]).strip()
             if composer_name:
-                cc = (get_composer_country_code(composer_name) or "").strip().upper()
-                flag = country_code_to_flag(cc) if cc else ""
+                resolved_cc = (get_composer_country_code(composer_name) or "").strip().upper()
+                flag = country_code_to_flag(resolved_cc) if resolved_cc else ""
                 if flag:
                     icon_payload = {"type": "emoji", "emoji": flag}
         if icon_payload is None and callable(get_media_icon_url):
             fallback = get_media_icon_url("演奏曲")
             if fallback:
                 icon_payload = {"type": "external", "external": {"url": fallback}}
+        if resolved_cc and code_prop:
+            put_notion_prop(props, type_map, code_prop, resolved_cc)
         if icon_payload:
             payload["icon"] = icon_payload
 
