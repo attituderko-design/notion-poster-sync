@@ -143,22 +143,25 @@ def is_media_icon_url(url: str | None) -> bool:
 
 def country_code_to_flag(code: str) -> str:
     c = (code or "").strip().upper()
-    # 廃止/非推奨コードはNotionで弾かれるため現行コードへ寄せる
-    legacy_map = {
-        "UK": "GB",
-        "SU": "RU",  # Soviet Union -> Russia（便宜上）
-        "DD": "DE",  # East Germany
-        "YU": "RS",  # Yugoslavia
-        "CS": "RS",  # Serbia and Montenegro
-        "TP": "TL",  # East Timor (old code)
-        "AN": "CW",  # Netherlands Antilles (old code; representative)
-        "ZR": "CD",  # Zaire
-    }
-    c = legacy_map.get(c, c)
+    # Notionで扱える現行ISO2へ正規化
+    c = normalize_country_code_for_flag(c)
     if len(c) != 2 or not c.isalpha():
         return ""
     base = ord("🇦") - ord("A")
     return chr(ord(c[0]) + base) + chr(ord(c[1]) + base)
+
+def normalize_country_code_for_flag(code: str) -> str:
+    c = (code or "").strip().upper()
+    if not c:
+        return ""
+    # 互換コード
+    if c == "UK":
+        return "GB"
+    # 廃止/非推奨コードは誤国旗の原因になるため、ここでは空扱いにして再解決へ回す
+    deprecated = {"SU", "DD", "YU", "CS", "TP", "AN", "ZR"}
+    if c in deprecated:
+        return ""
+    return c if re.fullmatch(r"[A-Z]{2}", c) else ""
 
 ASSET_BASE_URL = "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets"
 
@@ -1879,7 +1882,7 @@ def canonical_mb_composer_name(c: dict) -> str:
 def get_composer_country_code(composer_name: str) -> str:
     """作曲家名からMusicBrainz/Wikidata経由で国コード(ISO2)を推定。"""
     # キャッシュ更新用バージョン（国コード解決ロジック変更時に更新）
-    _resolver_version = "2026-03-16b"
+    _resolver_version = "2026-03-16c"
     name = (composer_name or "").strip()
     if not name:
         return ""
@@ -1895,8 +1898,7 @@ def get_composer_country_code(composer_name: str) -> str:
         return exact + starts + rest
 
     def _sanitize_cc(cc: str) -> str:
-        code = (cc or "").strip().upper()
-        return code if re.fullmatch(r"[A-Z]{2}", code) else ""
+        return normalize_country_code_for_flag(cc)
 
     for c in _pick_candidates():
         cc = _sanitize_cc(c.get("country") or "")
@@ -1932,8 +1934,8 @@ def _get_mb_area_iso2(area_id: str) -> str:
         codes = data.get("iso-3166-1-codes") or []
         if isinstance(codes, list):
             for c in codes:
-                cc = (c or "").strip().upper()
-                if re.fullmatch(r"[A-Z]{2}", cc):
+                cc = normalize_country_code_for_flag(c)
+                if cc:
                     return cc
     except Exception:
         return ""
@@ -2012,8 +2014,8 @@ def _get_wikidata_country_iso2_by_country_qid(country_qid: str) -> str:
         p297 = claims.get("P297") or []  # ISO 3166-1 alpha-2 code
         for claim in p297:
             v = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value")
-            cc = (v or "").strip().upper()
-            if re.fullmatch(r"[A-Z]{2}", cc):
+            cc = normalize_country_code_for_flag(v or "")
+            if cc:
                 return cc
     except Exception:
         return ""
@@ -2073,8 +2075,8 @@ def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
         if res.status_code != 200:
             return ""
         data = res.json() or {}
-        country = (data.get("country") or "").strip().upper()
-        if re.fullmatch(r"[A-Z]{2}", country):
+        country = normalize_country_code_for_flag(data.get("country") or "")
+        if country:
             return country
 
         for area_key in ("area", "begin-area", "end-area"):
