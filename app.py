@@ -1741,7 +1741,7 @@ def search_mb_composer(name: str) -> tuple[list, str | None]:
 
 @st.cache_data(ttl=86400)
 def get_composer_country_code(composer_name: str) -> str:
-    """作曲家名からMusicBrainz経由で国コード(ISO2)を推定。"""
+    """作曲家名からMusicBrainz/Wikidata経由で国コード(ISO2)を推定。"""
     name = (composer_name or "").strip()
     if not name:
         return ""
@@ -1749,9 +1749,164 @@ def get_composer_country_code(composer_name: str) -> str:
     if err or not comps:
         return ""
     norm = name.lower().strip()
-    exact = next((c for c in comps if (c.get("name") or "").strip().lower() == norm), None)
-    picked = exact or comps[0]
-    return (picked.get("country") or "").strip().upper()
+
+    def _pick_candidates() -> list[dict]:
+        exact = [c for c in comps if (c.get("name") or "").strip().lower() == norm]
+        starts = [c for c in comps if (c.get("name") or "").strip().lower().startswith(norm)]
+        rest = [c for c in comps if c not in exact and c not in starts]
+        return exact + starts + rest
+
+    def _sanitize_cc(cc: str) -> str:
+        code = (cc or "").strip().upper()
+        return code if re.fullmatch(r"[A-Z]{2}", code) else ""
+
+    for c in _pick_candidates():
+        cc = _sanitize_cc(c.get("country") or "")
+        if cc:
+            return cc
+
+    # country が空の場合は artist詳細→area→Wikidata の順で補完
+    for c in _pick_candidates()[:5]:
+        mbid = (c.get("id") or "").strip()
+        if not mbid:
+            continue
+        cc = _sanitize_cc(_get_mb_artist_country_code_by_id(mbid))
+        if cc:
+            return cc
+    return ""
+
+
+@st.cache_data(ttl=86400)
+def _get_mb_area_iso2(area_id: str) -> str:
+    aid = (area_id or "").strip()
+    if not aid:
+        return ""
+    try:
+        res = requests.get(
+            f"https://musicbrainz.org/ws/2/area/{aid}",
+            params={"fmt": "json", "inc": "iso-3166-1-codes"},
+            headers=MB_HEADERS,
+            timeout=8,
+        )
+        if res.status_code != 200:
+            return ""
+        data = res.json() or {}
+        codes = data.get("iso-3166-1-codes") or []
+        if isinstance(codes, list):
+            for c in codes:
+                cc = (c or "").strip().upper()
+                if re.fullmatch(r"[A-Z]{2}", cc):
+                    return cc
+    except Exception:
+        return ""
+    return ""
+
+
+@st.cache_data(ttl=86400)
+def _get_wikidata_country_iso2(qid: str) -> str:
+    q = (qid or "").strip().upper()
+    if not re.fullmatch(r"Q[0-9]+", q):
+        return ""
+    try:
+        res = wikimedia_get(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbgetentities",
+                "ids": q,
+                "props": "claims",
+                "format": "json",
+            },
+            timeout=10,
+        )
+        if res.status_code != 200:
+            return ""
+        ent = (((res.json() or {}).get("entities") or {}).get(q) or {})
+        claims = ent.get("claims") or {}
+        p27 = claims.get("P27") or []  # country of citizenship
+        p495 = claims.get("P495") or []  # country of origin
+        for claim in (p27 + p495):
+            dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+            cid = dv.get("id")
+            if not cid:
+                continue
+            cc = _get_wikidata_country_iso2_by_country_qid(cid)
+            if cc:
+                return cc
+    except Exception:
+        return ""
+    return ""
+
+
+@st.cache_data(ttl=86400)
+def _get_wikidata_country_iso2_by_country_qid(country_qid: str) -> str:
+    cq = (country_qid or "").strip().upper()
+    if not re.fullmatch(r"Q[0-9]+", cq):
+        return ""
+    try:
+        res = wikimedia_get(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbgetentities",
+                "ids": cq,
+                "props": "claims",
+                "format": "json",
+            },
+            timeout=10,
+        )
+        if res.status_code != 200:
+            return ""
+        ent = (((res.json() or {}).get("entities") or {}).get(cq) or {})
+        claims = ent.get("claims") or {}
+        p297 = claims.get("P297") or []  # ISO 3166-1 alpha-2 code
+        for claim in p297:
+            v = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value")
+            cc = (v or "").strip().upper()
+            if re.fullmatch(r"[A-Z]{2}", cc):
+                return cc
+    except Exception:
+        return ""
+    return ""
+
+
+@st.cache_data(ttl=86400)
+def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
+    aid = (artist_id or "").strip()
+    if not aid:
+        return ""
+    try:
+        res = requests.get(
+            f"https://musicbrainz.org/ws/2/artist/{aid}",
+            params={"fmt": "json", "inc": "url-rels"},
+            headers=MB_HEADERS,
+            timeout=8,
+        )
+        if res.status_code != 200:
+            return ""
+        data = res.json() or {}
+        country = (data.get("country") or "").strip().upper()
+        if re.fullmatch(r"[A-Z]{2}", country):
+            return country
+
+        for area_key in ("area", "begin-area", "end-area"):
+            area = data.get(area_key) or {}
+            cc = _get_mb_area_iso2(area.get("id") or "")
+            if cc:
+                return cc
+
+        # MBに country がない歴史人物は Wikidata で補完
+        for rel in data.get("relations") or []:
+            if (rel.get("type") or "").lower() != "wikidata":
+                continue
+            resource = ((rel.get("url") or {}).get("resource") or "").strip()
+            m = re.search(r"/wiki/(Q[0-9]+)$", resource)
+            if not m:
+                continue
+            cc = _get_wikidata_country_iso2(m.group(1))
+            if cc:
+                return cc
+    except Exception:
+        return ""
+    return ""
 
 
 def search_mb_works_by_title(title: str, limit: int = 10) -> tuple[list, str | None]:
