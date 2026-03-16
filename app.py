@@ -1651,13 +1651,21 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
     st.session_state["mb_portrait_last_reason"] = ""
     files = get_drive_files()
 
-    # Drive既存チェック
-    if fname in files:
-        file_id = files[fname]
+    # Drive既存チェック（表記ゆれ: 姓名順・カンマ有無など）
+    fname_candidates = [fname]
+    for n in _composer_query_variants(composer_name):
+        fn = make_portrait_filename(n)
+        if fn not in fname_candidates:
+            fname_candidates.append(fn)
+    for cand_fname in fname_candidates:
+        if cand_fname not in files:
+            continue
+        file_id = files[cand_fname]
         try:
             service = get_drive_service_safe()
             if service:
                 service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
+            st.session_state["mb_portrait_last_reason"] = f"Drive既存画像を使用: {cand_fname}"
             return drive_image_url(file_id)
         except Exception:
             pass
