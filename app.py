@@ -8970,6 +8970,8 @@ if mode == "出演者管理":
     if icon_ops_col1.button("🏳️ 演奏曲DBの作曲家アイコンを更新", key="cast_mode_refresh_score_icons"):
         with st.spinner("演奏曲DBアイコン更新中..."):
             icon_stats = refresh_score_db_composer_flag_icons()
+        st.session_state["last_score_icon_stats"] = icon_stats
+        st.session_state["last_score_icon_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if icon_stats.get("error"):
             st.error(f"❌ {icon_stats.get('error')}")
         else:
@@ -8981,6 +8983,17 @@ if mode == "出演者管理":
                 f"未解決 {icon_stats.get('unresolved', 0)} / "
                 f"スキップ {icon_stats.get('skipped', 0)} / "
                 f"失敗 {icon_stats.get('failed', 0)}"
+            )
+    if st.session_state.get("last_score_icon_stats"):
+        _lis = st.session_state.get("last_score_icon_stats", {})
+        _lit = st.session_state.get("last_score_icon_updated_at", "")
+        if _lis.get("error"):
+            st.caption(f"直近実行（{_lit}）: エラー - {_lis.get('error')}")
+        else:
+            st.caption(
+                f"直近実行（{_lit}）: 走査 {_lis.get('scanned', 0)} / "
+                f"国旗 {_lis.get('flagged', 0)} / 媒体アイコン {_lis.get('fallback', 0)} / "
+                f"未解決 {_lis.get('unresolved', 0)} / スキップ {_lis.get('skipped', 0)} / 失敗 {_lis.get('failed', 0)}"
             )
 
     if icon_ops_col2.button("🧯 親DBの演奏曲アイコンを復旧", key="cast_mode_restore_parent_score_icons"):
