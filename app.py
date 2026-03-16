@@ -722,6 +722,8 @@ def api_request(method: str, url: str, max_retries: int = 3, **kwargs):
         raise ValueError(f"Unsupported method: {method}")
     if "timeout" not in kwargs:
         kwargs["timeout"] = DEFAULT_TIMEOUT
+    last_exc = None
+    connection_like_error = False
     for attempt in range(max_retries):
         try:
             res = fn(url, **kwargs)
@@ -737,8 +739,27 @@ def api_request(method: str, url: str, max_retries: int = 3, **kwargs):
                 time.sleep(2 ** attempt)
                 continue
             return res
-        except requests.exceptions.RequestException:
+        except requests.exceptions.RequestException as e:
+            last_exc = e
+            msg = str(e).lower()
+            if (
+                "broken pipe" in msg
+                or "errno 32" in msg
+                or "connection reset" in msg
+                or "connection aborted" in msg
+                or "connection refused" in msg
+                or "10060" in msg
+                or "timed out" in msg
+            ):
+                connection_like_error = True
             time.sleep(2 ** attempt)
+    if connection_like_error:
+        st.session_state["api_connection_error_hint"] = (
+            "⚠️ ネットワーク接続が不安定なため通信が切断されました（Broken pipe 等）。"
+            " ページを再読み込みして再実行してください。"
+        )
+    elif last_exc is not None:
+        st.session_state["api_connection_error_hint"] = f"⚠️ API通信エラー: {last_exc}"
     return None
 
 # ============================================================
@@ -5938,6 +5959,9 @@ if "pending_notice" in st.session_state:
     emit_scroll_top_script()
 if "pending_warning" in st.session_state:
     st.warning(st.session_state.pop("pending_warning"))
+
+if "api_connection_error_hint" in st.session_state:
+    st.warning(st.session_state.pop("api_connection_error_hint"))
 if st.session_state.pop("pending_force_scroll_top", False):
     emit_scroll_top_script()
 
