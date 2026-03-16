@@ -1794,6 +1794,8 @@ def search_mb_composer(name: str) -> tuple[list, str | None]:
 @st.cache_data(ttl=86400)
 def get_composer_country_code(composer_name: str) -> str:
     """作曲家名からMusicBrainz/Wikidata経由で国コード(ISO2)を推定。"""
+    # キャッシュ更新用バージョン（国コード解決ロジック変更時に更新）
+    _resolver_version = "2026-03-16b"
     name = (composer_name or "").strip()
     if not name:
         return ""
@@ -1874,14 +1876,28 @@ def _get_wikidata_country_iso2(qid: str) -> str:
             return ""
         ent = (((res.json() or {}).get("entities") or {}).get(q) or {})
         claims = ent.get("claims") or {}
-        p27 = claims.get("P27") or []  # country of citizenship
-        p495 = claims.get("P495") or []  # country of origin
+        p27 = claims.get("P27") or []   # country of citizenship
+        p495 = claims.get("P495") or [] # country of origin
         for claim in (p27 + p495):
             dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
             cid = dv.get("id")
             if not cid:
                 continue
             cc = _get_wikidata_country_iso2_by_country_qid(cid)
+            if cc:
+                return cc
+        # 歴史人物でP27/P495が現代ISOに落ちない場合:
+        # 出生/死亡/拠点地などの場所QIDから P17(国) を辿って補完
+        place_claim_keys = ("P19", "P20", "P937", "P551", "P740")
+        place_qids = []
+        for pk in place_claim_keys:
+            for claim in (claims.get(pk) or []):
+                dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+                pq = dv.get("id")
+                if pq and re.fullmatch(r"Q[0-9]+", str(pq).upper()):
+                    place_qids.append(str(pq).upper())
+        for pq in place_qids:
+            cc = _resolve_country_iso2_from_place_qid(pq, max_depth=3)
             if cc:
                 return cc
     except Exception:
@@ -1917,6 +1933,44 @@ def _get_wikidata_country_iso2_by_country_qid(country_qid: str) -> str:
                 return cc
     except Exception:
         return ""
+    return ""
+
+
+@st.cache_data(ttl=86400)
+def _resolve_country_iso2_from_place_qid(place_qid: str, max_depth: int = 3) -> str:
+    """場所QIDから国ISO2を再帰的に解決する（P17 -> P131...）。"""
+    start = (place_qid or "").strip().upper()
+    if not re.fullmatch(r"Q[0-9]+", start):
+        return ""
+    visited = set()
+    queue = [(start, 0)]
+    while queue:
+        qid, depth = queue.pop(0)
+        if qid in visited or depth > max_depth:
+            continue
+        visited.add(qid)
+        ent = _wikidata_entity(qid) or {}
+        claims = ent.get("claims") or {}
+        # そのものが国でISO2を持つ場合
+        cc_self = _get_wikidata_country_iso2_by_country_qid(qid)
+        if cc_self:
+            return cc_self
+        # 直接の国(P17)
+        for claim in (claims.get("P17") or []):
+            dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+            cid = (dv.get("id") or "").strip().upper()
+            if not re.fullmatch(r"Q[0-9]+", cid):
+                continue
+            cc = _get_wikidata_country_iso2_by_country_qid(cid)
+            if cc:
+                return cc
+            queue.append((cid, depth + 1))
+        # 行政単位(P131)を辿る
+        for claim in (claims.get("P131") or []):
+            dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+            pid = (dv.get("id") or "").strip().upper()
+            if re.fullmatch(r"Q[0-9]+", pid):
+                queue.append((pid, depth + 1))
     return ""
 
 
