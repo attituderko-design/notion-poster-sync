@@ -2216,7 +2216,19 @@ def _wikidata_country_iso2_by_person_name(person_name: str) -> str:
     if "," in q:
         parts = [p.strip() for p in q.split(",") if p.strip()]
         if len(parts) >= 2:
-            variants.append(" ".join(parts[1:] + [parts[0]]))
+            family = parts[0]
+            given_raw = " ".join(parts[1:])
+            variants.append(f"{given_raw} {family}".strip())
+            # patronymic/ミドル名がノイズになるケース向けに「名 + 姓」も試す
+            given_tokens = [t for t in re.split(r"\s+", given_raw) if t]
+            if given_tokens:
+                variants.append(f"{given_tokens[0]} {family}".strip())
+    # 一般名でもミドル名を落とした「先頭 + 末尾」を候補化
+    q_tokens_full = [t for t in re.split(r"\s+", q) if t]
+    if len(q_tokens_full) >= 3:
+        variants.append(f"{q_tokens_full[0]} {q_tokens_full[-1]}")
+    # 重複除去（順序保持）
+    variants = list(dict.fromkeys([v.strip() for v in variants if v.strip()]))
     q_tokens = set(re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿĀ-žА-Яа-яЁё]+", q.lower()))
 
     best_cc, best_score = "", -1
