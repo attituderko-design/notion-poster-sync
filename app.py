@@ -8782,15 +8782,9 @@ if mode == "自動同期" and st.session_state.is_running:
                 media_label_val = media_labels[0] if media_labels else None
                 icon_url        = get_media_icon_url(media_label_val) if media_label_val else None
                 patch_body      = {}
-                # 演奏曲は作曲家の出身国が取れれば国旗絵文字を優先
+                # 親DB(芸術鑑賞記録DB)の演奏曲アイコンは、リフレッシュで変更しない
                 if media_label_val == "演奏曲":
-                    creator_val = plain_text_join((props.get("クリエイター") or {}).get("rich_text", []))
-                    country_code = get_composer_country_code(creator_val)
-                    flag_emoji = country_code_to_flag(country_code)
-                    if flag_emoji:
-                        patch_body["icon"] = {"type": "emoji", "emoji": flag_emoji}
-                    elif icon_url:
-                        patch_body["icon"] = {"type": "external", "external": {"url": icon_url}}
+                    pass
                 elif icon_url:
                     patch_body["icon"] = {"type": "external", "external": {"url": icon_url}}
 
