@@ -5203,6 +5203,102 @@ def normalize_performance_score_relations(pages: list[dict]) -> dict:
             stats["failed"] += 1
     return stats
 
+
+def refresh_score_db_composer_flag_icons() -> dict:
+    """演奏曲DBのアイコンを、作曲家の国コードに基づく国旗へ更新する。"""
+    stats = {"scanned": 0, "flagged": 0, "fallback": 0, "skipped": 0, "failed": 0}
+    if not NOTION_SCORE_DB_ID:
+        stats["error"] = "NOTION_SCORE_DB_ID 未設定"
+        return stats
+
+    type_map = get_notion_db_property_types(NOTION_SCORE_DB_ID)
+    if not type_map:
+        stats["error"] = "演奏曲DBのプロパティ取得失敗"
+        return stats
+
+    relation_candidates = ["演奏曲", "曲", "関連演奏曲", "作品"]
+    rel_prop = next((k for k in relation_candidates if type_map.get(k) == "relation"), None)
+    fallback_icon_url = get_media_icon_url("演奏曲")
+    score_rows = query_notion_database_all(NOTION_SCORE_DB_ID)
+    if not score_rows:
+        return stats
+
+    parent_cache: dict[str, dict | None] = {}
+    country_cache: dict[str, str] = {}
+
+    def _resolve_country_code(composer_name: str) -> str:
+        key = (composer_name or "").strip().lower()
+        if not key:
+            return ""
+        if key in country_cache:
+            return country_cache[key]
+        cc = get_composer_country_code(composer_name)
+        country_cache[key] = cc or ""
+        return country_cache[key]
+
+    for row in score_rows:
+        stats["scanned"] += 1
+        row_id = row.get("id")
+        props = (row.get("properties") or {})
+        if not row_id:
+            stats["skipped"] += 1
+            continue
+
+        composer = plain_text_join((props.get("クリエイター") or {}).get("rich_text", []))
+        linked_score_id = None
+        if rel_prop:
+            rels = ((props.get(rel_prop) or {}).get("relation") or [])
+            linked_score_id = next((r.get("id") for r in rels if r.get("id")), None)
+
+        if not composer and linked_score_id:
+            if linked_score_id not in parent_cache:
+                pres = api_request(
+                    "get",
+                    f"https://api.notion.com/v1/pages/{linked_score_id}",
+                    headers=NOTION_HEADERS,
+                )
+                parent_cache[linked_score_id] = pres.json() if (pres is not None and pres.status_code == 200) else None
+            parent_page = parent_cache.get(linked_score_id)
+            if parent_page:
+                parent_props = parent_page.get("properties", {}) or {}
+                composer = plain_text_join((parent_props.get("クリエイター") or {}).get("rich_text", []))
+
+        icon_payload = None
+        set_as_fallback = False
+        if composer:
+            cc = _resolve_country_code(composer)
+            flag = country_code_to_flag(cc) if cc else ""
+            if flag:
+                icon_payload = {"type": "emoji", "emoji": flag}
+        if icon_payload is None and fallback_icon_url:
+            icon_payload = {"type": "external", "external": {"url": fallback_icon_url}}
+            set_as_fallback = True
+
+        if not icon_payload:
+            stats["skipped"] += 1
+            continue
+
+        current_icon = row.get("icon") or {}
+        if current_icon == icon_payload:
+            stats["skipped"] += 1
+            continue
+
+        ures = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{row_id}",
+            headers=NOTION_HEADERS,
+            json={"icon": icon_payload},
+        )
+        if ures is not None and ures.status_code == 200:
+            if set_as_fallback:
+                stats["fallback"] += 1
+            else:
+                stats["flagged"] += 1
+        else:
+            stats["failed"] += 1
+
+    return stats
+
 def migrate_drive_cover_urls(pages: list[dict]) -> dict:
     """既存ページのDriveカバーURLをNotion表示安定形式に更新する。"""
     stats = {"scanned": 0, "patched": 0, "failed": 0}
@@ -8359,6 +8455,21 @@ def resolve_needs(notion_ok_now, drive_ok_now):
 if mode == "出演者管理":
     st.subheader("👥 出演者管理")
 
+    if st.button("🏳️ 演奏曲DBの作曲家アイコンを更新", key="cast_mode_refresh_score_icons"):
+        with st.spinner("演奏曲DBアイコン更新中..."):
+            icon_stats = refresh_score_db_composer_flag_icons()
+        if icon_stats.get("error"):
+            st.error(f"❌ {icon_stats.get('error')}")
+        else:
+            st.success(
+                "✅ 更新完了: "
+                f"走査 {icon_stats.get('scanned', 0)} / "
+                f"国旗 {icon_stats.get('flagged', 0)} / "
+                f"媒体アイコン {icon_stats.get('fallback', 0)} / "
+                f"スキップ {icon_stats.get('skipped', 0)} / "
+                f"失敗 {icon_stats.get('failed', 0)}"
+            )
+
     with st.expander("🧪 出演データのつながりを自動で整える", expanded=False):
         st.caption("欠けたリンク補完と重複整理を、演奏会単位サマリで確認します。")
         if st.button("🔍 リンク状態をチェック", key="reconcile_run"):
@@ -9130,6 +9241,21 @@ if mode == "自動同期" and st.session_state.is_running:
                         st.session_state.pending_notice = msg
                         if errs:
                             st.session_state.pending_warning = "整合修復で一部失敗があります（出演者管理の整合チェックで要確認）"
+                    icon_stats = refresh_score_db_composer_flag_icons()
+                    if icon_stats.get("error"):
+                        st.session_state.pending_warning = f"演奏曲DBアイコン更新をスキップ: {icon_stats.get('error')}"
+                    else:
+                        icon_msg = (
+                            "🏳️ 演奏曲DBアイコン更新: "
+                            f"国旗 {icon_stats.get('flagged', 0)} 件 / "
+                            f"媒体アイコン {icon_stats.get('fallback', 0)} 件 / "
+                            f"失敗 {icon_stats.get('failed', 0)} 件"
+                        )
+                        st.session_state.pending_notice = (
+                            f"{st.session_state.get('pending_notice', '')}\n{icon_msg}".strip()
+                            if st.session_state.get("pending_notice")
+                            else icon_msg
+                        )
                     maintenance_elapsed = round(time.time() - _maint_t0, 2)
             elif st.session_state.get("refresh_maintenance_enabled", True):
                 st.session_state.pending_notice = "⏭ 整合修復を省略: 今回の更新対象に出演/演奏曲が含まれなかったため"
