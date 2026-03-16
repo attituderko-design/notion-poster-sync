@@ -1883,7 +1883,7 @@ def canonical_mb_composer_name(c: dict) -> str:
 def get_composer_country_code(composer_name: str) -> str:
     """作曲家名からMusicBrainz/Wikidata経由で国コード(ISO2)を推定。"""
     # キャッシュ更新用バージョン（国コード解決ロジック変更時に更新）
-    _resolver_version = "2026-03-16d"
+    _resolver_version = "2026-03-16e"
     name = (composer_name or "").strip()
     if not name:
         return ""
@@ -1929,7 +1929,13 @@ def get_composer_country_code(composer_name: str) -> str:
 
     def _pick_candidates() -> list[dict]:
         ranked = sorted(comps, key=lambda c: _composer_score(c), reverse=True)
-        return ranked
+        if not ranked:
+            return []
+        top = _composer_score(ranked[0])
+        # 上位候補から大きく離れた同姓/別人を除外（誤国旗防止）
+        floor = max(40, top - 15)
+        narrowed = [c for c in ranked if _composer_score(c) >= floor]
+        return narrowed[:5]
 
     def _sanitize_cc(cc: str) -> str:
         return normalize_country_code_for_flag(cc)
