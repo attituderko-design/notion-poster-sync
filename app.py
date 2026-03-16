@@ -1883,13 +1883,13 @@ def canonical_mb_composer_name(c: dict) -> str:
 def get_composer_country_code(composer_name: str) -> str:
     """作曲家名からMusicBrainz/Wikidata経由で国コード(ISO2)を推定。"""
     # キャッシュ更新用バージョン（国コード解決ロジック変更時に更新）
-    _resolver_version = "2026-03-16h"
+    _resolver_version = "2026-03-16i"
     name = (composer_name or "").strip()
     if not name:
         return ""
     comps, err = search_mb_composer(name)
     if err or not comps:
-        return normalize_country_code_for_flag(_wikidata_country_iso2_by_person_name(name))
+        return ""
     norm = name.lower().strip()
 
     def _norm_name(s: str) -> str:
@@ -1949,10 +1949,6 @@ def get_composer_country_code(composer_name: str) -> str:
         if cc:
             return cc
 
-    # MBで取れない場合は、名称からWikidata人名検索で救済
-    cc = _sanitize_cc(_wikidata_country_iso2_by_person_name(name))
-    if cc:
-        return cc
     return ""
 
 
@@ -2177,13 +2173,7 @@ def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
             if cc:
                 return cc
 
-        # 関連が弱い/無い場合は人名検索でWikidata救済
-        for n in ((data.get("name") or "").strip(), (data.get("sort-name") or "").strip()):
-            if not n:
-                continue
-            cc = _wikidata_country_iso2_by_person_name(n)
-            if cc:
-                return cc
+        # 名寄せ誤爆を防ぐため、ここでは人名検索フォールバックを使わない
     except Exception:
         return ""
     return ""
