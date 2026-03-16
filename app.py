@@ -1739,6 +1739,20 @@ def search_mb_composer(name: str) -> tuple[list, str | None]:
     except Exception as e:
         return [], str(e)
 
+@st.cache_data(ttl=86400)
+def get_composer_country_code(composer_name: str) -> str:
+    """作曲家名からMusicBrainz経由で国コード(ISO2)を推定。"""
+    name = (composer_name or "").strip()
+    if not name:
+        return ""
+    comps, err = search_mb_composer(name)
+    if err or not comps:
+        return ""
+    norm = name.lower().strip()
+    exact = next((c for c in comps if (c.get("name") or "").strip().lower() == norm), None)
+    picked = exact or comps[0]
+    return (picked.get("country") or "").strip().upper()
+
 
 def search_mb_works_by_title(title: str, limit: int = 10) -> tuple[list, str | None]:
     """曲名でMusicBrainz Workを検索。(results, error_msg)"""
@@ -8768,7 +8782,16 @@ if mode == "自動同期" and st.session_state.is_running:
                 media_label_val = media_labels[0] if media_labels else None
                 icon_url        = get_media_icon_url(media_label_val) if media_label_val else None
                 patch_body      = {}
-                if icon_url:
+                # 演奏曲は作曲家の出身国が取れれば国旗絵文字を優先
+                if media_label_val == "演奏曲":
+                    creator_val = plain_text_join((props.get("クリエイター") or {}).get("rich_text", []))
+                    country_code = get_composer_country_code(creator_val)
+                    flag_emoji = country_code_to_flag(country_code)
+                    if flag_emoji:
+                        patch_body["icon"] = {"type": "emoji", "emoji": flag_emoji}
+                    elif icon_url:
+                        patch_body["icon"] = {"type": "external", "external": {"url": icon_url}}
+                elif icon_url:
                     patch_body["icon"] = {"type": "external", "external": {"url": icon_url}}
 
                 # クリエイター名正規化（書籍・漫画・音楽・ゲーム共通）
