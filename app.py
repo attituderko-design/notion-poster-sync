@@ -1841,6 +1841,7 @@ def search_mb_composer(name: str) -> tuple[list, str | None]:
                 "id":             a["id"],
                 "name":           a["name"],
                 "sort_name":      (a.get("sort-name") or "").strip(),
+                "artist_type":    (a.get("type") or "").strip(),
                 "disambiguation": a.get("disambiguation", ""),
                 "life_span":      a.get("life-span", {}).get("begin", "")[:4],
                 "country":        (a.get("country") or "").strip().upper(),
@@ -1882,7 +1883,7 @@ def canonical_mb_composer_name(c: dict) -> str:
 def get_composer_country_code(composer_name: str) -> str:
     """作曲家名からMusicBrainz/Wikidata経由で国コード(ISO2)を推定。"""
     # キャッシュ更新用バージョン（国コード解決ロジック変更時に更新）
-    _resolver_version = "2026-03-16c"
+    _resolver_version = "2026-03-16d"
     name = (composer_name or "").strip()
     if not name:
         return ""
@@ -1891,11 +1892,44 @@ def get_composer_country_code(composer_name: str) -> str:
         return ""
     norm = name.lower().strip()
 
+    def _norm_name(s: str) -> str:
+        txt = (s or "").lower()
+        txt = re.sub(r"[^\w\s]", " ", txt)
+        txt = re.sub(r"\s+", " ", txt).strip()
+        return txt
+
+    def _token_set(s: str) -> set[str]:
+        return {t for t in _norm_name(s).split(" ") if t}
+
+    query_tokens = _token_set(name)
+
+    def _composer_score(c: dict) -> int:
+        cand_name = (c.get("name") or "").strip()
+        cand_sort = (c.get("sort_name") or "").strip()
+        disamb = (c.get("disambiguation") or "").lower()
+        typ = (c.get("artist_type") or "").lower()
+        score = 0
+
+        if _norm_name(cand_name) == _norm_name(name) or _norm_name(cand_sort) == _norm_name(name):
+            score += 100
+
+        cand_tokens = _token_set(cand_name) | _token_set(cand_sort)
+        overlap = len(query_tokens & cand_tokens)
+        score += overlap * 10
+        if query_tokens and query_tokens.issubset(cand_tokens):
+            score += 30
+
+        if typ == "person":
+            score += 20
+        if "composer" in disamb or "作曲" in disamb:
+            score += 20
+        if c.get("country"):
+            score += 3
+        return score
+
     def _pick_candidates() -> list[dict]:
-        exact = [c for c in comps if (c.get("name") or "").strip().lower() == norm]
-        starts = [c for c in comps if (c.get("name") or "").strip().lower().startswith(norm)]
-        rest = [c for c in comps if c not in exact and c not in starts]
-        return exact + starts + rest
+        ranked = sorted(comps, key=lambda c: _composer_score(c), reverse=True)
+        return ranked
 
     def _sanitize_cc(cc: str) -> str:
         return normalize_country_code_for_flag(cc)
