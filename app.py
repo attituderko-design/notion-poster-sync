@@ -2,6 +2,7 @@ import re
 import json
 import requests
 import time
+import random
 import streamlit as st
 from datetime import date, datetime
 from pathlib import Path
@@ -725,6 +726,8 @@ def api_request(method: str, url: str, max_retries: int = 3, **kwargs):
     last_exc = None
     connection_like_error = False
     for attempt in range(max_retries):
+        # 短いジッターで瞬間的な同時アクセスを分散
+        time.sleep(random.uniform(0.05, 0.25))
         try:
             res = fn(url, **kwargs)
             if res.status_code == 429:
@@ -733,10 +736,10 @@ def api_request(method: str, url: str, max_retries: int = 3, **kwargs):
                     retry_after = int(retry_after)
                 except Exception:
                     retry_after = 5
-                time.sleep(retry_after)
+                time.sleep(retry_after + random.uniform(0.1, 0.6))
                 continue
             if res.status_code >= 500:
-                time.sleep(2 ** attempt)
+                time.sleep((2 ** attempt) + random.uniform(0.1, 0.6))
                 continue
             return res
         except requests.exceptions.RequestException as e:
@@ -752,7 +755,7 @@ def api_request(method: str, url: str, max_retries: int = 3, **kwargs):
                 or "timed out" in msg
             ):
                 connection_like_error = True
-            time.sleep(2 ** attempt)
+            time.sleep((2 ** attempt) + random.uniform(0.1, 0.6))
     if connection_like_error:
         st.session_state["api_connection_error_hint"] = (
             "⚠️ ネットワーク接続が不安定なため通信が切断されました（Broken pipe 等）。"
