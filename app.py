@@ -7689,9 +7689,7 @@ if mode == "新規登録":
                                                 item["premiere_partial_value"] = picked.get("date", "")
                                             if urls:
                                                 item["premiere_source_url"] = urls[0]
-                                            # text_input(key=cart_rel_*) の既存セッション値を同期しないと
-                                            # rerun後に旧値へ戻るため、明示的に上書きする
-                                            st.session_state[f"cart_rel_{item_uid}"] = applied_release
+                                            st.session_state.pop(f"cart_rel_{item_uid}", None)
                                             st.success("初演候補を反映しました（年月日不足の候補は手入力が必要です）")
                                             st.rerun()
                                     elif cand_state_key in st.session_state:
@@ -7705,9 +7703,15 @@ if mode == "新規登録":
                             cols = st.columns([2, 1, 2, 2, 1, 1])
                             item["jp_title"] = cols[0].text_input("日本語タイトル", value=item["jp_title"], key=f"cart_jp_{item_uid}")
                             rel_key = f"cart_rel_{item_uid}"
-                            if rel_key not in st.session_state:
-                                st.session_state[rel_key] = item.get("release", "")
-                            item["release"] = cols[1].text_input("リリース日", key=rel_key)
+                            rel_date_val = None
+                            rel_norm = _normalize_notion_date_input(str(item.get("release") or ""))
+                            if rel_norm:
+                                try:
+                                    rel_date_val = date.fromisoformat(rel_norm)
+                                except Exception:
+                                    rel_date_val = None
+                            release_input = cols[1].date_input("リリース日", value=rel_date_val, key=rel_key)
+                            item["release"] = release_input.isoformat() if release_input else ""
                             date_val = None
                             if item.get("watched"):
                                 try:
@@ -9275,7 +9279,16 @@ if mode == "新規登録":
                     with st.expander(f"{idx+1}. {item['jp_title']}", expanded=True):
                         cols = st.columns([2, 1, 2, 2, 1, 1])
                         item["jp_title"] = cols[0].text_input("日本語タイトル", value=item["jp_title"], key=f"cart_jp_{idx}")
-                        item["release"]  = cols[1].text_input("リリース日", value=item.get("release",""), key=f"cart_rel_{idx}")
+                        rel_key = f"cart_rel_{idx}"
+                        rel_date_val = None
+                        rel_norm = _normalize_notion_date_input(str(item.get("release") or ""))
+                        if rel_norm:
+                            try:
+                                rel_date_val = date.fromisoformat(rel_norm)
+                            except Exception:
+                                rel_date_val = None
+                        release_input = cols[1].date_input("リリース日", value=rel_date_val, key=rel_key)
+                        item["release"] = release_input.isoformat() if release_input else ""
                         date_val = None
                         if item.get("watched"):
                             try: date_val = date.fromisoformat(item["watched"])
