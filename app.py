@@ -7710,7 +7710,13 @@ if mode == "新規登録":
                                     rel_date_val = date.fromisoformat(rel_norm)
                                 except Exception:
                                     rel_date_val = None
-                            release_input = cols[1].date_input("リリース日", value=rel_date_val, key=rel_key)
+                            release_input = cols[1].date_input(
+                                "リリース日",
+                                value=rel_date_val,
+                                min_value=date(1500, 1, 1),
+                                max_value=date(2100, 12, 31),
+                                key=rel_key,
+                            )
                             item["release"] = release_input.isoformat() if release_input else ""
                             date_val = None
                             if item.get("watched"):
@@ -9287,7 +9293,13 @@ if mode == "新規登録":
                                 rel_date_val = date.fromisoformat(rel_norm)
                             except Exception:
                                 rel_date_val = None
-                        release_input = cols[1].date_input("リリース日", value=rel_date_val, key=rel_key)
+                        release_input = cols[1].date_input(
+                            "リリース日",
+                            value=rel_date_val,
+                            min_value=date(1500, 1, 1),
+                            max_value=date(2100, 12, 31),
+                            key=rel_key,
+                        )
                         item["release"] = release_input.isoformat() if release_input else ""
                         date_val = None
                         if item.get("watched"):
