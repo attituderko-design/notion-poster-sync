@@ -5361,7 +5361,7 @@ def normalize_performance_score_relations(pages: list[dict]) -> dict:
 
 def refresh_score_db_composer_flag_icons() -> dict:
     """演奏曲DBのアイコンを、作曲家の国コードに基づく国旗へ更新する。"""
-    stats = {"scanned": 0, "flagged": 0, "fallback": 0, "skipped": 0, "failed": 0}
+    stats = {"scanned": 0, "flagged": 0, "fallback": 0, "unresolved": 0, "skipped": 0, "failed": 0}
     if not NOTION_SCORE_DB_ID:
         stats["error"] = "NOTION_SCORE_DB_ID 未設定"
         return stats
@@ -5380,6 +5380,21 @@ def refresh_score_db_composer_flag_icons() -> dict:
 
     parent_cache: dict[str, dict | None] = {}
     country_cache: dict[str, str] = {}
+    score_parent_creator_by_title: dict[str, str] = {}
+
+    def _norm_title(t: str) -> str:
+        return re.sub(r"\s+", " ", (t or "").strip()).lower()
+
+    # 演奏曲DBのrelationが未整備でも、親DB(媒体=演奏曲)の同名タイトルから作曲家を補完する
+    for pp in st.session_state.get("all_pages", []) or []:
+        if get_page_media(pp) != "演奏曲":
+            continue
+        pprops = pp.get("properties", {}) or {}
+        ptitle = get_title(pprops)[0]
+        pcreator = plain_text_join((pprops.get("クリエイター") or {}).get("rich_text", []))
+        nk = _norm_title(ptitle)
+        if nk and pcreator and nk not in score_parent_creator_by_title:
+            score_parent_creator_by_title[nk] = pcreator
 
     def _resolve_country_code(composer_name: str) -> str:
         key = (composer_name or "").strip().lower()
@@ -5418,6 +5433,10 @@ def refresh_score_db_composer_flag_icons() -> dict:
                 parent_props = parent_page.get("properties", {}) or {}
                 composer = plain_text_join((parent_props.get("クリエイター") or {}).get("rich_text", []))
 
+        if not composer:
+            row_title = plain_text_join((props.get("タイトル") or {}).get("title", []))
+            composer = score_parent_creator_by_title.get(_norm_title(row_title), "")
+
         icon_payload = None
         set_as_fallback = False
         if composer:
@@ -5425,6 +5444,10 @@ def refresh_score_db_composer_flag_icons() -> dict:
             flag = country_code_to_flag(cc) if cc else ""
             if flag:
                 icon_payload = {"type": "emoji", "emoji": flag}
+            else:
+                stats["unresolved"] += 1
+        else:
+            stats["unresolved"] += 1
         if icon_payload is None and fallback_icon_url:
             icon_payload = {"type": "external", "external": {"url": fallback_icon_url}}
             set_as_fallback = True
@@ -8660,6 +8683,7 @@ if mode == "出演者管理":
                 f"走査 {icon_stats.get('scanned', 0)} / "
                 f"国旗 {icon_stats.get('flagged', 0)} / "
                 f"媒体アイコン {icon_stats.get('fallback', 0)} / "
+                f"未解決 {icon_stats.get('unresolved', 0)} / "
                 f"スキップ {icon_stats.get('skipped', 0)} / "
                 f"失敗 {icon_stats.get('failed', 0)}"
             )
@@ -9457,6 +9481,7 @@ if mode == "自動同期" and st.session_state.is_running:
                             "🏳️ 演奏曲DBアイコン更新: "
                             f"国旗 {icon_stats.get('flagged', 0)} 件 / "
                             f"媒体アイコン {icon_stats.get('fallback', 0)} 件 / "
+                            f"未解決 {icon_stats.get('unresolved', 0)} 件 / "
                             f"失敗 {icon_stats.get('failed', 0)} 件"
                         )
                         st.session_state.pending_notice = (
