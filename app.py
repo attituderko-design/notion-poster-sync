@@ -1641,7 +1641,7 @@ def collect_composer_portrait_candidates(composer_name: str, artist_id: str, lim
     uniq.sort(key=lambda x: _rank_portrait_candidate_url(x), reverse=True)
     return uniq[:limit]
 
-def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
+def get_composer_portrait_url(composer_name: str, artist_id: str, force_refresh: bool = False) -> str | None:
     """
     1. Driveに既存の肖像画があればそのURLを返す
     2. なければMusicBrainz → Wikipedia/Wikidata/Commonsで取得してDriveに保存
@@ -1657,18 +1657,19 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
         fn = make_portrait_filename(n)
         if fn not in fname_candidates:
             fname_candidates.append(fn)
-    for cand_fname in fname_candidates:
-        if cand_fname not in files:
-            continue
-        file_id = files[cand_fname]
-        try:
-            service = get_drive_service_safe()
-            if service:
-                service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
-            st.session_state["mb_portrait_last_reason"] = f"Drive既存画像を使用: {cand_fname}"
-            return drive_image_url(file_id)
-        except Exception:
-            pass
+    if not force_refresh:
+        for cand_fname in fname_candidates:
+            if cand_fname not in files:
+                continue
+            file_id = files[cand_fname]
+            try:
+                service = get_drive_service_safe()
+                if service:
+                    service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
+                st.session_state["mb_portrait_last_reason"] = f"Drive既存画像を使用: {cand_fname}"
+                return drive_image_url(file_id)
+            except Exception:
+                pass
 
     # MusicBrainzからWikipedia/Wikidata情報取得（失敗しても名前検索フォールバックに進む）
     try:
@@ -7991,12 +7992,19 @@ if mode == "新規登録":
                     # 肖像画取得
                     comp_name  = canonical_mb_composer_name(comp) or comp.get("name", "")
                     artist_id  = comp.get("id", "")
+                    force_refresh = st.session_state.get("mb_portrait_force_refresh_once", False)
+                    if st.button("🔄 肖像画を再取得（Drive既存を無視）", key="mb_portrait_force_refresh_btn"):
+                        st.session_state.mb_portrait_force_refresh_once = True
+                        st.session_state.mb_portrait_url = None
+                        st.session_state.mb_portrait_comp = ""
+                        st.rerun()
                     cover_url_final = MB_DEFAULT_COVER
-                    if "mb_portrait_url" not in st.session_state or st.session_state.get("mb_portrait_comp") != artist_id:
+                    if force_refresh or "mb_portrait_url" not in st.session_state or st.session_state.get("mb_portrait_comp") != artist_id:
                         with st.spinner(f"🖼️ {comp_name} の肖像画を取得中..."):
-                            portrait_url = get_composer_portrait_url(comp_name, artist_id)
+                            portrait_url = get_composer_portrait_url(comp_name, artist_id, force_refresh=force_refresh)
                         st.session_state.mb_portrait_url  = portrait_url
                         st.session_state.mb_portrait_comp = artist_id
+                        st.session_state.mb_portrait_force_refresh_once = False
                     else:
                         portrait_url = st.session_state.mb_portrait_url
 
