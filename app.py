@@ -5318,6 +5318,9 @@ def create_setlist_rows_for_performance(
         "split_instruments": _split_instruments,
         "api_request": api_request,
         "NOTION_HEADERS": NOTION_HEADERS,
+        "get_composer_country_code": get_composer_country_code,
+        "country_code_to_flag": country_code_to_flag,
+        "get_media_icon_url": get_media_icon_url,
     }
     return _create_setlist_service(
         ctx,

@@ -136,6 +136,9 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
     split_instruments = ctx["split_instruments"]
     api_request = ctx["api_request"]
     NOTION_HEADERS = ctx["NOTION_HEADERS"]
+    get_composer_country_code = ctx.get("get_composer_country_code")
+    country_code_to_flag = ctx.get("country_code_to_flag")
+    get_media_icon_url = ctx.get("get_media_icon_url")
 
     title_to_id = {}
     for s in (selected_scores or []):
@@ -146,6 +149,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
 
     created, failed = 0, 0
     created_rows = []
+    score_page_cache = {}
     rows = []
     for x in (main_items or []):
         rows.append(((x.get("section") or "本編"), x))
@@ -186,6 +190,34 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
             order += 1
             continue
         payload = {"parent": {"database_id": NOTION_SCORE_DB_ID}, "properties": props}
+
+        # 新規作成時点で演奏曲DBアイコンを設定（作曲家国旗優先、未解決は媒体アイコン）
+        icon_payload = None
+        if callable(country_code_to_flag) and callable(get_composer_country_code):
+            composer_name = ""
+            if score_id:
+                if score_id not in score_page_cache:
+                    pres = api_request(
+                        "get",
+                        f"https://api.notion.com/v1/pages/{score_id}",
+                        headers=NOTION_HEADERS,
+                    )
+                    score_page_cache[score_id] = pres.json() if (pres is not None and pres.status_code == 200) else {}
+                src_props = ((score_page_cache.get(score_id) or {}).get("properties") or {})
+                rt = ((src_props.get("クリエイター") or {}).get("rich_text") or [])
+                composer_name = "".join([(t.get("plain_text") or "") for t in rt]).strip()
+            if composer_name:
+                cc = (get_composer_country_code(composer_name) or "").strip().upper()
+                flag = country_code_to_flag(cc) if cc else ""
+                if flag:
+                    icon_payload = {"type": "emoji", "emoji": flag}
+        if icon_payload is None and callable(get_media_icon_url):
+            fallback = get_media_icon_url("演奏曲")
+            if fallback:
+                icon_payload = {"type": "external", "external": {"url": fallback}}
+        if icon_payload:
+            payload["icon"] = icon_payload
+
         res = api_request("post", "https://api.notion.com/v1/pages", headers=NOTION_HEADERS, json=payload)
         if res is not None and res.status_code == 200:
             created += 1
