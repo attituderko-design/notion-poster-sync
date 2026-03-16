@@ -1435,13 +1435,30 @@ def _download_image_bytes(url: str) -> tuple[bytes | None, str | None, str]:
         except Exception:
             return raw
 
+    def _extract_og_image_url(html_text: str) -> str | None:
+        try:
+            m = re.search(
+                r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+                html_text,
+                flags=re.IGNORECASE,
+            )
+            if not m:
+                m = re.search(
+                    r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+                    html_text,
+                    flags=re.IGNORECASE,
+                )
+            return m.group(1).strip() if m else None
+        except Exception:
+            return None
+
     target = _normalize_url(url)
     hdrs = {
         "User-Agent": WIKIMEDIA_HEADERS.get("User-Agent", "ArteMisCERS/9.x"),
         "Accept": "image/*,*/*;q=0.8",
     }
     last_err = "unknown"
-    for _ in range(2):
+    for _ in range(3):
         try:
             res = requests.get(target, timeout=DEFAULT_TIMEOUT, headers=hdrs, allow_redirects=True)
             if res.status_code != 200:
@@ -1452,6 +1469,11 @@ def _download_image_bytes(url: str) -> tuple[bytes | None, str | None, str]:
                 continue
             ctype = (res.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if ctype.startswith("text/html"):
+                og = _extract_og_image_url(res.text or "")
+                if og and og != target:
+                    target = og
+                    last_err = "html-redirect-og-image"
+                    continue
                 last_err = "html-response"
                 continue
             if not ctype.startswith("image/"):
@@ -1581,6 +1603,7 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
     3. 取得できなければNoneを返す
     """
     fname = make_portrait_filename(composer_name)
+    st.session_state["mb_portrait_last_reason"] = ""
     files = get_drive_files()
 
     # Drive既存チェック
@@ -1603,6 +1626,7 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
             headers=MB_HEADERS, timeout=8,
         )
         if res.status_code != 200:
+            st.session_state["mb_portrait_last_reason"] = f"musicbrainz artist取得失敗: {res.status_code}"
             return None
         artist_data = res.json()
         relations = artist_data.get("relations", [])
@@ -1695,6 +1719,7 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
             image_candidates.extend(_wikidata_commons_category_images(qid, limit=10))
 
         if not image_candidates:
+            st.session_state["mb_portrait_last_reason"] = "候補URLを生成できませんでした"
             return None
 
         # 同一URLへの再試行を避ける
@@ -1713,11 +1738,15 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
                 picked_url = cand
                 break
         if not image_bytes:
+            st.session_state["mb_portrait_last_reason"] = (
+                f"候補{len(uniq_candidates)}件を試行しましたが、画像DLに失敗しました"
+            )
             return None
 
         service = get_drive_service_safe()
         if not service:
             # Driveが使えない環境でも、外部URLで表示は継続する
+            st.session_state["mb_portrait_last_reason"] = "Drive接続不可のため外部URLを直接使用"
             return picked_url
         if not mimetype:
             mimetype = "image/jpeg"
@@ -1729,9 +1758,11 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
         file_id = result["id"]
         st.session_state.drive_files_cache[fname] = file_id
         service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
+        st.session_state["mb_portrait_last_reason"] = "取得成功"
         return drive_image_url(file_id)
 
     except Exception as e:
+        st.session_state["mb_portrait_last_reason"] = f"例外: {type(e).__name__}"
         st.warning(f"⚠️ 肖像画取得エラー ({composer_name}): {e}")
     return None
 
@@ -7496,6 +7527,9 @@ if mode == "新規登録":
                                     st.rerun()
                     else:
                         st.warning(f"⚠️ {comp_name} の肖像画が見つかりませんでした。画像をアップロードしてください。")
+                        last_reason = (st.session_state.get("mb_portrait_last_reason") or "").strip()
+                        if last_reason:
+                            st.caption(f"取得状況: {last_reason}")
                         uploaded = st.file_uploader("肖像画をアップロード", type=["jpg", "jpeg", "png"], key="mb_portrait_upload")
                         if uploaded:
                             default_fname = sanitize_filename(comp_name)
