@@ -1,6 +1,9 @@
-# 🌙 ArtéMis CERS
+# 🌙 ArtéMis MUSE
 
-**Cultural Experience Record System**
+**Media Unified Sourcing Engine**
+
+Database name: **ArtéMis ATLAS**  
+(*Archive of Titles, Life, Art and Sound*)
 
 > Notion-based personal tracker for films, dramas, anime, concerts, exhibitions, live shows, books, manga, music albums, games, and musical scores — with metadata & cover fetching.
 
@@ -62,7 +65,7 @@
 | `タイトル` | Title | 必須 |
 | `International Title` | Rich text | 英語タイトル |
 | `媒体` | Multi-select | 映画 / ドラマ / アニメ / 演奏会（鑑賞） / 出演 / 展示会 / ライブ/ショー / 書籍 / 漫画 / 音楽アルバム / ゲーム / 演奏曲 |
-| `鑑賞日` | Date | 任意 |
+| `体験日` | Date | 任意（旧 `鑑賞日` 互換） |
 | `リリース日` | Date | 任意 |
 | `クリエイター` | Rich text | 監督 / 著者 / アーティスト / 開発元 / 作曲者など |
 | `キャスト・関係者` | Rich text | 任意 |

@@ -6093,14 +6093,14 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 # アプリ初期化
 # ============================================================
 
-st.set_page_config(page_title="ArtéMis", page_icon=get_asset_path_or_url("favicon.png"), layout="wide")
+st.set_page_config(page_title="ArtéMis MUSE", page_icon=get_asset_path_or_url("favicon.png"), layout="wide")
 
 # ── PWA対応 metaタグ ──
 st.markdown("""
 <head>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="ArtéMis">
+<meta name="apple-mobile-web-app-title" content="ArtéMis MUSE">
 <meta name="theme-color" content="#0e1117">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/favicon.png">
@@ -6112,6 +6112,7 @@ st.markdown(
     "<em><strong>ArtéMis</strong></em> — named after the goddess of the hunt and the moon. She keeps track of everything you've ever experienced.",
     unsafe_allow_html=True
 )
+st.caption("Engine: ArtéMis MUSE (Media Unified Sourcing Engine) / DB: ArtéMis ATLAS (Archive of Titles, Life, Art and Sound)")
 st.caption(f"v{APP_VERSION}")
 if is_drive_skip_mode():
     st.info("⏭ Driveデータスキップ機能ON: Drive保存/照合はスキップして動作中です。")

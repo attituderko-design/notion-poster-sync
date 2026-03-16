@@ -1,4 +1,7 @@
-# 📘 ArtéMis 操作ガイド
+# 📘 ArtéMis MUSE 操作ガイド
+
+- Engine: `ArtéMis MUSE` (Media Unified Sourcing Engine)
+- Database: `ArtéMis ATLAS` (Archive of Titles, Life, Art and Sound)
 
 このガイドは「日常運用で迷わない」ことを目的に、操作だけをまとめています。
 
