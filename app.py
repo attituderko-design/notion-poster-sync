@@ -5385,6 +5385,43 @@ def refresh_score_db_composer_flag_icons() -> dict:
     def _norm_title(t: str) -> str:
         return re.sub(r"\s+", " ", (t or "").strip()).lower()
 
+    def _text_from_prop(meta: dict | None) -> str:
+        if not isinstance(meta, dict):
+            return ""
+        ptype = meta.get("type")
+        if ptype == "rich_text":
+            return plain_text_join(meta.get("rich_text", []))
+        if ptype == "title":
+            return plain_text_join(meta.get("title", []))
+        if ptype == "rollup":
+            roll = meta.get("rollup") or {}
+            rtype = roll.get("type")
+            if rtype == "array":
+                parts = []
+                for item in roll.get("array", []):
+                    if not isinstance(item, dict):
+                        continue
+                    it = item.get("type")
+                    if it == "rich_text":
+                        txt = plain_text_join(item.get("rich_text", []))
+                    elif it == "title":
+                        txt = plain_text_join(item.get("title", []))
+                    elif it == "people":
+                        txt = " / ".join([(p.get("name") or "").strip() for p in (item.get("people") or []) if (p.get("name") or "").strip()])
+                    else:
+                        txt = ""
+                    if txt:
+                        parts.append(txt)
+                return " / ".join(parts)
+            if rtype == "rich_text":
+                return plain_text_join((roll.get("rich_text") or []))
+            if rtype == "number":
+                v = roll.get("number")
+                return "" if v is None else str(v)
+            if rtype == "date":
+                return (((roll.get("date") or {}).get("start")) or "")
+        return ""
+
     # 演奏曲DBのrelationが未整備でも、親DB(媒体=演奏曲)の同名タイトルから作曲家を補完する
     for pp in st.session_state.get("all_pages", []) or []:
         if get_page_media(pp) != "演奏曲":
@@ -5415,6 +5452,13 @@ def refresh_score_db_composer_flag_icons() -> dict:
             continue
 
         composer = plain_text_join((props.get("クリエイター") or {}).get("rich_text", []))
+        if not composer:
+            for key, meta in props.items():
+                if ("クリエイター" in key) or ("作曲家" in key):
+                    txt = _text_from_prop(meta)
+                    if txt:
+                        composer = txt
+                        break
         linked_score_id = None
         if rel_prop:
             rels = ((props.get(rel_prop) or {}).get("relation") or [])
