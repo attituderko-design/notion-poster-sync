@@ -2006,14 +2006,44 @@ def _get_wikidata_country_iso2(qid: str) -> str:
         p27 = claims.get("P27") or []   # country of citizenship
         p495 = claims.get("P495") or [] # country of origin
         had_nationality_claim = bool(p27 or p495)
-        for claim in (p27 + p495):
-            dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
-            cid = dv.get("id")
-            if not cid:
-                continue
-            cc = _get_wikidata_country_iso2_by_country_qid(cid)
-            if cc:
-                return cc
+
+        def _claim_country_codes(claims_list: list) -> list[str]:
+            out = []
+            seen = set()
+            for claim in claims_list:
+                dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+                cid = dv.get("id")
+                if not cid:
+                    continue
+                cc = _get_wikidata_country_iso2_by_country_qid(cid)
+                if cc and cc not in seen:
+                    seen.add(cc)
+                    out.append(cc)
+            return out
+
+        p495_codes = _claim_country_codes(p495)
+        p27_codes = _claim_country_codes(p27)
+
+        # 作曲家では「出自(P495)」を最優先
+        if p495_codes:
+            return p495_codes[0]
+
+        # citizenship が複数ある場合は出生地の国と一致するものを優先
+        if len(p27_codes) > 1:
+            birth_place_qid = ""
+            for claim in (claims.get("P19") or []):  # place of birth
+                dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+                pq = (dv.get("id") or "").strip().upper()
+                if re.fullmatch(r"Q[0-9]+", pq):
+                    birth_place_qid = pq
+                    break
+            if birth_place_qid:
+                birth_cc = _resolve_country_iso2_from_place_qid(birth_place_qid, max_depth=3)
+                if birth_cc and birth_cc in p27_codes:
+                    return birth_cc
+
+        if p27_codes:
+            return p27_codes[0]
         # 国籍/出自があるのに現代ISOへ落ちない場合は、出生地フォールバックで誤判定しない
         if had_nationality_claim:
             return ""
