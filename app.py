@@ -8017,6 +8017,30 @@ if mode == "新規登録":
                                 st.image(portrait_url, width=120, caption=comp_name)
                         else:
                             st.image(portrait_url, width=120, caption=comp_name)
+                        is_drive_portrait = portrait_url.startswith("https://drive.google.com")
+                        st.caption("保存先: Drive" if is_drive_portrait else "保存先: 外部URL（Drive未保存の可能性）")
+                        last_reason = (st.session_state.get("mb_portrait_last_reason") or "").strip()
+                        if last_reason:
+                            st.caption(f"取得状況: {last_reason}")
+                        if (not is_drive_portrait) and st.button("💾 現在画像をDriveに保存", key="mb_portrait_save_current_to_drive"):
+                            img_bytes_now, mimetype_now, why_now = _download_image_bytes(portrait_url)
+                            if not img_bytes_now:
+                                st.warning(f"画像取得に失敗しました: {why_now}")
+                            else:
+                                save_name = make_portrait_filename(comp_name)
+                                file_id = save_bytes_to_drive(
+                                    save_name,
+                                    img_bytes_now,
+                                    mimetype_now or "image/jpeg",
+                                    make_public=True,
+                                )
+                                if file_id:
+                                    st.session_state.mb_portrait_url = drive_image_url(file_id)
+                                    st.session_state.mb_portrait_comp = artist_id
+                                    st.success("Driveに保存しました")
+                                    st.rerun()
+                                else:
+                                    st.warning("Drive保存に失敗しました")
                         cover_url_final = portrait_url
                         with st.expander("🛠 肖像画を別候補に変更", expanded=False):
                             cand_key = "mb_portrait_candidates"
