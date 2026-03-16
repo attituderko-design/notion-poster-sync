@@ -5851,7 +5851,6 @@ def refresh_score_db_composer_flag_icons() -> dict:
             composer = score_parent_creator_by_title.get(_norm_title(row_title), "")
 
         icon_payload = None
-        set_as_fallback = False
         if composer:
             cc = _resolve_country_code(composer)
             flag = country_code_to_flag(cc) if cc else ""
@@ -5861,9 +5860,6 @@ def refresh_score_db_composer_flag_icons() -> dict:
                 stats["unresolved"] += 1
         else:
             stats["unresolved"] += 1
-        if icon_payload is None and fallback_icon_url:
-            icon_payload = {"type": "external", "external": {"url": fallback_icon_url}}
-            set_as_fallback = True
 
         if not icon_payload:
             stats["skipped"] += 1
@@ -5881,10 +5877,7 @@ def refresh_score_db_composer_flag_icons() -> dict:
             json={"icon": icon_payload},
         )
         if ures is not None and ures.status_code == 200:
-            if set_as_fallback:
-                stats["fallback"] += 1
-            else:
-                stats["flagged"] += 1
+            stats["flagged"] += 1
         else:
             stats["failed"] += 1
 
