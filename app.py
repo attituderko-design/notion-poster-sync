@@ -7349,6 +7349,7 @@ if mode == "新規登録":
                             success_count = 0
                             linked_setlist_created = 0
                             linked_setlist_failed = 0
+                            linked_setlist_reasons = []
                             linked_assign_created = 0
                             linked_assign_failed = 0
                             prog = st.progress(0)
@@ -7416,7 +7417,7 @@ if mode == "新規登録":
                                                     }
                                                     main_items = [score_item] if section in ("幕前", "ロビー", "本編") else []
                                                     encore_items = [score_item] if section in ("Encore", "ソリストEncore") else []
-                                                    c_set, f_set, _reason_set, created_rows = create_setlist_rows_for_performance(
+                                                    c_set, f_set, reason_set, created_rows = create_setlist_rows_for_performance(
                                                         performance_page_id=perf_id,
                                                         performance_title=perf_title,
                                                         performance_date=perf_date,
@@ -7427,6 +7428,8 @@ if mode == "新規登録":
                                                     )
                                                     linked_setlist_created += c_set
                                                     linked_setlist_failed += f_set
+                                                    if reason_set:
+                                                        linked_setlist_reasons.append(reason_set)
                                                     if NOTION_SONG_ASSIGN_DB_ID and created_rows:
                                                         cast_row_map = _get_cast_row_map_for_performance(perf_id)
                                                         c_asg, f_asg, _reason_asg = create_song_assignment_rows(
@@ -7457,6 +7460,9 @@ if mode == "新規登録":
                                     st.success(f"✅ 演奏曲DB連動: {linked_setlist_created} 件")
                                 else:
                                     st.warning(f"⚠️ 演奏曲DB連動: 成功 {linked_setlist_created} 件 / 失敗 {linked_setlist_failed} 件")
+                                    if linked_setlist_reasons:
+                                        reason_text = " / ".join(list(dict.fromkeys(linked_setlist_reasons))[:3])
+                                        st.caption(f"ℹ️ 失敗理由: {reason_text}")
                             if linked_assign_created > 0 or linked_assign_failed > 0:
                                 if linked_assign_failed == 0:
                                     st.success(f"✅ 楽曲別担当者DB連動: {linked_assign_created} 件")

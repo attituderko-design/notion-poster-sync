@@ -148,6 +148,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
             title_to_id[t] = sid
 
     created, failed = 0, 0
+    failure_reasons = []
     created_rows = []
     score_page_cache = {}
     rows = []
@@ -157,6 +158,19 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
         rows.append(((x.get("section") or "Encore"), x))
     if not rows:
         return 0, 0, "セットリスト入力なし", []
+
+    section_allowed = set()
+    try:
+        db_res = api_request("get", f"https://api.notion.com/v1/databases/{NOTION_SCORE_DB_ID}", headers=NOTION_HEADERS)
+        if db_res is not None and db_res.status_code == 200:
+            db_props = ((db_res.json() or {}).get("properties") or {})
+            sec_meta = db_props.get("区分") or {}
+            sec_type = sec_meta.get("type")
+            if sec_type in ("select", "multi_select"):
+                opts = ((sec_meta.get(sec_type) or {}).get("options") or [])
+                section_allowed = {str(o.get("name") or "").strip() for o in opts if str(o.get("name") or "").strip()}
+    except Exception:
+        section_allowed = set()
 
     order = 1
     for section, item in rows:
@@ -170,6 +184,10 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
         played = bool(item.get("played", False) or part)
         if section not in ("幕前", "ロビー", "本編", "Encore", "ソリストEncore"):
             section = "本編"
+        if section_allowed and section not in section_allowed:
+            fallback_section = "本編" if "本編" in section_allowed else next(iter(section_allowed))
+            failure_reasons.append(f"区分「{section}」が未定義のため「{fallback_section}」で代替")
+            section = fallback_section
         score_id = title_to_id.get(song_title.lower())
         if not score_id:
             found = find_score_page_by_title(score_pages or [], song_title)
@@ -187,6 +205,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
 
         if not props:
             failed += 1
+            failure_reasons.append(f"登録プロパティ生成に失敗: {song_title}")
             order += 1
             continue
         payload = {"parent": {"database_id": NOTION_SCORE_DB_ID}, "properties": props}
@@ -226,8 +245,16 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
                 created_rows.append({"id": row_id, "title": song_title, "players": item.get("players", []) or [], "instruments": split_instruments(part) if played else []})
         else:
             failed += 1
+            status = str(res.status_code) if res is not None else "None"
+            message = ""
+            try:
+                message = ((res.json() or {}).get("message") or "").strip() if res is not None else ""
+            except Exception:
+                message = ""
+            failure_reasons.append(f"{song_title}: Notion {status}" + (f" / {message}" if message else ""))
         order += 1
-    return created, failed, "", created_rows
+    reason = " / ".join(list(dict.fromkeys([r for r in failure_reasons if r]))[:3])
+    return created, failed, reason, created_rows
 
 
 def create_song_assignment_rows_service(ctx: dict, score_rows: list[dict], cast_row_map: dict) -> tuple[int, int, str]:
