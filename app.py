@@ -1829,6 +1829,16 @@ def format_mb_composer_label(c: dict) -> str:
         base += f" [{life}–]"
     return base
 
+
+def canonical_mb_composer_name(c: dict) -> str:
+    """登録保存に使う作曲家名を返す（非ASCII名はsort-name優先）。"""
+    name = (c.get("name") or "").strip()
+    sort_name = (c.get("sort_name") or "").strip()
+    has_non_ascii = any(ord(ch) > 127 for ch in name)
+    if has_non_ascii and sort_name and sort_name.lower() != name.lower():
+        return sort_name
+    return name or sort_name
+
 @st.cache_data(ttl=86400)
 def get_composer_country_code(composer_name: str) -> str:
     """作曲家名からMusicBrainz/Wikidata経由で国コード(ISO2)を推定。"""
@@ -6765,7 +6775,7 @@ if mode == "新規登録":
                             st.rerun()
                         ev_selected_comp = st.session_state.get("ev_mb_selected_comp")
                         if ev_selected_comp:
-                            st.success(f"作曲家を確定: {ev_selected_comp.get('name', '')}")
+                            st.success(f"作曲家を確定: {format_mb_composer_label(ev_selected_comp)}")
 
                     if ev_selected_comp:
                         ev_title_filter = clearable_text_input(
@@ -7479,7 +7489,7 @@ if mode == "新規登録":
                     st.rerun()
                 selected_comp = st.session_state.get("mb_selected_comp")
                 if selected_comp:
-                    st.success(f"作曲家を確定: {selected_comp.get('name', '')}")
+                    st.success(f"作曲家を確定: {format_mb_composer_label(selected_comp)}")
 
             if selected_comp:
                 with st.form("mb_work_form", clear_on_submit=False):
@@ -7531,7 +7541,7 @@ if mode == "新規登録":
                     st.info(f"{len(selected_works)} 件選択中")
 
                     # 肖像画取得
-                    comp_name  = comp.get("name", "")
+                    comp_name  = canonical_mb_composer_name(comp) or comp.get("name", "")
                     artist_id  = comp.get("id", "")
                     if "mb_portrait_url" not in st.session_state or st.session_state.get("mb_portrait_comp") != artist_id:
                         with st.spinner(f"🖼️ {comp_name} の肖像画を取得中..."):
@@ -10010,7 +10020,7 @@ if mode == "データ管理":
                             comp_idx_key = f"edit_score_comp_pick_{page_id}"
                             idx = st.session_state.get(comp_idx_key, 0)
                             if composers and isinstance(idx, int) and 0 <= idx < len(composers):
-                                composer_name = composers[idx].get("name", "")
+                                composer_name = canonical_mb_composer_name(composers[idx]) or composers[idx].get("name", "")
                             st.session_state[f"pending_edit_jp_{page_id}"] = title_val
                             st.session_state[f"pending_edit_en_{page_id}"] = title_val
                             # 反映後の再描画で確実に見えるよう、Notionにも即保存する
@@ -10247,7 +10257,7 @@ if mode == "データ管理":
                                 st.rerun()
                             selected_comp = st.session_state.get(comp_sel_key)
                         if selected_comp:
-                            st.success(f"作曲家を確定: {selected_comp.get('name','')}")
+                            st.success(f"作曲家を確定: {format_mb_composer_label(selected_comp)}")
                             c_mb1, c_mb2 = st.columns([1, 1])
                             if c_mb1.button("🔍 曲名で検索", key=f"edit_rel_mb_work_search_{page_id}"):
                                 st.session_state.focus_page_id = page_id
@@ -10271,7 +10281,7 @@ if mode == "データ管理":
                                 c_t.write(label)
                                 if c_b.button("🎼 曲を追加", key=f"edit_rel_mb_add_{page_id}_{i}"):
                                     st.session_state.focus_page_id = page_id
-                                    creator_name = (selected_comp or {}).get("name", "")
+                                    creator_name = canonical_mb_composer_name(selected_comp or {}) or (selected_comp or {}).get("name", "")
                                     if add_or_create_score_relation(title_w, creator_name):
                                         st.session_state.pending_notice = f"✅ 関連を追加: {title_w}"
                                     else:
