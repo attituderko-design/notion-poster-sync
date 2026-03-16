@@ -1801,6 +1801,7 @@ def search_mb_composer(name: str) -> tuple[list, str | None]:
             {
                 "id":             a["id"],
                 "name":           a["name"],
+                "sort_name":      (a.get("sort-name") or "").strip(),
                 "disambiguation": a.get("disambiguation", ""),
                 "life_span":      a.get("life-span", {}).get("begin", "")[:4],
                 "country":        (a.get("country") or "").strip().upper(),
@@ -1809,6 +1810,24 @@ def search_mb_composer(name: str) -> tuple[list, str | None]:
         ], None
     except Exception as e:
         return [], str(e)
+
+
+def format_mb_composer_label(c: dict) -> str:
+    name = (c.get("name") or "").strip()
+    sort_name = (c.get("sort_name") or "").strip()
+    disamb = (c.get("disambiguation") or "").strip()
+    life = (c.get("life_span") or "").strip()
+    # キリル/漢字等で表示される場合に、読める表記(主にsort-name)を先頭に出す
+    has_non_ascii = any(ord(ch) > 127 for ch in name)
+    if has_non_ascii and sort_name and sort_name.lower() != name.lower():
+        base = f"{sort_name} / {name}"
+    else:
+        base = name or sort_name
+    if disamb:
+        base += f"（{disamb}）"
+    if life:
+        base += f" [{life}–]"
+    return base
 
 @st.cache_data(ttl=86400)
 def get_composer_country_code(composer_name: str) -> str:
@@ -6738,12 +6757,7 @@ if mode == "新規登録":
                     ev_selected_comp = st.session_state.get("ev_mb_selected_comp")
                     if st.session_state.get("ev_mb_composers"):
                         ev_composers = st.session_state.ev_mb_composers
-                        ev_comp_labels = [
-                            f"{c['name']}"
-                            + (f"（{c['disambiguation']}）" if c.get('disambiguation') else "")
-                            + (f" [{c['life_span']}–]" if c.get('life_span') else "")
-                            for c in ev_composers
-                        ]
+                        ev_comp_labels = [format_mb_composer_label(c) for c in ev_composers]
                         ev_sel_idx = st.radio("2. 作曲家を特定", range(len(ev_comp_labels)), format_func=lambda i: ev_comp_labels[i], key="ev_mb_comp_radio")
                         if st.button("✅ この作曲家で進める", key="ev_mb_pick_comp"):
                             st.session_state.ev_mb_selected_comp = ev_composers[ev_sel_idx]
@@ -7448,12 +7462,7 @@ if mode == "新規登録":
             selected_comp = st.session_state.get("mb_selected_comp")
             if st.session_state.get("mb_composers"):
                 composers = st.session_state.mb_composers
-                comp_labels = [
-                    f"{c['name']}"
-                    + (f"（{c['disambiguation']}）" if c['disambiguation'] else "")
-                    + (f" [{c['life_span']}–]" if c['life_span'] else "")
-                    for c in composers
-                ]
+                comp_labels = [format_mb_composer_label(c) for c in composers]
                 selected_idx = st.radio(
                     "2. 作曲家を特定",
                     range(len(comp_labels)),
@@ -9977,10 +9986,7 @@ if mode == "データ管理":
 
                     composers = st.session_state.get(comp_key, [])
                     if composers:
-                        labels = [
-                            f"{c['name']}" + (f"（{c['disambiguation']}）" if c.get("disambiguation") else "")
-                            for c in composers
-                        ]
+                        labels = [format_mb_composer_label(c) for c in composers]
                         sel_idx = st.selectbox("作曲家候補", options=list(range(len(labels))), format_func=lambda i: labels[i], key=f"edit_score_comp_pick_{page_id}")
                         if c2.button("この作曲家の作品を取得", key=f"edit_score_work_fetch_{page_id}"):
                             st.session_state.focus_page_id = page_id
@@ -10229,10 +10235,7 @@ if mode == "データ管理":
                         comps = st.session_state.get(comp_list_key, [])
                         selected_comp = None
                         if comps:
-                            labels = [
-                                f"{c['name']}" + (f"（{c['disambiguation']}）" if c.get("disambiguation") else "")
-                                for c in comps
-                            ]
+                            labels = [format_mb_composer_label(c) for c in comps]
                             idx = st.selectbox("作曲家候補", list(range(len(labels))), format_func=lambda i: labels[i], key=f"edit_rel_mb_pick_{page_id}")
                             if st.button("✅ この作曲家で進める", key=f"edit_rel_mb_pick_btn_{page_id}"):
                                 st.session_state[comp_sel_key] = comps[idx]
