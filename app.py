@@ -10,6 +10,7 @@ from urllib.parse import quote, unquote, urlparse
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseUpload
 import io
 import uuid
@@ -453,15 +454,43 @@ def save_bytes_to_drive(filename: str, image_bytes: bytes, mimetype: str, make_p
     files = get_drive_files()
     media = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype=mimetype, resumable=False)
     file_id = None
-    if filename in files:
-        cached_id = files[filename]
+    cached_id = files.get(filename)
+    escaped_name = filename.replace("'", "\\'")
+    try:
+        # 同名重複がある場合は最新を優先し、古い重複は削除して今後の取り違えを防ぐ
+        listed = service.files().list(
+            q=f"'{DRIVE_FOLDER_ID}' in parents and name='{escaped_name}' and trashed=false",
+            fields="files(id,name,modifiedTime)",
+            orderBy="modifiedTime desc",
+            pageSize=20,
+        ).execute().get("files", [])
+        if listed:
+            cached_id = listed[0].get("id") or cached_id
+            files[filename] = cached_id
+            for dup in listed[1:]:
+                dup_id = dup.get("id")
+                if dup_id:
+                    try:
+                        service.files().delete(fileId=dup_id).execute()
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    if cached_id:
         try:
             service.files().update(fileId=cached_id, media_body=media).execute()
             file_id = cached_id
+        except HttpError as e:
+            status = getattr(getattr(e, "resp", None), "status", None)
+            if status == 404:
+                st.session_state.drive_files_cache.pop(filename, None)
+                file_id = None
+            else:
+                # 一時通信エラー時に新規作成へフォールバックすると重複が増えるため中断
+                return None
         except Exception:
-            # キャッシュが古い/接続揺らぎ時は新規作成にフォールバック
-            st.session_state.drive_files_cache.pop(filename, None)
-            file_id = None
+            return None
     if file_id is None:
         try:
             result = service.files().create(
