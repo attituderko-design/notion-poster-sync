@@ -5932,6 +5932,180 @@ def refresh_score_db_composer_flag_icons() -> dict:
     return stats
 
 
+def backfill_score_db_country_codes(dry_run: bool = True, fill_only_empty: bool = True) -> dict:
+    """演奏曲DBの国コード列を、作曲家名から推定して補完する。"""
+    stats = {
+        "scanned": 0,
+        "filled": 0,
+        "candidates": 0,
+        "has_code": 0,
+        "unresolved": 0,
+        "skipped": 0,
+        "failed": 0,
+        "dry_run": bool(dry_run),
+    }
+    if not NOTION_SCORE_DB_ID:
+        stats["error"] = "NOTION_SCORE_DB_ID 未設定"
+        return stats
+
+    type_map = get_notion_db_property_types(NOTION_SCORE_DB_ID)
+    if not type_map:
+        stats["error"] = "演奏曲DBのプロパティ取得失敗"
+        return stats
+
+    relation_candidates = ["演奏曲", "曲", "関連演奏曲", "作品"]
+    rel_prop = next((k for k in relation_candidates if type_map.get(k) == "relation"), None)
+    code_prop_candidates = ["国コード", "CountryCode", "country_code"]
+    code_prop = next((k for k in code_prop_candidates if k in type_map), None)
+    if not code_prop:
+        stats["error"] = "国コード列が見つかりません"
+        return stats
+    code_prop_type = type_map.get(code_prop) or ""
+    if code_prop_type not in ("rich_text", "title", "select", "multi_select"):
+        stats["error"] = f"国コード列({code_prop})は書き込み非対応の型です: {code_prop_type}"
+        return stats
+
+    score_rows = query_notion_database_all(NOTION_SCORE_DB_ID)
+    if not score_rows:
+        return stats
+
+    parent_cache: dict[str, dict | None] = {}
+    country_cache: dict[str, str] = {}
+    score_parent_creator_by_title: dict[str, str] = {}
+
+    def _norm_title(t: str) -> str:
+        return re.sub(r"\s+", " ", (t or "").strip()).lower()
+
+    def _text_from_prop(meta: dict | None) -> str:
+        if not isinstance(meta, dict):
+            return ""
+        ptype = meta.get("type")
+        if ptype == "rich_text":
+            return plain_text_join(meta.get("rich_text", []))
+        if ptype == "title":
+            return plain_text_join(meta.get("title", []))
+        if ptype == "select":
+            return ((meta.get("select") or {}).get("name") or "").strip()
+        if ptype == "multi_select":
+            vals = [((x or {}).get("name") or "").strip() for x in (meta.get("multi_select") or [])]
+            return vals[0] if vals else ""
+        if ptype == "rollup":
+            roll = meta.get("rollup") or {}
+            rtype = roll.get("type")
+            if rtype == "array":
+                parts = []
+                for item in (roll.get("array") or []):
+                    if not isinstance(item, dict):
+                        continue
+                    it = item.get("type")
+                    if it == "rich_text":
+                        txt = plain_text_join(item.get("rich_text", []))
+                    elif it == "title":
+                        txt = plain_text_join(item.get("title", []))
+                    else:
+                        txt = ""
+                    if txt:
+                        parts.append(txt)
+                return " / ".join(parts)
+            if rtype == "rich_text":
+                return plain_text_join((roll.get("rich_text") or []))
+        return ""
+
+    # relationが未整備でも、親DB(媒体=演奏曲)同名タイトルで作曲家を補完
+    for pp in st.session_state.get("all_pages", []) or []:
+        if get_page_media(pp) != "演奏曲":
+            continue
+        pprops = pp.get("properties", {}) or {}
+        ptitle = get_title(pprops)[0]
+        pcreator = plain_text_join((pprops.get("クリエイター") or {}).get("rich_text", []))
+        nk = _norm_title(ptitle)
+        if nk and pcreator and nk not in score_parent_creator_by_title:
+            score_parent_creator_by_title[nk] = pcreator
+
+    def _resolve_country_code(composer_name: str) -> str:
+        key = (composer_name or "").strip().lower()
+        if not key:
+            return ""
+        if key in country_cache:
+            return country_cache[key]
+        cc = (get_composer_country_code(composer_name) or "").strip().upper()
+        cc = normalize_country_code_for_flag(cc)
+        country_cache[key] = cc
+        return cc
+
+    for row in score_rows:
+        stats["scanned"] += 1
+        row_id = row.get("id")
+        props = (row.get("properties") or {})
+        if not row_id:
+            stats["skipped"] += 1
+            continue
+
+        existing_cc = normalize_country_code_for_flag(_text_from_prop(props.get(code_prop)))
+        if fill_only_empty and existing_cc:
+            stats["has_code"] += 1
+            stats["skipped"] += 1
+            continue
+
+        composer = plain_text_join((props.get("クリエイター") or {}).get("rich_text", []))
+        if not composer:
+            for key, meta in props.items():
+                if ("クリエイター" in key) or ("作曲家" in key):
+                    txt = _text_from_prop(meta)
+                    if txt:
+                        composer = txt
+                        break
+        linked_score_id = None
+        if rel_prop:
+            rels = ((props.get(rel_prop) or {}).get("relation") or [])
+            linked_score_id = next((r.get("id") for r in rels if r.get("id")), None)
+
+        if not composer and linked_score_id:
+            if linked_score_id not in parent_cache:
+                pres = api_request("get", f"https://api.notion.com/v1/pages/{linked_score_id}", headers=NOTION_HEADERS)
+                parent_cache[linked_score_id] = pres.json() if (pres is not None and pres.status_code == 200) else None
+            parent_page = parent_cache.get(linked_score_id)
+            if parent_page:
+                parent_props = parent_page.get("properties", {}) or {}
+                composer = plain_text_join((parent_props.get("クリエイター") or {}).get("rich_text", []))
+
+        if not composer:
+            row_title = plain_text_join((props.get("タイトル") or {}).get("title", []))
+            composer = score_parent_creator_by_title.get(_norm_title(row_title), "")
+
+        cc = _resolve_country_code(composer) if composer else ""
+        if not cc:
+            stats["unresolved"] += 1
+            stats["skipped"] += 1
+            continue
+
+        stats["candidates"] += 1
+        if dry_run:
+            continue
+
+        if code_prop_type == "rich_text":
+            patch = {code_prop: {"rich_text": [{"type": "text", "text": {"content": cc}}]}}
+        elif code_prop_type == "title":
+            patch = {code_prop: {"title": [{"type": "text", "text": {"content": cc}}]}}
+        elif code_prop_type == "select":
+            patch = {code_prop: {"select": {"name": cc}}}
+        else:  # multi_select
+            patch = {code_prop: {"multi_select": [{"name": cc}]}}
+
+        res = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{row_id}",
+            headers=NOTION_HEADERS,
+            json={"properties": patch},
+        )
+        if res is not None and res.status_code == 200:
+            stats["filled"] += 1
+        else:
+            stats["failed"] += 1
+
+    return stats
+
+
 def restore_parent_score_media_icons() -> dict:
     """親DB(芸術鑑賞記録DB)の媒体=演奏曲アイコンを媒体アイコンへ戻す。"""
     stats = {"scanned": 0, "patched": 0, "skipped": 0, "failed": 0}
@@ -9188,6 +9362,56 @@ if mode == "出演者管理":
                 f"更新 {restore_stats.get('patched', 0)} / "
                 f"スキップ {restore_stats.get('skipped', 0)} / "
                 f"失敗 {restore_stats.get('failed', 0)}"
+            )
+
+    code_ops_col1, code_ops_col2 = st.columns(2)
+    if code_ops_col1.button("🧪 国コード候補を診断（Dry Run）", key="cast_mode_code_backfill_dry"):
+        with st.spinner("国コード候補を診断中..."):
+            code_stats = backfill_score_db_country_codes(dry_run=True, fill_only_empty=True)
+        st.session_state["last_score_code_backfill_stats"] = code_stats
+        st.session_state["last_score_code_backfill_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if code_stats.get("error"):
+            st.error(f"❌ {code_stats.get('error')}")
+        else:
+            st.info(
+                "診断結果: "
+                f"走査 {code_stats.get('scanned', 0)} / "
+                f"既入力 {code_stats.get('has_code', 0)} / "
+                f"候補 {code_stats.get('candidates', 0)} / "
+                f"未解決 {code_stats.get('unresolved', 0)} / "
+                f"スキップ {code_stats.get('skipped', 0)}"
+            )
+
+    if code_ops_col2.button("✍️ 国コードを自動入力", key="cast_mode_code_backfill_apply"):
+        with st.spinner("国コードを補完中..."):
+            code_stats = backfill_score_db_country_codes(dry_run=False, fill_only_empty=True)
+        st.session_state["last_score_code_backfill_stats"] = code_stats
+        st.session_state["last_score_code_backfill_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if code_stats.get("error"):
+            st.error(f"❌ {code_stats.get('error')}")
+        else:
+            st.success(
+                "✅ 国コード補完完了: "
+                f"走査 {code_stats.get('scanned', 0)} / "
+                f"更新 {code_stats.get('filled', 0)} / "
+                f"候補 {code_stats.get('candidates', 0)} / "
+                f"既入力 {code_stats.get('has_code', 0)} / "
+                f"未解決 {code_stats.get('unresolved', 0)} / "
+                f"失敗 {code_stats.get('failed', 0)}"
+            )
+
+    if st.session_state.get("last_score_code_backfill_stats"):
+        _lcs = st.session_state.get("last_score_code_backfill_stats", {})
+        _lct = st.session_state.get("last_score_code_backfill_at", "")
+        mode_text = "Dry Run" if _lcs.get("dry_run") else "適用"
+        if _lcs.get("error"):
+            st.caption(f"直近の国コード補完（{_lct} / {mode_text}）: エラー - {_lcs.get('error')}")
+        else:
+            st.caption(
+                f"直近の国コード補完（{_lct} / {mode_text}）: 走査 {_lcs.get('scanned', 0)} / "
+                f"更新 {_lcs.get('filled', 0)} / 候補 {_lcs.get('candidates', 0)} / "
+                f"既入力 {_lcs.get('has_code', 0)} / 未解決 {_lcs.get('unresolved', 0)} / "
+                f"失敗 {_lcs.get('failed', 0)}"
             )
 
     with st.expander("🧪 出演データのつながりを自動で整える", expanded=False):
