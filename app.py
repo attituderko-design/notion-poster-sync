@@ -107,6 +107,13 @@ def drive_image_url(file_id: str) -> str:
     """Notion/ブラウザで扱いやすいDrive画像URLを返す。"""
     return f"https://drive.google.com/thumbnail?id={file_id}&sz=w2000"
 
+def with_cache_bust(url: str) -> str:
+    """同一Drive URL更新時のブラウザキャッシュ残りを回避する。"""
+    if not url:
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}v={int(time.time()*1000)}"
+
 def format_premiere_source_message(source: str) -> str:
     src = (source or "").strip()
     if src == "musicbrainz-work":
@@ -1229,6 +1236,22 @@ MB_DEFAULT_COVER = "https://raw.githubusercontent.com/attituderko-design/artemis
 
 def make_portrait_filename(composer_name: str) -> str:
     return f"portrait_{sanitize_filename(composer_name)}.jpg"
+
+def save_manual_portrait_for_composer(
+    composer_name: str,
+    image_bytes: bytes,
+    mimetype: str,
+    custom_basename: str = "",
+) -> str | None:
+    """手動アップロード時は標準名を必ず更新し、必要なら別名にも保存する。"""
+    canonical_name = make_portrait_filename(composer_name)
+    file_id = save_bytes_to_drive(canonical_name, image_bytes, mimetype, make_public=True)
+    custom = sanitize_filename((custom_basename or "").strip())
+    if custom:
+        custom_name = f"portrait_{custom}.jpg"
+        if custom_name != canonical_name:
+            save_bytes_to_drive(custom_name, image_bytes, mimetype, make_public=True)
+    return file_id
 
 def _extract_mb_wiki_relations(relations: list) -> tuple[list[str], str | None]:
     wiki_urls = []
@@ -8011,10 +8034,11 @@ if mode == "新規登録":
                     if portrait_url:
                         if portrait_url.startswith("https://drive.google.com"):
                             try:
-                                img_res = requests.get(portrait_url, timeout=8)
+                                preview_url = with_cache_bust(portrait_url)
+                                img_res = requests.get(preview_url, timeout=8)
                                 st.image(io.BytesIO(img_res.content), width=120, caption=comp_name)
                             except Exception:
-                                st.image(portrait_url, width=120, caption=comp_name)
+                                st.image(with_cache_bust(portrait_url), width=120, caption=comp_name)
                         else:
                             st.image(portrait_url, width=120, caption=comp_name)
                         is_drive_portrait = portrait_url.startswith("https://drive.google.com")
@@ -8076,7 +8100,8 @@ if mode == "新規登録":
                                                         make_public=True,
                                                     )
                                                     if file_id:
-                                                        new_url = drive_image_url(file_id)
+                                                        new_url = with_cache_bust(drive_image_url(file_id))
+                                                        st.session_state["mb_portrait_last_reason"] = "候補画像を採用"
                                                     else:
                                                         new_url = url
                                                     st.session_state.mb_portrait_url = new_url
@@ -8096,12 +8121,17 @@ if mode == "新規登録":
                                     key="mb_portrait_fname_alt",
                                 )
                                 if st.button("📤 手動アップロード画像を適用", key="mb_portrait_upload_apply_alt"):
-                                    save_fname = f"portrait_{custom_fname}.jpg"
-                                    img_bytes_alt = uploaded_alt.read()
-                                    mimetype_alt = "image/png" if uploaded_alt.name.endswith(".png") else "image/jpeg"
-                                    file_id = save_bytes_to_drive(save_fname, img_bytes_alt, mimetype_alt, make_public=True)
+                                    img_bytes_alt = uploaded_alt.getvalue()
+                                    mimetype_alt = "image/png" if uploaded_alt.name.lower().endswith(".png") else "image/jpeg"
+                                    file_id = save_manual_portrait_for_composer(
+                                        comp_name,
+                                        img_bytes_alt,
+                                        mimetype_alt,
+                                        custom_basename=custom_fname,
+                                    )
                                     if file_id:
-                                        new_url = drive_image_url(file_id)
+                                        new_url = with_cache_bust(drive_image_url(file_id))
+                                        st.session_state["mb_portrait_last_reason"] = "手動アップロードを適用"
                                         st.success("手動アップロード画像を適用しました")
                                     else:
                                         st.warning("Drive保存に失敗しました。通信安定後に再度お試しください。")
@@ -8126,16 +8156,20 @@ if mode == "新規登録":
                             if custom_fname != default_fname:
                                 st.caption("⚠️ 名前を変更すると次回自動使用されません。このセッションのみ有効です。")
                             if st.button("📤 手動アップロード画像を適用", key="mb_portrait_upload_apply_default"):
-                                save_fname = f"portrait_{custom_fname}.jpg"
-                                img_bytes = uploaded.read()
-                                mimetype  = "image/png" if uploaded.name.endswith(".png") else "image/jpeg"
+                                img_bytes = uploaded.getvalue()
+                                mimetype  = "image/png" if uploaded.name.lower().endswith(".png") else "image/jpeg"
                                 with st.spinner("Driveに保存中..."):
-                                    file_id = save_bytes_to_drive(save_fname, img_bytes, mimetype, make_public=True)
+                                    file_id = save_manual_portrait_for_composer(
+                                        comp_name,
+                                        img_bytes,
+                                        mimetype,
+                                        custom_basename=custom_fname,
+                                    )
                                     if file_id:
-                                        cover_url_final = drive_image_url(file_id)
-                                        if custom_fname == default_fname:
-                                            st.session_state.mb_portrait_url  = cover_url_final
-                                            st.session_state.mb_portrait_comp = artist_id
+                                        cover_url_final = with_cache_bust(drive_image_url(file_id))
+                                        st.session_state.mb_portrait_url = cover_url_final
+                                        st.session_state.mb_portrait_comp = artist_id
+                                        st.session_state["mb_portrait_last_reason"] = "手動アップロードを適用"
                                     else:
                                         st.warning("Drive保存に失敗しました。今回のみアップロード画像を利用します。")
                                         cover_url_final = MB_DEFAULT_COVER
