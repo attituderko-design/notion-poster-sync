@@ -133,6 +133,13 @@ def is_media_icon_url(url: str | None) -> bool:
     icon_urls = {v[1] for v in MEDIA_ICON_MAP.values() if len(v) > 1 and v[1]}
     return url in icon_urls
 
+def country_code_to_flag(code: str) -> str:
+    c = (code or "").strip().upper()
+    if len(c) != 2 or not c.isalpha():
+        return ""
+    base = ord("🇦") - ord("A")
+    return chr(ord(c[0]) + base) + chr(ord(c[1]) + base)
+
 ASSET_BASE_URL = "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets"
 
 def get_asset_path_or_url(filename: str) -> str:
@@ -1725,6 +1732,7 @@ def search_mb_composer(name: str) -> tuple[list, str | None]:
                 "name":           a["name"],
                 "disambiguation": a.get("disambiguation", ""),
                 "life_span":      a.get("life-span", {}).get("begin", "")[:4],
+                "country":        (a.get("country") or "").strip().upper(),
             }
             for a in artists
         ], None
@@ -4759,6 +4767,7 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
                        anilist_id: int | None = None,
                        is_concerto: bool = False,
                        soloists: str | None = None,
+                       icon_emoji: str | None = None,
                        relation_prop: str | None = None,
                        relation_ids: list[str] | None = None) -> bool:
     """Notionに新規ページを作成してポスター・メタデータも一括登録"""
@@ -4822,9 +4831,12 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
         properties[relation_prop] = {"relation": [{"id": rid} for rid in rel_ids]}
 
     icon_url = get_media_icon_url(media_type_label)
+    icon_payload = {"type": "external", "external": {"url": icon_url}}
+    if icon_emoji:
+        icon_payload = {"type": "emoji", "emoji": icon_emoji}
     payload = {
         "parent":     {"database_id": NOTION_DB_ID},
-        "icon":       {"type": "external", "external": {"url": icon_url}},
+        "icon":       icon_payload,
         "properties": properties,
     }
     # 媒体アイコンURLは cover には使わず、icon のみ適用する
@@ -6798,6 +6810,7 @@ if mode == "新規登録":
                                     anilist_id=item.get("anilist_id"),
                                     is_concerto=bool(item.get("is_concerto", False)),
                                     soloists=item.get("soloists", ""),
+                                    icon_emoji=country_code_to_flag(item.get("composer_country", "")),
                                     location=item.get("location"),
                                     relation_prop=rel_prop,
                                     relation_ids=rel_ids,
@@ -7272,6 +7285,7 @@ if mode == "新規登録":
                                 "media_type":  "score",
                                 "tmdb_id":     0,
                                 "details":     {"genres": [], "cast": "", "director": comp_name, "score": None},
+                                "composer_country": (comp.get("country") or "").strip().upper(),
                                 "isbn":        "",
                                 "location":    perf_location,
                                 "media_label": media_label,
