@@ -1460,7 +1460,10 @@ def _download_image_bytes(url: str) -> tuple[bytes | None, str | None, str]:
     last_err = "unknown"
     for _ in range(3):
         try:
-            res = requests.get(target, timeout=DEFAULT_TIMEOUT, headers=hdrs, allow_redirects=True)
+            res = api_request("get", target, headers=hdrs, allow_redirects=True, max_retries=3)
+            if res is None:
+                last_err = "request-failed"
+                continue
             if res.status_code != 200:
                 last_err = f"status={res.status_code}"
                 continue
@@ -1617,20 +1620,28 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
         except Exception:
             pass
 
-    # MusicBrainzからWikipedia/Wikidata情報取得
+    # MusicBrainzからWikipedia/Wikidata情報取得（失敗しても名前検索フォールバックに進む）
     try:
         time.sleep(1.1)
-        res = requests.get(
+        artist_data = {}
+        relations = []
+        artist_name = ""
+        res = api_request(
+            "get",
             f"https://musicbrainz.org/ws/2/artist/{artist_id}",
             params={"inc": "url-rels", "fmt": "json"},
-            headers=MB_HEADERS, timeout=8,
+            headers=MB_HEADERS,
+            timeout=8,
+            max_retries=5,
         )
-        if res.status_code != 200:
-            st.session_state["mb_portrait_last_reason"] = f"musicbrainz artist取得失敗: {res.status_code}"
-            return None
-        artist_data = res.json()
-        relations = artist_data.get("relations", [])
-        artist_name = (artist_data.get("name") or "").strip()
+        if res is not None and res.status_code == 200:
+            artist_data = res.json() or {}
+            relations = artist_data.get("relations", []) or []
+            artist_name = (artist_data.get("name") or "").strip()
+        else:
+            st.session_state["mb_portrait_last_reason"] = (
+                f"musicbrainz artist取得失敗: {res.status_code if res is not None else 'None'}"
+            )
         wiki_urls, qid = _extract_mb_wiki_relations(relations)
         image_candidates = []
 
@@ -1743,23 +1754,28 @@ def get_composer_portrait_url(composer_name: str, artist_id: str) -> str | None:
             )
             return None
 
-        service = get_drive_service_safe()
-        if not service:
-            # Driveが使えない環境でも、外部URLで表示は継続する
-            st.session_state["mb_portrait_last_reason"] = "Drive接続不可のため外部URLを直接使用"
+        try:
+            service = get_drive_service_safe()
+            if not service:
+                # Driveが使えない環境でも、外部URLで表示は継続する
+                st.session_state["mb_portrait_last_reason"] = "Drive接続不可のため外部URLを直接使用"
+                return picked_url
+            if not mimetype:
+                mimetype = "image/jpeg"
+            media   = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype=mimetype, resumable=False)
+            result  = service.files().create(
+                body={"name": fname, "parents": [DRIVE_FOLDER_ID]},
+                media_body=media, fields="id",
+            ).execute()
+            file_id = result["id"]
+            st.session_state.drive_files_cache[fname] = file_id
+            service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
+            st.session_state["mb_portrait_last_reason"] = "取得成功"
+            return drive_image_url(file_id)
+        except Exception:
+            # Drive保存のみ失敗した場合は取得済みURLで継続
+            st.session_state["mb_portrait_last_reason"] = "Drive保存失敗のため外部URLを使用"
             return picked_url
-        if not mimetype:
-            mimetype = "image/jpeg"
-        media   = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype=mimetype, resumable=False)
-        result  = service.files().create(
-            body={"name": fname, "parents": [DRIVE_FOLDER_ID]},
-            media_body=media, fields="id",
-        ).execute()
-        file_id = result["id"]
-        st.session_state.drive_files_cache[fname] = file_id
-        service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
-        st.session_state["mb_portrait_last_reason"] = "取得成功"
-        return drive_image_url(file_id)
 
     except Exception as e:
         st.session_state["mb_portrait_last_reason"] = f"例外: {type(e).__name__}"
