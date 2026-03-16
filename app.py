@@ -6479,9 +6479,8 @@ def _extract_performance_defaults(page: dict | None) -> tuple[str, str, str, dic
         }
     return release, watched, rating, location
 
-@st.cache_data(ttl=180)
 def _suggest_next_setlist_order(performance_page_id: str) -> int:
-    """既存の演奏曲DBから該当出演の最大曲順+1を返す（取得失敗時は1）。"""
+    """既存の演奏曲DBから該当出演の最大曲順+1を返す（区分に依らず）。"""
     perf_id = (performance_page_id or "").strip()
     if not perf_id or not NOTION_SCORE_DB_ID:
         return 1
@@ -7739,8 +7738,8 @@ if mode == "新規登録":
                                 item["setlist_order"] = int(
                                     pcols[0].number_input(
                                         "曲順",
-                                        min_value=0,
-                                        value=max(int(item.get("setlist_order", 1) or 1), 0),
+                                        min_value=1,
+                                        value=max(int(item.get("setlist_order", 1) or 1), 1),
                                         step=1,
                                         key=f"cart_ord_{item_uid}",
                                     )
@@ -7872,7 +7871,7 @@ if mode == "新規登録":
                                                         section = "本編"
                                                     score_item = {
                                                         "title": item.get("jp_title", ""),
-                                                        "order": int(item.get("setlist_order", 0) or 0),
+                                                        "order": max(int(item.get("setlist_order", 1) or 1), 1),
                                                         "part": item.get("part", ""),
                                                         "played": bool(item.get("played", True)),
                                                         "players": item.get("players", []) or [],
