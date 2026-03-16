@@ -7204,7 +7204,7 @@ if mode == "新規登録":
                                     anilist_id=item.get("anilist_id"),
                                     is_concerto=bool(item.get("is_concerto", False)),
                                     soloists=item.get("soloists", ""),
-                                    icon_emoji=country_code_to_flag(item.get("composer_country", "")),
+                                    icon_emoji=None if item.get("media_type") == "score" else country_code_to_flag(item.get("composer_country", "")),
                                     location=item.get("location"),
                                     relation_prop=rel_prop,
                                     relation_ids=rel_ids,
