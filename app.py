@@ -86,6 +86,13 @@ MEDIA_LABEL_ALIASES = {
 }
 
 RATING_OPTIONS = ["", "★", "★★", "★★★", "★★★★", "★★★★★"]
+EXPERIENCE_DATE_PROP_CANDIDATES = ("体験日", "鑑賞日")
+EXPERIENCE_SORT_NEW = "体験日（新しい順）"
+EXPERIENCE_SORT_OLD = "体験日（古い順）"
+LEGACY_SORT_LABEL_MAP = {
+    "鑑賞日（新しい順）": EXPERIENCE_SORT_NEW,
+    "鑑賞日（古い順）": EXPERIENCE_SORT_OLD,
+}
 
 
 def queue_new_search_from_enter() -> None:
@@ -501,6 +508,23 @@ def plain_text_join(items) -> str:
             pt = ((t.get("text") or {}).get("content") or "")
         vals.append(pt)
     return "".join(vals)
+
+def get_experience_date_property_name(type_map: dict | None = None, database_id: str = NOTION_DB_ID) -> str:
+    """体験日/鑑賞日のどちらを使うかをDB定義から解決する。"""
+    if type_map is None:
+        type_map = get_notion_db_property_types(database_id)
+    for name in EXPERIENCE_DATE_PROP_CANDIDATES:
+        if name in (type_map or {}):
+            return name
+    return EXPERIENCE_DATE_PROP_CANDIDATES[0]
+
+def get_experience_date_from_props(props: dict | None) -> str:
+    p = props or {}
+    for name in EXPERIENCE_DATE_PROP_CANDIDATES:
+        val = ((p.get(name) or {}).get("date") or {}).get("start", "") or ""
+        if val:
+            return val
+    return ""
 
 def make_filename(title: str, tmdb_id) -> str:
     return f"{sanitize_filename(title)}_{tmdb_id}.jpg"
@@ -5110,7 +5134,8 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
         properties["リリース日"] = {"date": date_prop}
     watched_date_str = _normalize_notion_date_input(str(watched_date))
     if watched_date_str:
-        properties["鑑賞日"] = {"date": {"start": watched_date_str}}
+        watched_prop_name = get_experience_date_property_name()
+        properties[watched_prop_name] = {"date": {"start": watched_date_str}}
     if rating:
         properties["評価"] = {"select": {"name": rating}}
     if details.get("genres"):
@@ -5978,7 +6003,7 @@ def _extract_performance_defaults(page: dict | None) -> tuple[str, str, str, dic
         return "", "", "", None
     props = page.get("properties", {})
     release = ((props.get("リリース日") or {}).get("date") or {}).get("start", "") or ""
-    watched = ((props.get("鑑賞日") or {}).get("date") or {}).get("start", "") or ""
+    watched = get_experience_date_from_props(props)
     rating = ((props.get("評価") or {}).get("select") or {}).get("name", "") or ""
     place = (props.get("ロケーション") or {}).get("place") or None
     location = None
@@ -6266,12 +6291,14 @@ with st.sidebar:
         sync_scope = "欠損のみ補填"  # legacy compat
         if mode == "データ管理":
             if "manual_sort_order" not in st.session_state:
-                st.session_state.manual_sort_order = "鑑賞日（新しい順）"
+                st.session_state.manual_sort_order = EXPERIENCE_SORT_NEW
+            current_sort = st.session_state.get("manual_sort_order", EXPERIENCE_SORT_NEW)
+            st.session_state.manual_sort_order = LEGACY_SORT_LABEL_MAP.get(current_sort, current_sort)
             st.selectbox(
                 "一覧ソート",
                 options=[
-                    "鑑賞日（新しい順）",
-                    "鑑賞日（古い順）",
+                    EXPERIENCE_SORT_NEW,
+                    EXPERIENCE_SORT_OLD,
                     "リリース日（新しい順）",
                     "リリース日（古い順）",
                     "更新日時（新しい順）",
@@ -6397,7 +6424,7 @@ if mode == "新規登録":
 
         # ── テンプレートダウンロード ──
         import csv, io as _io
-        CSV_COLUMNS = ["媒体", "タイトル", "英語タイトル", "鑑賞日", "評価", "メモ", "場所"]
+        CSV_COLUMNS = ["媒体", "タイトル", "英語タイトル", "体験日", "評価", "メモ", "場所"]
         template_buf = _io.StringIO()
         writer = csv.writer(template_buf)
         writer.writerow(CSV_COLUMNS)
@@ -6433,7 +6460,11 @@ if mode == "新規登録":
                 df = None
 
             if df is not None:
-                missing_cols = [c for c in CSV_COLUMNS if c not in df.columns]
+                required_cols = ["媒体", "タイトル", "英語タイトル", "評価", "メモ", "場所"]
+                missing_cols = [c for c in required_cols if c not in df.columns]
+                has_date_col = ("体験日" in df.columns) or ("鑑賞日" in df.columns)
+                if not has_date_col:
+                    missing_cols.append("体験日(または鑑賞日)")
                 if missing_cols:
                     st.error(f"列が不足しています: {missing_cols}")
                 else:
@@ -6443,7 +6474,7 @@ if mode == "新規登録":
                         row_num = i + 2  # ヘッダー行=1
                         media = row["媒体"].strip()
                         title = row["タイトル"].strip()
-                        date  = row["鑑賞日"].strip()
+                        date  = str(row.get("体験日", "") or row.get("鑑賞日", "")).strip()
                         rating = row["評価"].strip()
                         if not media:
                             errors.append(f"行{row_num}: 媒体が空です")
@@ -6457,7 +6488,7 @@ if mode == "新規登録":
                         if date:
                             import re as _re
                             if not _re.match(r"^\d{4}-\d{2}-\d{2}$", date):
-                                errors.append(f"行{row_num}: 鑑賞日のフォーマットが不正「{date}」（YYYY-MM-DD）")
+                                errors.append(f"行{row_num}: 体験日のフォーマットが不正「{date}」（YYYY-MM-DD）")
                                 continue
                         if rating and rating not in VALID_RATINGS:
                             errors.append(f"行{row_num}: 無効な評価「{rating}」")
@@ -6484,7 +6515,7 @@ if mode == "新規登録":
                         with st.expander(f"登録内容プレビュー（{len(ok_rows)} 件）"):
                             preview_df = pd.DataFrame(ok_rows).rename(columns={
                                 "media": "媒体", "title": "タイトル", "en": "英語タイトル",
-                                "date": "鑑賞日", "rating": "評価", "memo": "メモ", "location": "場所",
+                                "date": "体験日", "rating": "評価", "memo": "メモ", "location": "場所",
                             })
                             st.dataframe(preview_df, use_container_width=True)
 
@@ -6633,11 +6664,11 @@ if mode == "新規登録":
                 col_start, col_end, col_watch = st.columns([1, 1, 1])
                 event_start = col_start.date_input("開催開始日", value=None, key="ev_start")
                 event_end   = col_end.date_input("開催終了日",   value=None, key="ev_end")
-                watch_label = "鑑賞日" if media_label == "展示会" else "参加日"
+                watch_label = "体験日" if media_label == "展示会" else "参加日"
                 event_watch = col_watch.date_input(watch_label, value=None, key="ev_watch")
             else:
                 col_watch2, _ = st.columns([1, 1])
-                date_label_ev = "出演日" if is_performance else ("鑑賞日" if is_concert else "参加日")
+                date_label_ev = "出演日" if is_performance else ("体験日" if is_concert else "参加日")
                 event_watch = col_watch2.date_input(date_label_ev, value=None, key="ev_watch2")
                 event_start = event_watch
                 event_end   = None
@@ -8133,7 +8164,7 @@ if mode == "新規登録":
                         dupe_titles = "、".join([get_title(d["properties"])[0] for d in dupes])
                         st.warning(f"⚠️ 登録済のデータがあります：{dupe_titles}\nそれでも登録しますか？")
     
-                    date_label   = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "アニメ": "視聴日"}.get(media_label, "鑑賞日")
+                    date_label   = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "アニメ": "視聴日"}.get(media_label, "体験日")
                     col_wl, col_date, col_rating = st.columns([1, 2, 2])
                     wlflg        = col_wl.checkbox("WLflg", value=False, key="confirm_wl")
                     watched_date = col_date.date_input(date_label, value=None, key="confirm_date")
@@ -8725,7 +8756,7 @@ if mode == "新規登録":
             if reg_cart:
                 st.divider()
                 st.subheader(f"📋 登録リスト（{len(reg_cart)} 件）")
-                date_label = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "演奏曲": "演奏日", "アニメ": "視聴日"}.get(media_label, "鑑賞日")
+                date_label = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "演奏曲": "演奏日", "アニメ": "視聴日"}.get(media_label, "体験日")
     
                 remove_indices = []
                 for idx, item in enumerate(reg_cart):
@@ -8738,7 +8769,7 @@ if mode == "新規登録":
                         if item.get("watched"):
                             try: date_val = date.fromisoformat(item["watched"])
                             except: pass
-                        item_date_label  = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "演奏曲": "演奏日", "アニメ": "視聴日"}.get(item_media, "鑑賞日")
+                        item_date_label  = {"ゲーム": "クリア日", "音楽アルバム": "聴いた日", "書籍": "読了日", "漫画": "読了日", "演奏曲": "演奏日", "アニメ": "視聴日"}.get(item_media, "体験日")
                         watched_input    = cols[2].date_input(item_date_label, value=date_val, key=f"cart_watch_{idx}")
                         item["watched"]  = watched_input.isoformat() if watched_input else ""
                         item["rating"]   = cols[3].selectbox("評価", RATING_OPTIONS, index=RATING_OPTIONS.index(item.get("rating","")) if item.get("rating","") in RATING_OPTIONS else 0, key=f"cart_rating_{idx}")
@@ -8845,15 +8876,18 @@ def get_display_pages():
         base = [p for p in base if get_page_media(p) in selected_media_filter]
     base = apply_diff_filter(base, diff_filter)
     if mode == "データ管理":
-        sort_mode = st.session_state.get("manual_sort_order", "鑑賞日（新しい順）")
+        sort_mode = st.session_state.get("manual_sort_order", EXPERIENCE_SORT_NEW)
+        sort_mode = LEGACY_SORT_LABEL_MAP.get(sort_mode, sort_mode)
         def _d(page, prop):
             return (((page.get("properties", {}).get(prop) or {}).get("date") or {}).get("start") or "")
+        def _experience_date(page):
+            return get_experience_date_from_props(page.get("properties", {}))
         def _t(page):
             return (get_title(page.get("properties", {}))[0] or "").lower()
-        if sort_mode == "鑑賞日（新しい順）":
-            base = sorted(base, key=lambda p: (_d(p, "鑑賞日"), _t(p)), reverse=True)
-        elif sort_mode == "鑑賞日（古い順）":
-            base = sorted(base, key=lambda p: (_d(p, "鑑賞日"), _t(p)))
+        if sort_mode == EXPERIENCE_SORT_NEW:
+            base = sorted(base, key=lambda p: (_experience_date(p), _t(p)), reverse=True)
+        elif sort_mode == EXPERIENCE_SORT_OLD:
+            base = sorted(base, key=lambda p: (_experience_date(p), _t(p)))
         elif sort_mode == "リリース日（新しい順）":
             base = sorted(base, key=lambda p: (_d(p, "リリース日"), _t(p)), reverse=True)
         elif sort_mode == "リリース日（古い順）":
@@ -9955,7 +9989,8 @@ if mode == "データ管理":
                 existing_rating = (props.get("評価") or {}).get("select") or {}
                 existing_rating = existing_rating.get("name", "") if isinstance(existing_rating, dict) else ""
                 existing_memo   = plain_text_join((props.get("メモ") or {}).get("rich_text", []))
-                existing_date_start = ((props.get("鑑賞日") or {}).get("date") or {}).get("start", "") or ""
+                existing_date_prop = "体験日" if "体験日" in props else ("鑑賞日" if "鑑賞日" in props else get_experience_date_property_name())
+                existing_date_start = get_experience_date_from_props(props)
                 edit_col1, edit_col2, edit_col3 = st.columns([1.5, 3, 1.2])
                 new_rating = edit_col1.selectbox(
                     "評価", RATING_OPTIONS,
@@ -9963,7 +9998,7 @@ if mode == "データ管理":
                     key=f"edit_rating_{page_id}",
                 )
                 new_memo   = edit_col2.text_input("メモ", value=existing_memo, key=f"edit_memo_{page_id}")
-                new_date   = edit_col3.text_input("鑑賞日", value=existing_date_start, placeholder="YYYY-MM-DD", key=f"edit_date_{page_id}")
+                new_date   = edit_col3.text_input(existing_date_prop, value=existing_date_start, placeholder="YYYY-MM-DD", key=f"edit_date_{page_id}")
 
                 # タイトル編集（全媒体）
                 existing_jp = jp or ""
@@ -10068,7 +10103,7 @@ if mode == "データ管理":
                     if new_memo != existing_memo:
                         patch_props["メモ"] = {"rich_text": [{"type": "text", "text": {"content": new_memo}}]}
                     if new_date != existing_date_start and new_date:
-                        patch_props["鑑賞日"] = {"date": {"start": new_date}}
+                        patch_props[existing_date_prop] = {"date": {"start": new_date}}
                     if new_jp != existing_jp:
                         patch_props["タイトル"] = {"title": [{"type": "text", "text": {"content": new_jp}}]}
                     if new_en != existing_en:
