@@ -1889,7 +1889,7 @@ def get_composer_country_code(composer_name: str) -> str:
         return ""
     comps, err = search_mb_composer(name)
     if err or not comps:
-        return ""
+        return normalize_country_code_for_flag(_wikidata_country_iso2_by_person_name(name))
     norm = name.lower().strip()
 
     def _norm_name(s: str) -> str:
@@ -1954,6 +1954,10 @@ def get_composer_country_code(composer_name: str) -> str:
         cc = _sanitize_cc(c.get("country") or "")
         if cc:
             return cc
+    # MBで取れない場合は、名称からWikidata人名検索で救済
+    cc = _sanitize_cc(_wikidata_country_iso2_by_person_name(name))
+    if cc:
+        return cc
     return ""
 
 
@@ -2178,6 +2182,14 @@ def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
             if cc:
                 return cc
 
+        # 関連が弱い/無い場合は人名検索でWikidata救済
+        for n in ((data.get("name") or "").strip(), (data.get("sort-name") or "").strip()):
+            if not n:
+                continue
+            cc = _wikidata_country_iso2_by_person_name(n)
+            if cc:
+                return cc
+
         # 次点: MBのcountry
         country = normalize_country_code_for_flag(data.get("country") or "")
         if country:
@@ -2192,6 +2204,92 @@ def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
     except Exception:
         return ""
     return ""
+
+
+@st.cache_data(ttl=86400)
+def _wikidata_country_iso2_by_person_name(person_name: str) -> str:
+    q = (person_name or "").strip()
+    if not q:
+        return ""
+
+    variants = [q]
+    if "," in q:
+        parts = [p.strip() for p in q.split(",") if p.strip()]
+        if len(parts) >= 2:
+            variants.append(" ".join(parts[1:] + [parts[0]]))
+    q_tokens = set(re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿĀ-žА-Яа-яЁё]+", q.lower()))
+
+    best_cc, best_score = "", -1
+    seen_qids = set()
+
+    for v in variants:
+        try:
+            sres = wikimedia_get(
+                "https://www.wikidata.org/w/api.php",
+                params={
+                    "action": "wbsearchentities",
+                    "search": v,
+                    "language": "en",
+                    "type": "item",
+                    "limit": 8,
+                    "format": "json",
+                },
+                timeout=10,
+            )
+            if sres.status_code != 200:
+                continue
+            items = (sres.json() or {}).get("search") or []
+        except Exception:
+            continue
+
+        for it in items:
+            qid = (it.get("id") or "").strip().upper()
+            if not re.fullmatch(r"Q[0-9]+", qid) or qid in seen_qids:
+                continue
+            seen_qids.add(qid)
+            ent = _wikidata_entity(qid) or {}
+            claims = ent.get("claims") or {}
+
+            # human (P31=Q5) 以外は除外
+            is_human = False
+            for c in (claims.get("P31") or []):
+                dv = ((((c or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {})
+                if (dv.get("id") or "").upper() == "Q5":
+                    is_human = True
+                    break
+            if not is_human:
+                continue
+
+            # composer (P106=Q36834) を優遇
+            is_composer = False
+            for c in (claims.get("P106") or []):
+                dv = ((((c or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {})
+                if (dv.get("id") or "").upper() == "Q36834":
+                    is_composer = True
+                    break
+
+            cc = _get_wikidata_country_iso2(qid)
+            if not cc:
+                continue
+
+            label = (it.get("label") or "").lower()
+            desc = (it.get("description") or "").lower()
+            lbl_tokens = set(re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿĀ-žА-Яа-яЁё]+", label))
+            overlap = len(q_tokens & lbl_tokens)
+
+            score = overlap * 20
+            if is_composer:
+                score += 40
+            if "composer" in desc or "作曲" in desc:
+                score += 20
+            if label == q.lower():
+                score += 25
+
+            if score > best_score:
+                best_score = score
+                best_cc = cc
+
+    return normalize_country_code_for_flag(best_cc)
 
 
 def search_mb_works_by_title(title: str, limit: int = 10) -> tuple[list, str | None]:
