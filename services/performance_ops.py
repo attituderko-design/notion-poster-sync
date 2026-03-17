@@ -187,9 +187,9 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
         if section not in ("幕前", "ロビー", "本編", "Encore", "ソリストEncore"):
             section = "本編"
         if section_allowed and section not in section_allowed:
-            fallback_section = "本編" if "本編" in section_allowed else next(iter(section_allowed))
-            failure_reasons.append(f"区分「{section}」が未定義のため「{fallback_section}」で代替")
-            section = fallback_section
+            # 以前はここで「本編」に強制代替していたが、区分情報が失われるため禁止。
+            # DB側に該当optionが無い場合はAPI側の検証エラーとして返し、呼び出し元で明示する。
+            failure_reasons.append(f"区分「{section}」はDB option未定義の可能性があります（そのまま登録を試行）")
         score_id = title_to_id.get(song_title.lower())
         if not score_id:
             found = find_score_page_by_title(score_pages or [], song_title)
