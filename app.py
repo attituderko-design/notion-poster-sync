@@ -6365,6 +6365,71 @@ def restore_parent_score_media_icons() -> dict:
             stats["failed"] += 1
     return stats
 
+
+def emergency_restore_all_media_icons() -> dict:
+    """
+    親DB/演奏曲DBのアイコンを媒体アイコンに強制復旧する。
+    黒塗り・不正アイコンが混入した際の緊急復旧用。
+    """
+    stats = {
+        "parent_scanned": 0,
+        "parent_patched": 0,
+        "parent_failed": 0,
+        "score_scanned": 0,
+        "score_patched": 0,
+        "score_failed": 0,
+    }
+
+    # 1) 親DB: 媒体ごとのアイコンに復旧
+    parent_pages = query_notion_database_all(NOTION_DB_ID) or []
+    for p in parent_pages:
+        media = get_page_media(p)
+        icon_url = get_media_icon_url(media)
+        if not icon_url:
+            continue
+        stats["parent_scanned"] += 1
+        page_id = p.get("id")
+        if not page_id:
+            continue
+        target_icon = {"type": "external", "external": {"url": icon_url}}
+        if (p.get("icon") or {}) == target_icon:
+            continue
+        res = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{page_id}",
+            headers=NOTION_HEADERS,
+            json={"icon": target_icon},
+        )
+        if res is not None and res.status_code == 200:
+            stats["parent_patched"] += 1
+        else:
+            stats["parent_failed"] += 1
+
+    # 2) 演奏曲DB: いったん媒体アイコン(演奏曲)に統一復旧
+    score_icon_url = get_media_icon_url("演奏曲")
+    if score_icon_url and NOTION_SCORE_DB_ID:
+        score_rows = query_notion_database_all(NOTION_SCORE_DB_ID) or []
+        target_score_icon = {"type": "external", "external": {"url": score_icon_url}}
+        for row in score_rows:
+            stats["score_scanned"] += 1
+            row_id = row.get("id")
+            if not row_id:
+                continue
+            if (row.get("icon") or {}) == target_score_icon:
+                continue
+            res = api_request(
+                "patch",
+                f"https://api.notion.com/v1/pages/{row_id}",
+                headers=NOTION_HEADERS,
+                json={"icon": target_score_icon},
+            )
+            if res is not None and res.status_code == 200:
+                stats["score_patched"] += 1
+            else:
+                stats["score_failed"] += 1
+
+    return stats
+
 def migrate_drive_cover_urls(pages: list[dict]) -> dict:
     """既存ページのDriveカバーURLをNotion表示安定形式に更新する。"""
     stats = {"scanned": 0, "patched": 0, "failed": 0}
@@ -9789,7 +9854,7 @@ if mode in ("出演者管理", "出演情報管理"):
     st.subheader("👥 出演情報管理")
 
     with st.expander("🏳️ アイコン更新・復旧", expanded=False):
-        icon_ops_col1, icon_ops_col2 = st.columns(2)
+        icon_ops_col1, icon_ops_col2, icon_ops_col3 = st.columns(3)
         if icon_ops_col1.button("演奏曲DBの作曲家アイコンを更新", key="cast_mode_refresh_score_icons"):
             with st.spinner("演奏曲DBアイコン更新中..."):
                 icon_stats = refresh_score_db_composer_flag_icons()
@@ -9832,6 +9897,15 @@ if mode in ("出演者管理", "出演情報管理"):
                     f"スキップ {restore_stats.get('skipped', 0)} / "
                     f"失敗 {restore_stats.get('failed', 0)}"
                 )
+
+        if icon_ops_col3.button("🆘 黒塗りアイコンを一括復旧", key="cast_mode_emergency_restore_icons"):
+            with st.spinner("親DB/演奏曲DBのアイコンを緊急復旧中..."):
+                em_stats = emergency_restore_all_media_icons()
+            st.success(
+                "✅ 緊急復旧完了: "
+                f"親DB 更新 {em_stats.get('parent_patched', 0)} / 失敗 {em_stats.get('parent_failed', 0)} ｜ "
+                f"演奏曲DB 更新 {em_stats.get('score_patched', 0)} / 失敗 {em_stats.get('score_failed', 0)}"
+            )
 
     with st.expander("🛠 整備・修復メニュー", expanded=False):
         st.caption("不具合対応・整合修復系のボタンをまとめています。")
