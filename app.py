@@ -53,7 +53,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.02"
+APP_VERSION = "11.03"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -85,6 +85,20 @@ MEDIA_ICON_MAP = {
 
 MEDIA_LABEL_ALIASES = {
     "演奏会（出演）": "出演",
+}
+
+_custom_icon_secret = st.secrets.get("MEDIA_ICON_CUSTOM_EMOJI_IDS", st.secrets.get("NOTION_MEDIA_ICON_CUSTOM_EMOJI_IDS", {}))
+if isinstance(_custom_icon_secret, str):
+    try:
+        _custom_icon_secret = json.loads(_custom_icon_secret)
+    except Exception:
+        _custom_icon_secret = {}
+if not isinstance(_custom_icon_secret, dict):
+    _custom_icon_secret = {}
+MEDIA_ICON_CUSTOM_EMOJI_IDS = {
+    MEDIA_LABEL_ALIASES.get(str(k).strip(), str(k).strip()): str(v).strip()
+    for k, v in _custom_icon_secret.items()
+    if str(k).strip() and str(v).strip()
 }
 
 RATING_OPTIONS = ["", "★", "★★", "★★★", "★★★★", "★★★★★"]
@@ -148,6 +162,52 @@ def get_media_icon_emoji(media_label: str) -> str:
     normalized = MEDIA_LABEL_ALIASES.get(media_label, media_label)
     label = MEDIA_ICON_MAP.get(normalized, ("📁", ""))[0]
     return (label.split(" ", 1)[0] or "📁").strip()
+
+@st.cache_data(ttl=3600)
+def fetch_notion_custom_emoji_name_map() -> dict:
+    """workspaceのカスタム絵文字 name -> id を取得"""
+    try:
+        res = api_request("get", "https://api.notion.com/v1/emojis", headers=NOTION_HEADERS)
+        if res is None or res.status_code != 200:
+            return {}
+        data = res.json() or {}
+        out = {}
+        for e in (data.get("results") or []):
+            name = str(e.get("name") or "").strip()
+            eid = str(e.get("id") or "").strip()
+            if name and eid:
+                out[name.lower()] = eid
+        return out
+    except Exception:
+        return {}
+
+def get_media_icon_payload(media_label: str) -> dict:
+    """媒体アイコンのpayload。カスタム絵文字IDがあれば優先、なければ外部URL。"""
+    normalized = MEDIA_LABEL_ALIASES.get(media_label, media_label)
+    explicit_id = MEDIA_ICON_CUSTOM_EMOJI_IDS.get(normalized, "")
+    if explicit_id:
+        return {"type": "custom_emoji", "custom_emoji": {"id": explicit_id}}
+
+    # secrets未設定でも、name一致なら自動解決
+    emoji_map = fetch_notion_custom_emoji_name_map()
+    if emoji_map:
+        icon_url = get_media_icon_url(normalized)
+        basename = ""
+        if icon_url:
+            basename = Path(urlparse(icon_url).path).stem.lower()
+        candidates = [
+            normalized.lower(),
+            normalized.replace("/", "").replace("（", "").replace("）", "").lower(),
+            basename,
+        ]
+        for c in candidates:
+            if c and c in emoji_map:
+                return {"type": "custom_emoji", "custom_emoji": {"id": emoji_map[c]}}
+
+    icon_url = get_media_icon_url(normalized)
+    if icon_url:
+        return {"type": "external", "external": {"url": icon_url}}
+    return {"type": "emoji", "emoji": get_media_icon_emoji(normalized)}
 
 def is_media_icon_url(url: str | None) -> bool:
     if not url:
@@ -5239,11 +5299,11 @@ def update_all(page_id, cover_url, tmdb_release, existing_release,
     if props is not None:
         media_labels = [m["name"] for m in props.get("媒体", {}).get("multi_select", [])]
         media_label  = media_labels[0] if media_labels else None
-        icon_url     = get_media_icon_url(media_label) if media_label else None
-        if icon_url:
+        if media_label:
+            icon_payload = get_media_icon_payload(media_label)
             api_request("patch", f"https://api.notion.com/v1/pages/{page_id}",
                         headers=NOTION_HEADERS,
-                        json={"icon": {"type": "external", "external": {"url": icon_url}}})
+                        json={"icon": icon_payload})
     drive_ok  = bool(save_to_drive(actual_cover_url, title, tmdb_id)) if need_drive else True
 
     if props is not None:
@@ -5453,8 +5513,7 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
     if relation_prop and rel_ids:
         properties[relation_prop] = {"relation": [{"id": rid} for rid in rel_ids]}
 
-    icon_url = get_media_icon_url(media_type_label)
-    icon_payload = {"type": "external", "external": {"url": icon_url}}
+    icon_payload = get_media_icon_payload(media_type_label)
     # 演奏曲は親DB側では媒体アイコンを維持する（国旗は演奏曲DB側で扱う）
     if icon_emoji and media_type != "score":
         icon_payload = {"type": "emoji", "emoji": icon_emoji}
@@ -6336,16 +6395,13 @@ def sync_score_country_master_relations(dry_run: bool = True, fill_only_empty: b
 def restore_parent_score_media_icons() -> dict:
     """親DB(芸術鑑賞記録DB)の媒体=演奏曲アイコンを媒体アイコンへ戻す。"""
     stats = {"scanned": 0, "patched": 0, "skipped": 0, "failed": 0}
-    fallback_icon_url = get_media_icon_url("演奏曲")
-    if not fallback_icon_url:
-        stats["error"] = "演奏曲の媒体アイコンURL未設定"
-        return stats
+    fallback_icon = get_media_icon_payload("演奏曲")
 
     pages = query_notion_database_all(NOTION_DB_ID)
     if not pages:
         return stats
 
-    target_icon = {"type": "external", "external": {"url": fallback_icon_url}}
+    target_icon = fallback_icon
     for p in pages:
         if get_page_media(p) != "演奏曲":
             continue
@@ -6390,13 +6446,10 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
     work_items = []
     for p in parent_pages:
         media = get_page_media(p)
-        icon_url = get_media_icon_url(media)
-        if not icon_url:
-            continue
+        target_icon = get_media_icon_payload(media)
         page_id = p.get("id")
         if not page_id:
             continue
-        target_icon = {"type": "external", "external": {"url": icon_url}}
         if (not force_reapply) and ((p.get("icon") or {}) == target_icon):
             continue
         work_items.append((p, media, page_id, target_icon))
@@ -6416,7 +6469,7 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
         if progress_text is not None:
             progress_text.caption(
                 f"処理中... 対象 {stats['parent_scanned']} / {total_work} 件 / "
-                f"外部URL更新 {stats['parent_patched']} / "
+                f"アイコン更新 {stats['parent_patched']} / "
                 f"絵文字暫定 {stats['parent_emoji_fallback']} / "
                 f"失敗 {stats['parent_failed']}"
             )
@@ -6430,6 +6483,7 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
             stats["parent_patched"] += 1
             stats["details"].append({
                 "status": "external_ok",
+                "icon_type": (target_icon.get("type") if isinstance(target_icon, dict) else ""),
                 "media": media,
                 "title": get_title(p.get("properties", {}))[0] or get_title(p.get("properties", {}))[1] or "(無題)",
                 "page_id": page_id,
@@ -6472,7 +6526,7 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
     if progress_text is not None:
         progress_text.caption(
             f"完了: 対象 {stats['parent_scanned']} 件 / "
-            f"外部URL更新 {stats['parent_patched']} / "
+            f"アイコン更新 {stats['parent_patched']} / "
             f"絵文字暫定 {stats['parent_emoji_fallback']} / "
             f"失敗 {stats['parent_failed']}"
         )
@@ -10000,7 +10054,7 @@ if mode in ("出演者管理", "出演情報管理"):
             st.session_state["last_emergency_icon_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.success(
                 "✅ 緊急復旧完了: "
-                f"親DB 外部URL更新 {em_stats.get('parent_patched', 0)} / "
+                f"親DB アイコン更新 {em_stats.get('parent_patched', 0)} / "
                 f"絵文字暫定 {em_stats.get('parent_emoji_fallback', 0)} / "
                 f"失敗 {em_stats.get('parent_failed', 0)}"
             )
@@ -10064,7 +10118,7 @@ if mode in ("出演者管理", "出演情報管理"):
             st.caption(
                 f"直近の緊急復旧（{_eit}）: "
                 f"走査 {_eis.get('parent_scanned', 0)} / "
-                f"外部URL更新 {_eis.get('parent_patched', 0)} / "
+                f"アイコン更新 {_eis.get('parent_patched', 0)} / "
                 f"絵文字暫定 {_eis.get('parent_emoji_fallback', 0)} / "
                 f"失敗 {_eis.get('parent_failed', 0)}"
             )
@@ -10075,7 +10129,8 @@ if mode in ("出演者管理", "出演情報管理"):
                 if _updated:
                     preview_lines = []
                     for d in _updated[:20]:
-                        status_label = "外部URL" if d.get("status") == "external_ok" else "絵文字暫定"
+                        icon_type = d.get("icon_type") or ""
+                        status_label = f"{icon_type}" if icon_type else ("更新" if d.get("status") == "external_ok" else "絵文字暫定")
                         preview_lines.append(f"- {d.get('title','(無題)')}  [{status_label}]")
                     st.code("\n".join(preview_lines), language="text")
                     if len(_updated) > 20:
@@ -10660,13 +10715,12 @@ if mode == "自動同期" and st.session_state.is_running:
                 # 映画・ドラマ以外: アイコン更新 + 媒体別の追加処理
                 media_labels    = [m["name"] for m in props.get("媒体", {}).get("multi_select", [])]
                 media_label_val = media_labels[0] if media_labels else None
-                icon_url        = get_media_icon_url(media_label_val) if media_label_val else None
                 patch_body      = {}
                 # 親DB(芸術鑑賞記録DB)の演奏曲アイコンは、リフレッシュで変更しない
                 if media_label_val == "演奏曲":
                     pass
-                elif icon_url:
-                    patch_body["icon"] = {"type": "external", "external": {"url": icon_url}}
+                elif media_label_val:
+                    patch_body["icon"] = get_media_icon_payload(media_label_val)
 
                 # クリエイター名正規化（書籍・漫画・音楽・ゲーム共通）
                 if media_label_val in ("書籍", "漫画", "音楽アルバム", "ゲーム"):
@@ -11792,9 +11846,7 @@ if mode == "データ管理":
                     patch_icon = None
                     if new_media != page_media:
                         patch_props["媒体"] = {"multi_select": [{"name": new_media}]}
-                        icon_url = get_media_icon_url(new_media)
-                        if icon_url:
-                            patch_icon = {"type": "external", "external": {"url": icon_url}}
+                        patch_icon = get_media_icon_payload(new_media)
                     if new_genres != existing_genres:
                         genres_list = [g.strip() for g in re.split(r'[/,、]', new_genres) if g.strip()]
                         patch_props["ジャンル"] = {"multi_select": [{"name": g} for g in genres_list]}
