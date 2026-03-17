@@ -8432,6 +8432,10 @@ if mode == "新規登録":
                     if perf_matches_manual:
                         perf_opts = ["（選択してください）"] + [p["title"] for p in perf_matches_manual]
                         picked_title = st.selectbox("候補", perf_opts, key="mb_manual_perf_pick")
+                        if picked_title != "（選択してください）":
+                            picked_perf_now = perf_matches_manual[perf_opts.index(picked_title) - 1]
+                            st.session_state["mb_manual_perf_last_id"] = picked_perf_now.get("id", "")
+                            st.session_state["mb_manual_perf_last_title"] = picked_perf_now.get("title", "")
                         if picked_title != "（選択してください）" and st.button("🎻 出演を追加", key="mb_manual_perf_add"):
                             picked_perf = perf_matches_manual[perf_opts.index(picked_title) - 1]
                             selected = st.session_state.get("score_perf_selected", [])
@@ -8501,6 +8505,18 @@ if mode == "新規登録":
                                         st.session_state.score_perf_selected_ids = _clean_relation_ids(
                                             [x.get("id") for x in st.session_state.get("score_perf_selected", [])]
                                         )
+                            if not selected_perf_ids:
+                                last_pid = (st.session_state.get("mb_manual_perf_last_id") or "").strip()
+                                last_ptitle = (st.session_state.get("mb_manual_perf_last_title") or "").strip()
+                                if last_pid:
+                                    selected_perf_ids = [last_pid]
+                                    selected = st.session_state.get("score_perf_selected", [])
+                                    if not any((x.get("id") or "") == last_pid for x in selected):
+                                        selected.append({"id": last_pid, "title": last_ptitle})
+                                        st.session_state.score_perf_selected = selected
+                                    st.session_state.score_perf_selected_ids = _clean_relation_ids(
+                                        [x.get("id") for x in st.session_state.get("score_perf_selected", [])]
+                                    )
                             perf_release, perf_watched, perf_rating, perf_location = "", "", "", None
                             suggested_order = 1
                             if selected_perf_ids:
