@@ -6903,7 +6903,7 @@ with st.sidebar:
             st.session_state.app_mode_widget = st.session_state.app_mode
         if "app_mode_widget" not in st.session_state:
             st.session_state.app_mode_widget = st.session_state.get("app_mode", "新規登録")
-        mode = st.radio("モード", ["新規登録", "データ管理", "出演者管理", "自動同期"], key="app_mode_widget")
+        mode = st.radio("モード", ["新規登録", "データ管理", "出演情報管理", "自動同期"], key="app_mode_widget")
         st.session_state.app_mode = mode
         sync_scope = "欠損のみ補填"  # legacy compat
         if mode == "データ管理":
@@ -9763,54 +9763,55 @@ def resolve_needs(notion_ok_now, drive_ok_now):
     return not notion_ok_now, not drive_ok_now
 
 # ============================================================
-# 出演者管理モード
+# 出演情報管理モード
 # ============================================================
-if mode == "出演者管理":
-    st.subheader("👥 出演者管理")
+if mode in ("出演者管理", "出演情報管理"):
+    st.subheader("👥 出演情報管理")
 
-    icon_ops_col1, icon_ops_col2 = st.columns(2)
-    if icon_ops_col1.button("🏳️ 演奏曲DBの作曲家アイコンを更新", key="cast_mode_refresh_score_icons"):
-        with st.spinner("演奏曲DBアイコン更新中..."):
-            icon_stats = refresh_score_db_composer_flag_icons()
-        st.session_state["last_score_icon_stats"] = icon_stats
-        st.session_state["last_score_icon_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if icon_stats.get("error"):
-            st.error(f"❌ {icon_stats.get('error')}")
-        else:
-            st.success(
-                "✅ 更新完了: "
-                f"走査 {icon_stats.get('scanned', 0)} / "
-                f"国旗 {icon_stats.get('flagged', 0)} / "
-                f"媒体アイコン {icon_stats.get('fallback', 0)} / "
-                f"未解決 {icon_stats.get('unresolved', 0)} / "
-                f"スキップ {icon_stats.get('skipped', 0)} / "
-                f"失敗 {icon_stats.get('failed', 0)}"
-            )
-    if st.session_state.get("last_score_icon_stats"):
-        _lis = st.session_state.get("last_score_icon_stats", {})
-        _lit = st.session_state.get("last_score_icon_updated_at", "")
-        if _lis.get("error"):
-            st.caption(f"直近実行（{_lit}）: エラー - {_lis.get('error')}")
-        else:
-            st.caption(
-                f"直近実行（{_lit}）: 走査 {_lis.get('scanned', 0)} / "
-                f"国旗 {_lis.get('flagged', 0)} / 媒体アイコン {_lis.get('fallback', 0)} / "
-                f"未解決 {_lis.get('unresolved', 0)} / スキップ {_lis.get('skipped', 0)} / 失敗 {_lis.get('failed', 0)}"
-            )
+    with st.expander("🏳️ アイコン更新・復旧", expanded=False):
+        icon_ops_col1, icon_ops_col2 = st.columns(2)
+        if icon_ops_col1.button("演奏曲DBの作曲家アイコンを更新", key="cast_mode_refresh_score_icons"):
+            with st.spinner("演奏曲DBアイコン更新中..."):
+                icon_stats = refresh_score_db_composer_flag_icons()
+            st.session_state["last_score_icon_stats"] = icon_stats
+            st.session_state["last_score_icon_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if icon_stats.get("error"):
+                st.error(f"❌ {icon_stats.get('error')}")
+            else:
+                st.success(
+                    "✅ 更新完了: "
+                    f"走査 {icon_stats.get('scanned', 0)} / "
+                    f"国旗 {icon_stats.get('flagged', 0)} / "
+                    f"媒体アイコン {icon_stats.get('fallback', 0)} / "
+                    f"未解決 {icon_stats.get('unresolved', 0)} / "
+                    f"スキップ {icon_stats.get('skipped', 0)} / "
+                    f"失敗 {icon_stats.get('failed', 0)}"
+                )
+        if st.session_state.get("last_score_icon_stats"):
+            _lis = st.session_state.get("last_score_icon_stats", {})
+            _lit = st.session_state.get("last_score_icon_updated_at", "")
+            if _lis.get("error"):
+                st.caption(f"直近実行（{_lit}）: エラー - {_lis.get('error')}")
+            else:
+                st.caption(
+                    f"直近実行（{_lit}）: 走査 {_lis.get('scanned', 0)} / "
+                    f"国旗 {_lis.get('flagged', 0)} / 媒体アイコン {_lis.get('fallback', 0)} / "
+                    f"未解決 {_lis.get('unresolved', 0)} / スキップ {_lis.get('skipped', 0)} / 失敗 {_lis.get('failed', 0)}"
+                )
 
-    if icon_ops_col2.button("🧯 親DBの演奏曲アイコンを復旧", key="cast_mode_restore_parent_score_icons"):
-        with st.spinner("親DBアイコン復旧中..."):
-            restore_stats = restore_parent_score_media_icons()
-        if restore_stats.get("error"):
-            st.error(f"❌ {restore_stats.get('error')}")
-        else:
-            st.success(
-                "✅ 復旧完了: "
-                f"対象 {restore_stats.get('scanned', 0)} / "
-                f"更新 {restore_stats.get('patched', 0)} / "
-                f"スキップ {restore_stats.get('skipped', 0)} / "
-                f"失敗 {restore_stats.get('failed', 0)}"
-            )
+        if icon_ops_col2.button("親DBの演奏曲アイコンを復旧", key="cast_mode_restore_parent_score_icons"):
+            with st.spinner("親DBアイコン復旧中..."):
+                restore_stats = restore_parent_score_media_icons()
+            if restore_stats.get("error"):
+                st.error(f"❌ {restore_stats.get('error')}")
+            else:
+                st.success(
+                    "✅ 復旧完了: "
+                    f"対象 {restore_stats.get('scanned', 0)} / "
+                    f"更新 {restore_stats.get('patched', 0)} / "
+                    f"スキップ {restore_stats.get('skipped', 0)} / "
+                    f"失敗 {restore_stats.get('failed', 0)}"
+                )
 
     with st.expander("🛠 整備・修復メニュー", expanded=False):
         st.caption("不具合対応・整合修復系のボタンをまとめています。")
@@ -10708,7 +10709,7 @@ if mode == "自動同期" and st.session_state.is_running:
                             msg += f" / 失敗 {stats.get('failed', 0)} 件"
                         st.session_state.pending_notice = msg
                         if errs:
-                            st.session_state.pending_warning = "整合修復で一部失敗があります（出演者管理の整合チェックで要確認）"
+                            st.session_state.pending_warning = "整合修復で一部失敗があります（出演情報管理の整合チェックで要確認）"
                     icon_stats = refresh_score_db_composer_flag_icons()
                     if icon_stats.get("error"):
                         st.session_state.pending_warning = f"演奏曲DBアイコン更新をスキップ: {icon_stats.get('error')}"
