@@ -6368,16 +6368,13 @@ def restore_parent_score_media_icons() -> dict:
 
 def emergency_restore_all_media_icons() -> dict:
     """
-    親DB/演奏曲DBのアイコンを媒体アイコンに強制復旧する。
-    黒塗り・不正アイコンが混入した際の緊急復旧用。
+    親DBのアイコンを媒体アイコンに強制復旧する。
+    ※ 演奏曲DBは国旗運用のため、ここでは触らない。
     """
     stats = {
         "parent_scanned": 0,
         "parent_patched": 0,
         "parent_failed": 0,
-        "score_scanned": 0,
-        "score_patched": 0,
-        "score_failed": 0,
     }
 
     # 1) 親DB: 媒体ごとのアイコンに復旧
@@ -6404,29 +6401,6 @@ def emergency_restore_all_media_icons() -> dict:
             stats["parent_patched"] += 1
         else:
             stats["parent_failed"] += 1
-
-    # 2) 演奏曲DB: いったん媒体アイコン(演奏曲)に統一復旧
-    score_icon_url = get_media_icon_url("演奏曲")
-    if score_icon_url and NOTION_SCORE_DB_ID:
-        score_rows = query_notion_database_all(NOTION_SCORE_DB_ID) or []
-        target_score_icon = {"type": "external", "external": {"url": score_icon_url}}
-        for row in score_rows:
-            stats["score_scanned"] += 1
-            row_id = row.get("id")
-            if not row_id:
-                continue
-            if (row.get("icon") or {}) == target_score_icon:
-                continue
-            res = api_request(
-                "patch",
-                f"https://api.notion.com/v1/pages/{row_id}",
-                headers=NOTION_HEADERS,
-                json={"icon": target_score_icon},
-            )
-            if res is not None and res.status_code == 200:
-                stats["score_patched"] += 1
-            else:
-                stats["score_failed"] += 1
 
     return stats
 
@@ -9898,13 +9872,12 @@ if mode in ("出演者管理", "出演情報管理"):
                     f"失敗 {restore_stats.get('failed', 0)}"
                 )
 
-        if icon_ops_col3.button("🆘 黒塗りアイコンを一括復旧", key="cast_mode_emergency_restore_icons"):
-            with st.spinner("親DB/演奏曲DBのアイコンを緊急復旧中..."):
+        if icon_ops_col3.button("🆘 親DBの黒塗りを緊急復旧", key="cast_mode_emergency_restore_icons"):
+            with st.spinner("親DBアイコンを緊急復旧中..."):
                 em_stats = emergency_restore_all_media_icons()
             st.success(
                 "✅ 緊急復旧完了: "
-                f"親DB 更新 {em_stats.get('parent_patched', 0)} / 失敗 {em_stats.get('parent_failed', 0)} ｜ "
-                f"演奏曲DB 更新 {em_stats.get('score_patched', 0)} / 失敗 {em_stats.get('score_failed', 0)}"
+                f"親DB 更新 {em_stats.get('parent_patched', 0)} / 失敗 {em_stats.get('parent_failed', 0)}"
             )
 
     with st.expander("🛠 整備・修復メニュー", expanded=False):
