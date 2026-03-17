@@ -674,10 +674,19 @@ def refresh_drive_files():
     try:
         results = service.files().list(
             q=f"'{DRIVE_FOLDER_ID}' in parents and trashed=false",
-            fields="files(id, name)",
+            fields="files(id, name, modifiedTime)",
+            orderBy="modifiedTime desc",
             pageSize=1000,
         ).execute()
-        st.session_state.drive_files_cache = {f["name"]: f["id"] for f in results.get("files", [])}
+        files = {}
+        for f in (results.get("files", []) or []):
+            nm = (f.get("name") or "").strip()
+            fid = (f.get("id") or "").strip()
+            if not nm or not fid or nm in files:
+                continue
+            # modifiedTime descで取得しているため、同名重複時は最初の1件(最新)を採用
+            files[nm] = fid
+        st.session_state.drive_files_cache = files
         st.session_state.drive_blocked_until = 0
     except Exception as e:
         st.warning(f"Drive一覧取得失敗: {e}")
