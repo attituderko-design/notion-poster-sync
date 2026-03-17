@@ -1,5 +1,6 @@
 import re
 import json
+import tomllib
 import requests
 import time
 import random
@@ -53,7 +54,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.13"
+APP_VERSION = "11.14"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -92,7 +93,12 @@ if isinstance(_custom_icon_secret, str):
     try:
         _custom_icon_secret = json.loads(_custom_icon_secret)
     except Exception:
-        _custom_icon_secret = {}
+        try:
+            # Streamlit Cloudのsecrets UIで inline table 文字列を入れたケースに対応
+            _parsed = tomllib.loads(f"_v = {_custom_icon_secret}")
+            _custom_icon_secret = _parsed.get("_v", {})
+        except Exception:
+            _custom_icon_secret = {}
 if not isinstance(_custom_icon_secret, dict):
     _custom_icon_secret = {}
 MEDIA_ICON_CUSTOM_EMOJI_IDS = {
