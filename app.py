@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.15"
+APP_VERSION = "11.16"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -335,6 +335,26 @@ def get_media_icon_payload(media_label: str) -> dict:
     if payload is None:
         return {"type": "emoji", "emoji": "📁"}
     return payload
+
+def icon_semantically_matches(current_icon: dict | None, target_icon: dict | None) -> bool:
+    """Notionのicon比較を意味ベースで行う（余分な name/url 差分を無視）。"""
+    c = current_icon or {}
+    t = target_icon or {}
+    ct = c.get("type")
+    tt = t.get("type")
+    if ct != tt:
+        return False
+    if tt == "custom_emoji":
+        cid = str(((c.get("custom_emoji") or {}).get("id") or "")).strip()
+        tid = str(((t.get("custom_emoji") or {}).get("id") or "")).strip()
+        return bool(cid and tid and cid == tid)
+    if tt == "emoji":
+        return str(c.get("emoji") or "") == str(t.get("emoji") or "")
+    if tt == "external":
+        curl = str(((c.get("external") or {}).get("url") or "")).strip()
+        turl = str(((t.get("external") or {}).get("url") or "")).strip()
+        return bool(curl and turl and curl == turl)
+    return c == t
 
 def diagnose_media_icon_payloads() -> list[dict]:
     rows = []
@@ -6568,7 +6588,7 @@ def restore_parent_score_media_icons() -> dict:
             stats["skipped"] += 1
             continue
         current_icon = p.get("icon") or {}
-        if current_icon == target_icon:
+        if icon_semantically_matches(current_icon, target_icon):
             stats["skipped"] += 1
             continue
         res = api_request(
@@ -6614,7 +6634,7 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
         if target_icon is None:
             work_items.append((p, media, page_id, None, icon_meta))
             continue
-        if (not force_reapply) and ((p.get("icon") or {}) == target_icon):
+        if (not force_reapply) and icon_semantically_matches((p.get("icon") or {}), target_icon):
             continue
         work_items.append((p, media, page_id, target_icon, icon_meta))
 
