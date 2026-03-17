@@ -10056,6 +10056,28 @@ if mode in ("出演者管理", "出演情報管理"):
             )
             _details = _eis.get("details") or []
             if _details:
+                _updated = [d for d in _details if d.get("status") in ("external_ok", "emoji_fallback")]
+                st.markdown(f"**今回の更新対象:** {len(_updated)} 件")
+                if _updated:
+                    preview_lines = []
+                    for d in _updated[:20]:
+                        status_label = "外部URL" if d.get("status") == "external_ok" else "絵文字暫定"
+                        preview_lines.append(f"- {d.get('title','(無題)')}  [{status_label}]")
+                    st.code("\n".join(preview_lines), language="text")
+                    if len(_updated) > 20:
+                        st.caption(f"※ 先頭20件のみ表示（全{len(_updated)}件）。")
+                try:
+                    _df_export = pd.DataFrame(_details)
+                    _csv_bytes = _df_export.to_csv(index=False).encode("utf-8-sig")
+                    st.download_button(
+                        "📥 緊急復旧の結果CSVをダウンロード",
+                        data=_csv_bytes,
+                        file_name=f"emergency_icon_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        key="download_emergency_icon_restore_csv",
+                    )
+                except Exception:
+                    pass
                 with st.expander("🧾 緊急復旧の処理結果（最新100件）", expanded=False):
                     st.dataframe(_details[:100], use_container_width=True, hide_index=True)
 
