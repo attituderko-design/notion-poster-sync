@@ -10024,7 +10024,7 @@ if mode in ("出演者管理", "出演情報管理"):
             "緊急復旧の一回あたり上限件数",
             min_value=20,
             max_value=500,
-            value=int(st.session_state.get("emergency_icon_restore_limit", 120) or 120),
+            value=int(st.session_state.get("emergency_icon_restore_limit", 500) or 500),
             step=20,
             key="emergency_icon_restore_limit",
             help="固まって見えるのを避けるため、緊急復旧は分割実行できます。",
@@ -10043,6 +10043,20 @@ if mode in ("出演者管理", "出演情報管理"):
             bar_slot2.empty()
             st.success(
                 f"✅ 絵文字復旧完了: 対象 {e2.get('scanned', 0)} / 更新 {e2.get('patched', 0)} / 失敗 {e2.get('failed', 0)}"
+            )
+        if st.button("🧯 今すぐ全件を媒体絵文字で復旧（親DB）", key="cast_mode_force_parent_emoji_restore_500"):
+            progress_slot3 = st.empty()
+            bar_slot3 = st.empty()
+            pbar3 = bar_slot3.progress(0.0)
+            with st.spinner("親DBを媒体絵文字で全件復旧中..."):
+                e3 = force_restore_parent_media_icons_as_emoji(
+                    progress_bar=pbar3,
+                    progress_text=progress_slot3,
+                    limit=500,
+                )
+            bar_slot3.empty()
+            st.success(
+                f"✅ 全件復旧（上限500）: 対象 {e3.get('scanned', 0)} / 更新 {e3.get('patched', 0)} / 失敗 {e3.get('failed', 0)}"
             )
         if st.session_state.get("last_emergency_icon_stats"):
             _eis = st.session_state.get("last_emergency_icon_stats", {})
