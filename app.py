@@ -8414,6 +8414,48 @@ if mode == "新規登録":
 
             st.divider()
             with st.expander("📝 MusicBrainzにない曲を手入力で追加", expanded=False):
+                    if "score_perf_selected" not in st.session_state:
+                        st.session_state.score_perf_selected = []
+                    if "score_perf_selected_ids" not in st.session_state:
+                        st.session_state.score_perf_selected_ids = []
+                    perf_pages_manual = _get_performance_pages()
+                    st.markdown("**出演履歴を関連付け（任意）**")
+                    perf_q_manual = st.text_input(
+                        "公演名で検索",
+                        key="mb_manual_perf_query",
+                        placeholder="例: 定期演奏会",
+                    )
+                    perf_matches_manual = []
+                    if perf_q_manual:
+                        ql = perf_q_manual.strip().lower()
+                        perf_matches_manual = [p for p in perf_pages_manual if ql in (p.get("title") or "").strip().lower()]
+                    if perf_matches_manual:
+                        perf_opts = ["（選択してください）"] + [p["title"] for p in perf_matches_manual]
+                        picked_title = st.selectbox("候補", perf_opts, key="mb_manual_perf_pick")
+                        if picked_title != "（選択してください）" and st.button("🎻 出演を追加", key="mb_manual_perf_add"):
+                            picked_perf = perf_matches_manual[perf_opts.index(picked_title) - 1]
+                            selected = st.session_state.get("score_perf_selected", [])
+                            if not any((x.get("id") or "") == picked_perf["id"] for x in selected):
+                                selected.append({"id": picked_perf["id"], "title": picked_perf["title"]})
+                                st.session_state.score_perf_selected = selected
+                                st.session_state.score_perf_selected_ids = _clean_relation_ids([x.get("id") for x in selected])
+                            st.rerun()
+                    elif perf_q_manual:
+                        st.caption("候補が見つかりませんでした。")
+                    selected_manual = st.session_state.get("score_perf_selected", [])
+                    if selected_manual:
+                        st.caption("✅ 関連付け済み")
+                        for i, rel in enumerate(selected_manual):
+                            c1, c2 = st.columns([4, 1])
+                            c1.write(rel.get("title", ""))
+                            if c2.button("✕", key=f"mb_manual_perf_rm_{i}"):
+                                st.session_state.score_perf_selected = [x for j, x in enumerate(selected_manual) if j != i]
+                                st.session_state.score_perf_selected_ids = _clean_relation_ids(
+                                    [x.get("id") for x in st.session_state.get("score_perf_selected", [])]
+                                )
+                                st.rerun()
+                    st.caption(f"紐付け対象ID: {len(_clean_relation_ids(st.session_state.get('score_perf_selected_ids', [])))} 件")
+                    st.divider()
                     manual_comp_name = st.text_input(
                         "作曲家名（手入力）",
                         key="mb_manual_comp_name",
