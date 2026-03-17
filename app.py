@@ -53,7 +53,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.11"
+APP_VERSION = "11.12"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -263,15 +263,25 @@ def guess_media_icon_custom_ids_from_names(rows: list[dict]) -> dict:
                 break
     return out
 
-def get_media_icon_payload(media_label: str) -> dict:
-    """媒体アイコンのpayload。カスタム絵文字IDがあれば優先、なければ外部URL。"""
+def resolve_media_icon_payload(
+    media_label: str,
+    allow_external_fallback: bool = True,
+    allow_emoji_fallback: bool = True,
+) -> tuple[dict | None, dict]:
+    """媒体アイコンpayloadを解決し、解決メタ情報も返す。"""
     media_label_s = str(media_label or "").strip()
     normalized = MEDIA_LABEL_ALIASES.get(media_label_s, media_label_s)
     if not normalized:
-        return {"type": "emoji", "emoji": "📁"}
+        if allow_emoji_fallback:
+            return {"type": "emoji", "emoji": "📁"}, {"normalized": normalized, "source": "fallback-emoji-default"}
+        return None, {"normalized": normalized, "error": "empty-media-label"}
     explicit_id = MEDIA_ICON_CUSTOM_EMOJI_IDS.get(normalized, "")
     if explicit_id:
-        return {"type": "custom_emoji", "custom_emoji": {"id": explicit_id}}
+        return {"type": "custom_emoji", "custom_emoji": {"id": explicit_id}}, {
+            "normalized": normalized,
+            "source": "custom-emoji-secret",
+            "custom_emoji_id": explicit_id,
+        }
 
     # secrets未設定でも、name一致なら自動解決
     emoji_map = fetch_notion_custom_emoji_name_map()
@@ -287,12 +297,35 @@ def get_media_icon_payload(media_label: str) -> dict:
         ]
         for c in candidates:
             if c and c in emoji_map:
-                return {"type": "custom_emoji", "custom_emoji": {"id": emoji_map[c]}}
+                return {"type": "custom_emoji", "custom_emoji": {"id": emoji_map[c]}}, {
+                    "normalized": normalized,
+                    "source": f"custom-emoji-name:{c}",
+                    "custom_emoji_id": emoji_map[c],
+                }
 
-    icon_url = get_media_icon_url(normalized)
-    if icon_url:
-        return {"type": "external", "external": {"url": icon_url}}
-    return {"type": "emoji", "emoji": get_media_icon_emoji(normalized)}
+    if allow_external_fallback:
+        icon_url = get_media_icon_url(normalized)
+        if icon_url:
+            return {"type": "external", "external": {"url": icon_url}}, {
+                "normalized": normalized,
+                "source": "fallback-external",
+                "external_url": icon_url,
+                "error": "custom-emoji-unresolved",
+            }
+    if allow_emoji_fallback:
+        return {"type": "emoji", "emoji": get_media_icon_emoji(normalized)}, {
+            "normalized": normalized,
+            "source": "fallback-emoji",
+            "error": "custom-emoji-unresolved",
+        }
+    return None, {"normalized": normalized, "error": "custom-emoji-unresolved"}
+
+def get_media_icon_payload(media_label: str) -> dict:
+    """媒体アイコンのpayload。カスタム絵文字IDがあれば優先、なければ外部URL。"""
+    payload, _ = resolve_media_icon_payload(media_label)
+    if payload is None:
+        return {"type": "emoji", "emoji": "📁"}
+    return payload
 
 def diagnose_media_icon_payloads() -> list[dict]:
     rows = []
@@ -6561,13 +6594,20 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
     work_items = []
     for p in parent_pages:
         media = get_page_media(p)
-        target_icon = get_media_icon_payload(media)
+        target_icon, icon_meta = resolve_media_icon_payload(
+            media,
+            allow_external_fallback=False,
+            allow_emoji_fallback=False,
+        )
         page_id = p.get("id")
         if not page_id:
             continue
+        if target_icon is None:
+            work_items.append((p, media, page_id, None, icon_meta))
+            continue
         if (not force_reapply) and ((p.get("icon") or {}) == target_icon):
             continue
-        work_items.append((p, media, page_id, target_icon))
+        work_items.append((p, media, page_id, target_icon, icon_meta))
 
     pending_all = len(work_items)
     if limit and limit > 0:
@@ -6576,7 +6616,7 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
     if progress_bar is not None:
         progress_bar.progress(0.0)
     total_work = len(work_items)
-    for idx, (p, media, page_id, target_icon) in enumerate(work_items, start=1):
+    for idx, (p, media, page_id, target_icon, icon_meta) in enumerate(work_items, start=1):
         stats["parent_scanned"] += 1
         if progress_bar is not None:
             ratio = min(1.0, idx / max(1, total_work))
@@ -6588,6 +6628,17 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
                 f"絵文字暫定 {stats['parent_emoji_fallback']} / "
                 f"失敗 {stats['parent_failed']}"
             )
+        if target_icon is None:
+            stats["parent_failed"] += 1
+            stats["details"].append({
+                "status": "failed-no-custom-emoji",
+                "media": media,
+                "title": get_title(p.get("properties", {}))[0] or get_title(p.get("properties", {}))[1] or "(無題)",
+                "page_id": page_id,
+                "reason": icon_meta.get("error", "custom-emoji-unresolved"),
+                "normalized": icon_meta.get("normalized", ""),
+            })
+            continue
         res = api_request(
             "patch",
             f"https://api.notion.com/v1/pages/{page_id}",
@@ -6604,32 +6655,23 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
                 "page_id": page_id,
             })
         else:
-            # 緊急時のみ: 外部URLが失敗したページは絵文字で暫定復旧
-            fallback_emoji = get_media_icon_emoji(media)
-            if fallback_emoji:
-                res2 = api_request(
-                    "patch",
-                    f"https://api.notion.com/v1/pages/{page_id}",
-                    headers=NOTION_HEADERS,
-                    json={"icon": {"type": "emoji", "emoji": fallback_emoji}},
-                )
-                if res2 is not None and res2.status_code == 200:
-                    stats["parent_emoji_fallback"] += 1
-                    stats["details"].append({
-                        "status": "emoji_fallback",
-                        "media": media,
-                        "title": get_title(p.get("properties", {}))[0] or get_title(p.get("properties", {}))[1] or "(無題)",
-                        "page_id": page_id,
-                        "external_status": getattr(res, "status_code", None) if res is not None else None,
-                    })
-                    continue
             stats["parent_failed"] += 1
+            err_text = ""
+            if res is not None:
+                try:
+                    body = res.json() or {}
+                    err_text = body.get("message", "") or body.get("code", "")
+                except Exception:
+                    err_text = (res.text or "")[:180]
             stats["details"].append({
                 "status": "failed",
                 "media": media,
                 "title": get_title(p.get("properties", {}))[0] or get_title(p.get("properties", {}))[1] or "(無題)",
                 "page_id": page_id,
-                "external_status": getattr(res, "status_code", None) if res is not None else None,
+                "status_code": getattr(res, "status_code", None) if res is not None else None,
+                "reason": err_text,
+                "normalized": icon_meta.get("normalized", ""),
+                "custom_emoji_id": (target_icon.get("custom_emoji") or {}).get("id") if isinstance(target_icon, dict) else "",
             })
 
     stats["limit"] = limit
