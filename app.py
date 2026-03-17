@@ -53,7 +53,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.09"
+APP_VERSION = "11.10"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -227,6 +227,11 @@ def fetch_notion_custom_emoji_rows_debug() -> tuple[list[dict], str]:
 
         rows = list(rows_map.values())
         rows.sort(key=lambda x: (x.get("name") or "").lower())
+        if not rows:
+            return [], (
+                "custom_emoji が1件も見つかりませんでした。"
+                "（/v1/search で取得できるのは、ページアイコンとして実際に使用中のカスタム絵文字のみです）"
+            )
         return rows, ""
     except Exception as ex:
         return [], f"例外: {ex}"
@@ -10278,6 +10283,11 @@ if mode in ("出演者管理", "出演情報管理"):
                 st.warning("⚠️ カスタム絵文字一覧を取得できませんでした。")
                 if err_detail:
                     st.caption(f"取得失敗理由: {err_detail}")
+                else:
+                    st.caption("取得失敗理由: 不明（API応答はあるが custom_emoji が検出できませんでした）")
+                hint = str(st.session_state.get("api_connection_error_hint") or "").strip()
+                if hint:
+                    st.caption(hint)
             else:
                 st.success(f"✅ 取得: {len(rows)} 件")
                 st.dataframe(rows, use_container_width=True, hide_index=True)
