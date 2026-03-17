@@ -6188,13 +6188,40 @@ def sync_score_country_master_relations(dry_run: bool = True, fill_only_empty: b
         stats["error"] = "NOTION_COUNTRY_MASTER_DB_ID 未設定"
         return stats
 
-    score_type_map = get_notion_db_property_types(NOTION_SCORE_DB_ID)
-    master_type_map = get_notion_db_property_types(NOTION_COUNTRY_MASTER_DB_ID)
+    def _extract_dbid(raw: str) -> str:
+        s = (raw or "").strip()
+        m = re.search(r"([0-9a-fA-F]{32})", s)
+        return m.group(1) if m else s
+
+    def _fetch_db_types_verbose(database_id: str) -> tuple[dict, str]:
+        did = _extract_dbid(database_id)
+        if not did:
+            return {}, "DB IDが空です"
+        res = api_request("get", f"https://api.notion.com/v1/databases/{did}", headers=NOTION_HEADERS)
+        if res is None:
+            return {}, "Notion応答なし（接続エラー）"
+        if res.status_code != 200:
+            msg = ""
+            try:
+                body = res.json() or {}
+                msg = (body.get("message") or body.get("code") or "").strip()
+            except Exception:
+                msg = (res.text or "").strip()
+            msg = (msg[:220] + "...") if len(msg) > 220 else msg
+            return {}, f"Notion {res.status_code}" + (f" / {msg}" if msg else "")
+        props = (res.json() or {}).get("properties", {}) or {}
+        type_map = {name: (meta.get("type") if isinstance(meta, dict) else None) for name, meta in props.items()}
+        return type_map, ""
+
+    score_db_id = _extract_dbid(NOTION_SCORE_DB_ID)
+    master_db_id = _extract_dbid(NOTION_COUNTRY_MASTER_DB_ID)
+    score_type_map, score_err = _fetch_db_types_verbose(score_db_id)
+    master_type_map, master_err = _fetch_db_types_verbose(master_db_id)
     if not score_type_map:
-        stats["error"] = "演奏曲DBのプロパティ取得失敗"
+        stats["error"] = "演奏曲DBのプロパティ取得失敗" + (f"（{score_err}）" if score_err else "")
         return stats
     if not master_type_map:
-        stats["error"] = "国名マスタのプロパティ取得失敗"
+        stats["error"] = "国名マスタのプロパティ取得失敗" + (f"（{master_err}）" if master_err else "")
         return stats
 
     relation_candidates = ["国名マスタ", "CountryMaster", "Country Master", "国マスタ"]
@@ -6238,7 +6265,7 @@ def sync_score_country_master_relations(dry_run: bool = True, fill_only_empty: b
                 return plain_text_join((roll.get("rich_text") or []))
         return ""
 
-    master_rows = query_notion_database_all(NOTION_COUNTRY_MASTER_DB_ID)
+    master_rows = query_notion_database_all(master_db_id)
     code_to_master_id = {}
     for row in master_rows:
         rid = row.get("id")
@@ -6252,7 +6279,7 @@ def sync_score_country_master_relations(dry_run: bool = True, fill_only_empty: b
         stats["error"] = "国名マスタに有効な国コードデータがありません"
         return stats
 
-    score_rows = query_notion_database_all(NOTION_SCORE_DB_ID)
+    score_rows = query_notion_database_all(score_db_id)
     for row in score_rows:
         stats["scanned"] += 1
         row_id = row.get("id")
