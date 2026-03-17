@@ -8041,7 +8041,11 @@ if mode == "新規登録":
                                             # 演奏曲DB / 楽曲別担当者DB 連動
                                             if NOTION_SCORE_DB_ID:
                                                 perf_date = item.get("watched") or item.get("release") or ""
-                                                selected_scores_for_link = [{"id": created_id, "title": item.get("jp_title", "")}]
+                                                selected_scores_for_link = [{
+                                                    "id": created_id,
+                                                    "title": item.get("jp_title", ""),
+                                                    "composer": ((item.get("details") or {}).get("director") or "").strip(),
+                                                }]
                                                 score_pages_for_link = _get_score_pages()
                                                 for perf_id in rel_ids:
                                                     perf_page = _get_page_from_state_or_api(perf_id) or {}

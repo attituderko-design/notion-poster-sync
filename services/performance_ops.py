@@ -189,11 +189,15 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
                     code_to_master_id[cc] = rid
 
     title_to_id = {}
+    title_to_composer = {}
     for s in (selected_scores or []):
         t = (s.get("title") or "").strip().lower()
         sid = s.get("id")
+        scomp = (s.get("composer") or "").strip()
         if t and sid and t not in title_to_id:
             title_to_id[t] = sid
+        if t and scomp and t not in title_to_composer:
+            title_to_composer[t] = scomp
 
     created, failed = 0, 0
     failure_reasons = []
@@ -230,6 +234,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
             row_order = order
         part = (item.get("part") or "").strip()
         played = bool(item.get("played", False) or part)
+        composer_name = (item.get("composer") or "").strip() or title_to_composer.get(song_title.lower(), "")
         if section not in ("幕前", "ロビー", "本編", "Encore", "ソリストEncore"):
             section = "本編"
         if section_allowed and section not in section_allowed:
@@ -262,7 +267,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
         icon_payload = None
         resolved_cc = ""
         if callable(country_code_to_flag) and callable(get_composer_country_code):
-            composer_name = ""
+            composer_name = composer_name or ""
             src_props = {}
             if score_id:
                 if score_id not in score_page_cache:
@@ -274,7 +279,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
                     score_page_cache[score_id] = pres.json() if (pres is not None and pres.status_code == 200) else {}
                 src_props = ((score_page_cache.get(score_id) or {}).get("properties") or {})
                 rt = ((src_props.get("クリエイター") or {}).get("rich_text") or [])
-                composer_name = "".join([(t.get("plain_text") or "") for t in rt]).strip()
+                composer_name = "".join([(t.get("plain_text") or "") for t in rt]).strip() or composer_name
                 if code_prop:
                     resolved_cc = _norm_cc(_prop_text(src_props.get(code_prop)))
                 if creator_prop and composer_name:
