@@ -36,6 +36,7 @@ NOTION_PERFORMER_DB_ID = st.secrets.get("NOTION_PERFORMER_DB_ID", "")
 NOTION_PERFORMANCE_CAST_DB_ID = st.secrets.get("NOTION_PERFORMANCE_CAST_DB_ID", st.secrets.get("NOTION_ASSIGNMENT_DB_ID", ""))
 NOTION_SONG_ASSIGN_DB_ID = st.secrets.get("NOTION_SONG_ASSIGN_DB_ID", "")
 NOTION_PERFORMER_MASTER_DB_ID = st.secrets.get("NOTION_PERFORMER_MASTER_DB_ID", "")
+NOTION_COUNTRY_MASTER_DB_ID = st.secrets.get("NOTION_COUNTRY_MASTER_DB_ID", "")
 NOTION_GAME_JP_DICT_DB_ID = st.secrets.get("NOTION_GAME_JP_DICT_DB_ID", "3234532d7d5680639809cb0d2a5da940")
 DEFAULT_PERFORMER_NAME = st.secrets.get("DEFAULT_PERFORMER_NAME", "")
 TMDB_API_KEY         = st.secrets["TMDB_API_KEY"]
@@ -6167,6 +6168,132 @@ def backfill_score_db_country_codes(dry_run: bool = True, fill_only_empty: bool 
     return stats
 
 
+def sync_score_country_master_relations(dry_run: bool = True, fill_only_empty: bool = True) -> dict:
+    """演奏曲DBの国コードをキーに、国名マスタRelationを自動紐付けする。"""
+    stats = {
+        "scanned": 0,
+        "candidates": 0,
+        "linked": 0,
+        "already": 0,
+        "no_code": 0,
+        "no_master": 0,
+        "skipped": 0,
+        "failed": 0,
+        "dry_run": bool(dry_run),
+    }
+    if not NOTION_SCORE_DB_ID:
+        stats["error"] = "NOTION_SCORE_DB_ID 未設定"
+        return stats
+    if not NOTION_COUNTRY_MASTER_DB_ID:
+        stats["error"] = "NOTION_COUNTRY_MASTER_DB_ID 未設定"
+        return stats
+
+    score_type_map = get_notion_db_property_types(NOTION_SCORE_DB_ID)
+    master_type_map = get_notion_db_property_types(NOTION_COUNTRY_MASTER_DB_ID)
+    if not score_type_map:
+        stats["error"] = "演奏曲DBのプロパティ取得失敗"
+        return stats
+    if not master_type_map:
+        stats["error"] = "国名マスタのプロパティ取得失敗"
+        return stats
+
+    relation_candidates = ["国名マスタ", "CountryMaster", "Country Master", "国マスタ"]
+    relation_prop = next((k for k in relation_candidates if score_type_map.get(k) == "relation"), None)
+    if not relation_prop:
+        relation_prop = next(
+            (k for k, v in score_type_map.items() if v == "relation" and ("国" in k or "country" in k.lower())),
+            None,
+        )
+    if not relation_prop:
+        stats["error"] = "演奏曲DBに国名マスタ用Relation列が見つかりません"
+        return stats
+
+    code_prop_candidates = ["国コード", "CountryCode", "country_code"]
+    score_code_prop = next((k for k in code_prop_candidates if k in score_type_map), None)
+    master_code_prop = next((k for k in code_prop_candidates if k in master_type_map), None)
+    if not score_code_prop:
+        stats["error"] = "演奏曲DBの国コード列が見つかりません"
+        return stats
+    if not master_code_prop:
+        stats["error"] = "国名マスタの国コード列が見つかりません"
+        return stats
+
+    def _text_from_prop(meta: dict | None) -> str:
+        if not isinstance(meta, dict):
+            return ""
+        ptype = meta.get("type")
+        if ptype == "rich_text":
+            return plain_text_join(meta.get("rich_text", []))
+        if ptype == "title":
+            return plain_text_join(meta.get("title", []))
+        if ptype == "select":
+            return ((meta.get("select") or {}).get("name") or "").strip()
+        if ptype == "multi_select":
+            vals = [((x or {}).get("name") or "").strip() for x in (meta.get("multi_select") or [])]
+            return vals[0] if vals else ""
+        if ptype == "rollup":
+            roll = meta.get("rollup") or {}
+            rtype = roll.get("type")
+            if rtype == "rich_text":
+                return plain_text_join((roll.get("rich_text") or []))
+        return ""
+
+    master_rows = query_notion_database_all(NOTION_COUNTRY_MASTER_DB_ID)
+    code_to_master_id = {}
+    for row in master_rows:
+        rid = row.get("id")
+        if not rid:
+            continue
+        cc = normalize_country_code_for_flag(_text_from_prop((row.get("properties") or {}).get(master_code_prop)))
+        if cc and cc not in code_to_master_id:
+            code_to_master_id[cc] = rid
+
+    if not code_to_master_id:
+        stats["error"] = "国名マスタに有効な国コードデータがありません"
+        return stats
+
+    score_rows = query_notion_database_all(NOTION_SCORE_DB_ID)
+    for row in score_rows:
+        stats["scanned"] += 1
+        row_id = row.get("id")
+        props = (row.get("properties") or {})
+        if not row_id:
+            stats["skipped"] += 1
+            continue
+        cc = normalize_country_code_for_flag(_text_from_prop(props.get(score_code_prop)))
+        if not cc:
+            stats["no_code"] += 1
+            stats["skipped"] += 1
+            continue
+        target_id = code_to_master_id.get(cc)
+        if not target_id:
+            stats["no_master"] += 1
+            stats["skipped"] += 1
+            continue
+        stats["candidates"] += 1
+        existing = [r.get("id") for r in ((props.get(relation_prop) or {}).get("relation") or []) if r.get("id")]
+        if target_id in existing and len(existing) == 1:
+            stats["already"] += 1
+            stats["skipped"] += 1
+            continue
+        if fill_only_empty and existing:
+            stats["skipped"] += 1
+            continue
+        if dry_run:
+            continue
+        res = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{row_id}",
+            headers=NOTION_HEADERS,
+            json={"properties": {relation_prop: {"relation": [{"id": target_id}]}}},
+        )
+        if res is not None and res.status_code == 200:
+            stats["linked"] += 1
+        else:
+            stats["failed"] += 1
+    return stats
+
+
 def restore_parent_score_media_icons() -> dict:
     """親DB(芸術鑑賞記録DB)の媒体=演奏曲アイコンを媒体アイコンへ戻す。"""
     stats = {"scanned": 0, "patched": 0, "skipped": 0, "failed": 0}
@@ -9706,6 +9833,58 @@ if mode == "出演者管理":
                 f"更新 {_lcs.get('filled', 0)} / 候補 {_lcs.get('candidates', 0)} / "
                 f"既入力 {_lcs.get('has_code', 0)} / 未解決 {_lcs.get('unresolved', 0)} / "
                 f"失敗 {_lcs.get('failed', 0)}"
+            )
+
+    rel_ops_col1, rel_ops_col2 = st.columns(2)
+    if rel_ops_col1.button("🧪 国名マスタ紐付けを診断（Dry Run）", key="cast_mode_country_rel_sync_dry"):
+        with st.spinner("国名マスタとの紐付け候補を診断中..."):
+            rel_stats = sync_score_country_master_relations(dry_run=True, fill_only_empty=True)
+        st.session_state["last_score_country_rel_sync_stats"] = rel_stats
+        st.session_state["last_score_country_rel_sync_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if rel_stats.get("error"):
+            st.error(f"❌ {rel_stats.get('error')}")
+        else:
+            st.info(
+                "診断結果: "
+                f"走査 {rel_stats.get('scanned', 0)} / "
+                f"候補 {rel_stats.get('candidates', 0)} / "
+                f"既紐付け {rel_stats.get('already', 0)} / "
+                f"国コードなし {rel_stats.get('no_code', 0)} / "
+                f"マスタ未一致 {rel_stats.get('no_master', 0)} / "
+                f"スキップ {rel_stats.get('skipped', 0)}"
+            )
+
+    if rel_ops_col2.button("🔗 国名マスタを自動紐付け", key="cast_mode_country_rel_sync_apply"):
+        with st.spinner("国名マスタとの紐付けを反映中..."):
+            rel_stats = sync_score_country_master_relations(dry_run=False, fill_only_empty=True)
+        st.session_state["last_score_country_rel_sync_stats"] = rel_stats
+        st.session_state["last_score_country_rel_sync_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if rel_stats.get("error"):
+            st.error(f"❌ {rel_stats.get('error')}")
+        else:
+            st.success(
+                "✅ 国名マスタ紐付け完了: "
+                f"走査 {rel_stats.get('scanned', 0)} / "
+                f"更新 {rel_stats.get('linked', 0)} / "
+                f"候補 {rel_stats.get('candidates', 0)} / "
+                f"既紐付け {rel_stats.get('already', 0)} / "
+                f"国コードなし {rel_stats.get('no_code', 0)} / "
+                f"マスタ未一致 {rel_stats.get('no_master', 0)} / "
+                f"失敗 {rel_stats.get('failed', 0)}"
+            )
+
+    if st.session_state.get("last_score_country_rel_sync_stats"):
+        _lrs = st.session_state.get("last_score_country_rel_sync_stats", {})
+        _lrt = st.session_state.get("last_score_country_rel_sync_at", "")
+        mode_text = "Dry Run" if _lrs.get("dry_run") else "適用"
+        if _lrs.get("error"):
+            st.caption(f"直近の国名マスタ紐付け（{_lrt} / {mode_text}）: エラー - {_lrs.get('error')}")
+        else:
+            st.caption(
+                f"直近の国名マスタ紐付け（{_lrt} / {mode_text}）: 走査 {_lrs.get('scanned', 0)} / "
+                f"更新 {_lrs.get('linked', 0)} / 候補 {_lrs.get('candidates', 0)} / "
+                f"既紐付け {_lrs.get('already', 0)} / 国コードなし {_lrs.get('no_code', 0)} / "
+                f"マスタ未一致 {_lrs.get('no_master', 0)} / 失敗 {_lrs.get('failed', 0)}"
             )
 
     with st.expander("🧪 出演データのつながりを自動で整える", expanded=False):
