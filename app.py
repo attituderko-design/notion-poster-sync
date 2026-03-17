@@ -6371,7 +6371,7 @@ def restore_parent_score_media_icons() -> dict:
     return stats
 
 
-def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, limit: int = 120) -> dict:
+def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, limit: int = 120, force_reapply: bool = False) -> dict:
     """
     親DBのアイコンを媒体アイコンに強制復旧する。
     ※ 演奏曲DBは国旗運用のため、ここでは触らない。
@@ -6397,7 +6397,7 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
         if not page_id:
             continue
         target_icon = {"type": "external", "external": {"url": icon_url}}
-        if (p.get("icon") or {}) == target_icon:
+        if (not force_reapply) and ((p.get("icon") or {}) == target_icon):
             continue
         work_items.append((p, media, page_id, target_icon))
 
@@ -6476,6 +6476,42 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
             f"絵文字暫定 {stats['parent_emoji_fallback']} / "
             f"失敗 {stats['parent_failed']}"
         )
+    return stats
+
+def force_restore_parent_media_icons_as_emoji(progress_bar=None, progress_text=None, limit: int = 120) -> dict:
+    """親DBを媒体絵文字で強制復旧（外部URLが視覚的に壊れている時の最終手段）。"""
+    stats = {"scanned": 0, "patched": 0, "failed": 0, "total_in_db": 0}
+    parent_pages = query_notion_database_all(NOTION_DB_ID) or []
+    stats["total_in_db"] = len(parent_pages)
+    work = []
+    for p in parent_pages:
+        media = get_page_media(p)
+        emoji = get_media_icon_emoji(media)
+        page_id = p.get("id")
+        if not (emoji and page_id):
+            continue
+        work.append((p, media, page_id, emoji))
+    if limit and limit > 0:
+        work = work[:limit]
+    total = len(work)
+    if progress_bar is not None:
+        progress_bar.progress(0.0)
+    for idx, (p, media, page_id, emoji) in enumerate(work, start=1):
+        stats["scanned"] += 1
+        if progress_bar is not None:
+            progress_bar.progress(min(1.0, idx / max(1, total)))
+        if progress_text is not None:
+            progress_text.caption(f"絵文字復旧中... {idx}/{total}")
+        res = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{page_id}",
+            headers=NOTION_HEADERS,
+            json={"icon": {"type": "emoji", "emoji": emoji}},
+        )
+        if res is not None and res.status_code == 200:
+            stats["patched"] += 1
+        else:
+            stats["failed"] += 1
     return stats
 
 def migrate_drive_cover_urls(pages: list[dict]) -> dict:
@@ -9948,6 +9984,7 @@ if mode in ("出演者管理", "出演情報管理"):
 
         if icon_ops_col3.button("🆘 親DBの黒塗りを緊急復旧", key="cast_mode_emergency_restore_icons"):
             emergency_limit = int(st.session_state.get("emergency_icon_restore_limit", 120) or 120)
+            force_reapply = bool(st.session_state.get("emergency_icon_force_reapply", True))
             progress_slot = st.empty()
             bar_slot = st.empty()
             pbar = bar_slot.progress(0.0)
@@ -9956,6 +9993,7 @@ if mode in ("出演者管理", "出演情報管理"):
                     progress_bar=pbar,
                     progress_text=progress_slot,
                     limit=emergency_limit,
+                    force_reapply=force_reapply,
                 )
             bar_slot.empty()
             st.session_state["last_emergency_icon_stats"] = em_stats
@@ -9976,6 +10014,12 @@ if mode in ("出演者管理", "出演情報管理"):
                     f"（未復旧 {em_stats.get('pending_total', 0)} 件）"
                     " 必要なら再実行してください。"
                 )
+        st.checkbox(
+            "緊急復旧時に同一URLでも強制再適用する",
+            value=bool(st.session_state.get("emergency_icon_force_reapply", True)),
+            key="emergency_icon_force_reapply",
+            help="見た目だけ黒塗りのケースに対応するため、既に同じURLでもPATCHを送ります。",
+        )
         st.number_input(
             "緊急復旧の一回あたり上限件数",
             min_value=20,
@@ -9985,6 +10029,21 @@ if mode in ("出演者管理", "出演情報管理"):
             key="emergency_icon_restore_limit",
             help="固まって見えるのを避けるため、緊急復旧は分割実行できます。",
         )
+        if st.button("🧯 親DBを媒体絵文字で強制復旧（最終手段）", key="cast_mode_force_parent_emoji_restore"):
+            emergency_limit = int(st.session_state.get("emergency_icon_restore_limit", 120) or 120)
+            progress_slot2 = st.empty()
+            bar_slot2 = st.empty()
+            pbar2 = bar_slot2.progress(0.0)
+            with st.spinner("親DBを媒体絵文字で強制復旧中..."):
+                e2 = force_restore_parent_media_icons_as_emoji(
+                    progress_bar=pbar2,
+                    progress_text=progress_slot2,
+                    limit=emergency_limit,
+                )
+            bar_slot2.empty()
+            st.success(
+                f"✅ 絵文字復旧完了: 対象 {e2.get('scanned', 0)} / 更新 {e2.get('patched', 0)} / 失敗 {e2.get('failed', 0)}"
+            )
         if st.session_state.get("last_emergency_icon_stats"):
             _eis = st.session_state.get("last_emergency_icon_stats", {})
             _eit = st.session_state.get("last_emergency_icon_updated_at", "")
