@@ -53,7 +53,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.10"
+APP_VERSION = "11.11"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -265,7 +265,10 @@ def guess_media_icon_custom_ids_from_names(rows: list[dict]) -> dict:
 
 def get_media_icon_payload(media_label: str) -> dict:
     """媒体アイコンのpayload。カスタム絵文字IDがあれば優先、なければ外部URL。"""
-    normalized = MEDIA_LABEL_ALIASES.get(media_label, media_label)
+    media_label_s = str(media_label or "").strip()
+    normalized = MEDIA_LABEL_ALIASES.get(media_label_s, media_label_s)
+    if not normalized:
+        return {"type": "emoji", "emoji": "📁"}
     explicit_id = MEDIA_ICON_CUSTOM_EMOJI_IDS.get(normalized, "")
     if explicit_id:
         return {"type": "custom_emoji", "custom_emoji": {"id": explicit_id}}
