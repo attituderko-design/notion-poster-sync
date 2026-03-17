@@ -6384,38 +6384,42 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
         "details": [],
     }
 
-    # 1) 親DB: 媒体ごとのアイコンに復旧（長時間化を避けるため件数上限あり）
+    # 1) 親DB: 媒体ごとのアイコンに復旧（未復旧分のみを抽出→上限件数だけ実行）
     parent_pages = query_notion_database_all(NOTION_DB_ID) or []
     total_pages = len(parent_pages)
-    if progress_bar is not None:
-        progress_bar.progress(0.0)
-    processed = 0
+    work_items = []
     for p in parent_pages:
-        if limit and stats["parent_scanned"] >= limit:
-            break
         media = get_page_media(p)
         icon_url = get_media_icon_url(media)
         if not icon_url:
             continue
-        stats["parent_scanned"] += 1
-        processed += 1
-        if progress_bar is not None:
-            # 実処理対象ベースで進捗更新
-            ratio = min(1.0, processed / max(1, min(total_pages, limit)))
-            progress_bar.progress(ratio)
-        if progress_text is not None:
-            progress_text.caption(
-                f"処理中... 対象 {stats['parent_scanned']} 件 / "
-                f"外部URL更新 {stats['parent_patched']} / "
-                f"絵文字暫定 {stats['parent_emoji_fallback']} / "
-                f"失敗 {stats['parent_failed']}"
-            )
         page_id = p.get("id")
         if not page_id:
             continue
         target_icon = {"type": "external", "external": {"url": icon_url}}
         if (p.get("icon") or {}) == target_icon:
             continue
+        work_items.append((p, media, page_id, target_icon))
+
+    pending_all = len(work_items)
+    if limit and limit > 0:
+        work_items = work_items[:limit]
+
+    if progress_bar is not None:
+        progress_bar.progress(0.0)
+    total_work = len(work_items)
+    for idx, (p, media, page_id, target_icon) in enumerate(work_items, start=1):
+        stats["parent_scanned"] += 1
+        if progress_bar is not None:
+            ratio = min(1.0, idx / max(1, total_work))
+            progress_bar.progress(ratio)
+        if progress_text is not None:
+            progress_text.caption(
+                f"処理中... 対象 {stats['parent_scanned']} / {total_work} 件 / "
+                f"外部URL更新 {stats['parent_patched']} / "
+                f"絵文字暫定 {stats['parent_emoji_fallback']} / "
+                f"失敗 {stats['parent_failed']}"
+            )
         res = api_request(
             "patch",
             f"https://api.notion.com/v1/pages/{page_id}",
@@ -6461,6 +6465,8 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
 
     stats["limit"] = limit
     stats["total_in_db"] = total_pages
+    stats["pending_before_run"] = len(work_items)
+    stats["pending_total"] = pending_all
     if progress_bar is not None:
         progress_bar.progress(1.0)
     if progress_text is not None:
@@ -9960,10 +9966,14 @@ if mode in ("出演者管理", "出演情報管理"):
                 f"絵文字暫定 {em_stats.get('parent_emoji_fallback', 0)} / "
                 f"失敗 {em_stats.get('parent_failed', 0)}"
             )
-            if em_stats.get("total_in_db", 0) > em_stats.get("parent_scanned", 0):
+            st.caption(
+                f"未復旧件数（実行前）: {em_stats.get('pending_total', 0)} 件 / "
+                f"今回処理: {em_stats.get('parent_scanned', 0)} 件"
+            )
+            if em_stats.get("pending_total", 0) > em_stats.get("parent_scanned", 0):
                 st.info(
                     f"ℹ️ 一度に処理する上限 {em_stats.get('limit', 120)} 件で実行しました。"
-                    f"（DB全体 {em_stats.get('total_in_db', 0)} 件）"
+                    f"（未復旧 {em_stats.get('pending_total', 0)} 件）"
                     " 必要なら再実行してください。"
                 )
         st.number_input(
