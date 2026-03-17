@@ -132,6 +132,8 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
         return 0, 0, "演奏曲DBのプロパティ取得失敗（Integration接続/DB IDを確認）", []
     code_prop_candidates = ["国コード", "CountryCode", "country_code"]
     code_prop = next((k for k in code_prop_candidates if type_map.get(k) in ("rich_text", "title", "select", "multi_select")), None)
+    creator_prop_candidates = ["クリエイター", "Creator", "作曲家"]
+    creator_prop = next((k for k in creator_prop_candidates if type_map.get(k) in ("rich_text", "title", "select", "multi_select")), None)
     country_master_rel_prop = next(
         (k for k in ["国名マスタ", "CountryMaster", "Country Master", "国マスタ"] if type_map.get(k) == "relation"),
         None,
@@ -275,6 +277,8 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
                 composer_name = "".join([(t.get("plain_text") or "") for t in rt]).strip()
                 if code_prop:
                     resolved_cc = _norm_cc(_prop_text(src_props.get(code_prop)))
+                if creator_prop and composer_name:
+                    put_notion_prop(props, type_map, creator_prop, composer_name)
             if composer_name:
                 resolved_cc = _norm_cc(get_composer_country_code(composer_name) or resolved_cc or "")
                 flag = country_code_to_flag(resolved_cc) if resolved_cc else ""
