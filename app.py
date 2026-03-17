@@ -6371,7 +6371,7 @@ def restore_parent_score_media_icons() -> dict:
     return stats
 
 
-def emergency_restore_all_media_icons() -> dict:
+def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, limit: int = 120) -> dict:
     """
     親DBのアイコンを媒体アイコンに強制復旧する。
     ※ 演奏曲DBは国旗運用のため、ここでは触らない。
@@ -6384,14 +6384,32 @@ def emergency_restore_all_media_icons() -> dict:
         "details": [],
     }
 
-    # 1) 親DB: 媒体ごとのアイコンに復旧
+    # 1) 親DB: 媒体ごとのアイコンに復旧（長時間化を避けるため件数上限あり）
     parent_pages = query_notion_database_all(NOTION_DB_ID) or []
+    total_pages = len(parent_pages)
+    if progress_bar is not None:
+        progress_bar.progress(0.0)
+    processed = 0
     for p in parent_pages:
+        if limit and stats["parent_scanned"] >= limit:
+            break
         media = get_page_media(p)
         icon_url = get_media_icon_url(media)
         if not icon_url:
             continue
         stats["parent_scanned"] += 1
+        processed += 1
+        if progress_bar is not None:
+            # 実処理対象ベースで進捗更新
+            ratio = min(1.0, processed / max(1, min(total_pages, limit)))
+            progress_bar.progress(ratio)
+        if progress_text is not None:
+            progress_text.caption(
+                f"処理中... 対象 {stats['parent_scanned']} 件 / "
+                f"外部URL更新 {stats['parent_patched']} / "
+                f"絵文字暫定 {stats['parent_emoji_fallback']} / "
+                f"失敗 {stats['parent_failed']}"
+            )
         page_id = p.get("id")
         if not page_id:
             continue
@@ -6441,6 +6459,17 @@ def emergency_restore_all_media_icons() -> dict:
                 "external_status": getattr(res, "status_code", None) if res is not None else None,
             })
 
+    stats["limit"] = limit
+    stats["total_in_db"] = total_pages
+    if progress_bar is not None:
+        progress_bar.progress(1.0)
+    if progress_text is not None:
+        progress_text.caption(
+            f"完了: 対象 {stats['parent_scanned']} 件 / "
+            f"外部URL更新 {stats['parent_patched']} / "
+            f"絵文字暫定 {stats['parent_emoji_fallback']} / "
+            f"失敗 {stats['parent_failed']}"
+        )
     return stats
 
 def migrate_drive_cover_urls(pages: list[dict]) -> dict:
@@ -9912,8 +9941,17 @@ if mode in ("出演者管理", "出演情報管理"):
                 )
 
         if icon_ops_col3.button("🆘 親DBの黒塗りを緊急復旧", key="cast_mode_emergency_restore_icons"):
+            emergency_limit = int(st.session_state.get("emergency_icon_restore_limit", 120) or 120)
+            progress_slot = st.empty()
+            bar_slot = st.empty()
+            pbar = bar_slot.progress(0.0)
             with st.spinner("親DBアイコンを緊急復旧中..."):
-                em_stats = emergency_restore_all_media_icons()
+                em_stats = emergency_restore_all_media_icons(
+                    progress_bar=pbar,
+                    progress_text=progress_slot,
+                    limit=emergency_limit,
+                )
+            bar_slot.empty()
             st.session_state["last_emergency_icon_stats"] = em_stats
             st.session_state["last_emergency_icon_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.success(
@@ -9922,6 +9960,21 @@ if mode in ("出演者管理", "出演情報管理"):
                 f"絵文字暫定 {em_stats.get('parent_emoji_fallback', 0)} / "
                 f"失敗 {em_stats.get('parent_failed', 0)}"
             )
+            if em_stats.get("total_in_db", 0) > em_stats.get("parent_scanned", 0):
+                st.info(
+                    f"ℹ️ 一度に処理する上限 {em_stats.get('limit', 120)} 件で実行しました。"
+                    f"（DB全体 {em_stats.get('total_in_db', 0)} 件）"
+                    " 必要なら再実行してください。"
+                )
+        st.number_input(
+            "緊急復旧の一回あたり上限件数",
+            min_value=20,
+            max_value=500,
+            value=int(st.session_state.get("emergency_icon_restore_limit", 120) or 120),
+            step=20,
+            key="emergency_icon_restore_limit",
+            help="固まって見えるのを避けるため、緊急復旧は分割実行できます。",
+        )
         if st.session_state.get("last_emergency_icon_stats"):
             _eis = st.session_state.get("last_emergency_icon_stats", {})
             _eit = st.session_state.get("last_emergency_icon_updated_at", "")
