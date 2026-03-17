@@ -53,7 +53,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.07"
+APP_VERSION = "11.08"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -74,7 +74,7 @@ MEDIA_ICON_MAP = {
     "出演":          ("🎻 出演",          "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/icons/music-note-list.svg"),
     "展示会":        ("🖼️ 展示会",        "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/icons/exhibition.svg"),
     "ライブ/ショー": ("🎤 ライブ/ショー", "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/icons/mic.svg"),
-    "イベント":      ("🎆 イベント",      "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/icons/exhibition.svg"),
+    "イベント":      ("🎆 イベント",      "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/icons/event.svg"),
     "書籍":          ("📖 書籍",          "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/icons/book.svg"),
     "漫画":          ("📚 漫画",          "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/icons/book-manga.svg"),
     "音楽アルバム":  ("🎵 音楽アルバム",  "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/icons/disc.svg"),
