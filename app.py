@@ -9812,131 +9812,133 @@ if mode == "出演者管理":
                 f"失敗 {restore_stats.get('failed', 0)}"
             )
 
-    code_ops_col1, code_ops_col2 = st.columns(2)
-    if code_ops_col1.button("🧪 国コード候補を診断（Dry Run）", key="cast_mode_code_backfill_dry"):
-        with st.spinner("国コード候補を診断中..."):
-            code_stats = backfill_score_db_country_codes(dry_run=True, fill_only_empty=True)
-        st.session_state["last_score_code_backfill_stats"] = code_stats
-        st.session_state["last_score_code_backfill_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if code_stats.get("error"):
-            st.error(f"❌ {code_stats.get('error')}")
-        else:
-            st.info(
-                "診断結果: "
-                f"走査 {code_stats.get('scanned', 0)} / "
-                f"既入力 {code_stats.get('has_code', 0)} / "
-                f"候補 {code_stats.get('candidates', 0)} / "
-                f"未解決 {code_stats.get('unresolved', 0)} / "
-                f"スキップ {code_stats.get('skipped', 0)}"
-            )
+    with st.expander("🛠 整備・修復メニュー", expanded=False):
+        st.caption("不具合対応・整合修復系のボタンをまとめています。")
+        code_ops_col1, code_ops_col2 = st.columns(2)
+        if code_ops_col1.button("🧪 国コード候補を診断（Dry Run）", key="cast_mode_code_backfill_dry"):
+            with st.spinner("国コード候補を診断中..."):
+                code_stats = backfill_score_db_country_codes(dry_run=True, fill_only_empty=True)
+            st.session_state["last_score_code_backfill_stats"] = code_stats
+            st.session_state["last_score_code_backfill_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if code_stats.get("error"):
+                st.error(f"❌ {code_stats.get('error')}")
+            else:
+                st.info(
+                    "診断結果: "
+                    f"走査 {code_stats.get('scanned', 0)} / "
+                    f"既入力 {code_stats.get('has_code', 0)} / "
+                    f"候補 {code_stats.get('candidates', 0)} / "
+                    f"未解決 {code_stats.get('unresolved', 0)} / "
+                    f"スキップ {code_stats.get('skipped', 0)}"
+                )
 
-    if code_ops_col2.button("✍️ 国コードを自動入力", key="cast_mode_code_backfill_apply"):
-        with st.spinner("国コードを補完中..."):
-            code_stats = backfill_score_db_country_codes(dry_run=False, fill_only_empty=True)
-        st.session_state["last_score_code_backfill_stats"] = code_stats
-        st.session_state["last_score_code_backfill_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if code_stats.get("error"):
-            st.error(f"❌ {code_stats.get('error')}")
-        else:
-            st.success(
-                "✅ 国コード補完完了: "
-                f"走査 {code_stats.get('scanned', 0)} / "
-                f"更新 {code_stats.get('filled', 0)} / "
-                f"候補 {code_stats.get('candidates', 0)} / "
-                f"既入力 {code_stats.get('has_code', 0)} / "
-                f"未解決 {code_stats.get('unresolved', 0)} / "
-                f"失敗 {code_stats.get('failed', 0)}"
-            )
+        if code_ops_col2.button("✍️ 国コードを自動入力", key="cast_mode_code_backfill_apply"):
+            with st.spinner("国コードを補完中..."):
+                code_stats = backfill_score_db_country_codes(dry_run=False, fill_only_empty=True)
+            st.session_state["last_score_code_backfill_stats"] = code_stats
+            st.session_state["last_score_code_backfill_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if code_stats.get("error"):
+                st.error(f"❌ {code_stats.get('error')}")
+            else:
+                st.success(
+                    "✅ 国コード補完完了: "
+                    f"走査 {code_stats.get('scanned', 0)} / "
+                    f"更新 {code_stats.get('filled', 0)} / "
+                    f"候補 {code_stats.get('candidates', 0)} / "
+                    f"既入力 {code_stats.get('has_code', 0)} / "
+                    f"未解決 {code_stats.get('unresolved', 0)} / "
+                    f"失敗 {code_stats.get('failed', 0)}"
+                )
 
-    if st.session_state.get("last_score_code_backfill_stats"):
-        _lcs = st.session_state.get("last_score_code_backfill_stats", {})
-        _lct = st.session_state.get("last_score_code_backfill_at", "")
-        mode_text = "Dry Run" if _lcs.get("dry_run") else "適用"
-        if _lcs.get("error"):
-            st.caption(f"直近の国コード補完（{_lct} / {mode_text}）: エラー - {_lcs.get('error')}")
-        else:
-            st.caption(
-                f"直近の国コード補完（{_lct} / {mode_text}）: 走査 {_lcs.get('scanned', 0)} / "
-                f"更新 {_lcs.get('filled', 0)} / 候補 {_lcs.get('candidates', 0)} / "
-                f"既入力 {_lcs.get('has_code', 0)} / 未解決 {_lcs.get('unresolved', 0)} / "
-                f"失敗 {_lcs.get('failed', 0)}"
-            )
+        if st.session_state.get("last_score_code_backfill_stats"):
+            _lcs = st.session_state.get("last_score_code_backfill_stats", {})
+            _lct = st.session_state.get("last_score_code_backfill_at", "")
+            mode_text = "Dry Run" if _lcs.get("dry_run") else "適用"
+            if _lcs.get("error"):
+                st.caption(f"直近の国コード補完（{_lct} / {mode_text}）: エラー - {_lcs.get('error')}")
+            else:
+                st.caption(
+                    f"直近の国コード補完（{_lct} / {mode_text}）: 走査 {_lcs.get('scanned', 0)} / "
+                    f"更新 {_lcs.get('filled', 0)} / 候補 {_lcs.get('candidates', 0)} / "
+                    f"既入力 {_lcs.get('has_code', 0)} / 未解決 {_lcs.get('unresolved', 0)} / "
+                    f"失敗 {_lcs.get('failed', 0)}"
+                )
 
-    rel_ops_col1, rel_ops_col2, rel_ops_col3 = st.columns(3)
-    if rel_ops_col1.button("🧪 国名マスタ紐付けを診断（Dry Run）", key="cast_mode_country_rel_sync_dry"):
-        with st.spinner("国名マスタとの紐付け候補を診断中..."):
-            rel_stats = sync_score_country_master_relations(dry_run=True, fill_only_empty=True)
-        st.session_state["last_score_country_rel_sync_stats"] = rel_stats
-        st.session_state["last_score_country_rel_sync_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if rel_stats.get("error"):
-            st.error(f"❌ {rel_stats.get('error')}")
-        else:
-            st.info(
-                "診断結果: "
-                f"走査 {rel_stats.get('scanned', 0)} / "
-                f"候補 {rel_stats.get('candidates', 0)} / "
-                f"既紐付け {rel_stats.get('already', 0)} / "
-                f"国コードなし {rel_stats.get('no_code', 0)} / "
-                f"マスタ未一致 {rel_stats.get('no_master', 0)} / "
-                f"スキップ {rel_stats.get('skipped', 0)}"
-            )
+        rel_ops_col1, rel_ops_col2, rel_ops_col3 = st.columns(3)
+        if rel_ops_col1.button("🧪 国名マスタ紐付けを診断（Dry Run）", key="cast_mode_country_rel_sync_dry"):
+            with st.spinner("国名マスタとの紐付け候補を診断中..."):
+                rel_stats = sync_score_country_master_relations(dry_run=True, fill_only_empty=True)
+            st.session_state["last_score_country_rel_sync_stats"] = rel_stats
+            st.session_state["last_score_country_rel_sync_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if rel_stats.get("error"):
+                st.error(f"❌ {rel_stats.get('error')}")
+            else:
+                st.info(
+                    "診断結果: "
+                    f"走査 {rel_stats.get('scanned', 0)} / "
+                    f"候補 {rel_stats.get('candidates', 0)} / "
+                    f"既紐付け {rel_stats.get('already', 0)} / "
+                    f"国コードなし {rel_stats.get('no_code', 0)} / "
+                    f"マスタ未一致 {rel_stats.get('no_master', 0)} / "
+                    f"スキップ {rel_stats.get('skipped', 0)}"
+                )
 
-    if rel_ops_col2.button("🔗 国名マスタを自動紐付け", key="cast_mode_country_rel_sync_apply"):
-        with st.spinner("国名マスタとの紐付けを反映中..."):
-            rel_stats = sync_score_country_master_relations(dry_run=False, fill_only_empty=True)
-        st.session_state["last_score_country_rel_sync_stats"] = rel_stats
-        st.session_state["last_score_country_rel_sync_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if rel_stats.get("error"):
-            st.error(f"❌ {rel_stats.get('error')}")
-        else:
-            st.success(
-                "✅ 国名マスタ紐付け完了: "
-                f"走査 {rel_stats.get('scanned', 0)} / "
-                f"更新 {rel_stats.get('linked', 0)} / "
-                f"候補 {rel_stats.get('candidates', 0)} / "
-                f"既紐付け {rel_stats.get('already', 0)} / "
-                f"国コードなし {rel_stats.get('no_code', 0)} / "
-                f"マスタ未一致 {rel_stats.get('no_master', 0)} / "
-                f"スキップ {rel_stats.get('skipped', 0)} / "
-                f"失敗 {rel_stats.get('failed', 0)}"
-            )
+        if rel_ops_col2.button("🔗 国名マスタを自動紐付け", key="cast_mode_country_rel_sync_apply"):
+            with st.spinner("国名マスタとの紐付けを反映中..."):
+                rel_stats = sync_score_country_master_relations(dry_run=False, fill_only_empty=True)
+            st.session_state["last_score_country_rel_sync_stats"] = rel_stats
+            st.session_state["last_score_country_rel_sync_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if rel_stats.get("error"):
+                st.error(f"❌ {rel_stats.get('error')}")
+            else:
+                st.success(
+                    "✅ 国名マスタ紐付け完了: "
+                    f"走査 {rel_stats.get('scanned', 0)} / "
+                    f"更新 {rel_stats.get('linked', 0)} / "
+                    f"候補 {rel_stats.get('candidates', 0)} / "
+                    f"既紐付け {rel_stats.get('already', 0)} / "
+                    f"国コードなし {rel_stats.get('no_code', 0)} / "
+                    f"マスタ未一致 {rel_stats.get('no_master', 0)} / "
+                    f"スキップ {rel_stats.get('skipped', 0)} / "
+                    f"失敗 {rel_stats.get('failed', 0)}"
+                )
 
-    if rel_ops_col3.button("♻️ 国名マスタを上書き再紐付け", key="cast_mode_country_rel_sync_force_apply"):
-        with st.spinner("国名マスタとの紐付けを上書き反映中..."):
-            rel_stats = sync_score_country_master_relations(dry_run=False, fill_only_empty=False)
-        st.session_state["last_score_country_rel_sync_stats"] = rel_stats
-        st.session_state["last_score_country_rel_sync_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if rel_stats.get("error"):
-            st.error(f"❌ {rel_stats.get('error')}")
-        else:
-            st.success(
-                "✅ 国名マスタ上書き紐付け完了: "
-                f"走査 {rel_stats.get('scanned', 0)} / "
-                f"更新 {rel_stats.get('linked', 0)} / "
-                f"候補 {rel_stats.get('candidates', 0)} / "
-                f"既紐付け {rel_stats.get('already', 0)} / "
-                f"国コードなし {rel_stats.get('no_code', 0)} / "
-                f"マスタ未一致 {rel_stats.get('no_master', 0)} / "
-                f"スキップ {rel_stats.get('skipped', 0)} / "
-                f"失敗 {rel_stats.get('failed', 0)}"
-            )
+        if rel_ops_col3.button("♻️ 国名マスタを上書き再紐付け", key="cast_mode_country_rel_sync_force_apply"):
+            with st.spinner("国名マスタとの紐付けを上書き反映中..."):
+                rel_stats = sync_score_country_master_relations(dry_run=False, fill_only_empty=False)
+            st.session_state["last_score_country_rel_sync_stats"] = rel_stats
+            st.session_state["last_score_country_rel_sync_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if rel_stats.get("error"):
+                st.error(f"❌ {rel_stats.get('error')}")
+            else:
+                st.success(
+                    "✅ 国名マスタ上書き紐付け完了: "
+                    f"走査 {rel_stats.get('scanned', 0)} / "
+                    f"更新 {rel_stats.get('linked', 0)} / "
+                    f"候補 {rel_stats.get('candidates', 0)} / "
+                    f"既紐付け {rel_stats.get('already', 0)} / "
+                    f"国コードなし {rel_stats.get('no_code', 0)} / "
+                    f"マスタ未一致 {rel_stats.get('no_master', 0)} / "
+                    f"スキップ {rel_stats.get('skipped', 0)} / "
+                    f"失敗 {rel_stats.get('failed', 0)}"
+                )
 
-    if st.session_state.get("last_score_country_rel_sync_stats"):
-        _lrs = st.session_state.get("last_score_country_rel_sync_stats", {})
-        _lrt = st.session_state.get("last_score_country_rel_sync_at", "")
-        mode_text = "Dry Run" if _lrs.get("dry_run") else "適用"
-        if _lrs.get("error"):
-            st.caption(f"直近の国名マスタ紐付け（{_lrt} / {mode_text}）: エラー - {_lrs.get('error')}")
-        else:
-            st.caption(
-                f"直近の国名マスタ紐付け（{_lrt} / {mode_text}）: 走査 {_lrs.get('scanned', 0)} / "
-                f"更新 {_lrs.get('linked', 0)} / 候補 {_lrs.get('candidates', 0)} / "
-                f"既紐付け {_lrs.get('already', 0)} / 国コードなし {_lrs.get('no_code', 0)} / "
-                f"マスタ未一致 {_lrs.get('no_master', 0)} / スキップ {_lrs.get('skipped', 0)} / "
-                f"失敗 {_lrs.get('failed', 0)}"
-            )
+        if st.session_state.get("last_score_country_rel_sync_stats"):
+            _lrs = st.session_state.get("last_score_country_rel_sync_stats", {})
+            _lrt = st.session_state.get("last_score_country_rel_sync_at", "")
+            mode_text = "Dry Run" if _lrs.get("dry_run") else "適用"
+            if _lrs.get("error"):
+                st.caption(f"直近の国名マスタ紐付け（{_lrt} / {mode_text}）: エラー - {_lrs.get('error')}")
+            else:
+                st.caption(
+                    f"直近の国名マスタ紐付け（{_lrt} / {mode_text}）: 走査 {_lrs.get('scanned', 0)} / "
+                    f"更新 {_lrs.get('linked', 0)} / 候補 {_lrs.get('candidates', 0)} / "
+                    f"既紐付け {_lrs.get('already', 0)} / 国コードなし {_lrs.get('no_code', 0)} / "
+                    f"マスタ未一致 {_lrs.get('no_master', 0)} / スキップ {_lrs.get('skipped', 0)} / "
+                    f"失敗 {_lrs.get('failed', 0)}"
+                )
 
-    with st.expander("🧪 出演データのつながりを自動で整える", expanded=False):
+        st.divider()
         st.caption("欠けたリンク補完と重複整理を、演奏会単位サマリで確認します。")
         if st.button("🔍 リンク状態をチェック", key="reconcile_run"):
             with st.spinner("整合チェック実行中..."):
