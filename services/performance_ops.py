@@ -132,6 +132,15 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
         return 0, 0, "演奏曲DBのプロパティ取得失敗（Integration接続/DB IDを確認）", []
     code_prop_candidates = ["国コード", "CountryCode", "country_code"]
     code_prop = next((k for k in code_prop_candidates if type_map.get(k) in ("rich_text", "title", "select", "multi_select")), None)
+    country_master_rel_prop = next(
+        (k for k in ["国名マスタ", "CountryMaster", "Country Master", "国マスタ"] if type_map.get(k) == "relation"),
+        None,
+    )
+    if not country_master_rel_prop:
+        country_master_rel_prop = next(
+            (k for k, v in (type_map or {}).items() if v == "relation" and ("国" in k or "country" in str(k).lower())),
+            None,
+        )
 
     find_score_page_by_title = ctx["find_score_page_by_title"]
     put_notion_prop = ctx["put_notion_prop"]
@@ -140,7 +149,42 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
     NOTION_HEADERS = ctx["NOTION_HEADERS"]
     get_composer_country_code = ctx.get("get_composer_country_code")
     country_code_to_flag = ctx.get("country_code_to_flag")
+    normalize_country_code_for_flag = ctx.get("normalize_country_code_for_flag")
+    query_notion_database_all = ctx.get("query_notion_database_all")
+    NOTION_COUNTRY_MASTER_DB_ID = ctx.get("NOTION_COUNTRY_MASTER_DB_ID")
     get_media_icon_url = ctx.get("get_media_icon_url")
+
+    def _norm_cc(v: str) -> str:
+        if callable(normalize_country_code_for_flag):
+            return normalize_country_code_for_flag(v or "")
+        return (v or "").strip().upper()
+
+    def _prop_text(meta: dict | None) -> str:
+        if not isinstance(meta, dict):
+            return ""
+        ptype = meta.get("type")
+        if ptype in ("rich_text", "title"):
+            chunks = meta.get(ptype, []) or []
+            return "".join((x.get("plain_text") or "") for x in chunks).strip()
+        if ptype == "select":
+            return ((meta.get("select") or {}).get("name") or "").strip()
+        if ptype == "multi_select":
+            vals = [((x or {}).get("name") or "").strip() for x in (meta.get("multi_select") or [])]
+            return vals[0] if vals else ""
+        return ""
+
+    code_to_master_id = {}
+    if country_master_rel_prop and NOTION_COUNTRY_MASTER_DB_ID and callable(get_notion_db_property_types) and callable(query_notion_database_all):
+        master_type_map = get_notion_db_property_types(NOTION_COUNTRY_MASTER_DB_ID) or {}
+        master_code_prop = next((k for k in code_prop_candidates if k in master_type_map), None)
+        if master_code_prop:
+            for row in (query_notion_database_all(NOTION_COUNTRY_MASTER_DB_ID) or []):
+                rid = row.get("id")
+                if not rid:
+                    continue
+                cc = _norm_cc(_prop_text(((row.get("properties") or {}).get(master_code_prop))))
+                if cc and cc not in code_to_master_id:
+                    code_to_master_id[cc] = rid
 
     title_to_id = {}
     for s in (selected_scores or []):
@@ -217,6 +261,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
         resolved_cc = ""
         if callable(country_code_to_flag) and callable(get_composer_country_code):
             composer_name = ""
+            src_props = {}
             if score_id:
                 if score_id not in score_page_cache:
                     pres = api_request(
@@ -228,8 +273,10 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
                 src_props = ((score_page_cache.get(score_id) or {}).get("properties") or {})
                 rt = ((src_props.get("クリエイター") or {}).get("rich_text") or [])
                 composer_name = "".join([(t.get("plain_text") or "") for t in rt]).strip()
+                if code_prop:
+                    resolved_cc = _norm_cc(_prop_text(src_props.get(code_prop)))
             if composer_name:
-                resolved_cc = (get_composer_country_code(composer_name) or "").strip().upper()
+                resolved_cc = _norm_cc(get_composer_country_code(composer_name) or resolved_cc or "")
                 flag = country_code_to_flag(resolved_cc) if resolved_cc else ""
                 if flag:
                     icon_payload = {"type": "emoji", "emoji": flag}
@@ -239,6 +286,8 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
                 icon_payload = {"type": "external", "external": {"url": fallback}}
         if resolved_cc and code_prop:
             put_notion_prop(props, type_map, code_prop, resolved_cc)
+        if resolved_cc and country_master_rel_prop and code_to_master_id.get(resolved_cc):
+            put_notion_prop(props, type_map, country_master_rel_prop, code_to_master_id.get(resolved_cc))
         if icon_payload:
             payload["icon"] = icon_payload
 

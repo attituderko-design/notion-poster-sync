@@ -5652,13 +5652,16 @@ def create_setlist_rows_for_performance(
 ) -> tuple[int, int, str, list[dict]]:
     ctx = {
         "NOTION_SCORE_DB_ID": NOTION_SCORE_DB_ID,
+        "NOTION_COUNTRY_MASTER_DB_ID": NOTION_COUNTRY_MASTER_DB_ID,
         "get_notion_db_property_types": get_notion_db_property_types,
         "find_score_page_by_title": _find_score_page_by_title,
         "put_notion_prop": _put_notion_prop,
         "split_instruments": _split_instruments,
+        "query_notion_database_all": query_notion_database_all,
         "api_request": api_request,
         "NOTION_HEADERS": NOTION_HEADERS,
         "get_composer_country_code": get_composer_country_code,
+        "normalize_country_code_for_flag": normalize_country_code_for_flag,
         "country_code_to_flag": country_code_to_flag,
         "get_media_icon_url": get_media_icon_url,
     }
