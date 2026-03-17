@@ -6381,6 +6381,7 @@ def emergency_restore_all_media_icons() -> dict:
         "parent_patched": 0,
         "parent_emoji_fallback": 0,
         "parent_failed": 0,
+        "details": [],
     }
 
     # 1) 親DB: 媒体ごとのアイコンに復旧
@@ -6405,6 +6406,12 @@ def emergency_restore_all_media_icons() -> dict:
         )
         if res is not None and res.status_code == 200:
             stats["parent_patched"] += 1
+            stats["details"].append({
+                "status": "external_ok",
+                "media": media,
+                "title": get_title(p.get("properties", {}))[0] or get_title(p.get("properties", {}))[1] or "(無題)",
+                "page_id": page_id,
+            })
         else:
             # 緊急時のみ: 外部URLが失敗したページは絵文字で暫定復旧
             fallback_emoji = get_media_icon_emoji(media)
@@ -6417,8 +6424,22 @@ def emergency_restore_all_media_icons() -> dict:
                 )
                 if res2 is not None and res2.status_code == 200:
                     stats["parent_emoji_fallback"] += 1
+                    stats["details"].append({
+                        "status": "emoji_fallback",
+                        "media": media,
+                        "title": get_title(p.get("properties", {}))[0] or get_title(p.get("properties", {}))[1] or "(無題)",
+                        "page_id": page_id,
+                        "external_status": getattr(res, "status_code", None) if res is not None else None,
+                    })
                     continue
             stats["parent_failed"] += 1
+            stats["details"].append({
+                "status": "failed",
+                "media": media,
+                "title": get_title(p.get("properties", {}))[0] or get_title(p.get("properties", {}))[1] or "(無題)",
+                "page_id": page_id,
+                "external_status": getattr(res, "status_code", None) if res is not None else None,
+            })
 
     return stats
 
@@ -9893,12 +9914,28 @@ if mode in ("出演者管理", "出演情報管理"):
         if icon_ops_col3.button("🆘 親DBの黒塗りを緊急復旧", key="cast_mode_emergency_restore_icons"):
             with st.spinner("親DBアイコンを緊急復旧中..."):
                 em_stats = emergency_restore_all_media_icons()
+            st.session_state["last_emergency_icon_stats"] = em_stats
+            st.session_state["last_emergency_icon_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.success(
                 "✅ 緊急復旧完了: "
                 f"親DB 外部URL更新 {em_stats.get('parent_patched', 0)} / "
                 f"絵文字暫定 {em_stats.get('parent_emoji_fallback', 0)} / "
                 f"失敗 {em_stats.get('parent_failed', 0)}"
             )
+        if st.session_state.get("last_emergency_icon_stats"):
+            _eis = st.session_state.get("last_emergency_icon_stats", {})
+            _eit = st.session_state.get("last_emergency_icon_updated_at", "")
+            st.caption(
+                f"直近の緊急復旧（{_eit}）: "
+                f"走査 {_eis.get('parent_scanned', 0)} / "
+                f"外部URL更新 {_eis.get('parent_patched', 0)} / "
+                f"絵文字暫定 {_eis.get('parent_emoji_fallback', 0)} / "
+                f"失敗 {_eis.get('parent_failed', 0)}"
+            )
+            _details = _eis.get("details") or []
+            if _details:
+                with st.expander("🧾 緊急復旧の処理結果（最新100件）", expanded=False):
+                    st.dataframe(_details[:100], use_container_width=True, hide_index=True)
 
     with st.expander("🛠 整備・修復メニュー", expanded=False):
         st.caption("不具合対応・整合修復系のボタンをまとめています。")
