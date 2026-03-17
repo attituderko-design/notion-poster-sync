@@ -53,7 +53,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.04"
+APP_VERSION = "11.05"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -180,6 +180,52 @@ def fetch_notion_custom_emoji_name_map() -> dict:
         return out
     except Exception:
         return {}
+
+@st.cache_data(ttl=3600)
+def fetch_notion_custom_emoji_rows() -> list[dict]:
+    """workspaceのカスタム絵文字一覧（name/id/url）"""
+    try:
+        res = api_request("get", "https://api.notion.com/v1/emojis", headers=NOTION_HEADERS)
+        if res is None or res.status_code != 200:
+            return []
+        data = res.json() or {}
+        rows = []
+        for e in (data.get("results") or []):
+            name = str(e.get("name") or "").strip()
+            eid = str(e.get("id") or "").strip()
+            url = str((e.get("custom_emoji") or {}).get("url") or "").strip()
+            if name and eid:
+                rows.append({"name": name, "id": eid, "url": url})
+        return rows
+    except Exception:
+        return []
+
+def guess_media_icon_custom_ids_from_names(rows: list[dict]) -> dict:
+    """絵文字名から媒体への推定マッピングを作る（最初の一致を採用）"""
+    hints = {
+        "映画": ["camera-reels", "movie", "film"],
+        "ドラマ": ["display", "tv", "drama"],
+        "演奏会（鑑賞）": ["music-note-beamed", "concert-listen"],
+        "出演": ["music-note-list", "performance", "cast"],
+        "展示会": ["exhibition", "gallery", "museum"],
+        "ライブ/ショー": ["mic", "live", "show"],
+        "イベント": ["event", "fireworks"],
+        "書籍": ["book"],
+        "漫画": ["book-manga", "manga", "comic"],
+        "音楽アルバム": ["disc", "album", "music-album"],
+        "ゲーム": ["controller", "game"],
+        "演奏曲": ["music-score", "score", "sheet"],
+        "アニメ": ["anime"],
+    }
+    out = {}
+    lower_rows = [{"name": (r.get("name") or "").lower(), "id": r.get("id", "")} for r in (rows or [])]
+    for media, keys in hints.items():
+        for r in lower_rows:
+            n = r["name"]
+            if any(k in n for k in keys):
+                out[media] = r["id"]
+                break
+    return out
 
 def get_media_icon_payload(media_label: str) -> dict:
     """媒体アイコンのpayload。カスタム絵文字IDがあれば優先、なければ外部URL。"""
@@ -10181,6 +10227,24 @@ if mode in ("出演者管理", "出演情報管理"):
                 )
                 kv = ", ".join([f'{k} = "{v}"' for k, v in found.items()])
                 st.code(f'MEDIA_ICON_CUSTOM_EMOJI_IDS = {{ {kv} }}', language="toml")
+        if st.button("🧾 ワークスペースのカスタム絵文字一覧を取得", key="list_workspace_custom_emojis"):
+            with st.spinner("取得中..."):
+                rows = fetch_notion_custom_emoji_rows()
+            if not rows:
+                st.warning("⚠️ カスタム絵文字一覧を取得できませんでした。")
+            else:
+                st.success(f"✅ 取得: {len(rows)} 件")
+                st.dataframe(rows, use_container_width=True, hide_index=True)
+                guessed = guess_media_icon_custom_ids_from_names(rows)
+                if guessed:
+                    st.caption("推定マッピング（名前ベース）")
+                    st.dataframe(
+                        [{"媒体": k, "custom_emoji_id": v} for k, v in guessed.items()],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                    kv2 = ", ".join([f'{k} = "{v}"' for k, v in guessed.items()])
+                    st.code(f'MEDIA_ICON_CUSTOM_EMOJI_IDS = {{ {kv2} }}', language="toml")
 
     with st.expander("🛠 整備・修復メニュー", expanded=False):
         st.caption("不具合対応・整合修復系のボタンをまとめています。")
