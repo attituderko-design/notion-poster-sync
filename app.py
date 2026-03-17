@@ -53,7 +53,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.05"
+APP_VERSION = "11.06"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -199,6 +199,32 @@ def fetch_notion_custom_emoji_rows() -> list[dict]:
         return rows
     except Exception:
         return []
+
+def fetch_notion_custom_emoji_rows_debug() -> tuple[list[dict], str]:
+    """カスタム絵文字取得（エラー可視化用）。"""
+    try:
+        res = api_request("get", "https://api.notion.com/v1/emojis", headers=NOTION_HEADERS)
+        if res is None:
+            return [], "API応答なし（ネットワーク/認証/RateLimit）"
+        if res.status_code != 200:
+            msg = ""
+            try:
+                body = res.json() or {}
+                msg = body.get("message", "") or body.get("code", "")
+            except Exception:
+                msg = (res.text or "")[:200]
+            return [], f"HTTP {res.status_code}: {msg}"
+        data = res.json() or {}
+        rows = []
+        for e in (data.get("results") or []):
+            name = str(e.get("name") or "").strip()
+            eid = str(e.get("id") or "").strip()
+            url = str((e.get("custom_emoji") or {}).get("url") or "").strip()
+            if name and eid:
+                rows.append({"name": name, "id": eid, "url": url})
+        return rows, ""
+    except Exception as ex:
+        return [], f"例外: {ex}"
 
 def guess_media_icon_custom_ids_from_names(rows: list[dict]) -> dict:
     """絵文字名から媒体への推定マッピングを作る（最初の一致を採用）"""
@@ -10229,9 +10255,11 @@ if mode in ("出演者管理", "出演情報管理"):
                 st.code(f'MEDIA_ICON_CUSTOM_EMOJI_IDS = {{ {kv} }}', language="toml")
         if st.button("🧾 ワークスペースのカスタム絵文字一覧を取得", key="list_workspace_custom_emojis"):
             with st.spinner("取得中..."):
-                rows = fetch_notion_custom_emoji_rows()
+                rows, err_detail = fetch_notion_custom_emoji_rows_debug()
             if not rows:
                 st.warning("⚠️ カスタム絵文字一覧を取得できませんでした。")
+                if err_detail:
+                    st.caption(f"取得失敗理由: {err_detail}")
             else:
                 st.success(f"✅ 取得: {len(rows)} 件")
                 st.dataframe(rows, use_container_width=True, hide_index=True)
