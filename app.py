@@ -8487,6 +8487,20 @@ if mode == "新規登録":
                             st.warning("曲名を入力してください。")
                         else:
                             selected_perf_ids = _clean_relation_ids(st.session_state.get("score_perf_selected_ids", []))
+                            # 候補を選んだだけで「🎻 出演を追加」を押していないケースを救済
+                            if not selected_perf_ids:
+                                picked_title = st.session_state.get("mb_manual_perf_pick", "（選択してください）")
+                                if picked_title and picked_title != "（選択してください）":
+                                    picked_perf = next((p for p in perf_pages_manual if p.get("title") == picked_title), None)
+                                    if picked_perf:
+                                        selected_perf_ids = [picked_perf["id"]]
+                                        selected = st.session_state.get("score_perf_selected", [])
+                                        if not any((x.get("id") or "") == picked_perf["id"] for x in selected):
+                                            selected.append({"id": picked_perf["id"], "title": picked_perf["title"]})
+                                            st.session_state.score_perf_selected = selected
+                                        st.session_state.score_perf_selected_ids = _clean_relation_ids(
+                                            [x.get("id") for x in st.session_state.get("score_perf_selected", [])]
+                                        )
                             perf_release, perf_watched, perf_rating, perf_location = "", "", "", None
                             suggested_order = 1
                             if selected_perf_ids:
