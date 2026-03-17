@@ -5,7 +5,8 @@ from urllib.request import urlopen
 
 
 API_URL = "https://restcountries.com/v3.1/all?fields=unMember,cca2,flag,name"
-OUT_CSV = Path("docs/country_master_un.csv")
+BASE_DIR = Path(__file__).resolve().parents[1]
+OUT_CSV = BASE_DIR / "docs" / "country_master_un.csv"
 
 
 def main() -> None:
@@ -44,4 +45,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
