@@ -9862,7 +9862,7 @@ if mode == "出演者管理":
                 f"失敗 {_lcs.get('failed', 0)}"
             )
 
-    rel_ops_col1, rel_ops_col2 = st.columns(2)
+    rel_ops_col1, rel_ops_col2, rel_ops_col3 = st.columns(3)
     if rel_ops_col1.button("🧪 国名マスタ紐付けを診断（Dry Run）", key="cast_mode_country_rel_sync_dry"):
         with st.spinner("国名マスタとの紐付け候補を診断中..."):
             rel_stats = sync_score_country_master_relations(dry_run=True, fill_only_empty=True)
@@ -9897,6 +9897,27 @@ if mode == "出演者管理":
                 f"既紐付け {rel_stats.get('already', 0)} / "
                 f"国コードなし {rel_stats.get('no_code', 0)} / "
                 f"マスタ未一致 {rel_stats.get('no_master', 0)} / "
+                f"スキップ {rel_stats.get('skipped', 0)} / "
+                f"失敗 {rel_stats.get('failed', 0)}"
+            )
+
+    if rel_ops_col3.button("♻️ 国名マスタを上書き再紐付け", key="cast_mode_country_rel_sync_force_apply"):
+        with st.spinner("国名マスタとの紐付けを上書き反映中..."):
+            rel_stats = sync_score_country_master_relations(dry_run=False, fill_only_empty=False)
+        st.session_state["last_score_country_rel_sync_stats"] = rel_stats
+        st.session_state["last_score_country_rel_sync_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if rel_stats.get("error"):
+            st.error(f"❌ {rel_stats.get('error')}")
+        else:
+            st.success(
+                "✅ 国名マスタ上書き紐付け完了: "
+                f"走査 {rel_stats.get('scanned', 0)} / "
+                f"更新 {rel_stats.get('linked', 0)} / "
+                f"候補 {rel_stats.get('candidates', 0)} / "
+                f"既紐付け {rel_stats.get('already', 0)} / "
+                f"国コードなし {rel_stats.get('no_code', 0)} / "
+                f"マスタ未一致 {rel_stats.get('no_master', 0)} / "
+                f"スキップ {rel_stats.get('skipped', 0)} / "
                 f"失敗 {rel_stats.get('failed', 0)}"
             )
 
@@ -9911,7 +9932,8 @@ if mode == "出演者管理":
                 f"直近の国名マスタ紐付け（{_lrt} / {mode_text}）: 走査 {_lrs.get('scanned', 0)} / "
                 f"更新 {_lrs.get('linked', 0)} / 候補 {_lrs.get('candidates', 0)} / "
                 f"既紐付け {_lrs.get('already', 0)} / 国コードなし {_lrs.get('no_code', 0)} / "
-                f"マスタ未一致 {_lrs.get('no_master', 0)} / 失敗 {_lrs.get('failed', 0)}"
+                f"マスタ未一致 {_lrs.get('no_master', 0)} / スキップ {_lrs.get('skipped', 0)} / "
+                f"失敗 {_lrs.get('failed', 0)}"
             )
 
     with st.expander("🧪 出演データのつながりを自動で整える", expanded=False):
