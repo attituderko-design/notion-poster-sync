@@ -53,7 +53,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.12"
+APP_VERSION = "11.13"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -10149,6 +10149,16 @@ if mode in ("出演者管理", "出演情報管理"):
     st.subheader("👥 出演情報管理")
 
     with st.expander("🏳️ アイコン更新・復旧", expanded=False):
+        loaded_media_keys = sorted(MEDIA_ICON_CUSTOM_EMOJI_IDS.keys())
+        expected_media_keys = [m for m in MEDIA_ICON_MAP.keys() if m != "演奏曲"]
+        missing_media_keys = [m for m in expected_media_keys if m not in MEDIA_ICON_CUSTOM_EMOJI_IDS]
+        st.caption(
+            f"custom_emoji設定: {len(loaded_media_keys)}件"
+            + (f" / 未設定媒体: {', '.join(missing_media_keys)}" if missing_media_keys else " / 全媒体設定済み")
+        )
+        if loaded_media_keys:
+            st.code("読み込み済み媒体: " + ", ".join(loaded_media_keys), language="text")
+
         icon_ops_col1, icon_ops_col2, icon_ops_col3 = st.columns(3)
         if icon_ops_col1.button("演奏曲DBの作曲家アイコンを更新", key="cast_mode_refresh_score_icons"):
             with st.spinner("演奏曲DBアイコン更新中..."):
