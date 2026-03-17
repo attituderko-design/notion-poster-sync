@@ -6853,33 +6853,34 @@ with st.sidebar:
                 st.session_state.pop("score_pages_cache", None)
                 st.session_state.pop("performance_pages_cache", None)
                 st.success(f"{len(st.session_state.pages)} 件取得しました（全媒体: {len(st.session_state.all_pages)} 件）")
-    if st.button("🧹 ゲームJP辞書をクリーンアップ", use_container_width=True, key="cleanup_game_jp_dict"):
-        with st.spinner("ゲームJP辞書DBを整備中..."):
-            s = cleanup_game_jp_dict_noise(max_rows=300)
-            err = st.session_state.get("_game_jp_dict_last_error", "")
-            if s.get("rows", 0) == 0:
-                if err:
-                    st.error(f"ゲームJP辞書DBを読めませんでした: {err}")
+    with st.expander("🧹 整備ツール", expanded=False):
+        if st.button("ゲームJP辞書をクリーンアップ", use_container_width=True, key="cleanup_game_jp_dict"):
+            with st.spinner("ゲームJP辞書DBを整備中..."):
+                s = cleanup_game_jp_dict_noise(max_rows=300)
+                err = st.session_state.get("_game_jp_dict_last_error", "")
+                if s.get("rows", 0) == 0:
+                    if err:
+                        st.error(f"ゲームJP辞書DBを読めませんでした: {err}")
+                    else:
+                        st.warning("ゲームJP辞書DBが0件です（DB ID / Integration接続 / 対象DBの中身をご確認ください）")
                 else:
-                    st.warning("ゲームJP辞書DBが0件です（DB ID / Integration接続 / 対象DBの中身をご確認ください）")
-            else:
+                    st.success(
+                        f"完了: 対象行 {s.get('rows', 0)} / 走査 {s.get('scanned', 0)} / 補正 {s.get('patched', 0)} / 整理 {s.get('archived', 0)}"
+                    )
+        if st.button("演奏関連リレーションを整理", use_container_width=True, key="cleanup_perf_score_rel"):
+            with st.spinner("演奏曲⇔出演 のリレーションを整備中..."):
+                base_pages = st.session_state.get("all_pages") or load_notion_data()
+                s = normalize_performance_score_relations(base_pages)
                 st.success(
-                    f"完了: 対象行 {s.get('rows', 0)} / 走査 {s.get('scanned', 0)} / 補正 {s.get('patched', 0)} / 整理 {s.get('archived', 0)}"
+                    f"完了: 走査 {s.get('scanned', 0)} / 更新 {s.get('patched', 0)} / 向き補正 {s.get('moved', 0)} / 失敗 {s.get('failed', 0)}"
                 )
-    if st.button("🧹 演奏関連リレーションを整理", use_container_width=True, key="cleanup_perf_score_rel"):
-        with st.spinner("演奏曲⇔出演 のリレーションを整備中..."):
-            base_pages = st.session_state.get("all_pages") or load_notion_data()
-            s = normalize_performance_score_relations(base_pages)
-            st.success(
-                f"完了: 走査 {s.get('scanned', 0)} / 更新 {s.get('patched', 0)} / 向き補正 {s.get('moved', 0)} / 失敗 {s.get('failed', 0)}"
-            )
-    if st.button("🖼 DriveカバーURLを再整形", use_container_width=True, key="cleanup_drive_cover_urls"):
-        with st.spinner("DriveカバーURLを整備中..."):
-            base_pages = st.session_state.get("all_pages") or load_notion_data()
-            s = migrate_drive_cover_urls(base_pages)
-            st.success(
-                f"完了: 対象 {s.get('scanned', 0)} / 更新 {s.get('patched', 0)} / 失敗 {s.get('failed', 0)}"
-            )
+        if st.button("DriveカバーURLを再整形", use_container_width=True, key="cleanup_drive_cover_urls"):
+            with st.spinner("DriveカバーURLを整備中..."):
+                base_pages = st.session_state.get("all_pages") or load_notion_data()
+                s = migrate_drive_cover_urls(base_pages)
+                st.success(
+                    f"完了: 対象 {s.get('scanned', 0)} / 更新 {s.get('patched', 0)} / 失敗 {s.get('failed', 0)}"
+                )
 
     if not st.session_state.pages_loaded:
         st.caption("👆 まず「最新データを読み込む」を実行してください")
@@ -7443,10 +7444,14 @@ if mode == "新規登録":
                                 with st.spinner(f"{ev_selected_comp['name']} の作品を検索中..."):
                                     ev_works = search_mb_works(ev_selected_comp["id"], ev_title_filter.strip())
                                 st.session_state.ev_mb_works = ev_works
+                                if not ev_works:
+                                    st.info("作品候補が見つかりませんでした。作曲家情報のみで作品登録がない可能性があります。")
                         if c_mb2.button("📚 全作品を取得（重い）", key="ev_mb_fetch_all"):
                             with st.spinner(f"{ev_selected_comp['name']} の全作品を取得中..."):
                                 ev_works = search_mb_works(ev_selected_comp["id"], "")
                             st.session_state.ev_mb_works = ev_works
+                            if not ev_works:
+                                st.info("全作品を取得しましたが候補がありませんでした。作曲家情報のみで作品登録がない可能性があります。")
 
                     if st.session_state.get("ev_mb_works"):
                         ev_works = st.session_state.ev_mb_works
@@ -8175,12 +8180,16 @@ if mode == "新規登録":
                             works = search_mb_works(selected_comp["id"], work_query)
                         st.session_state.mb_works = works
                         st.session_state.mb_checked = {}
+                        if not works:
+                            st.info("作品候補が見つかりませんでした。作曲家情報のみで作品登録がない可能性があります。")
                 if mb_fetch_all_submit:
                     st.session_state.mb_title_filter = ""
                     with st.spinner(f"{selected_comp['name']} の全作品を取得中...（数分かかることがあります）"):
                         works = search_mb_works(selected_comp["id"], "")
                     st.session_state.mb_works = works
                     st.session_state.mb_checked = {}
+                    if not works:
+                        st.info("全作品を取得しましたが候補がありませんでした。作曲家情報のみで作品登録がない可能性があります。")
 
             if st.session_state.get("mb_works"):
                 works = st.session_state.mb_works
