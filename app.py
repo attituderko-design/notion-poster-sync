@@ -8394,9 +8394,36 @@ if mode == "新規登録":
                         st.session_state.active_score_tab_next = "登録リスト"
                         st.rerun()
 
+            manual_composer_default = ""
+            manual_country_default = ""
             if selected_comp:
-                st.divider()
-                with st.expander("📝 MusicBrainzにない曲を手入力で追加", expanded=False):
+                manual_composer_default = canonical_mb_composer_name(selected_comp) or selected_comp.get("name", "")
+                manual_country_default = (selected_comp.get("country") or "").strip().upper()
+            else:
+                manual_composer_default = (st.session_state.get("mb_composer_query") or "").strip()
+            if (
+                "mb_manual_comp_name" not in st.session_state
+                or (
+                    selected_comp
+                    and st.session_state.get("mb_manual_comp_source_id") != selected_comp.get("id")
+                )
+            ):
+                st.session_state["mb_manual_comp_name"] = manual_composer_default
+                st.session_state["mb_manual_country_code"] = manual_country_default
+                st.session_state["mb_manual_comp_source_id"] = selected_comp.get("id") if selected_comp else ""
+
+            st.divider()
+            with st.expander("📝 MusicBrainzにない曲を手入力で追加", expanded=False):
+                    manual_comp_name = st.text_input(
+                        "作曲家名（手入力）",
+                        key="mb_manual_comp_name",
+                        placeholder="例: Takashi Yoshimatsu / 吉松 隆",
+                    )
+                    manual_country_code = st.text_input(
+                        "国コード（任意, 2文字）",
+                        key="mb_manual_country_code",
+                        placeholder="例: JP / DE / FR",
+                    )
                     manual_title = st.text_input(
                         "曲名（手入力）",
                         key="mb_manual_work_title",
@@ -8408,9 +8435,13 @@ if mode == "新規登録":
                         placeholder="例: world premiere / revised 2024",
                     )
                     if st.button("➕ 手入力曲を登録リストに追加", key="mb_manual_add_to_cart"):
+                        composer_raw = (manual_comp_name or "").strip()
+                        country_raw = (manual_country_code or "").strip().upper()
                         title_raw = (manual_title or "").strip()
                         note_raw = (manual_note or "").strip()
-                        if not title_raw:
+                        if not composer_raw:
+                            st.warning("作曲家名を入力してください。")
+                        elif not title_raw:
                             st.warning("曲名を入力してください。")
                         else:
                             selected_perf_ids = _clean_relation_ids(st.session_state.get("score_perf_selected_ids", []))
@@ -8420,7 +8451,8 @@ if mode == "新規登録":
                                 perf_page = _get_page_from_state_or_api(selected_perf_ids[0])
                                 perf_release, perf_watched, perf_rating, perf_location = _extract_performance_defaults(perf_page)
                                 suggested_order = _suggest_next_setlist_order(selected_perf_ids[0])
-                            comp_name = canonical_mb_composer_name(selected_comp) or selected_comp.get("name", "")
+                            if len(country_raw) != 2 or not country_raw.isalpha():
+                                country_raw = ""
                             register_title = f"{title_raw} ({note_raw})" if note_raw else title_raw
                             st.session_state.reg_cart.append({
                                 "cart_uid":    f"score_{uuid.uuid4().hex[:10]}",
@@ -8433,8 +8465,8 @@ if mode == "新規登録":
                                 "wlflg":       False,
                                 "media_type":  "score",
                                 "tmdb_id":     0,
-                                "details":     {"genres": [], "cast": "", "director": comp_name, "score": None},
-                                "composer_country": (selected_comp.get("country") or "").strip().upper(),
+                                "details":     {"genres": [], "cast": "", "director": composer_raw, "score": None},
+                                "composer_country": country_raw,
                                 "isbn":        "",
                                 "location":    perf_location,
                                 "media_label": media_label,
