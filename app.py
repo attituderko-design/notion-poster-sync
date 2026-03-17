@@ -1,6 +1,7 @@
 import re
 import json
 import tomllib
+from collections.abc import Mapping
 import requests
 import time
 import random
@@ -54,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.14"
+APP_VERSION = "11.15"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -99,6 +100,8 @@ if isinstance(_custom_icon_secret, str):
             _custom_icon_secret = _parsed.get("_v", {})
         except Exception:
             _custom_icon_secret = {}
+if isinstance(_custom_icon_secret, Mapping):
+    _custom_icon_secret = dict(_custom_icon_secret)
 if not isinstance(_custom_icon_secret, dict):
     _custom_icon_secret = {}
 MEDIA_ICON_CUSTOM_EMOJI_IDS = {
