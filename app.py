@@ -53,7 +53,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.03"
+APP_VERSION = "11.04"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -208,6 +208,23 @@ def get_media_icon_payload(media_label: str) -> dict:
     if icon_url:
         return {"type": "external", "external": {"url": icon_url}}
     return {"type": "emoji", "emoji": get_media_icon_emoji(normalized)}
+
+def detect_media_icon_custom_emoji_ids_from_parent_db() -> dict:
+    """親DBの既存ページから 媒体 -> custom emoji id を抽出する。"""
+    out = {}
+    pages = query_notion_database_all(NOTION_DB_ID) or []
+    for p in pages:
+        media = get_page_media(p)
+        if not media:
+            continue
+        icon = p.get("icon") or {}
+        if icon.get("type") != "custom_emoji":
+            continue
+        eid = str((icon.get("custom_emoji") or {}).get("id") or "").strip()
+        if not eid:
+            continue
+        out[media] = eid
+    return out
 
 def is_media_icon_url(url: str | None) -> bool:
     if not url:
@@ -10149,6 +10166,21 @@ if mode in ("出演者管理", "出演情報管理"):
                     pass
                 with st.expander("🧾 緊急復旧の処理結果（最新100件）", expanded=False):
                     st.dataframe(_details[:100], use_container_width=True, hide_index=True)
+
+        if st.button("🧩 親DBから媒体カスタム絵文字IDを抽出", key="detect_media_icon_custom_emoji_ids"):
+            with st.spinner("抽出中..."):
+                found = detect_media_icon_custom_emoji_ids_from_parent_db()
+            if not found:
+                st.warning("⚠️ custom_emoji の媒体行が見つかりませんでした。")
+            else:
+                st.success(f"✅ 抽出完了: {len(found)} 件")
+                st.dataframe(
+                    [{"媒体": k, "custom_emoji_id": v} for k, v in found.items()],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                kv = ", ".join([f'{k} = "{v}"' for k, v in found.items()])
+                st.code(f'MEDIA_ICON_CUSTOM_EMOJI_IDS = {{ {kv} }}', language="toml")
 
     with st.expander("🛠 整備・修復メニュー", expanded=False):
         st.caption("不具合対応・整合修復系のボタンをまとめています。")
