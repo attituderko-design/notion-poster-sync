@@ -53,7 +53,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.08"
+APP_VERSION = "11.09"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -164,41 +164,25 @@ def get_media_icon_emoji(media_label: str) -> str:
     return (label.split(" ", 1)[0] or "📁").strip()
 
 @st.cache_data(ttl=3600)
-def fetch_notion_custom_emoji_name_map() -> dict:
-    """workspaceのカスタム絵文字 name -> id を取得"""
-    try:
-        res = api_request("get", "https://api.notion.com/v1/emojis", headers=NOTION_HEADERS)
-        if res is None or res.status_code != 200:
-            return {}
-        data = res.json() or {}
-        out = {}
-        for e in (data.get("results") or []):
-            name = str(e.get("name") or "").strip()
-            eid = str(e.get("id") or "").strip()
-            if name and eid:
-                out[name.lower()] = eid
-        return out
-    except Exception:
-        return {}
+def fetch_notion_custom_emoji_rows() -> list[dict]:
+    """
+    workspaceのカスタム絵文字一覧（name/id/url）
+    Notion APIに /v1/emojis エンドポイントは無いため、
+    /v1/search でページに使われている custom_emoji を収集する。
+    """
+    rows, _ = fetch_notion_custom_emoji_rows_debug()
+    return rows
 
 @st.cache_data(ttl=3600)
-def fetch_notion_custom_emoji_rows() -> list[dict]:
-    """workspaceのカスタム絵文字一覧（name/id/url）"""
-    try:
-        res = api_request("get", "https://api.notion.com/v1/emojis", headers=NOTION_HEADERS)
-        if res is None or res.status_code != 200:
-            return []
-        data = res.json() or {}
-        rows = []
-        for e in (data.get("results") or []):
-            name = str(e.get("name") or "").strip()
-            eid = str(e.get("id") or "").strip()
-            url = str((e.get("custom_emoji") or {}).get("url") or "").strip()
-            if name and eid:
-                rows.append({"name": name, "id": eid, "url": url})
-        return rows
-    except Exception:
-        return []
+def fetch_notion_custom_emoji_name_map() -> dict:
+    """workspaceのカスタム絵文字 name -> id を取得"""
+    out = {}
+    for r in fetch_notion_custom_emoji_rows():
+        name = str((r or {}).get("name") or "").strip()
+        eid = str((r or {}).get("id") or "").strip()
+        if name and eid:
+            out[name.lower()] = eid
+    return out
 
 def fetch_notion_custom_emoji_rows_debug() -> tuple[list[dict], str]:
     """ページ上で使用されているカスタム絵文字を収集（エラー可視化用）。"""
@@ -301,6 +285,19 @@ def get_media_icon_payload(media_label: str) -> dict:
     if icon_url:
         return {"type": "external", "external": {"url": icon_url}}
     return {"type": "emoji", "emoji": get_media_icon_emoji(normalized)}
+
+def diagnose_media_icon_payloads() -> list[dict]:
+    rows = []
+    for media in MEDIA_ICON_MAP.keys():
+        payload = get_media_icon_payload(media)
+        rows.append({
+            "媒体": media,
+            "payload_type": payload.get("type", ""),
+            "custom_emoji_id": ((payload.get("custom_emoji") or {}).get("id") if payload.get("type") == "custom_emoji" else ""),
+            "external_url": ((payload.get("external") or {}).get("url") if payload.get("type") == "external" else ""),
+            "emoji": (payload.get("emoji") if payload.get("type") == "emoji" else ""),
+        })
+    return rows
 
 def detect_media_icon_custom_emoji_ids_from_parent_db() -> dict:
     """親DBの既存ページから 媒体 -> custom emoji id を抽出する。"""
