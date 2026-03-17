@@ -53,7 +53,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.06"
+APP_VERSION = "11.07"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -201,27 +201,48 @@ def fetch_notion_custom_emoji_rows() -> list[dict]:
         return []
 
 def fetch_notion_custom_emoji_rows_debug() -> tuple[list[dict], str]:
-    """カスタム絵文字取得（エラー可視化用）。"""
+    """ページ上で使用されているカスタム絵文字を収集（エラー可視化用）。"""
     try:
-        res = api_request("get", "https://api.notion.com/v1/emojis", headers=NOTION_HEADERS)
-        if res is None:
-            return [], "API応答なし（ネットワーク/認証/RateLimit）"
-        if res.status_code != 200:
-            msg = ""
-            try:
-                body = res.json() or {}
-                msg = body.get("message", "") or body.get("code", "")
-            except Exception:
-                msg = (res.text or "")[:200]
-            return [], f"HTTP {res.status_code}: {msg}"
-        data = res.json() or {}
-        rows = []
-        for e in (data.get("results") or []):
-            name = str(e.get("name") or "").strip()
-            eid = str(e.get("id") or "").strip()
-            url = str((e.get("custom_emoji") or {}).get("url") or "").strip()
-            if name and eid:
-                rows.append({"name": name, "id": eid, "url": url})
+        rows_map = {}
+        has_more = True
+        next_cursor = None
+        rounds = 0
+        while has_more and rounds < 20:  # 最大2000ページ相当
+            rounds += 1
+            payload = {
+                "page_size": 100,
+                "filter": {"property": "object", "value": "page"},
+            }
+            if next_cursor:
+                payload["start_cursor"] = next_cursor
+            res = api_request("post", "https://api.notion.com/v1/search", headers=NOTION_HEADERS, json=payload)
+            if res is None:
+                return [], "API応答なし（ネットワーク/認証/RateLimit）"
+            if res.status_code != 200:
+                msg = ""
+                try:
+                    body = res.json() or {}
+                    msg = body.get("message", "") or body.get("code", "")
+                except Exception:
+                    msg = (res.text or "")[:200]
+                return [], f"HTTP {res.status_code}: {msg}"
+            data = res.json() or {}
+            for p in (data.get("results") or []):
+                icon = p.get("icon") or {}
+                if icon.get("type") != "custom_emoji":
+                    continue
+                c = icon.get("custom_emoji") or {}
+                name = str(c.get("name") or "").strip()
+                eid = str(c.get("id") or "").strip()
+                url = str(c.get("url") or "").strip()
+                if not (name and eid):
+                    continue
+                rows_map[eid] = {"name": name, "id": eid, "url": url}
+            has_more = bool(data.get("has_more"))
+            next_cursor = data.get("next_cursor")
+
+        rows = list(rows_map.values())
+        rows.sort(key=lambda x: (x.get("name") or "").lower())
         return rows, ""
     except Exception as ex:
         return [], f"例外: {ex}"
