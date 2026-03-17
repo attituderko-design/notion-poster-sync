@@ -8393,6 +8393,69 @@ if mode == "新規登録":
                         st.success(f"✅ {len(selected_works)} 件を登録リストに追加しました")
                         st.session_state.active_score_tab_next = "登録リスト"
                         st.rerun()
+
+            if selected_comp:
+                st.divider()
+                with st.expander("📝 MusicBrainzにない曲を手入力で追加", expanded=False):
+                    manual_title = st.text_input(
+                        "曲名（手入力）",
+                        key="mb_manual_work_title",
+                        placeholder="例: 委嘱新作 / 初演作品 / 現代作品",
+                    )
+                    manual_note = st.text_input(
+                        "補足（任意）",
+                        key="mb_manual_work_note",
+                        placeholder="例: world premiere / revised 2024",
+                    )
+                    if st.button("➕ 手入力曲を登録リストに追加", key="mb_manual_add_to_cart"):
+                        title_raw = (manual_title or "").strip()
+                        note_raw = (manual_note or "").strip()
+                        if not title_raw:
+                            st.warning("曲名を入力してください。")
+                        else:
+                            selected_perf_ids = _clean_relation_ids(st.session_state.get("score_perf_selected_ids", []))
+                            perf_release, perf_watched, perf_rating, perf_location = "", "", "", None
+                            suggested_order = 1
+                            if selected_perf_ids:
+                                perf_page = _get_page_from_state_or_api(selected_perf_ids[0])
+                                perf_release, perf_watched, perf_rating, perf_location = _extract_performance_defaults(perf_page)
+                                suggested_order = _suggest_next_setlist_order(selected_perf_ids[0])
+                            comp_name = canonical_mb_composer_name(selected_comp) or selected_comp.get("name", "")
+                            register_title = f"{title_raw} ({note_raw})" if note_raw else title_raw
+                            st.session_state.reg_cart.append({
+                                "cart_uid":    f"score_{uuid.uuid4().hex[:10]}",
+                                "jp_title":    register_title,
+                                "en_title":    register_title,
+                                "cover_url":   st.session_state.get("mb_portrait_url") or MB_DEFAULT_COVER,
+                                "release":     "",
+                                "watched":     perf_watched or "",
+                                "rating":      perf_rating or "",
+                                "wlflg":       False,
+                                "media_type":  "score",
+                                "tmdb_id":     0,
+                                "details":     {"genres": [], "cast": "", "director": comp_name, "score": None},
+                                "composer_country": (selected_comp.get("country") or "").strip().upper(),
+                                "isbn":        "",
+                                "location":    perf_location,
+                                "media_label": media_label,
+                                "relation_prop": "出演履歴" if selected_perf_ids else None,
+                                "relation_ids":  selected_perf_ids,
+                                "premiere_missing": True,
+                                "premiere_source": "manual-input",
+                                "premiere_partial": False,
+                                "premiere_partial_value": "",
+                                "setlist_order": suggested_order,
+                                "setlist_section": "本編",
+                                "played": True,
+                                "part": "",
+                                "is_concerto": False,
+                                "soloists": "",
+                                "players": [],
+                                "mb_work_id": "",
+                            })
+                            st.success("✅ 手入力曲を登録リストに追加しました")
+                            st.session_state.active_score_tab_next = "登録リスト"
+                            st.rerun()
             st.stop()
 
         # ============================================================
