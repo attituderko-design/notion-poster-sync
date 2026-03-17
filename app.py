@@ -53,7 +53,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "10.08"
+APP_VERSION = "11.00"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -2020,11 +2020,6 @@ def get_composer_country_code(composer_name: str) -> str:
         if cc:
             return cc
 
-    # 詳細解決で取れなかった場合のみ、検索レスポンスのcountryを最後の救済として使う
-    for c in _pick_candidates():
-        cc = _sanitize_cc(c.get("country") or "")
-        if cc:
-            return cc
     # MBで取れない場合は、名称からWikidata人名検索で救済
     cc = _sanitize_cc(_wikidata_country_iso2_by_person_name(name))
     if cc:
@@ -2078,10 +2073,25 @@ def _get_wikidata_country_iso2(qid: str) -> str:
             return ""
         ent = (((res.json() or {}).get("entities") or {}).get(q) or {})
         claims = ent.get("claims") or {}
-        p27 = claims.get("P27") or []   # country of citizenship
+        p27 = claims.get("P27") or []   # country of citizenship（演奏曲では採用しない）
         p495 = claims.get("P495") or [] # country of origin
         had_nationality_claim = bool(p27 or p495)
-        p27_claim_count = len(p27)
+
+        # 仕様: 国コードは「出生地の現在国」を最優先（歴史国家・国籍変更の揺れを避ける）
+        birth_place_qid = ""
+        for claim in (claims.get("P19") or []):  # place of birth
+            dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+            pq = (dv.get("id") or "").strip().upper()
+            if re.fullmatch(r"Q[0-9]+", pq):
+                birth_place_qid = pq
+                break
+        if birth_place_qid:
+            birth_cc = _resolve_country_iso2_from_place_qid(birth_place_qid, max_depth=8)
+            if birth_cc:
+                return birth_cc
+            # 出生地が取れているのに現代主権国へ解決できない場合は、
+            # P27/P495へのフォールバックで誤判定を起こしやすいため未解決扱いにする。
+            return ""
 
         def _claim_country_codes(claims_list: list) -> list[str]:
             out = []
@@ -2104,37 +2114,9 @@ def _get_wikidata_country_iso2(qid: str) -> str:
         if p495_codes:
             return p495_codes[0]
 
-        # citizenship が複数ある場合は出生地の国を優先
-        # （歴史国家QIDで現代ISO化できない国籍が混ざるケースを救済）
-        if len(p27_codes) > 1:
-            birth_place_qid = ""
-            for claim in (claims.get("P19") or []):  # place of birth
-                dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
-                pq = (dv.get("id") or "").strip().upper()
-                if re.fullmatch(r"Q[0-9]+", pq):
-                    birth_place_qid = pq
-                    break
-            if birth_place_qid:
-                birth_cc = _resolve_country_iso2_from_place_qid(birth_place_qid, max_depth=3)
-                if birth_cc and birth_cc in p27_codes:
-                    return birth_cc
-
-        # 生のP27が複数あるのにISO化で1件しか残らない場合も、出生地国を優先
-        if p27_claim_count > 1 and len(p27_codes) == 1:
-            birth_place_qid = ""
-            for claim in (claims.get("P19") or []):  # place of birth
-                dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
-                pq = (dv.get("id") or "").strip().upper()
-                if re.fullmatch(r"Q[0-9]+", pq):
-                    birth_place_qid = pq
-                    break
-            if birth_place_qid:
-                birth_cc = _resolve_country_iso2_from_place_qid(birth_place_qid, max_depth=3)
-                if birth_cc:
-                    return birth_cc
-
-        if p27_codes:
-            return p27_codes[0]
+        # P27(国籍)は移住や亡命でノイズになりやすいため、
+        # 作曲家国旗判定では採用しない（出生地→現代主権国 / P495優先）
+        _ = p27_codes  # デバッグ用に残す
         # 国籍/出自があるのに現代ISOへ落ちない場合は、出生地フォールバックで誤判定しない
         if had_nationality_claim:
             return ""
@@ -2149,7 +2131,7 @@ def _get_wikidata_country_iso2(qid: str) -> str:
                 if pq and re.fullmatch(r"Q[0-9]+", str(pq).upper()):
                     place_qids.append(str(pq).upper())
         for pq in place_qids:
-            cc = _resolve_country_iso2_from_place_qid(pq, max_depth=3)
+            cc = _resolve_country_iso2_from_place_qid(pq, max_depth=8)
             if cc:
                 return cc
     except Exception:
@@ -2189,8 +2171,27 @@ def _get_wikidata_country_iso2_by_country_qid(country_qid: str) -> str:
 
 
 @st.cache_data(ttl=86400)
-def _resolve_country_iso2_from_place_qid(place_qid: str, max_depth: int = 3) -> str:
-    """場所QIDから国ISO2を再帰的に解決する（P17 -> P131...）。"""
+def _is_wikidata_historical_country_qid(country_qid: str) -> bool:
+    cq = (country_qid or "").strip().upper()
+    if not re.fullmatch(r"Q[0-9]+", cq):
+        return False
+    ent = _wikidata_entity(cq) or {}
+    claims = ent.get("claims") or {}
+    # 失効/廃止/終了が付いている国家は歴史国家として扱う
+    if claims.get("P576") or claims.get("P582"):
+        return True
+    # instance of historical classes（代表例）
+    historical_classes = {"Q3024240", "Q28171280"}  # historical country / former country
+    for c in (claims.get("P31") or []):
+        dv = ((((c or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {})
+        if (dv.get("id") or "").strip().upper() in historical_classes:
+            return True
+    return False
+
+
+@st.cache_data(ttl=86400)
+def _resolve_country_iso2_from_place_qid(place_qid: str, max_depth: int = 8) -> str:
+    """場所QIDから国ISO2を再帰的に解決する（出生地の現在主権国を優先）。"""
     start = (place_qid or "").strip().upper()
     if not re.fullmatch(r"Q[0-9]+", start):
         return ""
@@ -2203,26 +2204,28 @@ def _resolve_country_iso2_from_place_qid(place_qid: str, max_depth: int = 3) -> 
         visited.add(qid)
         ent = _wikidata_entity(qid) or {}
         claims = ent.get("claims") or {}
-        # そのものが国でISO2を持つ場合
+        # そのものが国でISO2を持つ場合（歴史国家は除外）
         cc_self = _get_wikidata_country_iso2_by_country_qid(qid)
-        if cc_self:
+        if cc_self and not _is_wikidata_historical_country_qid(qid):
             return cc_self
-        # 直接の国(P17)
-        for claim in (claims.get("P17") or []):
-            dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
-            cid = (dv.get("id") or "").strip().upper()
-            if not re.fullmatch(r"Q[0-9]+", cid):
-                continue
-            cc = _get_wikidata_country_iso2_by_country_qid(cid)
-            if cc:
-                return cc
-            queue.append((cid, depth + 1))
-        # 行政単位(P131)を辿る
+        # 行政単位(P131)を優先して辿る（現代国家に着地しやすい）
         for claim in (claims.get("P131") or []):
             dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
             pid = (dv.get("id") or "").strip().upper()
             if re.fullmatch(r"Q[0-9]+", pid):
                 queue.append((pid, depth + 1))
+        # 直接の国(P17)は補助扱い（歴史国家は採用しない）
+        for claim in (claims.get("P17") or []):
+            dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+            cid = (dv.get("id") or "").strip().upper()
+            if not re.fullmatch(r"Q[0-9]+", cid):
+                continue
+            if _is_wikidata_historical_country_qid(cid):
+                continue
+            cc = _get_wikidata_country_iso2_by_country_qid(cid)
+            if cc:
+                return cc
+            queue.append((cid, depth + 1))
     return ""
 
 
@@ -2261,17 +2264,8 @@ def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
             if cc:
                 return cc
 
-        # 次点: MBのcountry
-        country = normalize_country_code_for_flag(data.get("country") or "")
-        if country:
-            return country
-
-        # 最後: 地域情報（活動地/出生地）。誤判定を避けるため area を優先し、begin/endは最後
-        for area_key in ("area", "begin-area", "end-area"):
-            area = data.get(area_key) or {}
-            cc = _get_mb_area_iso2(area.get("id") or "")
-            if cc:
-                return cc
+        # MBのcountry/areaは活動地由来の誤判定が起きやすいため不採用
+        # （出生地の現在主権国を優先する方針）
     except Exception:
         return ""
     return ""
@@ -5456,7 +5450,8 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
 
     icon_url = get_media_icon_url(media_type_label)
     icon_payload = {"type": "external", "external": {"url": icon_url}}
-    if icon_emoji:
+    # 演奏曲は親DB側では媒体アイコンを維持する（国旗は演奏曲DB側で扱う）
+    if icon_emoji and media_type != "score":
         icon_payload = {"type": "emoji", "emoji": icon_emoji}
     payload = {
         "parent":     {"database_id": NOTION_DB_ID},
@@ -8548,7 +8543,7 @@ if mode == "新規登録":
                                 "media_type":  "score",
                                 "tmdb_id":     0,
                                 "details":     {"genres": [], "cast": "", "director": comp_name, "score": None},
-                                "composer_country": (comp.get("country") or "").strip().upper(),
+                                "composer_country": normalize_country_code_for_flag(get_composer_country_code(comp_name) or ""),
                                 "isbn":        "",
                                 "location":    perf_location,
                                 "media_label": media_label,
@@ -9840,7 +9835,7 @@ if mode in ("出演者管理", "出演情報管理"):
 
     with st.expander("🛠 整備・修復メニュー", expanded=False):
         st.caption("不具合対応・整合修復系のボタンをまとめています。")
-        code_ops_col1, code_ops_col2 = st.columns(2)
+        code_ops_col1, code_ops_col2, code_ops_col3 = st.columns(3)
         if code_ops_col1.button("🧪 国コード候補を診断（Dry Run）", key="cast_mode_code_backfill_dry"):
             with st.spinner("国コード候補を診断中..."):
                 code_stats = backfill_score_db_country_codes(dry_run=True, fill_only_empty=True)
@@ -9868,6 +9863,24 @@ if mode in ("出演者管理", "出演情報管理"):
             else:
                 st.success(
                     "✅ 国コード補完完了: "
+                    f"走査 {code_stats.get('scanned', 0)} / "
+                    f"更新 {code_stats.get('filled', 0)} / "
+                    f"候補 {code_stats.get('candidates', 0)} / "
+                    f"既入力 {code_stats.get('has_code', 0)} / "
+                    f"未解決 {code_stats.get('unresolved', 0)} / "
+                    f"失敗 {code_stats.get('failed', 0)}"
+                )
+
+        if code_ops_col3.button("♻️ 国コードを上書き再計算", key="cast_mode_code_backfill_force_apply"):
+            with st.spinner("国コードを上書き再計算中..."):
+                code_stats = backfill_score_db_country_codes(dry_run=False, fill_only_empty=False)
+            st.session_state["last_score_code_backfill_stats"] = code_stats
+            st.session_state["last_score_code_backfill_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if code_stats.get("error"):
+                st.error(f"❌ {code_stats.get('error')}")
+            else:
+                st.success(
+                    "✅ 国コード上書き補完完了: "
                     f"走査 {code_stats.get('scanned', 0)} / "
                     f"更新 {code_stats.get('filled', 0)} / "
                     f"候補 {code_stats.get('candidates', 0)} / "
