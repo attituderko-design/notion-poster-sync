@@ -11302,7 +11302,7 @@ if mode == "出演アーカイブ":
                             soloists = plain_text_join((score_props.get("ソリスト") or {}).get("rich_text", []))
                             meta_line = []
                             if ordv is not None:
-                                meta_line.append(f"Concert No.{ordv}")
+                                meta_line.append(f"曲順No.{ordv}")
                             if sec:
                                 meta_line.append(sec)
 
