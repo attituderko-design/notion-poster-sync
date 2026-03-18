@@ -11300,7 +11300,6 @@ if mode == "出演アーカイブ":
                 for k, v in (_props or {}).items():
                     k_norm = re.sub(r"\s+", "", str(k or "")).upper()
                     if k_norm == "URL":
-                        st.write("url_prop:", v)
                         url_prop = v
                         break
                 if isinstance(url_prop, dict):
