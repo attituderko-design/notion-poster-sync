@@ -11294,20 +11294,29 @@ if mode == "出演アーカイブ":
             rel_info_map = perf_score_info.get(page_id, {})
             played_titles = [id_to_title.get(rid, rid[:8]) for rid in rel_ids if (rel_info_map.get(rid) or {}).get("played")]
             # 動画は親DBの「URL」プロパティのみ参照（運用固定）
-            video_urls = []
-            url_prop = None
-            for k, v in props.items():
-                k_norm = re.sub(r"\s+", "", str(k or "")).upper()
-                if k_norm == "URL":
-                    url_prop = v
-                    break
-            if isinstance(url_prop, dict):
-                direct_url = ((url_prop.get("url") or "")).strip()
-                if direct_url:
-                    video_urls.append(direct_url)
-                else:
-                    video_urls.extend(_extract_urls_from_text(_archive_prop_text(url_prop)))
-            video_urls = list(dict.fromkeys([u for u in video_urls if u]))
+            def _extract_video_urls_from_url_prop(_props: dict) -> list[str]:
+                out = []
+                url_prop = None
+                for k, v in (_props or {}).items():
+                    k_norm = re.sub(r"\s+", "", str(k or "")).upper()
+                    if k_norm == "URL":
+                        url_prop = v
+                        break
+                if isinstance(url_prop, dict):
+                    direct_url = ((url_prop.get("url") or "")).strip()
+                    if direct_url:
+                        out.append(direct_url)
+                    else:
+                        out.extend(_extract_urls_from_text(_archive_prop_text(url_prop)))
+                return list(dict.fromkeys([u for u in out if u]))
+
+            video_urls = _extract_video_urls_from_url_prop(props)
+            if not video_urls and page_id:
+                # stateキャッシュが古い場合に備えて、ページAPIから再取得して再判定
+                fresh_page = _get_page_from_state_or_api(page_id, force_api=True)
+                fresh_props = (fresh_page or {}).get("properties") or {}
+                if fresh_props:
+                    video_urls = _extract_video_urls_from_url_prop(fresh_props)
             place = (props.get("ロケーション") or {}).get("place") or {}
             venue = ""
             venue_lat = None
