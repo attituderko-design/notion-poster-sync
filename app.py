@@ -11362,7 +11362,6 @@ if mode == "出演アーカイブ":
                         st.caption("（フライヤー未設定）")
                 with c2:
                     st.caption(f"ID: `{page_id}`")
-                    st.caption(f"英題: {en or '—'}")
                     st.caption(f"クリエイター: {creator or '—'}")
                     st.caption(f"キャスト・関係者: {cast or '—'}")
                     st.caption(f"会場: {venue or '—'}")
