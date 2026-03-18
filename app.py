@@ -11388,13 +11388,17 @@ if mode == "出演アーカイブ":
                         yt_urls = []
                         other_urls = []
                         for u in video_urls:
+                            ul = (u or "").lower()
                             embed_u = _to_youtube_embed_url(u)
-                            if embed_u:
+                            if embed_u or ("youtube.com" in ul) or ("youtu.be" in ul):
                                 yt_urls.append((u, embed_u))
                             else:
                                 other_urls.append(u)
                         for raw_u, embed_u in yt_urls:
-                            st.video(embed_u)
+                            # URL形の揺れがあるため、まず生URL、その後埋め込みURLを試す
+                            st.video(raw_u)
+                            if embed_u and embed_u != raw_u:
+                                st.video(embed_u)
                             st.caption(raw_u)
                         for u in other_urls:
                             st.markdown(f"- [リンクを開く]({u})")
