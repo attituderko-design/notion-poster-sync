@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.28"
+APP_VERSION = "11.29"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -11085,6 +11085,53 @@ if mode == "出演アーカイブ":
     archive_media = ("出演", "演奏会（鑑賞）", "ライブ/ショー", "イベント")
     archive_pages = [p for p in target_pages if get_page_media(p) in archive_media]
     id_to_title = {p.get("id"): get_title((p.get("properties") or {}))[1] for p in target_pages}
+    id_to_page = {p.get("id"): p for p in target_pages}
+    score_rows = _get_score_pages()
+    perf_score_info: dict[str, dict[str, dict]] = {}
+    for row in score_rows:
+        rprops = row.get("properties") or {}
+        perf_ids = []
+        score_ids = []
+        for k, meta in rprops.items():
+            if not isinstance(meta, dict) or meta.get("type") != "relation":
+                continue
+            rel_ids = _clean_relation_ids([x.get("id") for x in (meta.get("relation") or [])])
+            kl = str(k).lower()
+            if ("出演" in str(k)) or ("演奏会" in str(k)) or ("公演" in str(k)):
+                perf_ids.extend(rel_ids)
+            elif ("演奏曲" in str(k)) or ("楽曲" in str(k)) or ("score" in kl):
+                score_ids.extend(rel_ids)
+        if not perf_ids or not score_ids:
+            continue
+        sec = ((rprops.get("区分") or {}).get("select") or {}).get("name", "")
+        order_num = (rprops.get("曲順") or {}).get("number")
+        try:
+            order_num = int(order_num) if order_num is not None else None
+        except Exception:
+            order_num = None
+        play_val = None
+        if isinstance(rprops.get("Playflg"), dict) and (rprops.get("Playflg") or {}).get("type") == "checkbox":
+            play_val = bool((rprops.get("Playflg") or {}).get("checkbox"))
+        inst_meta = rprops.get("担当楽器") or {}
+        inst_vals = []
+        if isinstance(inst_meta, dict):
+            if inst_meta.get("type") == "multi_select":
+                inst_vals = [((x or {}).get("name") or "").strip() for x in (inst_meta.get("multi_select") or []) if ((x or {}).get("name") or "").strip()]
+            elif inst_meta.get("type") == "select":
+                one = ((inst_meta.get("select") or {}).get("name") or "").strip()
+                if one:
+                    inst_vals = [one]
+            elif inst_meta.get("type") == "rich_text":
+                txt = plain_text_join(inst_meta.get("rich_text") or [])
+                if txt:
+                    inst_vals = [txt]
+        if play_val is None:
+            play_val = bool(inst_vals)
+        info = {"played": bool(play_val), "part": " / ".join(inst_vals), "section": sec, "order": order_num}
+        for pid in perf_ids:
+            perf_score_info.setdefault(pid, {})
+            for sid in score_ids:
+                perf_score_info[pid][sid] = info
 
     q = clearable_text_input(
         "🔎 横断検索（タイトル / クリエイター / キャスト / 演奏曲 / 動画URL）",
@@ -11110,6 +11157,9 @@ if mode == "出演アーカイブ":
                         video_vals.append((meta.get("url") or "").strip())
                     elif meta.get("type") == "rich_text":
                         video_vals.append(plain_text_join((meta.get("rich_text") or [])))
+            direct_url = ((props.get("URL") or {}).get("url") or "").strip()
+            if direct_url:
+                video_vals.append(direct_url)
             hay = " ".join([jp or "", en or "", creator, cast, rel_titles, " ".join(video_vals)]).lower()
             if ql in hay:
                 filtered.append(p)
@@ -11142,6 +11192,8 @@ if mode == "出演アーカイブ":
             exp_date = get_experience_date_from_props(props) or "—"
             rel_ids = _clean_relation_ids([r.get("id") for r in ((props.get("演奏曲") or {}).get("relation", []))])
             rel_titles = [id_to_title.get(rid, rid[:8]) for rid in rel_ids]
+            rel_info_map = perf_score_info.get(page_id, {})
+            played_titles = [id_to_title.get(rid, rid[:8]) for rid in rel_ids if (rel_info_map.get(rid) or {}).get("played")]
             video_urls = []
             for k, meta in props.items():
                 if "動画" not in str(k):
@@ -11155,6 +11207,13 @@ if mode == "出演アーカイブ":
                         u = plain_text_join((meta.get("rich_text") or []))
                         if u:
                             video_urls.append(u)
+            direct_url = ((props.get("URL") or {}).get("url") or "").strip()
+            if direct_url:
+                video_urls.append(direct_url)
+            place = (props.get("ロケーション") or {}).get("place") or {}
+            venue = ""
+            if isinstance(place, dict):
+                venue = (place.get("name") or place.get("address") or "").strip()
 
             with st.expander(f"{jp}  ({media} / {exp_date})", expanded=False):
                 c1, c2 = st.columns([1, 2])
@@ -11169,10 +11228,32 @@ if mode == "出演アーカイブ":
                     st.caption(f"英題: {en or '—'}")
                     st.caption(f"クリエイター: {creator or '—'}")
                     st.caption(f"キャスト・関係者: {cast or '—'}")
+                    st.caption(f"会場: {venue or '—'}")
+                    st.caption(f"自分が演奏した曲: {len(played_titles)} 件")
                     if rel_titles:
                         st.markdown("**プログラム（演奏曲）**")
-                        for t in rel_titles:
-                            st.write(f"- {t}")
+                        for rid in rel_ids:
+                            t = id_to_title.get(rid, rid[:8])
+                            extra = rel_info_map.get(rid) or {}
+                            sec = extra.get("section") or ""
+                            ordv = extra.get("order")
+                            part = extra.get("part") or ""
+                            played = bool(extra.get("played"))
+                            score_page = id_to_page.get(rid)
+                            score_props = (score_page or {}).get("properties", {}) if score_page else {}
+                            is_concerto = bool((score_props.get("協奏曲") or {}).get("checkbox", False))
+                            soloists = plain_text_join((score_props.get("ソリスト") or {}).get("rich_text", []))
+                            tags = []
+                            if ordv is not None:
+                                tags.append(f"No.{ordv}")
+                            if sec:
+                                tags.append(sec)
+                            tags.append("演奏" if played else "未演奏")
+                            if part:
+                                tags.append(f"担当: {part}")
+                            if is_concerto and soloists:
+                                tags.append(f"ソリスト: {soloists}")
+                            st.write(f"- {t}  {' / '.join(tags)}")
                     if video_urls:
                         st.markdown("**動画URL**")
                         for u in video_urls:
