@@ -190,14 +190,18 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
 
     title_to_id = {}
     title_to_composer = {}
+    title_to_country = {}
     for s in (selected_scores or []):
         t = (s.get("title") or "").strip().lower()
         sid = s.get("id")
         scomp = (s.get("composer") or "").strip()
+        scc = _norm_cc((s.get("composer_country") or "").strip())
         if t and sid and t not in title_to_id:
             title_to_id[t] = sid
         if t and scomp and t not in title_to_composer:
             title_to_composer[t] = scomp
+        if t and scc and t not in title_to_country:
+            title_to_country[t] = scc
 
     created, failed = 0, 0
     failure_reasons = []
@@ -234,7 +238,9 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
             row_order = order
         part = (item.get("part") or "").strip()
         played = bool(item.get("played", False) or part)
-        composer_name = (item.get("composer") or "").strip() or title_to_composer.get(song_title.lower(), "")
+        song_key = song_title.lower()
+        composer_name = (item.get("composer") or "").strip() or title_to_composer.get(song_key, "")
+        preferred_cc = _norm_cc((item.get("composer_country") or "").strip() or title_to_country.get(song_key, ""))
         if section not in ("幕前", "ロビー", "本編", "Encore", "ソリストEncore"):
             section = "本編"
         if section_allowed and section not in section_allowed:
@@ -265,7 +271,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
 
         # 新規作成時点で演奏曲DBアイコンを設定（作曲家国旗優先、未解決は媒体アイコン）
         icon_payload = None
-        resolved_cc = ""
+        resolved_cc = preferred_cc
         if callable(country_code_to_flag) and callable(get_composer_country_code):
             composer_name = composer_name or ""
             src_props = {}
@@ -283,7 +289,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
                 # 呼び出し元（検索確定時）の作曲家名を優先し、未指定時のみ既存レコード値へフォールバック
                 if not composer_name:
                     composer_name = src_composer_name
-                if code_prop:
+                if code_prop and not resolved_cc:
                     resolved_cc = _norm_cc(_prop_text(src_props.get(code_prop)))
                 if creator_prop and composer_name:
                     put_notion_prop(props, type_map, creator_prop, composer_name)

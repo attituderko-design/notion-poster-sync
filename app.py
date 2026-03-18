@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.25"
+APP_VERSION = "11.26"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -8589,6 +8589,7 @@ if mode == "新規登録":
                                                     "id": created_id,
                                                     "title": item.get("jp_title", ""),
                                                     "composer": ((item.get("details") or {}).get("director") or "").strip(),
+                                                    "composer_country": normalize_country_code_for_flag(item.get("composer_country", "")),
                                                 }]
                                                 score_pages_for_link = _get_score_pages()
                                                 for perf_id in rel_ids:
