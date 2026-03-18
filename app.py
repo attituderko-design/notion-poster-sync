@@ -11289,6 +11289,8 @@ if mode == "出演アーカイブ":
                     st.caption(f"自分が演奏した曲: {len(played_titles)} 件")
                     if rel_titles:
                         st.markdown("**プログラム（演奏曲）**")
+                        section_order = ["幕前", "ロビー", "本編", "ソリストEncore", "Encore"]
+                        grouped_rows = {}
                         for rid in rel_ids:
                             t = id_to_title.get(rid, rid[:8])
                             extra = rel_info_map.get(rid) or {}
@@ -11300,19 +11302,31 @@ if mode == "出演アーカイブ":
                             score_props = (score_page or {}).get("properties", {}) if score_page else {}
                             is_concerto = bool((score_props.get("協奏曲") or {}).get("checkbox", False))
                             soloists = plain_text_join((score_props.get("ソリスト") or {}).get("rich_text", []))
-                            meta_line = []
-                            if ordv is not None:
-                                meta_line.append(f"曲順No.{ordv}")
-                            if sec:
-                                meta_line.append(sec)
+                            sec_key = sec if sec else "本編"
+                            grouped_rows.setdefault(sec_key, []).append({
+                                "title": t,
+                                "order": ordv if isinstance(ordv, int) else 9999,
+                                "soloists": soloists,
+                                "is_concerto": is_concerto,
+                                "played": played,
+                                "part": part,
+                            })
 
-                            st.write(f"- {t}")
-                            if meta_line:
-                                st.caption(" / ".join(meta_line))
-                            if is_concerto and soloists:
-                                st.caption(f"Soloist: {soloists}")
-                            if played and part:
-                                st.caption(f"Assigned: {part}")
+                        display_sections = [s for s in section_order if s in grouped_rows] + [
+                            s for s in grouped_rows.keys() if s not in section_order
+                        ]
+                        for sec_name in display_sections:
+                            if sec_name == "ソリストEncore":
+                                st.markdown("**＜ソリストEncore＞**")
+                            else:
+                                st.markdown(f"**【{sec_name}】**")
+                            rows = sorted(grouped_rows.get(sec_name, []), key=lambda r: (r["order"], r["title"]))
+                            for row in rows:
+                                st.write(f"- {row['title']}")
+                                if row.get("is_concerto") and row.get("soloists"):
+                                    st.caption(f"Soloist: {row['soloists']}")
+                                if row.get("played") and row.get("part"):
+                                    st.caption(f"Assigned: {row['part']}")
                     if video_urls:
                         st.markdown("**動画URL**")
                         for u in video_urls:
