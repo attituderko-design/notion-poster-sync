@@ -11294,13 +11294,26 @@ if mode == "出演アーカイブ":
             rel_info_map = perf_score_info.get(page_id, {})
             played_titles = [id_to_title.get(rid, rid[:8]) for rid in rel_ids if (rel_info_map.get(rid) or {}).get("played")]
             # 動画は親DBの「URL」プロパティのみ参照（運用固定）
+            def _normalize_video_url(u: str) -> str:
+                s = (u or "").strip()
+                if not s:
+                    return ""
+                if re.match(r"^https?://", s, flags=re.I):
+                    return s
+                if s.startswith("//"):
+                    return "https:" + s
+                sl = s.lower()
+                if sl.startswith("youtu.be/") or sl.startswith("www.youtube.com/") or sl.startswith("youtube.com/"):
+                    return "https://" + s
+                return s
+
             def _extract_video_urls_from_url_prop(_props: dict) -> list[str]:
                 out = []
                 props_dict = (_props or {})
                 # 1) まず type=url の値を拾う（プロパティ名に依存しない）
                 for _, v in props_dict.items():
                     if isinstance(v, dict) and v.get("type") == "url":
-                        direct_url = ((v.get("url") or "")).strip()
+                        direct_url = _normalize_video_url((v.get("url") or ""))
                         if direct_url:
                             out.append(direct_url)
                 # 2) 念のため「URL」名プロパティからテキスト抽出
@@ -11312,7 +11325,7 @@ if mode == "出演アーカイブ":
                             url_prop = v
                             break
                     if isinstance(url_prop, dict):
-                        out.extend(_extract_urls_from_text(_archive_prop_text(url_prop)))
+                        out.extend([_normalize_video_url(x) for x in _extract_urls_from_text(_archive_prop_text(url_prop))])
                 return list(dict.fromkeys([u for u in out if u]))
 
             video_urls = _extract_video_urls_from_url_prop(props)
@@ -11322,6 +11335,13 @@ if mode == "出演アーカイブ":
                 fresh_props = (fresh_page or {}).get("properties") or {}
                 if fresh_props:
                     video_urls = _extract_video_urls_from_url_prop(fresh_props)
+            # 出演ページ側にURLがない場合、関連する演奏曲ページのURLを拾う
+            if not video_urls and rel_ids:
+                for rid in rel_ids:
+                    score_page = id_to_page.get(rid) or {}
+                    score_props = score_page.get("properties") or {}
+                    video_urls.extend(_extract_video_urls_from_url_prop(score_props))
+                video_urls = list(dict.fromkeys([u for u in video_urls if u]))
             place = (props.get("ロケーション") or {}).get("place") or {}
             venue = ""
             venue_lat = None
