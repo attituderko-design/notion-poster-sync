@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.29"
+APP_VERSION = "11.30"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -11087,6 +11087,63 @@ if mode == "出演アーカイブ":
     id_to_title = {p.get("id"): get_title((p.get("properties") or {}))[1] for p in target_pages}
     id_to_page = {p.get("id"): p for p in target_pages}
     score_rows = _get_score_pages()
+
+    def _archive_prop_text(meta: dict | None) -> str:
+        if not isinstance(meta, dict):
+            return ""
+        ptype = meta.get("type")
+        if ptype == "rich_text":
+            return plain_text_join(meta.get("rich_text") or [])
+        if ptype == "title":
+            return plain_text_join(meta.get("title") or [])
+        if ptype == "select":
+            return ((meta.get("select") or {}).get("name") or "").strip()
+        if ptype == "multi_select":
+            vals = [((x or {}).get("name") or "").strip() for x in (meta.get("multi_select") or [])]
+            vals = [v for v in vals if v]
+            return " / ".join(vals)
+        if ptype == "formula":
+            f = meta.get("formula") or {}
+            if f.get("type") == "string":
+                return (f.get("string") or "").strip()
+            if f.get("type") == "number" and f.get("number") is not None:
+                return str(f.get("number"))
+            return ""
+        if ptype == "rollup":
+            r = meta.get("rollup") or {}
+            rtype = r.get("type")
+            if rtype == "array":
+                chunks = []
+                for a in (r.get("array") or []):
+                    if not isinstance(a, dict):
+                        continue
+                    atype = a.get("type")
+                    if atype == "rich_text":
+                        txt = plain_text_join(a.get("rich_text") or [])
+                        if txt:
+                            chunks.append(txt)
+                    elif atype == "title":
+                        txt = plain_text_join(a.get("title") or [])
+                        if txt:
+                            chunks.append(txt)
+                    elif atype == "select":
+                        txt = ((a.get("select") or {}).get("name") or "").strip()
+                        if txt:
+                            chunks.append(txt)
+                    elif atype == "multi_select":
+                        vals = [((x or {}).get("name") or "").strip() for x in (a.get("multi_select") or [])]
+                        vals = [v for v in vals if v]
+                        if vals:
+                            chunks.extend(vals)
+                    else:
+                        txt = (a.get("plain_text") or "").strip()
+                        if txt:
+                            chunks.append(txt)
+                return " / ".join(list(dict.fromkeys([c for c in chunks if c])))
+            if rtype == "number" and r.get("number") is not None:
+                return str(r.get("number"))
+            return ""
+        return ""
     perf_score_info: dict[str, dict[str, dict]] = {}
     for row in score_rows:
         rprops = row.get("properties") or {}
@@ -11103,28 +11160,19 @@ if mode == "出演アーカイブ":
                 score_ids.extend(rel_ids)
         if not perf_ids or not score_ids:
             continue
-        sec = ((rprops.get("区分") or {}).get("select") or {}).get("name", "")
+        sec = _archive_prop_text(rprops.get("区分"))
         order_num = (rprops.get("曲順") or {}).get("number")
         try:
             order_num = int(order_num) if order_num is not None else None
         except Exception:
             order_num = None
         play_val = None
-        if isinstance(rprops.get("Playflg"), dict) and (rprops.get("Playflg") or {}).get("type") == "checkbox":
-            play_val = bool((rprops.get("Playflg") or {}).get("checkbox"))
-        inst_meta = rprops.get("担当楽器") or {}
-        inst_vals = []
-        if isinstance(inst_meta, dict):
-            if inst_meta.get("type") == "multi_select":
-                inst_vals = [((x or {}).get("name") or "").strip() for x in (inst_meta.get("multi_select") or []) if ((x or {}).get("name") or "").strip()]
-            elif inst_meta.get("type") == "select":
-                one = ((inst_meta.get("select") or {}).get("name") or "").strip()
-                if one:
-                    inst_vals = [one]
-            elif inst_meta.get("type") == "rich_text":
-                txt = plain_text_join(inst_meta.get("rich_text") or [])
-                if txt:
-                    inst_vals = [txt]
+        for pfk in ("Playflg", "PlayFlg", "playflg", "演奏した"):
+            if isinstance(rprops.get(pfk), dict) and (rprops.get(pfk) or {}).get("type") == "checkbox":
+                play_val = bool((rprops.get(pfk) or {}).get("checkbox"))
+                break
+        inst_txt = _archive_prop_text(rprops.get("担当楽器"))
+        inst_vals = [v.strip() for v in re.split(r"\s*/\s*|、|,|\n", inst_txt) if v.strip()]
         if play_val is None:
             play_val = bool(inst_vals)
         info = {"played": bool(play_val), "part": " / ".join(inst_vals), "section": sec, "order": order_num}
@@ -11248,7 +11296,8 @@ if mode == "出演アーカイブ":
                                 tags.append(f"No.{ordv}")
                             if sec:
                                 tags.append(sec)
-                            tags.append("演奏" if played else "未演奏")
+                            if played:
+                                tags.append("演奏")
                             if part:
                                 tags.append(f"担当: {part}")
                             if is_concerto and soloists:
