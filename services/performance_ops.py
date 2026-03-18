@@ -216,6 +216,11 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
         return 0, 0, "セットリスト入力なし", []
 
     section_allowed = set()
+    play_prop = None
+    for cand in ("Playflg", "PlayFlg", "演奏した"):
+        if type_map.get(cand) == "checkbox":
+            play_prop = cand
+            break
     try:
         db_res = api_request("get", f"https://api.notion.com/v1/databases/{NOTION_SCORE_DB_ID}", headers=NOTION_HEADERS)
         if db_res is not None and db_res.status_code == 200:
@@ -258,6 +263,8 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
         put_notion_prop(props, type_map, "出演日", performance_date)
         put_notion_prop(props, type_map, "区分", section)
         put_notion_prop(props, type_map, "担当楽器", split_instruments(part) if played else [])
+        if play_prop:
+            put_notion_prop(props, type_map, play_prop, bool(played))
         put_notion_prop(props, type_map, "曲順", row_order)
         put_notion_prop(props, type_map, "演奏曲", score_id)
         put_notion_prop(props, type_map, "表示名", f"{performance_title} / {row_order:02d} / {section} / {song_title}")
