@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.23"
+APP_VERSION = "11.24"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -2386,7 +2386,7 @@ def _get_mb_area_iso2(area_id: str) -> str:
 
 
 @st.cache_data(ttl=86400)
-def _get_wikidata_country_iso2(qid: str) -> str:
+def _get_wikidata_country_iso2(qid: str, preferred_cc: str = "") -> str:
     q = (qid or "").strip().upper()
     if not re.fullmatch(r"Q[0-9]+", q):
         return ""
@@ -2426,8 +2426,12 @@ def _get_wikidata_country_iso2(qid: str) -> str:
         p495_codes = _claim_country_codes(p495)
         p27_codes = _claim_country_codes(p27)
 
+        preferred_cc = normalize_country_code_for_flag(preferred_cc or "")
         # 作曲家では「本人の国籍(P27)」を最優先
+        # ただしMB countryが有効な場合は、P27候補内でそれを優先採用
         if p27_codes:
+            if preferred_cc and preferred_cc in p27_codes:
+                return preferred_cc
             return p27_codes[0]
         # 次点: 出自(P495)
         if p495_codes:
@@ -2634,6 +2638,7 @@ def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
         if res.status_code != 200:
             return ""
         data = res.json() or {}
+        mb_country_pref = normalize_country_code_for_flag((data.get("country") or "").strip().upper())
         # 国籍はWikidata(P27/P495)を最優先
         for rel in data.get("relations") or []:
             if (rel.get("type") or "").lower() != "wikidata":
@@ -2642,7 +2647,7 @@ def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
             m = re.search(r"/wiki/(Q[0-9]+)$", resource)
             if not m:
                 continue
-            cc = _get_wikidata_country_iso2(m.group(1))
+            cc = _get_wikidata_country_iso2(m.group(1), preferred_cc=mb_country_pref)
             if cc:
                 return cc
 
@@ -2656,7 +2661,7 @@ def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
 
         # Wikidataで解決不能な場合のみ、MB countryを最終フォールバックとして採用
         # （活動地由来のノイズはあり得るが、未解決よりは運用上有益）
-        mb_cc = normalize_country_code_for_flag((data.get("country") or "").strip().upper())
+        mb_cc = mb_country_pref
         if mb_cc:
             return mb_cc
     except Exception:
