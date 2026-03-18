@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.19"
+APP_VERSION = "11.20"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -2269,6 +2269,96 @@ def get_composer_country_code(composer_name: str) -> str:
     return ""
 
 
+def trace_get_composer_country_code(composer_name: str) -> dict:
+    """国コード解決の経路を可視化するデバッグ用トレース。"""
+    name = (composer_name or "").strip()
+    out = {
+        "query": name,
+        "search_error": "",
+        "search_count": 0,
+        "rank_floor": None,
+        "candidates": [],
+        "selected_path": "",
+        "final_country_code": "",
+    }
+    if not name:
+        out["selected_path"] = "empty-query"
+        return out
+
+    comps, err = search_mb_composer(name)
+    out["search_error"] = err or ""
+    out["search_count"] = len(comps or [])
+    if err or not comps:
+        cc = normalize_country_code_for_flag(_wikidata_country_iso2_by_person_name(name))
+        out["selected_path"] = "fallback:wikidata-by-person-name"
+        out["final_country_code"] = cc or ""
+        return out
+
+    def _norm_name(s: str) -> str:
+        txt = (s or "").lower()
+        txt = re.sub(r"[^\w\s]", " ", txt)
+        txt = re.sub(r"\s+", " ", txt).strip()
+        return txt
+
+    def _token_set(s: str) -> set[str]:
+        return {t for t in _norm_name(s).split(" ") if t}
+
+    query_tokens = _token_set(name)
+
+    def _composer_score(c: dict) -> int:
+        cand_name = (c.get("name") or "").strip()
+        cand_sort = (c.get("sort_name") or "").strip()
+        disamb = (c.get("disambiguation") or "").lower()
+        typ = (c.get("artist_type") or "").lower()
+        score = 0
+        if _norm_name(cand_name) == _norm_name(name) or _norm_name(cand_sort) == _norm_name(name):
+            score += 100
+        cand_tokens = _token_set(cand_name) | _token_set(cand_sort)
+        overlap = len(query_tokens & cand_tokens)
+        score += overlap * 10
+        if query_tokens and query_tokens.issubset(cand_tokens):
+            score += 30
+        if typ == "person":
+            score += 20
+        if "composer" in disamb or "作曲" in disamb:
+            score += 20
+        if c.get("country"):
+            score += 3
+        return score
+
+    ranked = sorted(comps, key=lambda c: _composer_score(c), reverse=True)
+    top = _composer_score(ranked[0]) if ranked else 0
+    floor = max(40, top - 15)
+    out["rank_floor"] = floor
+    narrowed = [c for c in ranked if _composer_score(c) >= floor][:5]
+
+    for c in narrowed:
+        mbid = (c.get("id") or "").strip()
+        cc = ""
+        if mbid:
+            cc = normalize_country_code_for_flag(_get_mb_artist_country_code_by_id(mbid))
+        row = {
+            "id": mbid,
+            "name": c.get("name", ""),
+            "sort_name": c.get("sort_name", ""),
+            "artist_type": c.get("artist_type", ""),
+            "disambiguation": c.get("disambiguation", ""),
+            "mb_country_field": c.get("country", ""),
+            "score": _composer_score(c),
+            "resolved_country_code": cc or "",
+        }
+        out["candidates"].append(row)
+        if cc and not out["final_country_code"]:
+            out["final_country_code"] = cc
+            out["selected_path"] = f"mb-candidate:{mbid}"
+
+    if not out["final_country_code"]:
+        cc = normalize_country_code_for_flag(_wikidata_country_iso2_by_person_name(name))
+        out["final_country_code"] = cc or ""
+        out["selected_path"] = "fallback:wikidata-by-person-name"
+    return out
+
+
 @st.cache_data(ttl=86400)
 def _get_mb_area_iso2(area_id: str) -> str:
     aid = (area_id or "").strip()
@@ -2597,6 +2687,37 @@ def _wikidata_country_iso2_by_person_name(person_name: str) -> str:
                 best_cc = cc
 
     return normalize_country_code_for_flag(best_cc)
+
+
+def debug_wikidata_country_resolution(qid: str) -> dict:
+    q = (qid or "").strip().upper()
+    out = {
+        "qid": q,
+        "valid_qid": bool(re.fullmatch(r"Q[0-9]+", q)),
+        "p19_birth_place_qids": [],
+        "p27_citizenship_qids": [],
+        "p495_origin_qids": [],
+        "resolved_country_code": "",
+    }
+    if not out["valid_qid"]:
+        return out
+    ent = _wikidata_entity(q) or {}
+    claims = ent.get("claims") or {}
+
+    def _extract_qids(p: str) -> list[str]:
+        vals = []
+        for c in (claims.get(p) or []):
+            dv = ((((c or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {})
+            cq = (dv.get("id") or "").strip().upper()
+            if re.fullmatch(r"Q[0-9]+", cq):
+                vals.append(cq)
+        return vals
+
+    out["p19_birth_place_qids"] = _extract_qids("P19")
+    out["p27_citizenship_qids"] = _extract_qids("P27")
+    out["p495_origin_qids"] = _extract_qids("P495")
+    out["resolved_country_code"] = _get_wikidata_country_iso2(q) or ""
+    return out
 
 
 def search_mb_works_by_title(title: str, limit: int = 10) -> tuple[list, str | None]:
@@ -8532,6 +8653,21 @@ if mode == "新規登録":
                 selected_comp = st.session_state.get("mb_selected_comp")
                 if selected_comp:
                     st.success(f"作曲家を確定: {format_mb_composer_label(selected_comp)}")
+                    with st.expander("🔎 国コード判定ログ（デバッグ）", expanded=False):
+                        if st.button("この作曲家の判定経路を表示", key="mb_country_trace_run"):
+                            cname = canonical_mb_composer_name(selected_comp)
+                            st.session_state["mb_country_trace_result"] = trace_get_composer_country_code(cname)
+                        trace_result = st.session_state.get("mb_country_trace_result")
+                        if trace_result:
+                            st.json(trace_result)
+
+                        st.caption("Wikidata QID を直接検証（例: Q131861）")
+                        qid_text = st.text_input("QID", key="mb_wikidata_debug_qid", value="Q131861")
+                        if st.button("QIDの解決経路を表示", key="mb_wikidata_trace_run"):
+                            st.session_state["mb_wikidata_trace_result"] = debug_wikidata_country_resolution(qid_text)
+                        qid_result = st.session_state.get("mb_wikidata_trace_result")
+                        if qid_result:
+                            st.json(qid_result)
 
             if selected_comp:
                 with st.form("mb_work_form", clear_on_submit=False):
