@@ -11296,17 +11296,22 @@ if mode == "出演アーカイブ":
             # 動画は親DBの「URL」プロパティのみ参照（運用固定）
             def _extract_video_urls_from_url_prop(_props: dict) -> list[str]:
                 out = []
-                url_prop = None
-                for k, v in (_props or {}).items():
-                    k_norm = re.sub(r"\s+", "", str(k or "")).upper()
-                    if k_norm == "URL":
-                        url_prop = v
-                        break
-                if isinstance(url_prop, dict):
-                    direct_url = ((url_prop.get("url") or "")).strip()
-                    if direct_url:
-                        out.append(direct_url)
-                    else:
+                props_dict = (_props or {})
+                # 1) まず type=url の値を拾う（プロパティ名に依存しない）
+                for _, v in props_dict.items():
+                    if isinstance(v, dict) and v.get("type") == "url":
+                        direct_url = ((v.get("url") or "")).strip()
+                        if direct_url:
+                            out.append(direct_url)
+                # 2) 念のため「URL」名プロパティからテキスト抽出
+                if not out:
+                    url_prop = None
+                    for k, v in props_dict.items():
+                        k_norm = re.sub(r"\s+", "", str(k or "")).upper()
+                        if k_norm == "URL":
+                            url_prop = v
+                            break
+                    if isinstance(url_prop, dict):
                         out.extend(_extract_urls_from_text(_archive_prop_text(url_prop)))
                 return list(dict.fromkeys([u for u in out if u]))
 
