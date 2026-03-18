@@ -11086,9 +11086,16 @@ if mode == "出演アーカイブ":
     archive_pages = [p for p in target_pages if get_page_media(p) in archive_media]
     id_to_title = {p.get("id"): get_title((p.get("properties") or {}))[1] for p in target_pages}
     id_to_page = {p.get("id"): p for p in target_pages}
-    # _get_score_pages() は id/title の軽量キャッシュなので、
-    # 出演アーカイブでは relation/checkbox 等を読むためにフルページを使う。
-    score_rows = [p for p in target_pages if get_page_media(p) == "演奏曲"]
+    # 出演アーカイブの演奏情報（曲順/担当楽器/Playflg）は演奏曲DBにあるため、
+    # まず演奏曲DBを参照し、未設定時のみ親DB(媒体=演奏曲)へフォールバックする。
+    score_rows = []
+    if NOTION_SCORE_DB_ID:
+        try:
+            score_rows = query_notion_database_all(NOTION_SCORE_DB_ID)
+        except Exception:
+            score_rows = []
+    if not score_rows:
+        score_rows = [p for p in target_pages if get_page_media(p) == "演奏曲"]
 
     def _archive_prop_text(meta: dict | None) -> str:
         if not isinstance(meta, dict):
@@ -11299,14 +11306,13 @@ if mode == "出演アーカイブ":
                             if sec:
                                 meta_line.append(sec)
 
-                            lines = [f"- {t}"]
+                            st.write(f"- {t}")
                             if meta_line:
-                                lines.append(f"  {' / '.join(meta_line)}")
+                                st.caption(" / ".join(meta_line))
                             if is_concerto and soloists:
-                                lines.append(f"  Soloist: {soloists}")
+                                st.caption(f"Soloist: {soloists}")
                             if played and part:
-                                lines.append(f"  Assigned: {part}")
-                            st.markdown("\n".join(lines))
+                                st.caption(f"Assigned: {part}")
                     if video_urls:
                         st.markdown("**動画URL**")
                         for u in video_urls:
