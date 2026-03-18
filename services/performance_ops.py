@@ -279,7 +279,10 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
                     score_page_cache[score_id] = pres.json() if (pres is not None and pres.status_code == 200) else {}
                 src_props = ((score_page_cache.get(score_id) or {}).get("properties") or {})
                 rt = ((src_props.get("クリエイター") or {}).get("rich_text") or [])
-                composer_name = "".join([(t.get("plain_text") or "") for t in rt]).strip() or composer_name
+                src_composer_name = "".join([(t.get("plain_text") or "") for t in rt]).strip()
+                # 呼び出し元（検索確定時）の作曲家名を優先し、未指定時のみ既存レコード値へフォールバック
+                if not composer_name:
+                    composer_name = src_composer_name
                 if code_prop:
                     resolved_cc = _norm_cc(_prop_text(src_props.get(code_prop)))
                 if creator_prop and composer_name:
