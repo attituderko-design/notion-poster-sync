@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.20"
+APP_VERSION = "11.21"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -2596,8 +2596,11 @@ def _get_mb_artist_country_code_by_id(artist_id: str) -> str:
             if cc:
                 return cc
 
-        # MBのcountry/areaは活動地由来の誤判定が起きやすいため不採用
-        # （出生地の現在主権国を優先する方針）
+        # Wikidataで解決不能な場合のみ、MB countryを最終フォールバックとして採用
+        # （活動地由来のノイズはあり得るが、未解決よりは運用上有益）
+        mb_cc = normalize_country_code_for_flag((data.get("country") or "").strip().upper())
+        if mb_cc:
+            return mb_cc
     except Exception:
         return ""
     return ""
