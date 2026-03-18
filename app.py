@@ -11295,7 +11295,12 @@ if mode == "出演アーカイブ":
             played_titles = [id_to_title.get(rid, rid[:8]) for rid in rel_ids if (rel_info_map.get(rid) or {}).get("played")]
             # 動画は親DBの「URL」プロパティのみ参照（運用固定）
             video_urls = []
-            url_prop = props.get("URL")
+            url_prop = None
+            for k, v in props.items():
+                k_norm = re.sub(r"\s+", "", str(k or "")).upper()
+                if k_norm == "URL":
+                    url_prop = v
+                    break
             if isinstance(url_prop, dict):
                 direct_url = ((url_prop.get("url") or "")).strip()
                 if direct_url:
