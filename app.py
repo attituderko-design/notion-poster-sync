@@ -11086,7 +11086,9 @@ if mode == "出演アーカイブ":
     archive_pages = [p for p in target_pages if get_page_media(p) in archive_media]
     id_to_title = {p.get("id"): get_title((p.get("properties") or {}))[1] for p in target_pages}
     id_to_page = {p.get("id"): p for p in target_pages}
-    score_rows = _get_score_pages()
+    # _get_score_pages() は id/title の軽量キャッシュなので、
+    # 出演アーカイブでは relation/checkbox 等を読むためにフルページを使う。
+    score_rows = [p for p in target_pages if get_page_media(p) == "演奏曲"]
 
     def _archive_prop_text(meta: dict | None) -> str:
         if not isinstance(meta, dict):
@@ -11291,18 +11293,20 @@ if mode == "出演アーカイブ":
                             score_props = (score_page or {}).get("properties", {}) if score_page else {}
                             is_concerto = bool((score_props.get("協奏曲") or {}).get("checkbox", False))
                             soloists = plain_text_join((score_props.get("ソリスト") or {}).get("rich_text", []))
-                            tags = []
+                            meta_line = []
                             if ordv is not None:
-                                tags.append(f"No.{ordv}")
+                                meta_line.append(f"Concert No.{ordv}")
                             if sec:
-                                tags.append(sec)
-                            if played:
-                                tags.append("演奏")
-                            if part:
-                                tags.append(f"担当: {part}")
+                                meta_line.append(sec)
+
+                            lines = [f"- {t}"]
+                            if meta_line:
+                                lines.append(f"  {' / '.join(meta_line)}")
                             if is_concerto and soloists:
-                                tags.append(f"ソリスト: {soloists}")
-                            st.write(f"- {t}  {' / '.join(tags)}")
+                                lines.append(f"  Soloist: {soloists}")
+                            if played and part:
+                                lines.append(f"  Assigned: {part}")
+                            st.markdown("\n".join(lines))
                     if video_urls:
                         st.markdown("**動画URL**")
                         for u in video_urls:
