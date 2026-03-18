@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.21"
+APP_VERSION = "11.22"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -2522,6 +2522,36 @@ def _is_wikidata_historical_country_qid(country_qid: str) -> bool:
 
 
 @st.cache_data(ttl=86400)
+def _resolve_modern_iso2_from_country_qid(country_qid: str, max_depth: int = 8) -> str:
+    """
+    歴史国家QIDから現行ISO2へ寄せる。
+    代表的に P1366(replaced by) / P155(follows) を辿って P297 を探す。
+    """
+    start = (country_qid or "").strip().upper()
+    if not re.fullmatch(r"Q[0-9]+", start):
+        return ""
+    visited = set()
+    queue = [(start, 0)]
+    while queue:
+        qid, depth = queue.pop(0)
+        if qid in visited or depth > max_depth:
+            continue
+        visited.add(qid)
+        cc = _get_wikidata_country_iso2_by_country_qid(qid)
+        if cc:
+            return cc
+        ent = _wikidata_entity(qid) or {}
+        claims = ent.get("claims") or {}
+        for prop in ("P1366", "P155"):  # replaced by / follows
+            for claim in (claims.get(prop) or []):
+                dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+                nq = (dv.get("id") or "").strip().upper()
+                if re.fullmatch(r"Q[0-9]+", nq):
+                    queue.append((nq, depth + 1))
+    return ""
+
+
+@st.cache_data(ttl=86400)
 def _resolve_country_iso2_from_place_qid(place_qid: str, max_depth: int = 8) -> str:
     """場所QIDから国ISO2を再帰的に解決する（出生地の現在主権国を優先）。"""
     start = (place_qid or "").strip().upper()
@@ -2536,27 +2566,35 @@ def _resolve_country_iso2_from_place_qid(place_qid: str, max_depth: int = 8) -> 
         visited.add(qid)
         ent = _wikidata_entity(qid) or {}
         claims = ent.get("claims") or {}
-        # そのものが国でISO2を持つ場合（歴史国家は除外）
+        # そのものが国でISO2を持つ場合
         cc_self = _get_wikidata_country_iso2_by_country_qid(qid)
-        if cc_self and not _is_wikidata_historical_country_qid(qid):
-            return cc_self
+        if cc_self:
+            if not _is_wikidata_historical_country_qid(qid):
+                return cc_self
+            # 歴史国家でも後継を辿って現代ISOへ寄せる
+            mapped = _resolve_modern_iso2_from_country_qid(qid)
+            if mapped:
+                return mapped
         # 行政単位(P131)を優先して辿る（現代国家に着地しやすい）
         for claim in (claims.get("P131") or []):
             dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
             pid = (dv.get("id") or "").strip().upper()
             if re.fullmatch(r"Q[0-9]+", pid):
                 queue.append((pid, depth + 1))
-        # 直接の国(P17)は補助扱い（歴史国家は採用しない）
+        # 直接の国(P17)は補助扱い
         for claim in (claims.get("P17") or []):
             dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
             cid = (dv.get("id") or "").strip().upper()
             if not re.fullmatch(r"Q[0-9]+", cid):
                 continue
             if _is_wikidata_historical_country_qid(cid):
-                continue
-            cc = _get_wikidata_country_iso2_by_country_qid(cid)
-            if cc:
-                return cc
+                mapped = _resolve_modern_iso2_from_country_qid(cid)
+                if mapped:
+                    return mapped
+            else:
+                cc = _get_wikidata_country_iso2_by_country_qid(cid)
+                if cc:
+                    return cc
             queue.append((cid, depth + 1))
     return ""
 
