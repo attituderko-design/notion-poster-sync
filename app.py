@@ -11268,7 +11268,7 @@ if mode == "出演アーカイブ":
             for k, meta in props.items():
                 ktxt = str(k)
                 # 親DBの「URL」列や、動画関連の列を幅広く拾う
-                if ("動画" not in ktxt) and ("URL" not in ktxt.upper()):
+                if ("動画" not in ktxt) and ("URL" not in ktxt.upper()) and ("リンク" not in ktxt):
                     continue
                 if isinstance(meta, dict):
                     if meta.get("type") == "url":
@@ -11353,6 +11353,7 @@ if mode == "出演アーカイブ":
                                     st.caption(f"Soloist: {row['soloists']}")
                                 if row.get("played") and row.get("part"):
                                     st.caption(f"Assigned: {row['part']}")
+                    st.caption(f"動画URL検出: {len(video_urls)} 件")
                     if video_urls:
                         st.markdown("**動画URL**")
                         yt_urls = []
@@ -11368,6 +11369,8 @@ if mode == "出演アーカイブ":
                             st.caption(u)
                         for u in other_urls:
                             st.markdown(f"- [リンクを開く]({u})")
+                    else:
+                        st.caption("（URL/動画列に有効なリンクが見つかりませんでした）")
 
 # ============================================================
 # 手動確認モード
