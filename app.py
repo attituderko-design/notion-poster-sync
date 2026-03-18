@@ -11084,8 +11084,9 @@ if mode == "出演アーカイブ":
     st.subheader("🗃 出演アーカイブ")
     archive_media = ("出演", "演奏会（鑑賞）", "ライブ/ショー", "イベント")
     archive_pages = [p for p in target_pages if get_page_media(p) in archive_media]
-    id_to_title = {p.get("id"): get_title((p.get("properties") or {}))[1] for p in target_pages}
-    id_to_page = {p.get("id"): p for p in target_pages}
+    all_pages_for_archive = st.session_state.get("all_pages") or target_pages
+    id_to_title = {p.get("id"): get_title((p.get("properties") or {}))[1] for p in all_pages_for_archive}
+    id_to_page = {p.get("id"): p for p in all_pages_for_archive}
     # 出演アーカイブの演奏情報（曲順/担当楽器/Playflg）は演奏曲DBにあるため、
     # まず演奏曲DBを参照し、未設定時のみ親DB(媒体=演奏曲)へフォールバックする。
     score_rows = []
@@ -11348,8 +11349,8 @@ if mode == "出演アーカイブ":
             venue_lon = None
             if isinstance(place, dict):
                 venue = (place.get("name") or place.get("address") or "").strip()
-                venue_lat = place.get("lat")
-                venue_lon = place.get("lon")
+                venue_lat = place.get("lat", place.get("latitude"))
+                venue_lon = place.get("lon", place.get("longitude"))
 
             with st.expander(f"{jp}  ({media} / {exp_date})", expanded=False):
                 c1, c2 = st.columns([1, 2])
