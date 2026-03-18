@@ -11390,10 +11390,14 @@ if mode == "出演アーカイブ":
                             else:
                                 other_urls.append(u)
                         for raw_u, embed_u in yt_urls:
-                            # URL形の揺れがあるため、まず生URL、その後埋め込みURLを試す
-                            st.video(raw_u)
-                            if embed_u and embed_u != raw_u:
-                                st.video(embed_u)
+                            # YouTube は iframe 埋め込みを優先（st.video で表示されない環境対策）
+                            video_src = embed_u or raw_u
+                            st.components.v1.html(
+                                f'<iframe width="100%" height="315" src="{video_src}" '
+                                'frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" '
+                                "allowfullscreen></iframe>",
+                                height=330,
+                            )
                             st.caption(raw_u)
                         for u in other_urls:
                             st.markdown(f"- [リンクを開く]({u})")
