@@ -11293,29 +11293,15 @@ if mode == "出演アーカイブ":
             rel_titles = [id_to_title.get(rid, rid[:8]) for rid in rel_ids]
             rel_info_map = perf_score_info.get(page_id, {})
             played_titles = [id_to_title.get(rid, rid[:8]) for rid in rel_ids if (rel_info_map.get(rid) or {}).get("played")]
+            # 動画は親DBの「URL」プロパティのみ参照（運用固定）
             video_urls = []
-            # 1) 明示の「URL」列を最優先（ここにYouTube直貼り運用）
             url_prop = props.get("URL")
             if isinstance(url_prop, dict):
-                video_urls.extend(_extract_urls_from_text(_archive_prop_text(url_prop)))
                 direct_url = ((url_prop.get("url") or "")).strip()
                 if direct_url:
                     video_urls.append(direct_url)
-            # 2) URL列が空のときのみ、動画系プロパティを探索
-            if not video_urls:
-                for k, meta in props.items():
-                    ktxt = str(k).strip()
-                    if ktxt in ("メディアリンク", "Media Link"):
-                        continue
-                    if ("動画" not in ktxt) and (ktxt not in ("動画URL", "動画リンク", "YouTube", "Youtube")):
-                        continue
-                    if isinstance(meta, dict):
-                        if meta.get("type") == "url":
-                            u = (meta.get("url") or "").strip()
-                            if u:
-                                video_urls.append(u)
-                        else:
-                            video_urls.extend(_extract_urls_from_text(_archive_prop_text(meta)))
+                else:
+                    video_urls.extend(_extract_urls_from_text(_archive_prop_text(url_prop)))
             video_urls = list(dict.fromkeys([u for u in video_urls if u]))
             place = (props.get("ロケーション") or {}).get("place") or {}
             venue = ""
