@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.17"
+APP_VERSION = "11.18"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -7249,34 +7249,7 @@ with st.sidebar:
                 st.session_state.pop("score_pages_cache", None)
                 st.session_state.pop("performance_pages_cache", None)
                 st.success(f"{len(st.session_state.pages)} 件取得しました（全媒体: {len(st.session_state.all_pages)} 件）")
-    with st.expander("🧹 整備ツール", expanded=False):
-        if st.button("ゲームJP辞書をクリーンアップ", use_container_width=True, key="cleanup_game_jp_dict"):
-            with st.spinner("ゲームJP辞書DBを整備中..."):
-                s = cleanup_game_jp_dict_noise(max_rows=300)
-                err = st.session_state.get("_game_jp_dict_last_error", "")
-                if s.get("rows", 0) == 0:
-                    if err:
-                        st.error(f"ゲームJP辞書DBを読めませんでした: {err}")
-                    else:
-                        st.warning("ゲームJP辞書DBが0件です（DB ID / Integration接続 / 対象DBの中身をご確認ください）")
-                else:
-                    st.success(
-                        f"完了: 対象行 {s.get('rows', 0)} / 走査 {s.get('scanned', 0)} / 補正 {s.get('patched', 0)} / 整理 {s.get('archived', 0)}"
-                    )
-        if st.button("演奏関連リレーションを整理", use_container_width=True, key="cleanup_perf_score_rel"):
-            with st.spinner("演奏曲⇔出演 のリレーションを整備中..."):
-                base_pages = st.session_state.get("all_pages") or load_notion_data()
-                s = normalize_performance_score_relations(base_pages)
-                st.success(
-                    f"完了: 走査 {s.get('scanned', 0)} / 更新 {s.get('patched', 0)} / 向き補正 {s.get('moved', 0)} / 失敗 {s.get('failed', 0)}"
-                )
-        if st.button("DriveカバーURLを再整形", use_container_width=True, key="cleanup_drive_cover_urls"):
-            with st.spinner("DriveカバーURLを整備中..."):
-                base_pages = st.session_state.get("all_pages") or load_notion_data()
-                s = migrate_drive_cover_urls(base_pages)
-                st.success(
-                    f"完了: 対象 {s.get('scanned', 0)} / 更新 {s.get('patched', 0)} / 失敗 {s.get('failed', 0)}"
-                )
+    # 整備ツールは機能過多になりUXを損なっていたためUIからオミット
 
     if not st.session_state.pages_loaded:
         st.caption("👆 まず「最新データを読み込む」を実行してください")
@@ -10177,214 +10150,8 @@ def resolve_needs(notion_ok_now, drive_ok_now):
 if mode in ("出演者管理", "出演情報管理"):
     st.subheader("👥 出演情報管理")
 
-    with st.expander("🏳️ アイコン更新・復旧", expanded=False):
-        loaded_media_keys = sorted(MEDIA_ICON_CUSTOM_EMOJI_IDS.keys())
-        expected_media_keys = [m for m in MEDIA_ICON_MAP.keys() if m != "演奏曲"]
-        missing_media_keys = [m for m in expected_media_keys if m not in MEDIA_ICON_CUSTOM_EMOJI_IDS]
-        st.caption(
-            f"custom_emoji設定: {len(loaded_media_keys)}件"
-            + (f" / 未設定媒体: {', '.join(missing_media_keys)}" if missing_media_keys else " / 全媒体設定済み")
-        )
-        if loaded_media_keys:
-            st.code("読み込み済み媒体: " + ", ".join(loaded_media_keys), language="text")
-
-        icon_ops_col1, icon_ops_col2, icon_ops_col3 = st.columns(3)
-        if icon_ops_col1.button("演奏曲DBの作曲家アイコンを更新", key="cast_mode_refresh_score_icons"):
-            with st.spinner("演奏曲DBアイコン更新中..."):
-                icon_stats = refresh_score_db_composer_flag_icons()
-            st.session_state["last_score_icon_stats"] = icon_stats
-            st.session_state["last_score_icon_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            if icon_stats.get("error"):
-                st.error(f"❌ {icon_stats.get('error')}")
-            else:
-                st.success(
-                    "✅ 更新完了: "
-                    f"走査 {icon_stats.get('scanned', 0)} / "
-                    f"国旗 {icon_stats.get('flagged', 0)} / "
-                    f"媒体アイコン {icon_stats.get('fallback', 0)} / "
-                    f"未解決 {icon_stats.get('unresolved', 0)} / "
-                    f"スキップ {icon_stats.get('skipped', 0)} / "
-                    f"失敗 {icon_stats.get('failed', 0)}"
-                )
-        if st.session_state.get("last_score_icon_stats"):
-            _lis = st.session_state.get("last_score_icon_stats", {})
-            _lit = st.session_state.get("last_score_icon_updated_at", "")
-            if _lis.get("error"):
-                st.caption(f"直近実行（{_lit}）: エラー - {_lis.get('error')}")
-            else:
-                st.caption(
-                    f"直近実行（{_lit}）: 走査 {_lis.get('scanned', 0)} / "
-                    f"国旗 {_lis.get('flagged', 0)} / 媒体アイコン {_lis.get('fallback', 0)} / "
-                    f"未解決 {_lis.get('unresolved', 0)} / スキップ {_lis.get('skipped', 0)} / 失敗 {_lis.get('failed', 0)}"
-                )
-
-        if icon_ops_col2.button("親DBの演奏曲アイコンを復旧", key="cast_mode_restore_parent_score_icons"):
-            with st.spinner("親DBアイコン復旧中..."):
-                restore_stats = restore_parent_score_media_icons()
-            if restore_stats.get("error"):
-                st.error(f"❌ {restore_stats.get('error')}")
-            else:
-                st.success(
-                    "✅ 復旧完了: "
-                    f"対象 {restore_stats.get('scanned', 0)} / "
-                    f"更新 {restore_stats.get('patched', 0)} / "
-                    f"スキップ {restore_stats.get('skipped', 0)} / "
-                    f"失敗 {restore_stats.get('failed', 0)}"
-                )
-
-        if icon_ops_col3.button("🆘 親DBの黒塗りを緊急復旧", key="cast_mode_emergency_restore_icons"):
-            emergency_limit = int(st.session_state.get("emergency_icon_restore_limit", 120) or 120)
-            force_reapply = bool(st.session_state.get("emergency_icon_force_reapply", True))
-            progress_slot = st.empty()
-            bar_slot = st.empty()
-            pbar = bar_slot.progress(0.0)
-            with st.spinner("親DBアイコンを緊急復旧中..."):
-                em_stats = emergency_restore_all_media_icons(
-                    progress_bar=pbar,
-                    progress_text=progress_slot,
-                    limit=emergency_limit,
-                    force_reapply=force_reapply,
-                )
-            bar_slot.empty()
-            st.session_state["last_emergency_icon_stats"] = em_stats
-            st.session_state["last_emergency_icon_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            st.success(
-                "✅ 緊急復旧完了: "
-                f"親DB アイコン更新 {em_stats.get('parent_patched', 0)} / "
-                f"絵文字暫定 {em_stats.get('parent_emoji_fallback', 0)} / "
-                f"失敗 {em_stats.get('parent_failed', 0)}"
-            )
-            st.caption(
-                f"未復旧件数（実行前）: {em_stats.get('pending_total', 0)} 件 / "
-                f"今回処理: {em_stats.get('parent_scanned', 0)} 件"
-            )
-            if em_stats.get("pending_total", 0) > em_stats.get("parent_scanned", 0):
-                st.info(
-                    f"ℹ️ 一度に処理する上限 {em_stats.get('limit', 120)} 件で実行しました。"
-                    f"（未復旧 {em_stats.get('pending_total', 0)} 件）"
-                    " 必要なら再実行してください。"
-                )
-        st.checkbox(
-            "緊急復旧時に同一URLでも強制再適用する",
-            value=bool(st.session_state.get("emergency_icon_force_reapply", False)),
-            key="emergency_icon_force_reapply",
-            help="見た目だけ黒塗りのケースに対応するため、既に同じURLでもPATCHを送ります。",
-        )
-        st.number_input(
-            "緊急復旧の一回あたり上限件数",
-            min_value=20,
-            max_value=500,
-            value=int(st.session_state.get("emergency_icon_restore_limit", 500) or 500),
-            step=20,
-            key="emergency_icon_restore_limit",
-            help="固まって見えるのを避けるため、緊急復旧は分割実行できます。",
-        )
-        if st.button("🧯 親DBを媒体絵文字で強制復旧（最終手段）", key="cast_mode_force_parent_emoji_restore"):
-            emergency_limit = int(st.session_state.get("emergency_icon_restore_limit", 120) or 120)
-            progress_slot2 = st.empty()
-            bar_slot2 = st.empty()
-            pbar2 = bar_slot2.progress(0.0)
-            with st.spinner("親DBを媒体絵文字で強制復旧中..."):
-                e2 = force_restore_parent_media_icons_as_emoji(
-                    progress_bar=pbar2,
-                    progress_text=progress_slot2,
-                    limit=emergency_limit,
-                )
-            bar_slot2.empty()
-            st.success(
-                f"✅ 絵文字復旧完了: 対象 {e2.get('scanned', 0)} / 更新 {e2.get('patched', 0)} / 失敗 {e2.get('failed', 0)}"
-            )
-        if st.button("🧯 今すぐ全件を媒体絵文字で復旧（親DB）", key="cast_mode_force_parent_emoji_restore_500"):
-            progress_slot3 = st.empty()
-            bar_slot3 = st.empty()
-            pbar3 = bar_slot3.progress(0.0)
-            with st.spinner("親DBを媒体絵文字で全件復旧中..."):
-                e3 = force_restore_parent_media_icons_as_emoji(
-                    progress_bar=pbar3,
-                    progress_text=progress_slot3,
-                    limit=500,
-                )
-            bar_slot3.empty()
-            st.success(
-                f"✅ 全件復旧（上限500）: 対象 {e3.get('scanned', 0)} / 更新 {e3.get('patched', 0)} / 失敗 {e3.get('failed', 0)}"
-            )
-        if st.session_state.get("last_emergency_icon_stats"):
-            _eis = st.session_state.get("last_emergency_icon_stats", {})
-            _eit = st.session_state.get("last_emergency_icon_updated_at", "")
-            st.caption(
-                f"直近の緊急復旧（{_eit}）: "
-                f"走査 {_eis.get('parent_scanned', 0)} / "
-                f"アイコン更新 {_eis.get('parent_patched', 0)} / "
-                f"絵文字暫定 {_eis.get('parent_emoji_fallback', 0)} / "
-                f"失敗 {_eis.get('parent_failed', 0)}"
-            )
-            _details = _eis.get("details") or []
-            if _details:
-                _updated = [d for d in _details if d.get("status") in ("external_ok", "emoji_fallback")]
-                st.markdown(f"**今回の更新対象:** {len(_updated)} 件")
-                if _updated:
-                    preview_lines = []
-                    for d in _updated[:20]:
-                        icon_type = d.get("icon_type") or ""
-                        status_label = f"{icon_type}" if icon_type else ("更新" if d.get("status") == "external_ok" else "絵文字暫定")
-                        preview_lines.append(f"- {d.get('title','(無題)')}  [{status_label}]")
-                    st.code("\n".join(preview_lines), language="text")
-                    if len(_updated) > 20:
-                        st.caption(f"※ 先頭20件のみ表示（全{len(_updated)}件）。")
-                try:
-                    _df_export = pd.DataFrame(_details)
-                    _csv_bytes = _df_export.to_csv(index=False).encode("utf-8-sig")
-                    st.download_button(
-                        "📥 緊急復旧の結果CSVをダウンロード",
-                        data=_csv_bytes,
-                        file_name=f"emergency_icon_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv",
-                        key="download_emergency_icon_restore_csv",
-                    )
-                except Exception:
-                    pass
-                with st.expander("🧾 緊急復旧の処理結果（最新100件）", expanded=False):
-                    st.dataframe(_details[:100], use_container_width=True, hide_index=True)
-
-        if st.button("🧩 親DBから媒体カスタム絵文字IDを抽出", key="detect_media_icon_custom_emoji_ids"):
-            with st.spinner("抽出中..."):
-                found = detect_media_icon_custom_emoji_ids_from_parent_db()
-            if not found:
-                st.warning("⚠️ custom_emoji の媒体行が見つかりませんでした。")
-            else:
-                st.success(f"✅ 抽出完了: {len(found)} 件")
-                st.dataframe(
-                    [{"媒体": k, "custom_emoji_id": v} for k, v in found.items()],
-                    use_container_width=True,
-                    hide_index=True,
-                )
-                kv = ", ".join([f'{k} = "{v}"' for k, v in found.items()])
-                st.code(f'MEDIA_ICON_CUSTOM_EMOJI_IDS = {{ {kv} }}', language="toml")
-        if st.button("🧾 ワークスペースのカスタム絵文字一覧を取得", key="list_workspace_custom_emojis"):
-            with st.spinner("取得中..."):
-                rows, err_detail = fetch_notion_custom_emoji_rows_debug()
-            if not rows:
-                st.warning("⚠️ カスタム絵文字一覧を取得できませんでした。")
-                if err_detail:
-                    st.caption(f"取得失敗理由: {err_detail}")
-                else:
-                    st.caption("取得失敗理由: 不明（API応答はあるが custom_emoji が検出できませんでした）")
-                hint = str(st.session_state.get("api_connection_error_hint") or "").strip()
-                if hint:
-                    st.caption(hint)
-            else:
-                st.success(f"✅ 取得: {len(rows)} 件")
-                st.dataframe(rows, use_container_width=True, hide_index=True)
-                guessed = guess_media_icon_custom_ids_from_names(rows)
-                if guessed:
-                    st.caption("推定マッピング（名前ベース）")
-                    st.dataframe(
-                        [{"媒体": k, "custom_emoji_id": v} for k, v in guessed.items()],
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                    kv2 = ", ".join([f'{k} = "{v}"' for k, v in guessed.items()])
-                    st.code(f'MEDIA_ICON_CUSTOM_EMOJI_IDS = {{ {kv2} }}', language="toml")
+    loaded_media_keys = sorted(MEDIA_ICON_CUSTOM_EMOJI_IDS.keys())
+    st.caption(f"custom_emoji設定: {len(loaded_media_keys)}件")
 
     with st.expander("🛠 整備・修復メニュー", expanded=False):
         st.caption("不具合対応・整合修復系のボタンをまとめています。")
@@ -10610,11 +10377,6 @@ if mode in ("出演者管理", "出演情報管理"):
                             f"楽曲別担当者欠損 {r.get('assign_missing_cast',0)}"
                         )
 
-    col_reload_perf, col_reload_master = st.columns([1, 1])
-    if col_reload_perf.button("🔄 出演一覧を再読込", key="cast_mode_reload_perf"):
-        st.session_state.pop("performance_pages_cache", None)
-    if col_reload_master.button("🔄 演奏者マスタ再読込", key="cast_mode_reload_master"):
-        st.session_state.pop("cast_mode_master_names_cache", None)
     perf_pages = _get_performance_pages(force_refresh=False)
     if not perf_pages:
         st.info("出演データが見つかりません。先にNotionデータ取得を実行してください。")
@@ -10625,14 +10387,6 @@ if mode in ("出演者管理", "出演情報管理"):
     options = ["（選択してください）"] + [p["title"] for p in matches]
     sel = st.selectbox("出演を選択", options, key="cast_mode_perf_pick")
     selected_perf = matches[options.index(sel) - 1] if sel != "（選択してください）" else None
-
-    if st.button("🔄 出演者DB→演奏者マスタ同期", key="cast_mode_sync_master"):
-        with st.spinner("同期中..."):
-            c, s, e = sync_performer_master_from_performer_db()
-        if e:
-            st.warning(e)
-        else:
-            st.success(f"✅ 追加 {c} 件 / 既存 {s} 件")
 
     if "cast_mode_master_names_cache" not in st.session_state:
         st.session_state.cast_mode_master_names_cache = get_performer_master_names()
