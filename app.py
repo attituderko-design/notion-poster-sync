@@ -11153,6 +11153,19 @@ if mode == "出演アーカイブ":
                 return str(r.get("number"))
             return ""
         return ""
+
+    def _extract_urls_from_text(raw: str) -> list[str]:
+        txt = (raw or "").strip()
+        if not txt:
+            return []
+        found = re.findall(r"https?://[^\s\)\]＞>]+", txt)
+        uniq = []
+        seen = set()
+        for u in found:
+            if u not in seen:
+                uniq.append(u)
+                seen.add(u)
+        return uniq
     perf_score_info: dict[str, dict[str, dict]] = {}
     for row in score_rows:
         rprops = row.get("properties") or {}
@@ -11253,20 +11266,24 @@ if mode == "出演アーカイブ":
             played_titles = [id_to_title.get(rid, rid[:8]) for rid in rel_ids if (rel_info_map.get(rid) or {}).get("played")]
             video_urls = []
             for k, meta in props.items():
-                if "動画" not in str(k):
+                ktxt = str(k)
+                # 親DBの「URL」列や、動画関連の列を幅広く拾う
+                if ("動画" not in ktxt) and ("URL" not in ktxt.upper()):
                     continue
                 if isinstance(meta, dict):
                     if meta.get("type") == "url":
                         u = (meta.get("url") or "").strip()
                         if u:
                             video_urls.append(u)
-                    elif meta.get("type") == "rich_text":
-                        u = plain_text_join((meta.get("rich_text") or []))
-                        if u:
-                            video_urls.append(u)
-            direct_url = ((props.get("URL") or {}).get("url") or "").strip()
-            if direct_url:
-                video_urls.append(direct_url)
+                    else:
+                        video_urls.extend(_extract_urls_from_text(_archive_prop_text(meta)))
+            # 念のため明示URL列も見る（型がurlでないケース対応）
+            if isinstance(props.get("URL"), dict):
+                video_urls.extend(_extract_urls_from_text(_archive_prop_text(props.get("URL"))))
+                direct_url = ((props.get("URL") or {}).get("url") or "").strip()
+                if direct_url:
+                    video_urls.append(direct_url)
+            video_urls = list(dict.fromkeys([u for u in video_urls if u]))
             place = (props.get("ロケーション") or {}).get("place") or {}
             venue = ""
             venue_lat = None
