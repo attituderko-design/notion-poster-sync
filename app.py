@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.22"
+APP_VERSION = "11.23"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -2409,7 +2409,31 @@ def _get_wikidata_country_iso2(qid: str) -> str:
         p495 = claims.get("P495") or [] # country of origin
         had_nationality_claim = bool(p27 or p495)
 
-        # 仕様: 国コードは「出生地の現在国」を最優先（歴史国家・国籍変更の揺れを避ける）
+        def _claim_country_codes(claims_list: list) -> list[str]:
+            out = []
+            seen = set()
+            for claim in claims_list:
+                dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+                cid = dv.get("id")
+                if not cid:
+                    continue
+                cc = _country_qid_to_modern_iso2(cid)
+                if cc and cc not in seen:
+                    seen.add(cc)
+                    out.append(cc)
+            return out
+
+        p495_codes = _claim_country_codes(p495)
+        p27_codes = _claim_country_codes(p27)
+
+        # 作曲家では「本人の国籍(P27)」を最優先
+        if p27_codes:
+            return p27_codes[0]
+        # 次点: 出自(P495)
+        if p495_codes:
+            return p495_codes[0]
+
+        # 上記で未解決の場合のみ、出生地の現代主権国を探索
         birth_place_qid = ""
         for claim in (claims.get("P19") or []):  # place of birth
             dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
@@ -2421,37 +2445,10 @@ def _get_wikidata_country_iso2(qid: str) -> str:
             birth_cc = _resolve_country_iso2_from_place_qid(birth_place_qid, max_depth=8)
             if birth_cc:
                 return birth_cc
-            # 出生地が取れているのに現代主権国へ解決できない場合は、
-            # P27/P495へのフォールバックで誤判定を起こしやすいため未解決扱いにする。
-            return ""
+            # 国籍/出自があるのに現代ISOへ落ちない場合は、出生地フォールバックで誤判定しない
+            if had_nationality_claim:
+                return ""
 
-        def _claim_country_codes(claims_list: list) -> list[str]:
-            out = []
-            seen = set()
-            for claim in claims_list:
-                dv = (((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
-                cid = dv.get("id")
-                if not cid:
-                    continue
-                cc = _get_wikidata_country_iso2_by_country_qid(cid)
-                if cc and cc not in seen:
-                    seen.add(cc)
-                    out.append(cc)
-            return out
-
-        p495_codes = _claim_country_codes(p495)
-        p27_codes = _claim_country_codes(p27)
-
-        # 作曲家では「出自(P495)」を最優先
-        if p495_codes:
-            return p495_codes[0]
-
-        # P27(国籍)は移住や亡命でノイズになりやすいため、
-        # 作曲家国旗判定では採用しない（出生地→現代主権国 / P495優先）
-        _ = p27_codes  # デバッグ用に残す
-        # 国籍/出自があるのに現代ISOへ落ちない場合は、出生地フォールバックで誤判定しない
-        if had_nationality_claim:
-            return ""
         # 歴史人物でP27/P495が現代ISOに落ちない場合:
         # 出生/死亡/拠点地などの場所QIDから P17(国) を辿って補完
         place_claim_keys = ("P19", "P20", "P937", "P551", "P740")
@@ -2530,6 +2527,17 @@ def _resolve_modern_iso2_from_country_qid(country_qid: str, max_depth: int = 8) 
     start = (country_qid or "").strip().upper()
     if not re.fullmatch(r"Q[0-9]+", start):
         return ""
+    # クラシックで頻出する歴史国家の最小マッピング
+    # （網羅ではなく実運用での誤判定抑制を優先）
+    qid_map = {
+        "Q34266": "RU",  # Russian Empire
+        "Q15180": "RU",  # Soviet Union
+        "Q15290": "DE",  # Prussia
+        "Q28513": "AT",  # Austria-Hungary
+        "Q39193": "CZ",  # Bohemia / Kingdom of Bohemia
+    }
+    if start in qid_map:
+        return qid_map[start]
     visited = set()
     queue = [(start, 0)]
     while queue:
@@ -2549,6 +2557,18 @@ def _resolve_modern_iso2_from_country_qid(country_qid: str, max_depth: int = 8) 
                 if re.fullmatch(r"Q[0-9]+", nq):
                     queue.append((nq, depth + 1))
     return ""
+
+
+@st.cache_data(ttl=86400)
+def _country_qid_to_modern_iso2(country_qid: str) -> str:
+    """国QIDを現代ISO2へ変換（直接ISO→歴史国家変換の順で解決）。"""
+    cq = (country_qid or "").strip().upper()
+    if not re.fullmatch(r"Q[0-9]+", cq):
+        return ""
+    cc = _get_wikidata_country_iso2_by_country_qid(cq)
+    if cc:
+        return cc
+    return _resolve_modern_iso2_from_country_qid(cq)
 
 
 @st.cache_data(ttl=86400)
