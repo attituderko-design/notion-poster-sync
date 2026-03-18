@@ -11166,6 +11166,35 @@ if mode == "出演アーカイブ":
                 uniq.append(u)
                 seen.add(u)
         return uniq
+
+    def _to_youtube_embed_url(url: str) -> str:
+        u = (url or "").strip()
+        if not u:
+            return ""
+        try:
+            from urllib.parse import urlparse, parse_qs
+            p = urlparse(u)
+            host = (p.netloc or "").lower()
+            path = (p.path or "").strip("/")
+            if "youtu.be" in host and path:
+                vid = path.split("/")[0]
+                return f"https://www.youtube.com/embed/{vid}"
+            if "youtube.com" in host:
+                if path.startswith("watch"):
+                    vid = (parse_qs(p.query).get("v") or [""])[0]
+                    if vid:
+                        return f"https://www.youtube.com/embed/{vid}"
+                if path.startswith("shorts/"):
+                    vid = path.split("/", 1)[1].split("/")[0]
+                    if vid:
+                        return f"https://www.youtube.com/embed/{vid}"
+                if path.startswith("embed/"):
+                    vid = path.split("/", 1)[1].split("/")[0]
+                    if vid:
+                        return f"https://www.youtube.com/embed/{vid}"
+        except Exception:
+            return ""
+        return ""
     perf_score_info: dict[str, dict[str, dict]] = {}
     for row in score_rows:
         rprops = row.get("properties") or {}
@@ -11359,14 +11388,14 @@ if mode == "出演アーカイブ":
                         yt_urls = []
                         other_urls = []
                         for u in video_urls:
-                            ul = u.lower()
-                            if ("youtube.com/" in ul) or ("youtu.be/" in ul):
-                                yt_urls.append(u)
+                            embed_u = _to_youtube_embed_url(u)
+                            if embed_u:
+                                yt_urls.append((u, embed_u))
                             else:
                                 other_urls.append(u)
-                        for u in yt_urls:
-                            st.video(u)
-                            st.caption(u)
+                        for raw_u, embed_u in yt_urls:
+                            st.video(embed_u)
+                            st.caption(raw_u)
                         for u in other_urls:
                             st.markdown(f"- [リンクを開く]({u})")
                     else:
