@@ -11269,8 +11269,12 @@ if mode == "出演アーカイブ":
                 video_urls.append(direct_url)
             place = (props.get("ロケーション") or {}).get("place") or {}
             venue = ""
+            venue_lat = None
+            venue_lon = None
             if isinstance(place, dict):
                 venue = (place.get("name") or place.get("address") or "").strip()
+                venue_lat = place.get("lat")
+                venue_lon = place.get("lon")
 
             with st.expander(f"{jp}  ({media} / {exp_date})", expanded=False):
                 c1, c2 = st.columns([1, 2])
@@ -11286,6 +11290,11 @@ if mode == "出演アーカイブ":
                     st.caption(f"クリエイター: {creator or '—'}")
                     st.caption(f"キャスト・関係者: {cast or '—'}")
                     st.caption(f"会場: {venue or '—'}")
+                    if venue_lat is not None and venue_lon is not None:
+                        try:
+                            st.map(pd.DataFrame([{"lat": float(venue_lat), "lon": float(venue_lon)}]), size=20)
+                        except Exception:
+                            pass
                     st.caption(f"自分が演奏した曲: {len(played_titles)} 件")
                     if rel_titles:
                         st.markdown("**プログラム（演奏曲）**")
@@ -11329,7 +11338,18 @@ if mode == "出演アーカイブ":
                                     st.caption(f"Assigned: {row['part']}")
                     if video_urls:
                         st.markdown("**動画URL**")
+                        yt_urls = []
+                        other_urls = []
                         for u in video_urls:
+                            ul = u.lower()
+                            if ("youtube.com/" in ul) or ("youtu.be/" in ul):
+                                yt_urls.append(u)
+                            else:
+                                other_urls.append(u)
+                        for u in yt_urls:
+                            st.video(u)
+                            st.caption(u)
+                        for u in other_urls:
                             st.markdown(f"- [リンクを開く]({u})")
 
 # ============================================================
