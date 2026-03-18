@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.27"
+APP_VERSION = "11.28"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -848,11 +848,21 @@ def get_season_number(props) -> int | None:
     return int(m.group(1)) if m else None
 
 def get_current_notion_url(item) -> str | None:
+    def _safe_url(v) -> str | None:
+        if not isinstance(v, str):
+            return None
+        u = v.strip()
+        if not u:
+            return None
+        if not (u.startswith("http://") or u.startswith("https://")):
+            return None
+        return u
+
     cover = item.get("cover")
     if cover and cover.get("type") == "external":
-        return cover.get("external", {}).get("url")
+        return _safe_url((cover.get("external") or {}).get("url"))
     if cover and cover.get("type") == "file":
-        return cover.get("file", {}).get("url")
+        return _safe_url((cover.get("file") or {}).get("url"))
     return None
 
 def is_unreleased(page) -> bool:
@@ -11152,6 +11162,8 @@ if mode == "出演アーカイブ":
                     cu = get_current_notion_url(p)
                     if cu:
                         st.image(cu, use_container_width=True)
+                    else:
+                        st.caption("（フライヤー未設定）")
                 with c2:
                     st.caption(f"ID: `{page_id}`")
                     st.caption(f"英題: {en or '—'}")
