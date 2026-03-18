@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.26"
+APP_VERSION = "11.27"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -7460,7 +7460,7 @@ with st.sidebar:
             st.session_state.app_mode_widget = st.session_state.app_mode
         if "app_mode_widget" not in st.session_state:
             st.session_state.app_mode_widget = st.session_state.get("app_mode", "新規登録")
-        mode = st.radio("モード", ["新規登録", "データ管理", "出演情報管理", "自動同期"], key="app_mode_widget")
+        mode = st.radio("モード", ["新規登録", "出演アーカイブ", "データ管理", "出演情報管理", "自動同期"], key="app_mode_widget")
         st.session_state.app_mode = mode
         sync_scope = "欠損のみ補填"  # legacy compat
         if mode == "データ管理":
@@ -11066,6 +11066,105 @@ if mode == "自動同期" and st.session_state.is_running:
             st.session_state.refresh_touched_performance = False
     else:
         st.session_state.is_running = False
+
+# ============================================================
+# 出演アーカイブモード
+# ============================================================
+if mode == "出演アーカイブ":
+    st.subheader("🗃 出演アーカイブ")
+    archive_media = ("出演", "演奏会（鑑賞）", "ライブ/ショー", "イベント")
+    archive_pages = [p for p in target_pages if get_page_media(p) in archive_media]
+    id_to_title = {p.get("id"): get_title((p.get("properties") or {}))[1] for p in target_pages}
+
+    q = clearable_text_input(
+        "🔎 横断検索（タイトル / クリエイター / キャスト / 演奏曲 / 動画URL）",
+        "archive_search_query",
+        placeholder="例: 定期演奏会 / Beethoven / URLの一部",
+    )
+    if q:
+        ql = q.strip().lower()
+        filtered = []
+        for p in archive_pages:
+            props = p.get("properties") or {}
+            _log_title, jp, en = get_title(props)
+            creator = plain_text_join((props.get("クリエイター") or {}).get("rich_text", []))
+            cast = plain_text_join((props.get("キャスト・関係者") or {}).get("rich_text", []))
+            rel_ids = _clean_relation_ids([r.get("id") for r in ((props.get("演奏曲") or {}).get("relation", []))])
+            rel_titles = " ".join([id_to_title.get(rid, "") for rid in rel_ids]).strip()
+            video_vals = []
+            for k, meta in props.items():
+                if "動画" not in str(k):
+                    continue
+                if isinstance(meta, dict):
+                    if meta.get("type") == "url":
+                        video_vals.append((meta.get("url") or "").strip())
+                    elif meta.get("type") == "rich_text":
+                        video_vals.append(plain_text_join((meta.get("rich_text") or [])))
+            hay = " ".join([jp or "", en or "", creator, cast, rel_titles, " ".join(video_vals)]).lower()
+            if ql in hay:
+                filtered.append(p)
+        archive_pages = filtered
+        st.caption(f"「{q}」に一致: {len(archive_pages)} 件")
+
+    sort_opt = st.selectbox("並び順", ["体験日（新しい順）", "体験日（古い順）", "タイトル（A-Z）"], key="archive_sort")
+
+    def _archive_date_key(page: dict) -> str:
+        return get_experience_date_from_props((page.get("properties") or {})) or "0001-01-01"
+
+    if sort_opt == "体験日（古い順）":
+        archive_pages = sorted(archive_pages, key=lambda p: _archive_date_key(p))
+    elif sort_opt == "タイトル（A-Z）":
+        archive_pages = sorted(archive_pages, key=lambda p: (get_title((p.get("properties") or {}))[1] or "").lower())
+    else:
+        archive_pages = sorted(archive_pages, key=lambda p: _archive_date_key(p), reverse=True)
+
+    st.caption(f"表示: {len(archive_pages)} 件")
+    if not archive_pages:
+        st.info("該当データがありません。")
+    else:
+        for p in archive_pages:
+            props = p.get("properties") or {}
+            page_id = p.get("id")
+            _log_title, jp, en = get_title(props)
+            media = get_page_media(p)
+            creator = plain_text_join((props.get("クリエイター") or {}).get("rich_text", []))
+            cast = plain_text_join((props.get("キャスト・関係者") or {}).get("rich_text", []))
+            exp_date = get_experience_date_from_props(props) or "—"
+            rel_ids = _clean_relation_ids([r.get("id") for r in ((props.get("演奏曲") or {}).get("relation", []))])
+            rel_titles = [id_to_title.get(rid, rid[:8]) for rid in rel_ids]
+            video_urls = []
+            for k, meta in props.items():
+                if "動画" not in str(k):
+                    continue
+                if isinstance(meta, dict):
+                    if meta.get("type") == "url":
+                        u = (meta.get("url") or "").strip()
+                        if u:
+                            video_urls.append(u)
+                    elif meta.get("type") == "rich_text":
+                        u = plain_text_join((meta.get("rich_text") or []))
+                        if u:
+                            video_urls.append(u)
+
+            with st.expander(f"{jp}  ({media} / {exp_date})", expanded=False):
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    cu = get_current_notion_url(p)
+                    if cu:
+                        st.image(cu, use_container_width=True)
+                with c2:
+                    st.caption(f"ID: `{page_id}`")
+                    st.caption(f"英題: {en or '—'}")
+                    st.caption(f"クリエイター: {creator or '—'}")
+                    st.caption(f"キャスト・関係者: {cast or '—'}")
+                    if rel_titles:
+                        st.markdown("**プログラム（演奏曲）**")
+                        for t in rel_titles:
+                            st.write(f"- {t}")
+                    if video_urls:
+                        st.markdown("**動画URL**")
+                        for u in video_urls:
+                            st.markdown(f"- [リンクを開く]({u})")
 
 # ============================================================
 # 手動確認モード
