@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.16"
+APP_VERSION = "11.17"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
@@ -10266,7 +10266,7 @@ if mode in ("出演者管理", "出演情報管理"):
                 )
         st.checkbox(
             "緊急復旧時に同一URLでも強制再適用する",
-            value=bool(st.session_state.get("emergency_icon_force_reapply", True)),
+            value=bool(st.session_state.get("emergency_icon_force_reapply", False)),
             key="emergency_icon_force_reapply",
             help="見た目だけ黒塗りのケースに対応するため、既に同じURLでもPATCHを送ります。",
         )
