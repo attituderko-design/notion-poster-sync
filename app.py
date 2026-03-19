@@ -27,6 +27,7 @@ from services.performance_ops import create_performance_participant_rows_service
 from services.performance_ops import create_setlist_rows_for_performance_service as _create_setlist_service
 from services.performance_ops import create_song_assignment_rows_service as _create_song_assign_service
 from services.performance_ops import get_cast_row_map_for_performance_service as _get_cast_row_map_service
+from services.performance_ops import upsert_score_master_links_service as _upsert_score_master_links_service
 
 # ============================================================
 # 設定（secrets.toml から読み込み）
@@ -6407,6 +6408,40 @@ def create_song_assignment_rows(
     }
     return _create_song_assign_service(ctx, score_rows, cast_row_map)
 
+
+def upsert_score_master_links(
+    score_page_id: str,
+    song_title: str,
+    composer_name: str = "",
+    composer_country: str = "",
+    movement_name: str = "",
+    movement_no=None,
+    movement_order=None,
+    movement_roman: str = "",
+) -> tuple[bool, str]:
+    ctx = {
+        "NOTION_SCORE_DB_ID": NOTION_SCORE_DB_ID,
+        "NOTION_WORK_DB_ID": NOTION_WORK_DB_ID,
+        "NOTION_COMPOSER_DB_ID": NOTION_COMPOSER_DB_ID,
+        "NOTION_MOVEMENT_DB_ID": NOTION_MOVEMENT_DB_ID,
+        "get_notion_db_property_types": get_notion_db_property_types,
+        "put_notion_prop": _put_notion_prop,
+        "api_request": api_request,
+        "NOTION_HEADERS": NOTION_HEADERS,
+        "normalize_country_code_for_flag": normalize_country_code_for_flag,
+    }
+    return _upsert_score_master_links_service(
+        ctx=ctx,
+        score_page_id=score_page_id,
+        song_title=song_title,
+        composer_name=composer_name,
+        composer_country=composer_country,
+        movement_name=movement_name,
+        movement_no=movement_no,
+        movement_order=movement_order,
+        movement_roman=movement_roman,
+    )
+
 def _pick_prop_name(type_map: dict, candidates: list[str], p_type: str) -> str | None:
     for c in candidates:
         if type_map.get(c) == p_type:
@@ -8938,6 +8973,21 @@ if mode == "新規登録":
                                     relation_ids=rel_ids,
                                 )
                                 if ok:
+                                    if item.get("media_type") == "score":
+                                        created_id_for_master = st.session_state.get("last_created_page_id")
+                                        if created_id_for_master:
+                                            m_ok, m_reason = upsert_score_master_links(
+                                                score_page_id=created_id_for_master,
+                                                song_title=item.get("jp_title", ""),
+                                                composer_name=((item.get("details") or {}).get("director") or "").strip(),
+                                                composer_country=normalize_country_code_for_flag(item.get("composer_country", "")),
+                                                movement_name=item.get("movement_name", ""),
+                                                movement_no=item.get("movement_no"),
+                                                movement_order=item.get("movement_order"),
+                                                movement_roman=item.get("movement_roman", ""),
+                                            )
+                                            if not m_ok and m_reason:
+                                                st.caption(f"ℹ️ 作品/楽章マスタ連動: {m_reason}")
                                     if item.get("media_type") == "score" and rel_ids:
                                         created_id = st.session_state.get("last_created_page_id")
                                         if created_id:

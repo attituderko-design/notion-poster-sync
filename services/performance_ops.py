@@ -632,3 +632,171 @@ def get_cast_row_map_for_performance_service(ctx: dict, performance_page_id: str
             out[key] = rid
     return out
 import re
+
+
+def upsert_score_master_links_service(
+    ctx: dict,
+    score_page_id: str,
+    song_title: str,
+    composer_name: str = "",
+    composer_country: str = "",
+    movement_name: str = "",
+    movement_no=None,
+    movement_order=None,
+    movement_roman: str = "",
+) -> tuple[bool, str]:
+    NOTION_WORK_DB_ID = ctx.get("NOTION_WORK_DB_ID", "")
+    NOTION_COMPOSER_DB_ID = ctx.get("NOTION_COMPOSER_DB_ID", "")
+    NOTION_MOVEMENT_DB_ID = ctx.get("NOTION_MOVEMENT_DB_ID", "")
+    get_notion_db_property_types = ctx["get_notion_db_property_types"]
+    put_notion_prop = ctx["put_notion_prop"]
+    api_request = ctx["api_request"]
+    NOTION_HEADERS = ctx["NOTION_HEADERS"]
+    normalize_country_code_for_flag = ctx.get("normalize_country_code_for_flag")
+
+    def _norm_cc(v: str) -> str:
+        if callable(normalize_country_code_for_flag):
+            return normalize_country_code_for_flag(v or "")
+        return (v or "").strip().upper()
+
+    def _slugify(text: str) -> str:
+        t = (text or "").strip().lower()
+        t = re.sub(r"[\"'`’]+", "", t)
+        t = re.sub(r"[\s/\\:;,.()\[\]{}!?#&+*=<>|]+", "_", t)
+        t = re.sub(r"_+", "_", t).strip("_")
+        return t or "unknown"
+
+    def _pick_title_prop_name(type_map_local: dict) -> str | None:
+        for k, v in (type_map_local or {}).items():
+            if v == "title":
+                return k
+        return None
+
+    def _find_page_id_by_title(db_id: str, title_prop: str | None, title_value: str) -> str:
+        if not db_id or not title_prop or not title_value:
+            return ""
+        try:
+            q = {"page_size": 1, "filter": {"property": title_prop, "title": {"equals": title_value}}}
+            res = api_request(
+                "post",
+                f"https://api.notion.com/v1/databases/{db_id}/query",
+                headers=NOTION_HEADERS,
+                json=q,
+            )
+            if res is not None and res.status_code == 200:
+                rows = (res.json() or {}).get("results", [])
+                if rows:
+                    return (rows[0] or {}).get("id") or ""
+        except Exception:
+            return ""
+        return ""
+
+    song_title = (song_title or "").strip()
+    composer_name = (composer_name or "").strip()
+    movement_name = (movement_name or "").strip()
+    movement_roman = (movement_roman or "").strip()
+    if not score_page_id or not song_title:
+        return False, "page_id/title が不足"
+
+    composer_id = ""
+    if NOTION_COMPOSER_DB_ID and composer_name:
+        c_type = get_notion_db_property_types(NOTION_COMPOSER_DB_ID) or {}
+        c_title = _pick_title_prop_name(c_type)
+        if c_title:
+            c_key = _slugify(composer_name)
+            composer_id = _find_page_id_by_title(NOTION_COMPOSER_DB_ID, c_title, c_key)
+            if not composer_id:
+                c_props = {}
+                put_notion_prop(c_props, c_type, c_title, c_key)
+                if c_type.get("表示名") in ("rich_text", "title"):
+                    put_notion_prop(c_props, c_type, "表示名", composer_name)
+                cc = _norm_cc(composer_country)
+                if cc and c_type.get("国コード") in ("rich_text", "title", "select", "multi_select"):
+                    put_notion_prop(c_props, c_type, "国コード", cc)
+                if c_props:
+                    cres = api_request(
+                        "post",
+                        "https://api.notion.com/v1/pages",
+                        headers=NOTION_HEADERS,
+                        json={"parent": {"database_id": NOTION_COMPOSER_DB_ID}, "properties": c_props},
+                    )
+                    if cres is not None and cres.status_code == 200:
+                        composer_id = ((cres.json() or {}).get("id") or "")
+
+    work_id = ""
+    wk = ""
+    if NOTION_WORK_DB_ID:
+        w_type = get_notion_db_property_types(NOTION_WORK_DB_ID) or {}
+        w_title = _pick_title_prop_name(w_type)
+        if w_title:
+            base_title = re.sub(r"\s*\([^)]*\)\s*$", "", song_title).strip() or song_title
+            composer_slug = _slugify(composer_name) if composer_name else "unknown"
+            wk = f"{composer_slug}_{_slugify(base_title)}"
+            work_id = _find_page_id_by_title(NOTION_WORK_DB_ID, w_title, wk)
+            if not work_id:
+                w_props = {}
+                put_notion_prop(w_props, w_type, w_title, wk)
+                if w_type.get("作品名") in ("rich_text", "title"):
+                    put_notion_prop(w_props, w_type, "作品名", base_title)
+                if composer_id and w_type.get("作曲家") == "relation":
+                    put_notion_prop(w_props, w_type, "作曲家", composer_id)
+                if w_props:
+                    wres = api_request(
+                        "post",
+                        "https://api.notion.com/v1/pages",
+                        headers=NOTION_HEADERS,
+                        json={"parent": {"database_id": NOTION_WORK_DB_ID}, "properties": w_props},
+                    )
+                    if wres is not None and wres.status_code == 200:
+                        work_id = ((wres.json() or {}).get("id") or "")
+
+    movement_id = ""
+    if NOTION_MOVEMENT_DB_ID and work_id and movement_name:
+        m_type = get_notion_db_property_types(NOTION_MOVEMENT_DB_ID) or {}
+        m_title = _pick_title_prop_name(m_type)
+        if m_title:
+            mv_key = f"{wk}_m{_slugify(str(movement_no or movement_order or movement_name))}"
+            movement_id = _find_page_id_by_title(NOTION_MOVEMENT_DB_ID, m_title, mv_key)
+            if not movement_id:
+                m_props = {}
+                put_notion_prop(m_props, m_type, m_title, mv_key)
+                if m_type.get("楽章名") in ("rich_text", "title"):
+                    put_notion_prop(m_props, m_type, "楽章名", movement_name)
+                if m_type.get("作品マスタ") == "relation":
+                    put_notion_prop(m_props, m_type, "作品マスタ", work_id)
+                if movement_no is not None and m_type.get("楽章番号") == "number":
+                    put_notion_prop(m_props, m_type, "楽章番号", int(movement_no))
+                if movement_order is not None and m_type.get("表示順") == "number":
+                    put_notion_prop(m_props, m_type, "表示順", int(movement_order))
+                if movement_roman and m_type.get("ローマ数字表示") in ("rich_text", "title"):
+                    put_notion_prop(m_props, m_type, "ローマ数字表示", movement_roman)
+                mres = api_request(
+                    "post",
+                    "https://api.notion.com/v1/pages",
+                    headers=NOTION_HEADERS,
+                    json={"parent": {"database_id": NOTION_MOVEMENT_DB_ID}, "properties": m_props},
+                )
+                if mres is not None and mres.status_code == 200:
+                    movement_id = ((mres.json() or {}).get("id") or "")
+
+    score_type = get_notion_db_property_types(ctx["NOTION_SCORE_DB_ID"]) or {}
+    patch_props = {}
+    if work_id and score_type.get("作品マスタ") == "relation":
+        put_notion_prop(patch_props, score_type, "作品マスタ", work_id)
+    if movement_id and score_type.get("作品楽章") == "relation":
+        put_notion_prop(patch_props, score_type, "作品楽章", movement_id)
+    if patch_props:
+        pres = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{score_page_id}",
+            headers=NOTION_HEADERS,
+            json={"properties": patch_props},
+        )
+        if pres is None or pres.status_code != 200:
+            return False, f"APOLLO側 relation 更新失敗: {pres.status_code if pres else 'None'}"
+
+    if NOTION_WORK_DB_ID and not work_id:
+        return False, "作品マスタ作成/取得に失敗"
+    if NOTION_MOVEMENT_DB_ID and movement_name and not movement_id:
+        return False, "作品楽章マスタ作成/取得に失敗"
+    return True, ""
