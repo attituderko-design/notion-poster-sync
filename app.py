@@ -58,7 +58,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.43"
+APP_VERSION = "11.44"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -6077,6 +6077,75 @@ def _put_notion_prop(properties: dict, type_map: dict, name: str, value):
 def _split_instruments(part: str) -> list[str]:
     return [x.strip() for x in re.split(r'[/／,、・\s]+', part or "") if x.strip()]
 
+def _int_to_roman(n: int) -> str:
+    if not isinstance(n, int) or n <= 0:
+        return ""
+    table = [
+        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
+        (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
+        (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+    ]
+    out = []
+    v = n
+    for base, sym in table:
+        while v >= base:
+            out.append(sym)
+            v -= base
+    return "".join(out)
+
+def _roman_to_int(s: str) -> int | None:
+    txt = (s or "").strip().upper()
+    if not txt or not re.fullmatch(r"[IVXLCDM]+", txt):
+        return None
+    val = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+    total = 0
+    prev = 0
+    for ch in reversed(txt):
+        cur = val.get(ch, 0)
+        if cur < prev:
+            total -= cur
+        else:
+            total += cur
+            prev = cur
+    # 妥当性再検証（IV 以外の不正並びを弾く）
+    if _int_to_roman(total) != txt:
+        return None
+    return total
+
+def _infer_movement_from_title(title: str) -> dict:
+    """
+    曲名から楽章番号/ローマ数字を推定（高信頼パターンのみ）。
+    例:
+      - 第2楽章 -> 2 / II
+      - Movement 3, Mvt. 3 -> 3 / III
+      - "II. Adagio"（先頭ローマ数字）-> 2 / II
+    """
+    txt = (title or "").strip()
+    if not txt:
+        return {"movement_name": "", "movement_no": None, "movement_order": None, "movement_roman": ""}
+
+    # 1) 日本語: 第N楽章
+    m = re.search(r"第\s*([0-9]{1,3})\s*楽章", txt, flags=re.IGNORECASE)
+    if m:
+        n = int(m.group(1))
+        return {"movement_name": "", "movement_no": n, "movement_order": n, "movement_roman": _int_to_roman(n)}
+
+    # 2) 英語: Movement / Mvt
+    m = re.search(r"\b(?:movement|mvt\.?)\s*(?:no\.?|#)?\s*([0-9]{1,3})\b", txt, flags=re.IGNORECASE)
+    if m:
+        n = int(m.group(1))
+        return {"movement_name": "", "movement_no": n, "movement_order": n, "movement_roman": _int_to_roman(n)}
+
+    # 3) 先頭ローマ数字: "II. Adagio" / "IV - Allegro"
+    m = re.match(r"^\s*([IVXLCDM]{1,8})(?:[\.\)\-:\s]|$)", txt, flags=re.IGNORECASE)
+    if m:
+        roman = m.group(1).upper()
+        n = _roman_to_int(roman)
+        if n:
+            return {"movement_name": "", "movement_no": n, "movement_order": n, "movement_roman": roman}
+
+    return {"movement_name": "", "movement_no": None, "movement_order": None, "movement_roman": ""}
+
 def _normalize_person_name(name: str) -> str:
     return (name or "").strip().lower()
 
@@ -9278,6 +9347,7 @@ if mode == "新規登録":
                             work_title = (w.get("title") or "").strip()
                             work_disamb = (w.get("disambiguation") or "").strip()
                             register_title = f"{work_title} ({work_disamb})" if work_disamb else work_title
+                            movement_guess = _infer_movement_from_title(work_title)
                             work_release = (w.get("first_release_date") or "").strip()
                             premiere_source = "musicbrainz-work"
                             if not work_release:
@@ -9323,10 +9393,10 @@ if mode == "新規登録":
                                 "is_concerto": False,
                                 "soloists": "",
                                 "players": [],
-                                "movement_name": "",
-                                "movement_no": None,
-                                "movement_order": None,
-                                "movement_roman": "",
+                                "movement_name": movement_guess.get("movement_name", ""),
+                                "movement_no": movement_guess.get("movement_no"),
+                                "movement_order": movement_guess.get("movement_order"),
+                                "movement_roman": movement_guess.get("movement_roman", ""),
                                 "mb_work_id": w.get("id", ""),
                             })
                             suggested_order += 1
@@ -9558,6 +9628,7 @@ if mode == "新規登録":
                             if len(country_raw) != 2 or not country_raw.isalpha():
                                 country_raw = ""
                             register_title = f"{title_raw} ({note_raw})" if note_raw else title_raw
+                            movement_guess = _infer_movement_from_title(title_raw)
                             st.session_state.reg_cart.append({
                                 "cart_uid":    f"score_{uuid.uuid4().hex[:10]}",
                                 "jp_title":    register_title,
@@ -9587,10 +9658,10 @@ if mode == "新規登録":
                                 "is_concerto": False,
                                 "soloists": "",
                                 "players": [],
-                                "movement_name": "",
-                                "movement_no": None,
-                                "movement_order": None,
-                                "movement_roman": "",
+                                "movement_name": movement_guess.get("movement_name", ""),
+                                "movement_no": movement_guess.get("movement_no"),
+                                "movement_order": movement_guess.get("movement_order"),
+                                "movement_roman": movement_guess.get("movement_roman", ""),
                                 "mb_work_id": "",
                             })
                             st.success("✅ 手入力曲を登録リストに追加しました")
