@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.38"
+APP_VERSION = "11.39"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -9406,6 +9406,42 @@ if mode == "新規登録":
                         key="mb_manual_comp_name",
                         placeholder="例: Takashi Yoshimatsu / 吉松 隆",
                     )
+                    manual_comp_key = (manual_comp_name or "").strip()
+                    if manual_comp_key:
+                        st.caption("作曲家情報が未登録でも、ここで肖像画を先に設定できます。")
+                        mcol1, mcol2 = st.columns([1, 1])
+                        if mcol1.button("🖼️ 作曲家肖像を取得", key="mb_manual_portrait_fetch"):
+                            with st.spinner(f"{manual_comp_key} の肖像画を取得中..."):
+                                manual_portrait = get_composer_portrait_url(manual_comp_key, "")
+                            st.session_state["mb_portrait_url"] = manual_portrait
+                            st.session_state["mb_portrait_comp"] = f"manual:{manual_comp_key.lower()}"
+                            st.rerun()
+                        if mcol2.button("🔄 肖像画を再取得（Drive既存を無視）", key="mb_manual_portrait_refresh"):
+                            with st.spinner(f"{manual_comp_key} の肖像画を再取得中..."):
+                                manual_portrait = get_composer_portrait_url(manual_comp_key, "", force_refresh=True)
+                            st.session_state["mb_portrait_url"] = manual_portrait
+                            st.session_state["mb_portrait_comp"] = f"manual:{manual_comp_key.lower()}"
+                            st.rerun()
+                        manual_cached = st.session_state.get("mb_portrait_url")
+                        if manual_cached and st.session_state.get("mb_portrait_comp") in ("", f"manual:{manual_comp_key.lower()}"):
+                            st.image(manual_cached, width=120, caption=manual_comp_key)
+                        manual_uploaded = st.file_uploader(
+                            "肖像画をアップロード（手入力作曲家）",
+                            type=["jpg", "jpeg", "png"],
+                            key="mb_manual_portrait_upload",
+                        )
+                        if manual_uploaded and st.button("📤 手動アップロード画像を適用", key="mb_manual_portrait_upload_apply"):
+                            up_bytes = manual_uploaded.getvalue()
+                            up_mime = "image/png" if manual_uploaded.name.lower().endswith(".png") else "image/jpeg"
+                            up_file_id = save_manual_portrait_for_composer(manual_comp_key, up_bytes, up_mime)
+                            if up_file_id:
+                                st.session_state["mb_portrait_url"] = with_cache_bust(drive_image_url(up_file_id))
+                                st.session_state["mb_portrait_comp"] = f"manual:{manual_comp_key.lower()}"
+                                st.success("手入力作曲家の肖像画を保存しました")
+                                st.rerun()
+                            else:
+                                st.warning("Drive保存に失敗しました。通信状況を確認して再実行してください。")
+                        st.divider()
                     manual_country_code = st.text_input(
                         "国コード（任意, 2文字）",
                         key="mb_manual_country_code",
