@@ -6162,6 +6162,20 @@ def find_test_pages_by_tag(tag: str, max_pages: int = 200) -> list[dict]:
             break
     return found[:max_pages]
 
+def collect_related_score_ids_from_parent_pages(parent_pages: list[dict]) -> list[str]:
+    ids = []
+    seen = set()
+    for pg in parent_pages or []:
+        props = (pg.get("properties") or {}) if isinstance(pg, dict) else {}
+        # 親DB -> 演奏曲DB の relation 列（想定名: 演奏曲）
+        rel = ((props.get("演奏曲") or {}).get("relation") or [])
+        for r in rel:
+            rid = (r or {}).get("id")
+            if rid and rid not in seen:
+                seen.add(rid)
+                ids.append(rid)
+    return ids
+
 def archive_pages_by_id(page_ids: list[str]) -> tuple[int, int]:
     ok = 0
     ng = 0
@@ -7856,10 +7870,16 @@ with st.sidebar:
                 if not pages:
                     st.info("対象データは見つかりませんでした。")
                 else:
-                    ids = [p.get("id") for p in pages if p.get("id")]
-                    with st.spinner(f"{len(ids)} 件をアーカイブ中..."):
-                        ok, ng = archive_pages_by_id(ids)
-                    st.success(f"完了: アーカイブ {ok} 件 / 失敗 {ng} 件")
+                    parent_ids = [p.get("id") for p in pages if p.get("id")]
+                    linked_score_ids = collect_related_score_ids_from_parent_pages(pages)
+                    with st.spinner(f"ATLAS {len(parent_ids)} 件 + APOLLO関連 {len(linked_score_ids)} 件をアーカイブ中..."):
+                        ok_parent, ng_parent = archive_pages_by_id(parent_ids)
+                        ok_score, ng_score = archive_pages_by_id(linked_score_ids)
+                    st.success(
+                        f"完了: "
+                        f"ATLAS {ok_parent} 件（失敗 {ng_parent}） / "
+                        f"APOLLO関連 {ok_score} 件（失敗 {ng_score}）"
+                    )
                     st.session_state.pop("score_pages_cache", None)
                     st.session_state.pop("performance_pages_cache", None)
     if "auto_reload_mode" not in st.session_state:
