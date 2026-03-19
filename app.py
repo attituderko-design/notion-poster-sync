@@ -59,7 +59,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.48"
+APP_VERSION = "11.49"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -6193,10 +6193,18 @@ def archive_pages_by_id(page_ids: list[str]) -> tuple[int, int]:
 def get_notion_db_property_types(database_id: str) -> dict:
     if not database_id:
         return {}
+    props = {}
     res = api_request("get", f"https://api.notion.com/v1/databases/{database_id}", headers=NOTION_HEADERS)
-    if res is None or res.status_code != 200:
+    if res is not None and res.status_code == 200:
+        props = (res.json() or {}).get("properties", {}) or {}
+    else:
+        # Notion Data Source API fallback (for IDs issued from data-source URL context)
+        ds_res = api_request("get", f"https://api.notion.com/v1/data-sources/{database_id}", headers=NOTION_HEADERS)
+        if ds_res is not None and ds_res.status_code == 200:
+            ds_json = ds_res.json() or {}
+            props = (ds_json.get("properties", {}) or {})
+    if not props:
         return {}
-    props = (res.json() or {}).get("properties", {}) or {}
     return {name: (meta.get("type") if isinstance(meta, dict) else None) for name, meta in props.items()}
 
 def _put_notion_prop(properties: dict, type_map: dict, name: str, value):

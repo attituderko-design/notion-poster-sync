@@ -190,9 +190,40 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
                 rows = (res.json() or {}).get("results", [])
                 if rows:
                     return (rows[0] or {}).get("id") or ""
+            ds_res = api_request(
+                "post",
+                f"https://api.notion.com/v1/data-sources/{db_id}/query",
+                headers=NOTION_HEADERS,
+                json=q,
+            )
+            if ds_res is not None and ds_res.status_code == 200:
+                rows = (ds_res.json() or {}).get("results", [])
+                if rows:
+                    return (rows[0] or {}).get("id") or ""
         except Exception:
             return ""
         return ""
+
+    def _create_page_in_parent(parent_id: str, props: dict):
+        if not parent_id:
+            return None
+        payload_db = {"parent": {"database_id": parent_id}, "properties": props}
+        res = api_request(
+            "post",
+            "https://api.notion.com/v1/pages",
+            headers=NOTION_HEADERS,
+            json=payload_db,
+        )
+        if res is not None and res.status_code == 200:
+            return res
+        payload_ds = {"parent": {"data_source_id": parent_id}, "properties": props}
+        ds_res = api_request(
+            "post",
+            "https://api.notion.com/v1/pages",
+            headers=NOTION_HEADERS,
+            json=payload_ds,
+        )
+        return ds_res
 
     def _upsert_composer(composer_name: str, composer_cc: str) -> str:
         if not NOTION_COMPOSER_DB_ID or not composer_name:
@@ -211,12 +242,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
             put_notion_prop(props, c_type, "表示名", composer_name)
         if composer_cc and c_type.get("国コード") in ("rich_text", "select", "title"):
             put_notion_prop(props, c_type, "国コード", composer_cc)
-        res = api_request(
-            "post",
-            "https://api.notion.com/v1/pages",
-            headers=NOTION_HEADERS,
-            json={"parent": {"database_id": NOTION_COMPOSER_DB_ID}, "properties": props},
-        )
+        res = _create_page_in_parent(NOTION_COMPOSER_DB_ID, props)
         if res is not None and res.status_code == 200:
             return ((res.json() or {}).get("id") or "")
         return ""
@@ -242,12 +268,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
             put_notion_prop(props, w_type, "作品名", base_title)
         if composer_id and w_type.get("作曲家") == "relation":
             put_notion_prop(props, w_type, "作曲家", composer_id)
-        res = api_request(
-            "post",
-            "https://api.notion.com/v1/pages",
-            headers=NOTION_HEADERS,
-            json={"parent": {"database_id": NOTION_WORK_DB_ID}, "properties": props},
-        )
+        res = _create_page_in_parent(NOTION_WORK_DB_ID, props)
         if res is not None and res.status_code == 200:
             return ((res.json() or {}).get("id") or "")
         return ""
@@ -417,12 +438,7 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
                             put_notion_prop(m_props, m_type, "表示順", int(movement_order))
                         if movement_roman and m_type.get("ローマ数字表示") in ("rich_text", "title"):
                             put_notion_prop(m_props, m_type, "ローマ数字表示", movement_roman)
-                        m_res = api_request(
-                            "post",
-                            "https://api.notion.com/v1/pages",
-                            headers=NOTION_HEADERS,
-                            json={"parent": {"database_id": NOTION_MOVEMENT_DB_ID}, "properties": m_props},
-                        )
+                        m_res = _create_page_in_parent(NOTION_MOVEMENT_DB_ID, m_props)
                         if m_res is not None and m_res.status_code == 200:
                             movement_id = ((m_res.json() or {}).get("id") or "")
                     if movement_id:
@@ -687,9 +703,40 @@ def upsert_score_master_links_service(
                 rows = (res.json() or {}).get("results", [])
                 if rows:
                     return (rows[0] or {}).get("id") or ""
+            ds_res = api_request(
+                "post",
+                f"https://api.notion.com/v1/data-sources/{db_id}/query",
+                headers=NOTION_HEADERS,
+                json=q,
+            )
+            if ds_res is not None and ds_res.status_code == 200:
+                rows = (ds_res.json() or {}).get("results", [])
+                if rows:
+                    return (rows[0] or {}).get("id") or ""
         except Exception:
             return ""
         return ""
+
+    def _create_page_in_parent(parent_id: str, props: dict):
+        if not parent_id:
+            return None
+        payload_db = {"parent": {"database_id": parent_id}, "properties": props}
+        res = api_request(
+            "post",
+            "https://api.notion.com/v1/pages",
+            headers=NOTION_HEADERS,
+            json=payload_db,
+        )
+        if res is not None and res.status_code == 200:
+            return res
+        payload_ds = {"parent": {"data_source_id": parent_id}, "properties": props}
+        ds_res = api_request(
+            "post",
+            "https://api.notion.com/v1/pages",
+            headers=NOTION_HEADERS,
+            json=payload_ds,
+        )
+        return ds_res
 
     def _res_error(res) -> str:
         if res is None:
@@ -723,12 +770,7 @@ def upsert_score_master_links_service(
                 if cc and c_type.get("国コード") in ("rich_text", "title", "select", "multi_select"):
                     put_notion_prop(c_props, c_type, "国コード", cc)
                 if c_props:
-                    cres = api_request(
-                        "post",
-                        "https://api.notion.com/v1/pages",
-                        headers=NOTION_HEADERS,
-                        json={"parent": {"database_id": NOTION_COMPOSER_DB_ID}, "properties": c_props},
-                    )
+                    cres = _create_page_in_parent(NOTION_COMPOSER_DB_ID, c_props)
                     if cres is not None and cres.status_code == 200:
                         composer_id = ((cres.json() or {}).get("id") or "")
 
@@ -738,7 +780,9 @@ def upsert_score_master_links_service(
     if NOTION_WORK_DB_ID:
         w_type = get_notion_db_property_types(NOTION_WORK_DB_ID) or {}
         w_title = _pick_title_prop_name(w_type)
-        if w_title:
+        if not w_type:
+            work_create_err = "作品マスタDBのプロパティ取得失敗（Integration接続/DB IDを確認）"
+        elif w_title:
             base_title = re.sub(r"\s*\([^)]*\)\s*$", "", song_title).strip() or song_title
             composer_slug = _slugify(composer_name) if composer_name else "unknown"
             wk = f"{composer_slug}_{_slugify(base_title)}"
@@ -756,12 +800,7 @@ def upsert_score_master_links_service(
                 if composer_id and composer_rel_prop:
                     put_notion_prop(w_props, w_type, composer_rel_prop, composer_id)
                 if w_props:
-                    wres = api_request(
-                        "post",
-                        "https://api.notion.com/v1/pages",
-                        headers=NOTION_HEADERS,
-                        json={"parent": {"database_id": NOTION_WORK_DB_ID}, "properties": w_props},
-                    )
+                    wres = _create_page_in_parent(NOTION_WORK_DB_ID, w_props)
                     if wres is not None and wres.status_code == 200:
                         work_id = ((wres.json() or {}).get("id") or "")
                     else:
@@ -789,12 +828,7 @@ def upsert_score_master_links_service(
                     put_notion_prop(m_props, m_type, "表示順", int(movement_order))
                 if movement_roman and m_type.get("ローマ数字表示") in ("rich_text", "title"):
                     put_notion_prop(m_props, m_type, "ローマ数字表示", movement_roman)
-                mres = api_request(
-                    "post",
-                    "https://api.notion.com/v1/pages",
-                    headers=NOTION_HEADERS,
-                    json={"parent": {"database_id": NOTION_MOVEMENT_DB_ID}, "properties": m_props},
-                )
+                mres = _create_page_in_parent(NOTION_MOVEMENT_DB_ID, m_props)
                 if mres is not None and mres.status_code == 200:
                     movement_id = ((mres.json() or {}).get("id") or "")
 
