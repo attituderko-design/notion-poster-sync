@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.40"
+APP_VERSION = "11.41"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -11774,9 +11774,14 @@ if mode == "出演アーカイブ":
                             is_concerto = bool((score_props.get("協奏曲") or {}).get("checkbox", False))
                             soloists = plain_text_join((score_props.get("ソリスト") or {}).get("rich_text", []))
                             sec_key = sec if sec else "本編"
+                            ord_num = 9999
+                            try:
+                                ord_num = int(str(ordv).strip())
+                            except Exception:
+                                ord_num = 9999
                             grouped_rows.setdefault(sec_key, []).append({
                                 "title": t,
-                                "order": ordv if isinstance(ordv, int) else 9999,
+                                "order": ord_num,
                                 "soloists": soloists,
                                 "is_concerto": is_concerto,
                                 "played": played,
@@ -11791,7 +11796,10 @@ if mode == "出演アーカイブ":
                                 st.markdown("**＜ソリストEncore＞**")
                             else:
                                 st.markdown(f"**【{sec_name}】**")
-                            rows = sorted(grouped_rows.get(sec_name, []), key=lambda r: (r["order"], r["title"]))
+                            rows = sorted(
+                                grouped_rows.get(sec_name, []),
+                                key=lambda r: (r["order"], (r["title"] or "").casefold()),
+                            )
                             for row in rows:
                                 st.write(f"- {row['title']}")
                                 if row.get("is_concerto") and row.get("soloists"):
