@@ -6323,7 +6323,20 @@ def _normalize_work_title_for_group(title: str) -> str:
     # 英語: movement/mvt 以降を切り落とし
     base = re.sub(r"\s*(?:[-:：/]\s*)?\b(?:movement|mvt\.?)\s*(?:no\.?|#)?\s*[0-9]{1,3}\b.*$", "", base, flags=re.IGNORECASE).strip()
     # ローマ数字節（"...: II. Andante" / "... - IV Allegro"）を末尾から切り落とし
-    base = re.sub(r"\s*(?:[-:：/]\s*)?[IVXLCDM]{1,8}(?:[\.\)\-:\s]+.*)?$", "", base, flags=re.IGNORECASE).strip()
+    # 重要: セパレータ必須にして、"in C major" の C を誤って楽章番号扱いしない
+    base = re.sub(
+        r"\s*(?:[-:：/]\s*)[IVXLCDM]{1,8}(?:[\.\)\-:\s]+.*)?$",
+        "",
+        base,
+        flags=re.IGNORECASE,
+    ).strip()
+    # 追加: "..., II. Andante" 形式にも対応（カンマ区切り）
+    base = re.sub(
+        r"\s*,\s*[IVXLCDM]{1,8}(?:[\.\)\-:\s]+.*)?$",
+        "",
+        base,
+        flags=re.IGNORECASE,
+    ).strip()
     return base or txt
 
 def _normalize_person_name(name: str) -> str:
