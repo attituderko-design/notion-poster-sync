@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.37"
+APP_VERSION = "11.38"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -8928,6 +8928,7 @@ if mode == "新規登録":
                     if not works:
                         st.info("全作品を取得しましたが候補がありませんでした。作曲家情報のみで作品登録がない可能性があります。")
 
+            selected_works = []
             if st.session_state.get("mb_works"):
                 works = st.session_state.mb_works
                 comp  = st.session_state.mb_selected_comp or {}
