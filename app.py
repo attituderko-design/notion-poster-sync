@@ -59,7 +59,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.49"
+APP_VERSION = "11.50"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -9739,6 +9739,19 @@ if mode == "新規登録":
                             key="mb_common_order",
                         )
                     )
+                    common_part = st.text_input(
+                        "担当楽器（共通・任意）",
+                        key="mb_common_part",
+                        placeholder="例: Timp. / Fl. / Perc.",
+                    ).strip()
+                    common_release_text = st.text_input(
+                        "リリース日（共通・任意 / YYYY-MM-DD）",
+                        key="mb_common_release",
+                        placeholder="例: 1921-06-14",
+                    ).strip()
+                    common_release_norm = _normalize_notion_date_input(common_release_text) if common_release_text else ""
+                    if common_release_text and not common_release_norm:
+                        st.caption("ℹ️ 共通リリース日は YYYY-MM-DD 形式で入力してください（未適用になります）。")
 
                     st.markdown("**② 曲データを確認（タイトル/楽章）**")
                     selected_ids_text = ",".join(sorted([(w.get("id") or "") for w in selected_works]))
@@ -9784,6 +9797,25 @@ if mode == "新規登録":
                             t_cols[1].text_input("楽章名", key=n_key, placeholder="例: Allegro con brio")
                             t_cols[2].number_input("楽章No.", min_value=0, step=1, key=no_key)
                             t_cols[3].text_input("ローマ数字", key=r_key, placeholder="I / II / III")
+                            roman_cols = st.columns([1, 1, 6])
+                            if roman_cols[0].button("－", key=f"mb_mv_roman_dec_{editor_scope}_{work_id}"):
+                                current_no = _roman_to_int((st.session_state.get(r_key) or "").strip())
+                                if current_no is None:
+                                    current_no = int(st.session_state.get(no_key) or 1)
+                                current_no = max(int(current_no), 1)
+                                next_no = max(current_no - 1, 1)
+                                st.session_state[r_key] = _int_to_roman(next_no)
+                                st.session_state[no_key] = next_no
+                                st.rerun()
+                            if roman_cols[1].button("＋", key=f"mb_mv_roman_inc_{editor_scope}_{work_id}"):
+                                current_no = _roman_to_int((st.session_state.get(r_key) or "").strip())
+                                if current_no is None:
+                                    current_no = int(st.session_state.get(no_key) or 0)
+                                current_no = max(int(current_no), 0)
+                                next_no = current_no + 1
+                                st.session_state[r_key] = _int_to_roman(next_no)
+                                st.session_state[no_key] = next_no
+                                st.rerun()
 
                     if st.button(f"📋 {len(selected_works)} 件を登録リストに追加", key="mb_add_cart"):
                         if len(selected_works) > 1 and group_selected_works and not manual_group_title:
@@ -9859,6 +9891,11 @@ if mode == "新規登録":
                                 work_release = ""
                             else:
                                 partial_value = ""
+                            if group_selected_works and common_release_norm:
+                                work_release = common_release_norm
+                                partial_value = ""
+                                release_partial = False
+                                premiere_source = "manual-common"
                             st.session_state.reg_cart.append({
                                 "cart_uid":    f"score_{uuid.uuid4().hex[:10]}",
                                 "jp_title":    register_title,
@@ -9884,7 +9921,7 @@ if mode == "新規登録":
                                 "setlist_order": row_order,
                                 "setlist_section": common_section,
                                 "played": True,
-                                "part": "",
+                                "part": common_part if group_selected_works else "",
                                 "is_concerto": False,
                                 "soloists": "",
                                 "players": [],
