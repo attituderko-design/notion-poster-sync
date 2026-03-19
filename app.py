@@ -6031,6 +6031,18 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
                        relation_prop: str | None = None,
                        relation_ids: list[str] | None = None) -> bool:
     """Notionに新規ページを作成してポスター・メタデータも一括登録"""
+    # テスト登録モード: タイトルにプレフィックスし、メモへタグを埋める
+    test_mode = bool(st.session_state.get("test_register_mode", False))
+    test_tag = (st.session_state.get("test_register_tag") or "").strip()
+    if test_mode:
+        if not jp_title.startswith("[TEST] "):
+            jp_title = f"[TEST] {jp_title}"
+        if not en_title.startswith("[TEST] "):
+            en_title = f"[TEST] {en_title}"
+        if test_tag:
+            marker = f"[TEST_TAG:{test_tag}]"
+            memo = ((memo or "").strip() + ("\n" if memo else "") + marker).strip()
+
     properties = {
         "タイトル":            {"title": [{"type": "text", "text": {"content": jp_title}}]},
         "International Title": {"rich_text": [{"type": "text", "text": {"content": en_title}, "annotations": {"italic": True}}]},
@@ -6121,6 +6133,47 @@ def create_notion_page(jp_title: str, en_title: str, media_type_label: str,
     except Exception:
         pass
     return True
+
+def find_test_pages_by_tag(tag: str, max_pages: int = 200) -> list[dict]:
+    t = (tag or "").strip()
+    if not t or not NOTION_DB_ID:
+        return []
+    body = {
+        "page_size": min(max_pages, 100),
+        "filter": {
+            "property": "メモ",
+            "rich_text": {"contains": f"[TEST_TAG:{t}]"},
+        },
+    }
+    found = []
+    next_cursor = None
+    while len(found) < max_pages:
+        if next_cursor:
+            body["start_cursor"] = next_cursor
+        res = api_request("post", f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query", headers=NOTION_HEADERS, json=body)
+        if res is None or res.status_code != 200:
+            break
+        data = res.json() or {}
+        found.extend(data.get("results", []))
+        if not data.get("has_more"):
+            break
+        next_cursor = data.get("next_cursor")
+        if not next_cursor:
+            break
+    return found[:max_pages]
+
+def archive_pages_by_id(page_ids: list[str]) -> tuple[int, int]:
+    ok = 0
+    ng = 0
+    for pid in page_ids:
+        if not pid:
+            continue
+        res = api_request("patch", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS, json={"archived": True})
+        if res is not None and res.status_code == 200:
+            ok += 1
+        else:
+            ng += 1
+    return ok, ng
 
 @st.cache_data(ttl=600)
 def get_notion_db_property_types(database_id: str) -> dict:
@@ -7752,6 +7805,8 @@ for key, default in {
     "drive_files_cache":   {},
     "drive_blocked_until": 0,
     "drive_last_error":    "",
+    "test_register_mode":  False,
+    "test_register_tag":   datetime.now().strftime("%Y%m%d-%H%M"),
     "app_mode":            "新規登録",
     "app_mode_widget":     "新規登録",
     "reconcile_report":    None,
@@ -7786,6 +7841,27 @@ with st.sidebar:
     st.toggle("Drive連携を一時停止", key="drive_skip_mode")
     if st.session_state.get("drive_skip_mode"):
         st.caption("Drive連携は停止中です（判定/保存/一覧取得をスキップ）。")
+    with st.expander("🧪 テスト登録モード", expanded=False):
+        st.toggle("テスト登録を有効化", key="test_register_mode")
+        st.text_input("テストタグ", key="test_register_tag", help="例: 20260319-001")
+        tag_now = (st.session_state.get("test_register_tag") or "").strip()
+        if st.session_state.get("test_register_mode"):
+            st.caption(f"有効中: 新規登録に `[TEST]` と `TEST_TAG:{tag_now}` を付与します。")
+        if st.button("🧹 このテストタグのデータを一括削除", key="delete_test_by_tag", use_container_width=True):
+            if not tag_now:
+                st.warning("テストタグを入力してください。")
+            else:
+                with st.spinner("テストデータを検索中..."):
+                    pages = find_test_pages_by_tag(tag_now, max_pages=500)
+                if not pages:
+                    st.info("対象データは見つかりませんでした。")
+                else:
+                    ids = [p.get("id") for p in pages if p.get("id")]
+                    with st.spinner(f"{len(ids)} 件をアーカイブ中..."):
+                        ok, ng = archive_pages_by_id(ids)
+                    st.success(f"完了: アーカイブ {ok} 件 / 失敗 {ng} 件")
+                    st.session_state.pop("score_pages_cache", None)
+                    st.session_state.pop("performance_pages_cache", None)
     if "auto_reload_mode" not in st.session_state:
         st.session_state.auto_reload_mode = "partial"
     current_label = (
