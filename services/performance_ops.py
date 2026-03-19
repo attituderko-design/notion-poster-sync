@@ -675,6 +675,9 @@ def upsert_score_master_links_service(
             return normalize_country_code_for_flag(v or "")
         return (v or "").strip().upper()
 
+    def _norm_id(v: str) -> str:
+        return (v or "").replace("-", "").strip().lower()
+
     def _slugify(text: str) -> str:
         t = (text or "").strip().lower()
         t = re.sub(r"[\"'`’]+", "", t)
@@ -746,6 +749,49 @@ def upsert_score_master_links_service(
         except Exception:
             msg = ""
         return f"HTTP {res.status_code}" + (f" / {msg}" if msg else "")
+
+    def _resolve_score_target_ids(page_id: str) -> list[str]:
+        """
+        score_page_id に ATLAS 側ページIDが渡るケースを吸収し、
+        APOLLO 側の relation 更新対象ページIDを解決する。
+        """
+        pid = (page_id or "").strip()
+        if not pid:
+            return []
+        page_res = api_request(
+            "get",
+            f"https://api.notion.com/v1/pages/{pid}",
+            headers=NOTION_HEADERS,
+        )
+        if page_res is None or page_res.status_code != 200:
+            return [pid]
+
+        page_json = page_res.json() or {}
+        parent = page_json.get("parent") or {}
+        parent_id = (parent.get("database_id") or parent.get("data_source_id") or "").strip()
+        if _norm_id(parent_id) == _norm_id(ctx["NOTION_SCORE_DB_ID"]):
+            return [pid]
+
+        props = page_json.get("properties") or {}
+        rel_ids = []
+        seen = set()
+
+        def _append_rel(meta: dict):
+            for rel in (meta.get("relation") or []):
+                rid = (rel or {}).get("id")
+                if rid and rid not in seen:
+                    seen.add(rid)
+                    rel_ids.append(rid)
+
+        for key in ("演奏曲", "Score", "スコア", "関連演奏曲"):
+            meta = props.get(key) or {}
+            if isinstance(meta, dict) and meta.get("type") == "relation":
+                _append_rel(meta)
+        if not rel_ids:
+            for _, meta in (props or {}).items():
+                if isinstance(meta, dict) and meta.get("type") == "relation":
+                    _append_rel(meta)
+        return rel_ids or [pid]
 
     song_title = (song_title or "").strip()
     composer_name = (composer_name or "").strip()
@@ -839,14 +885,18 @@ def upsert_score_master_links_service(
     if movement_id and score_type.get("作品楽章") == "relation":
         put_notion_prop(patch_props, score_type, "作品楽章", movement_id)
     if patch_props:
-        pres = api_request(
-            "patch",
-            f"https://api.notion.com/v1/pages/{score_page_id}",
-            headers=NOTION_HEADERS,
-            json={"properties": patch_props},
-        )
-        if pres is None or pres.status_code != 200:
-            return False, f"APOLLO側 relation 更新失敗: {pres.status_code if pres else 'None'}"
+        target_ids = _resolve_score_target_ids(score_page_id)
+        if not target_ids:
+            return False, "APOLLO側 relation 更新失敗: target page未解決"
+        for tid in target_ids:
+            pres = api_request(
+                "patch",
+                f"https://api.notion.com/v1/pages/{tid}",
+                headers=NOTION_HEADERS,
+                json={"properties": patch_props},
+            )
+            if pres is None or pres.status_code != 200:
+                return False, f"APOLLO側 relation 更新失敗: {_res_error(pres)} / target={tid}"
 
     if NOTION_WORK_DB_ID and not work_id:
         return False, "作品マスタ作成/取得に失敗" + (f" ({work_create_err})" if work_create_err else "")
