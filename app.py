@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.36"
+APP_VERSION = "11.37"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -2543,11 +2543,12 @@ def _get_wikidata_country_iso2(qid: str, preferred_cc: str = "") -> str:
         p27_codes = _claim_country_codes(p27)
 
         preferred_cc = normalize_country_code_for_flag(preferred_cc or "")
-        # 作曲家では「本人の国籍(P27)」を最優先
-        # ただしMB countryが有効な場合は、P27候補内でそれを優先採用
+        # MB側で国コードが取れている場合は最優先。
+        # （Wikidataの歴史国家/多重国籍ノイズで誤判定するのを防ぐ）
+        if preferred_cc:
+            return preferred_cc
+        # 次点: 本人の国籍(P27)
         if p27_codes:
-            if preferred_cc and preferred_cc in p27_codes:
-                return preferred_cc
             return p27_codes[0]
         # 次点: 出自(P495)
         if p495_codes:
@@ -2653,6 +2654,7 @@ def _resolve_modern_iso2_from_country_qid(country_qid: str, max_depth: int = 8) 
         "Q34266": "RU",  # Russian Empire
         "Q15180": "RU",  # Soviet Union
         "Q15290": "DE",  # Prussia
+        "Q12548": "DE",  # Holy Roman Empire
         "Q28513": "AT",  # Austria-Hungary
         "Q39193": "CZ",  # Bohemia / Kingdom of Bohemia
     }
@@ -9291,6 +9293,46 @@ if mode == "新規登録":
                         st.success(f"✅ {len(selected_works)} 件を登録リストに追加しました")
                         st.session_state.active_score_tab_next = "登録リスト"
                         st.rerun()
+
+            if not selected_works and selected_comp:
+                comp_name_now = canonical_mb_composer_name(selected_comp) or selected_comp.get("name", "")
+                artist_id_now = selected_comp.get("id", "")
+                st.caption("作品未選択でも、手入力登録に備えて肖像画を先に設定できます。")
+                col_np1, col_np2 = st.columns([1, 1])
+                if col_np1.button("🖼️ 肖像画を取得", key="mb_portrait_fetch_no_work"):
+                    with st.spinner(f"{comp_name_now} の肖像画を取得中..."):
+                        portrait_now = get_composer_portrait_url(comp_name_now, artist_id_now)
+                    st.session_state["mb_portrait_url"] = portrait_now
+                    st.session_state["mb_portrait_comp"] = artist_id_now
+                    st.rerun()
+                if col_np2.button("🔄 肖像画を再取得（Drive既存を無視）", key="mb_portrait_force_fetch_no_work"):
+                    with st.spinner(f"{comp_name_now} の肖像画を再取得中..."):
+                        portrait_now = get_composer_portrait_url(comp_name_now, artist_id_now, force_refresh=True)
+                    st.session_state["mb_portrait_url"] = portrait_now
+                    st.session_state["mb_portrait_comp"] = artist_id_now
+                    st.rerun()
+
+                portrait_cached = st.session_state.get("mb_portrait_url")
+                if portrait_cached and st.session_state.get("mb_portrait_comp") == artist_id_now:
+                    st.image(portrait_cached, width=120, caption=comp_name_now)
+
+                uploaded_no_work = st.file_uploader(
+                    "肖像画をアップロード（手入力用）",
+                    type=["jpg", "jpeg", "png"],
+                    key="mb_portrait_upload_no_work",
+                )
+                if uploaded_no_work and st.button("📤 手動アップロード画像を適用", key="mb_portrait_upload_apply_no_work"):
+                    img_bytes_now = uploaded_no_work.getvalue()
+                    mimetype_now = "image/png" if uploaded_no_work.name.lower().endswith(".png") else "image/jpeg"
+                    file_id_now = save_manual_portrait_for_composer(comp_name_now, img_bytes_now, mimetype_now)
+                    if file_id_now:
+                        st.session_state["mb_portrait_url"] = with_cache_bust(drive_image_url(file_id_now))
+                        st.session_state["mb_portrait_comp"] = artist_id_now
+                        st.success("手入力用の肖像画を保存しました")
+                        st.rerun()
+                    else:
+                        st.warning("Drive保存に失敗しました。通信状況を確認して再実行してください。")
+                st.divider()
 
             manual_composer_default = ""
             manual_country_default = ""
