@@ -55,7 +55,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.39"
+APP_VERSION = "11.40"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -9442,11 +9442,22 @@ if mode == "新規登録":
                             else:
                                 st.warning("Drive保存に失敗しました。通信状況を確認して再実行してください。")
                         st.divider()
-                    manual_country_code = st.text_input(
+                    if "mb_manual_country_code_next" in st.session_state:
+                        st.session_state["mb_manual_country_code"] = st.session_state.pop("mb_manual_country_code_next")
+                    cc_col_inp, cc_col_btn = st.columns([3, 1])
+                    manual_country_code = cc_col_inp.text_input(
                         "国コード（任意, 2文字）",
                         key="mb_manual_country_code",
                         placeholder="例: JP / DE / FR",
                     )
+                    if cc_col_btn.button("🌐 自動取得", key="mb_manual_country_auto"):
+                        guessed_cc = normalize_country_code_for_flag(get_composer_country_code(manual_comp_key) or "")
+                        if guessed_cc:
+                            st.session_state["mb_manual_country_code_next"] = guessed_cc
+                            st.success(f"国コード候補: {guessed_cc}")
+                            st.rerun()
+                        else:
+                            st.warning("国コードを自動取得できませんでした。必要なら手入力してください。")
                     manual_title = st.text_input(
                         "曲名（手入力）",
                         key="mb_manual_work_title",
@@ -9457,7 +9468,11 @@ if mode == "新規登録":
                         key="mb_manual_work_note",
                         placeholder="例: world premiere / revised 2024",
                     )
-                    if st.button("➕ 手入力曲を登録リストに追加", key="mb_manual_add_to_cart"):
+                    if st.button(
+                        "➕ 手入力曲を登録リストに追加",
+                        key="mb_manual_add_to_cart",
+                        disabled=(not (manual_comp_name or "").strip() or not (manual_title or "").strip()),
+                    ):
                         composer_raw = (manual_comp_name or "").strip()
                         country_raw = (manual_country_code or "").strip().upper()
                         title_raw = (manual_title or "").strip()
