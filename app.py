@@ -59,7 +59,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.47"
+APP_VERSION = "11.48"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -9704,6 +9704,15 @@ if mode == "新規登録":
                             ).strip()
                         else:
                             st.caption("個別作品として登録します（自動グルーピングは行いません）。")
+
+                    suggested_order = 1
+                    preview_perf_ids = _clean_relation_ids(st.session_state.get("score_perf_selected_ids", []))
+                    if not preview_perf_ids:
+                        preview_perf_ids = _clean_relation_ids(
+                            [x.get("id") for x in st.session_state.get("score_perf_selected", [])]
+                        )
+                    if preview_perf_ids:
+                        suggested_order = _suggest_next_setlist_order(preview_perf_ids[0])
 
                     section_options = ["幕前", "ロビー", "本編", "Encore", "ソリストEncore"]
                     common_cols = st.columns([2, 1])
