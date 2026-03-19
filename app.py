@@ -58,7 +58,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.45"
+APP_VERSION = "11.46"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -696,12 +696,12 @@ def get_drive_service_safe():
         try:
             return get_drive_service()
         except Exception as e2:
-            st.session_state.drive_blocked_until = now + 45
+            st.session_state["drive_blocked_until"] = now + 45
             last_err = st.session_state.get("drive_last_error", "")
             msg = f"Google Drive 接続エラー: {e2 or e}"
             if msg != last_err:
                 st.warning(msg)
-                st.session_state.drive_last_error = msg
+                st.session_state["drive_last_error"] = msg
             return None
 
 
@@ -800,7 +800,9 @@ def save_bytes_to_drive(filename: str, image_bytes: bytes, mimetype: str, make_p
         except HttpError as e:
             status = getattr(getattr(e, "resp", None), "status", None)
             if status == 404:
-                st.session_state.drive_files_cache.pop(filename, None)
+                cache = st.session_state.get("drive_files_cache")
+                if isinstance(cache, dict):
+                    cache.pop(filename, None)
                 file_id = None
             else:
                 # 一時通信エラー時に新規作成へフォールバックすると重複が増えるため中断
@@ -815,7 +817,11 @@ def save_bytes_to_drive(filename: str, image_bytes: bytes, mimetype: str, make_p
                 fields="id",
             ).execute()
             file_id = result["id"]
-            st.session_state.drive_files_cache[filename] = file_id
+            cache = st.session_state.get("drive_files_cache")
+            if not isinstance(cache, dict):
+                cache = {}
+                st.session_state["drive_files_cache"] = cache
+            cache[filename] = file_id
         except Exception:
             return None
     if make_public:
@@ -979,17 +985,43 @@ def is_incomplete(page) -> bool:
 
 def get_drive_files() -> dict:
     if is_drive_skip_mode():
-        if "drive_files_cache" not in st.session_state:
-            st.session_state.drive_files_cache = {}
-        return st.session_state.drive_files_cache
-    if "drive_files_cache" not in st.session_state or not isinstance(st.session_state.drive_files_cache, dict):
+        if "drive_files_cache" not in st.session_state or not isinstance(st.session_state.get("drive_files_cache"), dict):
+            st.session_state["drive_files_cache"] = {}
+        return st.session_state.get("drive_files_cache", {})
+    if "drive_files_cache" not in st.session_state or not isinstance(st.session_state.get("drive_files_cache"), dict):
         refresh_drive_files()
-    return st.session_state.drive_files_cache
+    return st.session_state.get("drive_files_cache", {})
 
 def refresh_drive_files():
     if is_drive_skip_mode():
-        if "drive_files_cache" not in st.session_state:
-            st.session_state.drive_files_cache = {}
+        return
+    service = get_drive_service_safe()
+    if service is None:
+        if "drive_files_cache" not in st.session_state or not isinstance(st.session_state.get("drive_files_cache"), dict):
+            st.session_state["drive_files_cache"] = {}
+        return
+    try:
+        results = service.files().list(
+            q=f"'{DRIVE_FOLDER_ID}' in parents and trashed=false",
+            fields="files(id, name, modifiedTime)",
+            orderBy="modifiedTime desc",
+            pageSize=1000,
+        ).execute()
+        files = {}
+        for f in (results.get("files", []) or []):
+            nm = (f.get("name") or "").strip()
+            fid = (f.get("id") or "").strip()
+            if not nm or not fid or nm in files:
+                continue
+            # modifiedTime descで取得しているため、同名重複時は最初の1件(最新)を採用
+            files[nm] = fid
+        st.session_state["drive_files_cache"] = files
+        st.session_state["drive_blocked_until"] = 0
+    except Exception as e:
+        st.warning(f"Drive一覧取得失敗: {e}")
+        st.session_state["drive_blocked_until"] = time.time() + 60
+        if "drive_files_cache" not in st.session_state or not isinstance(st.session_state.get("drive_files_cache"), dict):
+            st.session_state["drive_files_cache"] = {}
 
 def _get_title_prop_name(database_id: str) -> str:
     type_map = get_notion_db_property_types(database_id) or {}
@@ -1015,13 +1047,10 @@ def run_production_api_selftest(enable_write: bool = False) -> dict:
         "error": "",
     }
     try:
-        # Notion DB GET
         db_res = api_request("get", f"https://api.notion.com/v1/databases/{NOTION_DB_ID}", headers=NOTION_HEADERS)
         report["notion_db_get"] = f"HTTP {db_res.status_code}" if db_res is not None else "No response"
         if db_res is None or db_res.status_code != 200:
             return report
-
-        # Notion query
         q_res = api_request(
             "post",
             f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query",
@@ -1029,8 +1058,6 @@ def run_production_api_selftest(enable_write: bool = False) -> dict:
             json={"page_size": 1},
         )
         report["notion_query"] = f"HTTP {q_res.status_code}" if q_res is not None else "No response"
-
-        # Drive list
         if is_drive_skip_mode():
             report["drive_list"] = "SKIP (drive_skip_mode=ON)"
         else:
@@ -1044,11 +1071,8 @@ def run_production_api_selftest(enable_write: bool = False) -> dict:
                     pageSize=1,
                 ).execute()
                 report["drive_list"] = f"OK ({len(ls.get('files', []))} sample)"
-
         if not enable_write:
             return report
-
-        # Write test (POST -> archive)
         tprop = _get_title_prop_name(NOTION_DB_ID)
         tmap = get_notion_db_property_types(NOTION_DB_ID) or {}
         props = {}
@@ -1080,34 +1104,6 @@ def run_production_api_selftest(enable_write: bool = False) -> dict:
     except Exception as e:
         report["error"] = str(e)
         return report
-        return
-    service = get_drive_service_safe()
-    if service is None:
-        if "drive_files_cache" not in st.session_state:
-            st.session_state.drive_files_cache = {}
-        return
-    try:
-        results = service.files().list(
-            q=f"'{DRIVE_FOLDER_ID}' in parents and trashed=false",
-            fields="files(id, name, modifiedTime)",
-            orderBy="modifiedTime desc",
-            pageSize=1000,
-        ).execute()
-        files = {}
-        for f in (results.get("files", []) or []):
-            nm = (f.get("name") or "").strip()
-            fid = (f.get("id") or "").strip()
-            if not nm or not fid or nm in files:
-                continue
-            # modifiedTime descで取得しているため、同名重複時は最初の1件(最新)を採用
-            files[nm] = fid
-        st.session_state.drive_files_cache = files
-        st.session_state.drive_blocked_until = 0
-    except Exception as e:
-        st.warning(f"Drive一覧取得失敗: {e}")
-        st.session_state.drive_blocked_until = time.time() + 60
-        if "drive_files_cache" not in st.session_state:
-            st.session_state.drive_files_cache = {}
 
 def drive_exists(title: str, tmdb_id) -> bool:
     if is_drive_skip_mode():
@@ -1168,7 +1164,9 @@ def delete_from_drive(title: str, tmdb_id) -> bool:
         if service is None:
             return False
         service.files().delete(fileId=files[fname]).execute()
-        del st.session_state.drive_files_cache[fname]
+        cache = st.session_state.get("drive_files_cache")
+        if isinstance(cache, dict) and fname in cache:
+            del cache[fname]
         return True
     except Exception as e:
         st.warning(f"Drive削除失敗 ({title} / {tmdb_id}): {e}")
@@ -2332,7 +2330,11 @@ def get_composer_portrait_url(composer_name: str, artist_id: str, force_refresh:
                 media_body=media, fields="id",
             ).execute()
             file_id = result["id"]
-            st.session_state.drive_files_cache[fname] = file_id
+            cache = st.session_state.get("drive_files_cache")
+            if not isinstance(cache, dict):
+                cache = {}
+                st.session_state["drive_files_cache"] = cache
+            cache[fname] = file_id
             service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
             st.session_state["mb_portrait_last_reason"] = "取得成功"
             return drive_image_url(file_id)
@@ -7692,6 +7694,9 @@ for key, default in {
     "auto_reload_mode":    "partial",
     "created_pages":       [],
     "drive_skip_mode":     False,
+    "drive_files_cache":   {},
+    "drive_blocked_until": 0,
+    "drive_last_error":    "",
     "app_mode":            "新規登録",
     "app_mode_widget":     "新規登録",
     "reconcile_report":    None,
