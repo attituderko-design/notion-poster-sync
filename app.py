@@ -58,7 +58,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.42"
+APP_VERSION = "11.43"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -8656,6 +8656,32 @@ if mode == "新規登録":
                                     value=item.get("part", ""),
                                     key=f"cart_part_{item_uid}",
                                 )
+                                mv_cols = st.columns([2, 1, 1, 1])
+                                item["movement_name"] = mv_cols[0].text_input(
+                                    "楽章名（任意）",
+                                    value=item.get("movement_name", ""),
+                                    key=f"cart_mv_name_{item_uid}",
+                                )
+                                movement_no_raw = mv_cols[1].text_input(
+                                    "楽章番号",
+                                    value="" if item.get("movement_no") is None else str(item.get("movement_no")),
+                                    key=f"cart_mv_no_{item_uid}",
+                                    placeholder="例: 3",
+                                )
+                                movement_order_raw = mv_cols[2].text_input(
+                                    "表示順",
+                                    value="" if item.get("movement_order") is None else str(item.get("movement_order")),
+                                    key=f"cart_mv_order_{item_uid}",
+                                    placeholder="例: 3",
+                                )
+                                item["movement_roman"] = mv_cols[3].text_input(
+                                    "ローマ数字",
+                                    value=item.get("movement_roman", ""),
+                                    key=f"cart_mv_roman_{item_uid}",
+                                    placeholder="例: III",
+                                )
+                                item["movement_no"] = int(movement_no_raw) if (movement_no_raw or "").strip().isdigit() else None
+                                item["movement_order"] = int(movement_order_raw) if (movement_order_raw or "").strip().isdigit() else None
                                 cc1, cc2 = st.columns([1, 3])
                                 item["is_concerto"] = cc1.checkbox(
                                     "協奏曲",
@@ -8773,6 +8799,10 @@ if mode == "新規登録":
                                                         "played": bool(item.get("played", True)),
                                                         "players": item.get("players", []) or [],
                                                         "section": section,
+                                                        "movement_name": item.get("movement_name", ""),
+                                                        "movement_no": item.get("movement_no"),
+                                                        "movement_order": item.get("movement_order"),
+                                                        "movement_roman": item.get("movement_roman", ""),
                                                     }
                                                     main_items = [score_item] if section in ("幕前", "ロビー", "本編") else []
                                                     encore_items = [score_item] if section in ("Encore", "ソリストEncore") else []
@@ -9293,6 +9323,10 @@ if mode == "新規登録":
                                 "is_concerto": False,
                                 "soloists": "",
                                 "players": [],
+                                "movement_name": "",
+                                "movement_no": None,
+                                "movement_order": None,
+                                "movement_roman": "",
                                 "mb_work_id": w.get("id", ""),
                             })
                             suggested_order += 1
@@ -9553,6 +9587,10 @@ if mode == "新規登録":
                                 "is_concerto": False,
                                 "soloists": "",
                                 "players": [],
+                                "movement_name": "",
+                                "movement_no": None,
+                                "movement_order": None,
+                                "movement_roman": "",
                                 "mb_work_id": "",
                             })
                             st.success("✅ 手入力曲を登録リストに追加しました")
