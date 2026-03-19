@@ -39,6 +39,9 @@ NOTION_PERFORMANCE_CAST_DB_ID = st.secrets.get("NOTION_PERFORMANCE_CAST_DB_ID", 
 NOTION_SONG_ASSIGN_DB_ID = st.secrets.get("NOTION_SONG_ASSIGN_DB_ID", "")
 NOTION_PERFORMER_MASTER_DB_ID = st.secrets.get("NOTION_PERFORMER_MASTER_DB_ID", "")
 NOTION_COUNTRY_MASTER_DB_ID = st.secrets.get("NOTION_COUNTRY_MASTER_DB_ID", "")
+NOTION_WORK_DB_ID = st.secrets.get("NOTION_WORK_DB_ID", "3284532d7d56805885ecdc62403489cf")
+NOTION_COMPOSER_DB_ID = st.secrets.get("NOTION_COMPOSER_DB_ID", "3284532d7d5680ab87b4d93899a68033")
+NOTION_MOVEMENT_DB_ID = st.secrets.get("NOTION_MOVEMENT_DB_ID", "3284532d7d5680e9bc10fc96fe7bfb99")
 NOTION_GAME_JP_DICT_DB_ID = st.secrets.get("NOTION_GAME_JP_DICT_DB_ID", "3234532d7d5680639809cb0d2a5da940")
 DEFAULT_PERFORMER_NAME = st.secrets.get("DEFAULT_PERFORMER_NAME", "")
 TMDB_API_KEY         = st.secrets["TMDB_API_KEY"]
@@ -55,7 +58,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.41"
+APP_VERSION = "11.42"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -6203,6 +6206,9 @@ def create_setlist_rows_for_performance(
     ctx = {
         "NOTION_SCORE_DB_ID": NOTION_SCORE_DB_ID,
         "NOTION_COUNTRY_MASTER_DB_ID": NOTION_COUNTRY_MASTER_DB_ID,
+        "NOTION_WORK_DB_ID": NOTION_WORK_DB_ID,
+        "NOTION_COMPOSER_DB_ID": NOTION_COMPOSER_DB_ID,
+        "NOTION_MOVEMENT_DB_ID": NOTION_MOVEMENT_DB_ID,
         "get_notion_db_property_types": get_notion_db_property_types,
         "find_score_page_by_title": _find_score_page_by_title,
         "put_notion_prop": _put_notion_prop,
