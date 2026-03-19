@@ -9571,7 +9571,35 @@ if mode == "新規登録":
                         st.session_state.score_perf_selected_ids = []
                     st.caption(f"紐付け対象ID: {len(_clean_relation_ids(st.session_state.get('score_perf_selected_ids', [])))} 件")
 
+                    group_selected_works = False
+                    manual_group_title = ""
+                    if len(selected_works) > 1:
+                        st.caption("複数選択時の登録方法")
+                        group_mode = st.radio(
+                            "この複数曲を同一作品としてグルーピングしますか？",
+                            ["はい（同一作品として扱う）", "いいえ（個別作品として扱う）"],
+                            index=0,
+                            key="mb_group_mode",
+                            horizontal=True,
+                        )
+                        group_selected_works = group_mode.startswith("はい")
+                        if group_selected_works:
+                            default_group_title = _normalize_work_title_for_group(
+                                (selected_works[0].get("title") or "").strip()
+                            ) or (selected_works[0].get("title") or "").strip()
+                            manual_group_title = st.text_input(
+                                "グルーピング時の作品名（共通）",
+                                value=default_group_title,
+                                key="mb_group_title",
+                                placeholder="例: Symphony no.41 in C major, K. 551",
+                            ).strip()
+                        else:
+                            st.caption("個別作品として登録します（自動グルーピングは行いません）。")
+
                     if st.button(f"📋 {len(selected_works)} 件を登録リストに追加", key="mb_add_cart"):
+                        if len(selected_works) > 1 and group_selected_works and not manual_group_title:
+                            st.warning("グルーピングする場合は共通作品名を入力してください。")
+                            st.stop()
                         selected_perf_ids = _clean_relation_ids(st.session_state.get("score_perf_selected_ids", []))
                         if not selected_perf_ids:
                             selected_perf_ids = _clean_relation_ids(
@@ -9601,8 +9629,13 @@ if mode == "新規登録":
                             work_disamb = (w.get("disambiguation") or "").strip()
                             register_title = f"{work_title} ({work_disamb})" if work_disamb else work_title
                             movement_guess = _infer_movement_from_title(work_title)
-                            work_base_title = _normalize_work_title_for_group(work_title)
-                            work_group_key = f"{(comp_name or '').strip().lower()}::{(work_base_title or work_title).strip().lower()}"
+                            if len(selected_works) > 1 and group_selected_works:
+                                work_group_base = manual_group_title
+                                work_group_key = f"{(comp_name or '').strip().lower()}::manual::{work_group_base.strip().lower()}"
+                            else:
+                                work_group_base = work_title
+                                # 個別扱い時は自動判定での同一視を行わない（手戻り防止）
+                                work_group_key = f"{(comp_name or '').strip().lower()}::single::{w.get('id') or work_group_base.strip().lower()}"
                             if work_group_key in work_order_map:
                                 row_order = work_order_map[work_group_key]
                             else:
@@ -9662,6 +9695,7 @@ if mode == "新規登録":
                                 "movement_order": movement_guess.get("movement_order"),
                                 "movement_roman": movement_guess.get("movement_roman", ""),
                                 "mb_work_id": w.get("id", ""),
+                                "manual_group_title": work_group_base if (len(selected_works) > 1 and group_selected_works) else "",
                             })
                         st.session_state.mb_checked = {}
                         st.success(f"✅ {len(selected_works)} 件を登録リストに追加しました")
