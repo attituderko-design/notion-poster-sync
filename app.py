@@ -8952,6 +8952,43 @@ if mode == "新規登録":
                     with col_reg:
                         if st.button(f"{len(st.session_state.reg_cart)} 件を一括登録", type="primary", key="bulk_register_score"):
                             total_count = len(st.session_state.get("reg_cart", []))
+                            # 同一作品（楽章違い）で担当情報を共通化
+                            # 例: 交響曲4楽章を別行で保持していても、担当楽器/奏者/ソリストをまとめて反映
+                            score_groups = {}
+                            for idx, _it in enumerate(st.session_state.get("reg_cart", [])):
+                                if (_it.get("media_type") or "") != "score":
+                                    continue
+                                title_norm = _normalize_work_title_for_group(_it.get("jp_title", ""))
+                                comp_norm = (((_it.get("details") or {}).get("director") or "")).strip().lower()
+                                gk = f"{comp_norm}::{(title_norm or (_it.get('jp_title') or '')).strip().lower()}"
+                                score_groups.setdefault(gk, []).append(idx)
+                            for _gk, idxs in score_groups.items():
+                                if len(idxs) <= 1:
+                                    continue
+                                rows = [st.session_state.reg_cart[i] for i in idxs]
+                                src = next((r for r in rows if (r.get("part") or "").strip()), rows[0])
+                                shared_part = (src.get("part") or "").strip()
+                                shared_players = src.get("players", []) or []
+                                shared_soloists = (src.get("soloists") or "").strip()
+                                shared_is_concerto = bool(src.get("is_concerto", False))
+                                shared_played = bool(src.get("played", True))
+                                section_non_empty = [((r.get("setlist_section") or "").strip()) for r in rows if (r.get("setlist_section") or "").strip()]
+                                shared_section = section_non_empty[0] if section_non_empty else "本編"
+                                order_vals = [int(r.get("setlist_order", 1) or 1) for r in rows]
+                                shared_order = max(1, min(order_vals) if order_vals else 1)
+                                for i in idxs:
+                                    it = st.session_state.reg_cart[i]
+                                    if shared_part:
+                                        it["part"] = shared_part
+                                    if shared_players:
+                                        it["players"] = shared_players
+                                    if shared_soloists:
+                                        it["soloists"] = shared_soloists
+                                    if shared_is_concerto:
+                                        it["is_concerto"] = True
+                                    it["played"] = shared_played
+                                    it["setlist_section"] = shared_section
+                                    it["setlist_order"] = shared_order
                             if not st.session_state.pages_loaded:
                                 with st.spinner("Notionデータ取得中..."):
                                     all_pages = load_notion_data()
