@@ -9522,7 +9522,17 @@ if mode == "新規登録":
                             suggested_order = _suggest_next_setlist_order(selected_perf_ids[0])
                         work_order_map = {}
                         work_branch_count = {}
+                        grouped_works = []
+                        seen_work_group = set()
                         for w in selected_works:
+                            wt = (w.get("title") or "").strip()
+                            wb = _normalize_work_title_for_group(wt) or wt
+                            gk = f"{(comp_name or '').strip().lower()}::{wb.strip().lower()}"
+                            if gk in seen_work_group:
+                                continue
+                            seen_work_group.add(gk)
+                            grouped_works.append(w)
+                        for w in grouped_works:
                             work_title = (w.get("title") or "").strip()
                             work_disamb = (w.get("disambiguation") or "").strip()
                             register_title = f"{work_title} ({work_disamb})" if work_disamb else work_title
@@ -9590,7 +9600,13 @@ if mode == "新規登録":
                                 "mb_work_id": w.get("id", ""),
                             })
                         st.session_state.mb_checked = {}
-                        st.success(f"✅ {len(selected_works)} 件を登録リストに追加しました")
+                        if len(grouped_works) != len(selected_works):
+                            st.success(
+                                f"✅ {len(grouped_works)} 件を登録リストに追加しました"
+                                f"（同一作品の楽章候補 {len(selected_works)-len(grouped_works)} 件を統合）"
+                            )
+                        else:
+                            st.success(f"✅ {len(grouped_works)} 件を登録リストに追加しました")
                         st.session_state.active_score_tab_next = "登録リスト"
                         st.rerun()
 

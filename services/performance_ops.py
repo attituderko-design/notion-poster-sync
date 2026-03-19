@@ -691,6 +691,15 @@ def upsert_score_master_links_service(
             return ""
         return ""
 
+    def _res_error(res) -> str:
+        if res is None:
+            return "HTTP None"
+        try:
+            msg = ((res.json() or {}).get("message") or "").strip()
+        except Exception:
+            msg = ""
+        return f"HTTP {res.status_code}" + (f" / {msg}" if msg else "")
+
     song_title = (song_title or "").strip()
     composer_name = (composer_name or "").strip()
     movement_name = (movement_name or "").strip()
@@ -725,6 +734,7 @@ def upsert_score_master_links_service(
 
     work_id = ""
     wk = ""
+    work_create_err = ""
     if NOTION_WORK_DB_ID:
         w_type = get_notion_db_property_types(NOTION_WORK_DB_ID) or {}
         w_title = _pick_title_prop_name(w_type)
@@ -738,8 +748,13 @@ def upsert_score_master_links_service(
                 put_notion_prop(w_props, w_type, w_title, wk)
                 if w_type.get("作品名") in ("rich_text", "title"):
                     put_notion_prop(w_props, w_type, "作品名", base_title)
-                if composer_id and w_type.get("作曲家") == "relation":
-                    put_notion_prop(w_props, w_type, "作曲家", composer_id)
+                composer_rel_prop = None
+                if w_type.get("作曲家") == "relation":
+                    composer_rel_prop = "作曲家"
+                else:
+                    composer_rel_prop = next((k for k, v in (w_type or {}).items() if v == "relation"), None)
+                if composer_id and composer_rel_prop:
+                    put_notion_prop(w_props, w_type, composer_rel_prop, composer_id)
                 if w_props:
                     wres = api_request(
                         "post",
@@ -749,6 +764,10 @@ def upsert_score_master_links_service(
                     )
                     if wres is not None and wres.status_code == 200:
                         work_id = ((wres.json() or {}).get("id") or "")
+                    else:
+                        work_create_err = _res_error(wres)
+        else:
+            work_create_err = "titleプロパティ未検出"
 
     movement_id = ""
     if NOTION_MOVEMENT_DB_ID and work_id and movement_name:
@@ -796,7 +815,7 @@ def upsert_score_master_links_service(
             return False, f"APOLLO側 relation 更新失敗: {pres.status_code if pres else 'None'}"
 
     if NOTION_WORK_DB_ID and not work_id:
-        return False, "作品マスタ作成/取得に失敗"
+        return False, "作品マスタ作成/取得に失敗" + (f" ({work_create_err})" if work_create_err else "")
     if NOTION_MOVEMENT_DB_ID and movement_name and not movement_id:
         return False, "作品楽章マスタ作成/取得に失敗"
     return True, ""
