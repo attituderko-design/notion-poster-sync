@@ -865,17 +865,27 @@ def upsert_score_master_links_service(
             work_create_err = "titleプロパティ未検出"
 
     movement_id = ""
-    if NOTION_MOVEMENT_DB_ID and work_id and movement_name:
+    has_movement_signal = bool(movement_name or movement_no is not None or movement_order is not None or movement_roman)
+    if NOTION_MOVEMENT_DB_ID and work_id and has_movement_signal:
         m_type = get_notion_db_property_types(NOTION_MOVEMENT_DB_ID) or {}
         m_title = _pick_title_prop_name(m_type)
         if m_title:
-            mv_key = f"{wk}_m{_slugify(str(movement_no or movement_order or movement_name))}"
+            mv_key_seed = movement_no if movement_no is not None else (movement_order if movement_order is not None else (movement_roman or movement_name))
+            mv_key = f"{wk}_m{_slugify(str(mv_key_seed))}"
             movement_id = _find_page_id_by_title(NOTION_MOVEMENT_DB_ID, m_title, mv_key)
             if not movement_id:
                 m_props = {}
                 put_notion_prop(m_props, m_type, m_title, mv_key)
+                movement_name_safe = (movement_name or "").strip()
+                if not movement_name_safe:
+                    if movement_roman:
+                        movement_name_safe = f"Movement {movement_roman}"
+                    elif movement_no is not None:
+                        movement_name_safe = f"Movement {int(movement_no)}"
+                    elif movement_order is not None:
+                        movement_name_safe = f"Movement {int(movement_order)}"
                 if m_type.get("楽章名") in ("rich_text", "title"):
-                    put_notion_prop(m_props, m_type, "楽章名", movement_name)
+                    put_notion_prop(m_props, m_type, "楽章名", movement_name_safe)
                 if m_type.get("作品マスタ") == "relation":
                     put_notion_prop(m_props, m_type, "作品マスタ", work_id)
                 if movement_no is not None and m_type.get("楽章番号") == "number":
@@ -920,6 +930,6 @@ def upsert_score_master_links_service(
 
     if NOTION_WORK_DB_ID and not work_id:
         return False, "作品マスタ作成/取得に失敗" + (f" ({work_create_err})" if work_create_err else "")
-    if NOTION_MOVEMENT_DB_ID and movement_name and not movement_id:
+    if NOTION_MOVEMENT_DB_ID and has_movement_signal and not movement_id:
         return False, "作品楽章マスタ作成/取得に失敗"
     return True, ""
