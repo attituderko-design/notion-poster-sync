@@ -6550,6 +6550,161 @@ def upsert_score_master_links(
         movement_roman=movement_roman,
     )
 
+def relink_existing_score_master_links(
+    max_rows: int = 300,
+    only_missing: bool = True,
+) -> tuple[dict, list[dict]]:
+    """
+    APOLLO既存行を 作品マスタ / 作品楽章マスタ に一括再連動する。
+    """
+    stats = {
+        "scanned": 0,
+        "targeted": 0,
+        "updated": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
+    failures: list[dict] = []
+
+    if not NOTION_SCORE_DB_ID:
+        stats["error"] = "NOTION_SCORE_DB_ID 未設定"
+        return stats, failures
+    if not NOTION_WORK_DB_ID:
+        stats["error"] = "NOTION_WORK_DB_ID 未設定"
+        return stats, failures
+
+    type_map = get_notion_db_property_types(NOTION_SCORE_DB_ID) or {}
+    if not type_map:
+        stats["error"] = "APOLLOのプロパティ取得失敗"
+        return stats, failures
+
+    work_rel_prop = next((k for k in ("作品マスタ", "作品", "Work") if type_map.get(k) == "relation"), None)
+    movement_rel_prop = next((k for k in ("作品楽章", "作品楽章マスタ", "楽章マスタ", "Movement") if type_map.get(k) == "relation"), None)
+    parent_rel_prop = next((k for k in ("演奏曲", "作品", "関連演奏曲", "Score") if type_map.get(k) == "relation"), None)
+
+    rows = query_notion_database_all(NOTION_SCORE_DB_ID)
+    if not rows:
+        return stats, failures
+
+    max_rows = max(1, int(max_rows or 1))
+    parent_creator_cache: dict[str, str] = {}
+
+    def _text_from_prop(meta: dict | None) -> str:
+        if not isinstance(meta, dict):
+            return ""
+        ptype = meta.get("type")
+        if ptype == "rich_text":
+            return plain_text_join(meta.get("rich_text", []))
+        if ptype == "title":
+            return plain_text_join(meta.get("title", []))
+        if ptype == "select":
+            return ((meta.get("select") or {}).get("name") or "").strip()
+        if ptype == "multi_select":
+            names = [((x or {}).get("name") or "").strip() for x in (meta.get("multi_select") or [])]
+            return " / ".join([x for x in names if x])
+        return ""
+
+    def _read_country_code(props_local: dict) -> str:
+        for key in ("国コード", "CountryCode", "country_code"):
+            cc = normalize_country_code_for_flag(_text_from_prop(props_local.get(key)))
+            if cc:
+                return cc
+        return ""
+
+    def _read_composer(props_local: dict) -> str:
+        comp = plain_text_join((props_local.get("クリエイター") or {}).get("rich_text", []))
+        if comp:
+            return comp.strip()
+        for key, meta in (props_local or {}).items():
+            if ("クリエイター" in str(key)) or ("作曲家" in str(key)):
+                txt = _text_from_prop(meta)
+                if txt:
+                    return txt.strip()
+        return ""
+
+    processed = 0
+    for row in rows:
+        stats["scanned"] += 1
+        if processed >= max_rows:
+            break
+
+        row_id = (row or {}).get("id") or ""
+        props = (row or {}).get("properties") or {}
+        if not row_id:
+            stats["skipped"] += 1
+            continue
+
+        title = (get_title(props) or ("", "", ""))[0].strip()
+        if not title:
+            stats["skipped"] += 1
+            continue
+
+        existing_work_rel = ((props.get(work_rel_prop) or {}).get("relation") or []) if work_rel_prop else []
+        existing_mv_rel = ((props.get(movement_rel_prop) or {}).get("relation") or []) if movement_rel_prop else []
+        if only_missing and existing_work_rel and (not movement_rel_prop or existing_mv_rel):
+            stats["skipped"] += 1
+            continue
+
+        composer_name = _read_composer(props)
+        if not composer_name and parent_rel_prop:
+            rels = ((props.get(parent_rel_prop) or {}).get("relation") or [])
+            parent_id = ((rels[0] or {}).get("id") or "") if rels else ""
+            if parent_id:
+                if parent_id not in parent_creator_cache:
+                    pres = api_request(
+                        "get",
+                        f"https://api.notion.com/v1/pages/{parent_id}",
+                        headers=NOTION_HEADERS,
+                    )
+                    if pres is not None and pres.status_code == 200:
+                        pprops = ((pres.json() or {}).get("properties") or {})
+                        parent_creator_cache[parent_id] = plain_text_join((pprops.get("クリエイター") or {}).get("rich_text", [])).strip()
+                    else:
+                        parent_creator_cache[parent_id] = ""
+                composer_name = parent_creator_cache.get(parent_id, "")
+
+        movement_name = _text_from_prop(props.get("楽章名"))
+        movement_no = (props.get("楽章番号") or {}).get("number")
+        movement_order = (props.get("表示順") or {}).get("number")
+        movement_roman = _text_from_prop(props.get("ローマ数字表示"))
+        if movement_order is None and movement_no is not None:
+            movement_order = movement_no
+        if not movement_roman and isinstance(movement_no, (int, float)):
+            movement_roman = _int_to_roman(int(movement_no))
+        if not movement_name and movement_no is None and not movement_roman:
+            guessed = _infer_movement_from_title(title)
+            movement_name = guessed.get("movement_name", "") or ""
+            movement_no = guessed.get("movement_no", None)
+            movement_order = guessed.get("movement_order", None)
+            movement_roman = guessed.get("movement_roman", "") or ""
+
+        processed += 1
+        stats["targeted"] += 1
+        ok, msg = upsert_score_master_links(
+            score_page_id=row_id,
+            song_title=title,
+            composer_name=composer_name,
+            composer_country=_read_country_code(props),
+            movement_name=movement_name,
+            movement_no=movement_no,
+            movement_order=movement_order,
+            movement_roman=movement_roman,
+        )
+        if ok:
+            stats["updated"] += 1
+        else:
+            stats["failed"] += 1
+            failures.append(
+                {
+                    "id": row_id,
+                    "title": title,
+                    "composer": composer_name,
+                    "error": msg or "unknown",
+                }
+            )
+
+    return stats, failures
+
 def _pick_prop_name(type_map: dict, candidates: list[str], p_type: str) -> str | None:
     for c in candidates:
         if type_map.get(c) == p_type:
@@ -11234,6 +11389,57 @@ if mode in ("出演者管理", "出演情報管理"):
     st.caption(f"custom_emoji設定: {len(loaded_media_keys)}件")
 
     st.caption("整備・修復系の個別ボタンは整理済みです。通常の出演登録フローをご利用ください。")
+
+    with st.expander("🧩 APOLLO既存データを作品/楽章マスタに一括再連動", expanded=False):
+        c_relink_1, c_relink_2 = st.columns([1, 1])
+        relink_only_missing = c_relink_1.checkbox("未連動のみ対象", value=True, key="relink_master_only_missing")
+        relink_max_rows = int(
+            c_relink_2.number_input(
+                "一度に処理する上限",
+                min_value=1,
+                max_value=2000,
+                value=300,
+                step=50,
+                key="relink_master_max_rows",
+            )
+        )
+        if st.button("🔁 作品/楽章マスタを一括再連動", key="relink_master_run_btn"):
+            with st.spinner("APOLLO既存データを再連動中..."):
+                relink_stats, relink_failures = relink_existing_score_master_links(
+                    max_rows=relink_max_rows,
+                    only_missing=relink_only_missing,
+                )
+            if relink_stats.get("error"):
+                st.error(f"❌ 一括再連動に失敗: {relink_stats['error']}")
+            else:
+                st.success(
+                    "✅ 一括再連動完了: "
+                    f"走査 {relink_stats.get('scanned', 0)} / "
+                    f"対象 {relink_stats.get('targeted', 0)} / "
+                    f"更新 {relink_stats.get('updated', 0)} / "
+                    f"スキップ {relink_stats.get('skipped', 0)} / "
+                    f"失敗 {relink_stats.get('failed', 0)}"
+                )
+                if relink_failures:
+                    st.warning(f"⚠️ 失敗 {len(relink_failures)} 件（先頭100件を表示）")
+                    st.dataframe(relink_failures[:100], use_container_width=True, hide_index=True)
+                    lines = ["id,title,composer,error"]
+                    for f in relink_failures:
+                        lines.append(
+                            "\"{id}\",\"{title}\",\"{composer}\",\"{error}\"".format(
+                                id=str(f.get("id", "")).replace("\"", "\"\""),
+                                title=str(f.get("title", "")).replace("\"", "\"\""),
+                                composer=str(f.get("composer", "")).replace("\"", "\"\""),
+                                error=str(f.get("error", "")).replace("\"", "\"\""),
+                            )
+                        )
+                    st.download_button(
+                        "📄 失敗一覧CSVをダウンロード",
+                        data="\n".join(lines).encode("utf-8-sig"),
+                        file_name=f"apollo_master_relink_failures_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        key="relink_master_failures_dl",
+                    )
 
     perf_pages = _get_performance_pages(force_refresh=False)
     if not perf_pages:
