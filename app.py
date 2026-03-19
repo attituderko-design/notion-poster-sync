@@ -6239,6 +6239,26 @@ def _infer_movement_from_title(title: str) -> dict:
 
     return {"movement_name": "", "movement_no": None, "movement_order": None, "movement_roman": ""}
 
+
+def _normalize_work_title_for_group(title: str) -> str:
+    """
+    楽章違いでも同一作品として束ねるための正規化タイトル。
+    例:
+      - Symphony No.41 ... I. Allegro  -> Symphony No.41 ...
+      - 交響曲第41番 第2楽章            -> 交響曲第41番
+    """
+    txt = (title or "").strip()
+    if not txt:
+        return ""
+    base = re.sub(r"\s*\([^)]*\)\s*$", "", txt).strip()
+    # 日本語: 第N楽章 以降を切り落とし
+    base = re.sub(r"\s*第\s*[0-9]{1,3}\s*楽章.*$", "", base, flags=re.IGNORECASE).strip()
+    # 英語: movement/mvt 以降を切り落とし
+    base = re.sub(r"\s*(?:[-:：/]\s*)?\b(?:movement|mvt\.?)\s*(?:no\.?|#)?\s*[0-9]{1,3}\b.*$", "", base, flags=re.IGNORECASE).strip()
+    # ローマ数字節（"...: II. Andante" / "... - IV Allegro"）を末尾から切り落とし
+    base = re.sub(r"\s*(?:[-:：/]\s*)?[IVXLCDM]{1,8}(?:[\.\)\-:\s]+.*)?$", "", base, flags=re.IGNORECASE).strip()
+    return base or txt
+
 def _normalize_person_name(name: str) -> str:
     return (name or "").strip().lower()
 
@@ -9500,11 +9520,24 @@ if mode == "新規登録":
                             perf_page = _get_page_from_state_or_api(selected_perf_ids[0])
                             perf_release, perf_watched, perf_rating, perf_location = _extract_performance_defaults(perf_page)
                             suggested_order = _suggest_next_setlist_order(selected_perf_ids[0])
+                        work_order_map = {}
+                        work_branch_count = {}
                         for w in selected_works:
                             work_title = (w.get("title") or "").strip()
                             work_disamb = (w.get("disambiguation") or "").strip()
                             register_title = f"{work_title} ({work_disamb})" if work_disamb else work_title
                             movement_guess = _infer_movement_from_title(work_title)
+                            work_base_title = _normalize_work_title_for_group(work_title)
+                            work_group_key = f"{(comp_name or '').strip().lower()}::{(work_base_title or work_title).strip().lower()}"
+                            if work_group_key in work_order_map:
+                                row_order = work_order_map[work_group_key]
+                            else:
+                                row_order = suggested_order
+                                work_order_map[work_group_key] = row_order
+                                suggested_order += 1
+                            work_branch_count[work_group_key] = work_branch_count.get(work_group_key, 0) + 1
+                            if movement_guess.get("movement_order") is None and work_branch_count[work_group_key] > 1:
+                                movement_guess["movement_order"] = work_branch_count[work_group_key]
                             work_release = (w.get("first_release_date") or "").strip()
                             premiere_source = "musicbrainz-work"
                             if not work_release:
@@ -9543,7 +9576,7 @@ if mode == "新規登録":
                                 "premiere_source": premiere_source if work_release else (premiere_source or "not-found"),
                                 "premiere_partial": release_partial,
                                 "premiere_partial_value": partial_value,
-                                "setlist_order": suggested_order,
+                                "setlist_order": row_order,
                                 "setlist_section": "本編",
                                 "played": True,
                                 "part": "",
@@ -9556,7 +9589,6 @@ if mode == "新規登録":
                                 "movement_roman": movement_guess.get("movement_roman", ""),
                                 "mb_work_id": w.get("id", ""),
                             })
-                            suggested_order += 1
                         st.session_state.mb_checked = {}
                         st.success(f"✅ {len(selected_works)} 件を登録リストに追加しました")
                         st.session_state.active_score_tab_next = "登録リスト"
