@@ -59,7 +59,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.46"
+APP_VERSION = "11.47"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -9680,10 +9680,10 @@ if mode == "新規登録":
                         st.session_state.score_perf_selected_ids = []
                     st.caption(f"紐付け対象ID: {len(_clean_relation_ids(st.session_state.get('score_perf_selected_ids', [])))} 件")
 
+                    st.markdown("**① 共通設定**")
                     group_selected_works = False
                     manual_group_title = ""
                     if len(selected_works) > 1:
-                        st.caption("複数選択時の登録方法")
                         group_mode = st.radio(
                             "この複数曲を同一作品としてグルーピングしますか？",
                             ["はい（同一作品として扱う）", "いいえ（個別作品として扱う）"],
@@ -9704,6 +9704,69 @@ if mode == "新規登録":
                             ).strip()
                         else:
                             st.caption("個別作品として登録します（自動グルーピングは行いません）。")
+
+                    section_options = ["幕前", "ロビー", "本編", "Encore", "ソリストEncore"]
+                    common_cols = st.columns([2, 1])
+                    common_section = common_cols[0].selectbox(
+                        "区分（共通）",
+                        section_options,
+                        index=section_options.index("本編"),
+                        key="mb_common_section",
+                    )
+                    common_order = int(
+                        common_cols[1].number_input(
+                            "曲順（開始）",
+                            min_value=1,
+                            value=max(int(suggested_order or 1), 1),
+                            step=1,
+                            key="mb_common_order",
+                        )
+                    )
+
+                    st.markdown("**② 曲データを確認（タイトル/楽章）**")
+                    selected_ids_text = ",".join(sorted([(w.get("id") or "") for w in selected_works]))
+                    editor_scope = uuid.uuid5(uuid.NAMESPACE_DNS, f"{artist_id}:{selected_ids_text}").hex[:10]
+                    for idx, w in enumerate(selected_works):
+                        work_id = (w.get("id") or f"work_{idx}").strip()
+                        work_title = (w.get("title") or "").strip()
+                        work_disamb = (w.get("disambiguation") or "").strip()
+                        register_title_default = f"{work_title} ({work_disamb})" if work_disamb else work_title
+                        movement_guess = _infer_movement_from_title(work_title)
+                        default_mv_no = movement_guess.get("movement_no")
+                        if not (isinstance(default_mv_no, int) and default_mv_no > 0):
+                            default_mv_no = (idx + 1) if (group_selected_works and len(selected_works) > 1) else 0
+                        default_mv_roman = (movement_guess.get("movement_roman") or "").strip()
+                        if not default_mv_roman and default_mv_no > 0:
+                            default_mv_roman = _int_to_roman(default_mv_no)
+
+                        t_key = f"mb_edit_title_{editor_scope}_{work_id}"
+                        n_key = f"mb_edit_mv_name_{editor_scope}_{work_id}"
+                        no_key = f"mb_edit_mv_no_{editor_scope}_{work_id}"
+                        r_key = f"mb_edit_mv_roman_{editor_scope}_{work_id}"
+                        if t_key not in st.session_state:
+                            st.session_state[t_key] = register_title_default
+                        if n_key not in st.session_state:
+                            st.session_state[n_key] = movement_guess.get("movement_name", "") or ""
+                        if no_key not in st.session_state:
+                            st.session_state[no_key] = int(default_mv_no)
+                        if r_key not in st.session_state:
+                            st.session_state[r_key] = default_mv_roman
+
+                        row_order_preview = common_order if group_selected_works else (common_order + idx)
+                        with st.expander(f"{idx + 1}. {register_title_default}", expanded=(idx == 0)):
+                            meta_left, meta_right = st.columns([1, 1])
+                            meta_left.caption(f"区分: {common_section}")
+                            meta_right.caption(f"曲順: {row_order_preview}")
+                            t_cols = st.columns([3, 2, 1, 1])
+                            t_cols[0].text_input(
+                                "タイトル",
+                                key=t_key,
+                                disabled=bool(group_selected_works),
+                                help="グルーピング時は共通作品名が適用されます。",
+                            )
+                            t_cols[1].text_input("楽章名", key=n_key, placeholder="例: Allegro con brio")
+                            t_cols[2].number_input("楽章No.", min_value=0, step=1, key=no_key)
+                            t_cols[3].text_input("ローマ数字", key=r_key, placeholder="I / II / III")
 
                     if st.button(f"📋 {len(selected_works)} 件を登録リストに追加", key="mb_add_cart"):
                         if len(selected_works) > 1 and group_selected_works and not manual_group_title:
@@ -9731,29 +9794,38 @@ if mode == "新規登録":
                             perf_page = _get_page_from_state_or_api(selected_perf_ids[0])
                             perf_release, perf_watched, perf_rating, perf_location = _extract_performance_defaults(perf_page)
                             suggested_order = _suggest_next_setlist_order(selected_perf_ids[0])
-                        work_order_map = {}
-                        work_branch_count = {}
-                        for w in selected_works:
+                        for idx, w in enumerate(selected_works):
+                            work_id = (w.get("id") or f"work_{idx}").strip()
                             work_title = (w.get("title") or "").strip()
-                            work_disamb = (w.get("disambiguation") or "").strip()
-                            register_title = f"{work_title} ({work_disamb})" if work_disamb else work_title
                             movement_guess = _infer_movement_from_title(work_title)
+                            t_key = f"mb_edit_title_{editor_scope}_{work_id}"
+                            n_key = f"mb_edit_mv_name_{editor_scope}_{work_id}"
+                            no_key = f"mb_edit_mv_no_{editor_scope}_{work_id}"
+                            r_key = f"mb_edit_mv_roman_{editor_scope}_{work_id}"
+
+                            register_title = ((st.session_state.get(t_key) or "").strip() if not group_selected_works else manual_group_title.strip())
+                            if not register_title:
+                                register_title = (w.get("title") or "").strip()
+
                             if len(selected_works) > 1 and group_selected_works:
-                                work_group_base = manual_group_title
+                                work_group_base = manual_group_title.strip()
                                 work_group_key = f"{(comp_name or '').strip().lower()}::manual::{work_group_base.strip().lower()}"
+                                row_order = common_order
                             else:
                                 work_group_base = work_title
-                                # 個別扱い時は自動判定での同一視を行わない（手戻り防止）
                                 work_group_key = f"{(comp_name or '').strip().lower()}::single::{w.get('id') or work_group_base.strip().lower()}"
-                            if work_group_key in work_order_map:
-                                row_order = work_order_map[work_group_key]
-                            else:
-                                row_order = suggested_order
-                                work_order_map[work_group_key] = row_order
-                                suggested_order += 1
-                            work_branch_count[work_group_key] = work_branch_count.get(work_group_key, 0) + 1
-                            if movement_guess.get("movement_order") is None and work_branch_count[work_group_key] > 1:
-                                movement_guess["movement_order"] = work_branch_count[work_group_key]
+                                row_order = common_order + idx
+
+                            movement_name_input = (st.session_state.get(n_key) or "").strip()
+                            movement_no_input = int(st.session_state.get(no_key) or 0)
+                            movement_roman_input = (st.session_state.get(r_key) or "").strip()
+                            movement_no_val = movement_no_input if movement_no_input > 0 else None
+                            movement_order_val = movement_no_val if movement_no_val is not None else movement_guess.get("movement_order")
+                            if movement_order_val is None and len(selected_works) > 1 and group_selected_works:
+                                movement_order_val = idx + 1
+                            if not movement_roman_input and movement_no_val:
+                                movement_roman_input = _int_to_roman(movement_no_val)
+
                             work_release = (w.get("first_release_date") or "").strip()
                             premiere_source = "musicbrainz-work"
                             if not work_release:
@@ -9793,16 +9865,16 @@ if mode == "新規登録":
                                 "premiere_partial": release_partial,
                                 "premiere_partial_value": partial_value,
                                 "setlist_order": row_order,
-                                "setlist_section": "本編",
+                                "setlist_section": common_section,
                                 "played": True,
                                 "part": "",
                                 "is_concerto": False,
                                 "soloists": "",
                                 "players": [],
-                                "movement_name": movement_guess.get("movement_name", ""),
-                                "movement_no": movement_guess.get("movement_no"),
-                                "movement_order": movement_guess.get("movement_order"),
-                                "movement_roman": movement_guess.get("movement_roman", ""),
+                                "movement_name": movement_name_input,
+                                "movement_no": movement_no_val,
+                                "movement_order": movement_order_val,
+                                "movement_roman": movement_roman_input,
                                 "mb_work_id": w.get("id", ""),
                                 "manual_group_title": work_group_base if (len(selected_works) > 1 and group_selected_works) else "",
                             })
