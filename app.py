@@ -8893,17 +8893,27 @@ if mode == "新規登録":
                                     value=item.get("movement_name", ""),
                                     key=f"cart_mv_name_{item_uid}",
                                 )
-                                movement_no_raw = mv_cols[1].text_input(
-                                    "楽章番号",
-                                    value="" if item.get("movement_no") is None else str(item.get("movement_no")),
-                                    key=f"cart_mv_no_{item_uid}",
-                                    placeholder="例: 3",
+                                movement_no_default = item.get("movement_no")
+                                movement_no_default = int(movement_no_default) if isinstance(movement_no_default, int) and movement_no_default > 0 else 1
+                                movement_order_default = item.get("movement_order")
+                                movement_order_default = int(movement_order_default) if isinstance(movement_order_default, int) and movement_order_default > 0 else movement_no_default
+                                movement_no_val = int(
+                                    mv_cols[1].number_input(
+                                        "楽章番号",
+                                        min_value=1,
+                                        value=movement_no_default,
+                                        step=1,
+                                        key=f"cart_mv_no_{item_uid}",
+                                    )
                                 )
-                                movement_order_raw = mv_cols[2].text_input(
-                                    "表示順",
-                                    value="" if item.get("movement_order") is None else str(item.get("movement_order")),
-                                    key=f"cart_mv_order_{item_uid}",
-                                    placeholder="例: 3",
+                                movement_order_val = int(
+                                    mv_cols[2].number_input(
+                                        "表示順",
+                                        min_value=1,
+                                        value=movement_order_default,
+                                        step=1,
+                                        key=f"cart_mv_order_{item_uid}",
+                                    )
                                 )
                                 item["movement_roman"] = mv_cols[3].text_input(
                                     "ローマ数字",
@@ -8911,8 +8921,10 @@ if mode == "新規登録":
                                     key=f"cart_mv_roman_{item_uid}",
                                     placeholder="例: III",
                                 )
-                                item["movement_no"] = int(movement_no_raw) if (movement_no_raw or "").strip().isdigit() else None
-                                item["movement_order"] = int(movement_order_raw) if (movement_order_raw or "").strip().isdigit() else None
+                                item["movement_no"] = movement_no_val
+                                item["movement_order"] = movement_order_val
+                                if not (item.get("movement_roman") or "").strip():
+                                    item["movement_roman"] = _int_to_roman(movement_no_val)
                                 cc1, cc2 = st.columns([1, 3])
                                 item["is_concerto"] = cc1.checkbox(
                                     "協奏曲",
@@ -9000,9 +9012,33 @@ if mode == "新規登録":
                             linked_setlist_reasons = []
                             linked_assign_created = 0
                             linked_assign_failed = 0
+                            score_primary_page_by_group = {}
                             prog = st.progress(0)
                             fallback_perf_ids = _clean_relation_ids(st.session_state.get("score_perf_selected_ids", []))
                             for n, item in enumerate(st.session_state.reg_cart):
+                                if item.get("media_type") == "score":
+                                    score_title = (item.get("jp_title") or "").strip()
+                                    score_comp = (((item.get("details") or {}).get("director") or "")).strip().lower()
+                                    score_base = _normalize_work_title_for_group(score_title) or score_title
+                                    score_group_key = f"{score_comp}::{score_base.strip().lower()}"
+                                    primary_score_id = score_primary_page_by_group.get(score_group_key)
+                                    if primary_score_id:
+                                        m_ok, m_reason = upsert_score_master_links(
+                                            score_page_id=primary_score_id,
+                                            song_title=score_title,
+                                            composer_name=((item.get("details") or {}).get("director") or "").strip(),
+                                            composer_country=normalize_country_code_for_flag(item.get("composer_country", "")),
+                                            movement_name=item.get("movement_name", ""),
+                                            movement_no=item.get("movement_no"),
+                                            movement_order=item.get("movement_order"),
+                                            movement_roman=item.get("movement_roman", ""),
+                                        )
+                                        if not m_ok and m_reason:
+                                            linked_setlist_reasons.append(f"{score_title}: {m_reason}")
+                                        success_count += 1
+                                        prog.progress((n + 1) / len(st.session_state.reg_cart))
+                                        time.sleep(0.1)
+                                        continue
                                 rel_prop = item.get("relation_prop")
                                 rel_ids = _clean_relation_ids(item.get("relation_ids"))
                                 if item.get("media_type") == "score" and not rel_ids and fallback_perf_ids:
@@ -9033,6 +9069,7 @@ if mode == "新規登録":
                                     if item.get("media_type") == "score":
                                         created_id_for_master = st.session_state.get("last_created_page_id")
                                         if created_id_for_master:
+                                            score_primary_page_by_group[score_group_key] = created_id_for_master
                                             m_ok, m_reason = upsert_score_master_links(
                                                 score_page_id=created_id_for_master,
                                                 song_title=item.get("jp_title", ""),
@@ -9559,17 +9596,7 @@ if mode == "新規登録":
                             suggested_order = _suggest_next_setlist_order(selected_perf_ids[0])
                         work_order_map = {}
                         work_branch_count = {}
-                        grouped_works = []
-                        seen_work_group = set()
                         for w in selected_works:
-                            wt = (w.get("title") or "").strip()
-                            wb = _normalize_work_title_for_group(wt) or wt
-                            gk = f"{(comp_name or '').strip().lower()}::{wb.strip().lower()}"
-                            if gk in seen_work_group:
-                                continue
-                            seen_work_group.add(gk)
-                            grouped_works.append(w)
-                        for w in grouped_works:
                             work_title = (w.get("title") or "").strip()
                             work_disamb = (w.get("disambiguation") or "").strip()
                             register_title = f"{work_title} ({work_disamb})" if work_disamb else work_title
@@ -9637,13 +9664,7 @@ if mode == "新規登録":
                                 "mb_work_id": w.get("id", ""),
                             })
                         st.session_state.mb_checked = {}
-                        if len(grouped_works) != len(selected_works):
-                            st.success(
-                                f"✅ {len(grouped_works)} 件を登録リストに追加しました"
-                                f"（同一作品の楽章候補 {len(selected_works)-len(grouped_works)} 件を統合）"
-                            )
-                        else:
-                            st.success(f"✅ {len(grouped_works)} 件を登録リストに追加しました")
+                        st.success(f"✅ {len(selected_works)} 件を登録リストに追加しました")
                         st.session_state.active_score_tab_next = "登録リスト"
                         st.rerun()
 
