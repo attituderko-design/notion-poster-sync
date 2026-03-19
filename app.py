@@ -58,7 +58,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.44"
+APP_VERSION = "11.45"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -990,6 +990,96 @@ def refresh_drive_files():
     if is_drive_skip_mode():
         if "drive_files_cache" not in st.session_state:
             st.session_state.drive_files_cache = {}
+
+def _get_title_prop_name(database_id: str) -> str:
+    type_map = get_notion_db_property_types(database_id) or {}
+    for k, t in type_map.items():
+        if t == "title":
+            return k
+    return "タイトル"
+
+def run_production_api_selftest(enable_write: bool = False) -> dict:
+    """
+    本番環境向けの軽量セルフテスト。
+    - 読み取り: Notion DB GET / query, Drive list
+    - 書き込み(任意): Notionにテストページを1件作成して即アーカイブ
+    """
+    report = {
+        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "notion_db_get": "",
+        "notion_query": "",
+        "drive_list": "",
+        "write_create": "SKIP",
+        "write_archive": "SKIP",
+        "write_page_id": "",
+        "error": "",
+    }
+    try:
+        # Notion DB GET
+        db_res = api_request("get", f"https://api.notion.com/v1/databases/{NOTION_DB_ID}", headers=NOTION_HEADERS)
+        report["notion_db_get"] = f"HTTP {db_res.status_code}" if db_res is not None else "No response"
+        if db_res is None or db_res.status_code != 200:
+            return report
+
+        # Notion query
+        q_res = api_request(
+            "post",
+            f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query",
+            headers=NOTION_HEADERS,
+            json={"page_size": 1},
+        )
+        report["notion_query"] = f"HTTP {q_res.status_code}" if q_res is not None else "No response"
+
+        # Drive list
+        if is_drive_skip_mode():
+            report["drive_list"] = "SKIP (drive_skip_mode=ON)"
+        else:
+            svc = get_drive_service_safe()
+            if svc is None:
+                report["drive_list"] = "NG (service unavailable)"
+            else:
+                ls = svc.files().list(
+                    q=f"'{DRIVE_FOLDER_ID}' in parents and trashed=false",
+                    fields="files(id,name)",
+                    pageSize=1,
+                ).execute()
+                report["drive_list"] = f"OK ({len(ls.get('files', []))} sample)"
+
+        if not enable_write:
+            return report
+
+        # Write test (POST -> archive)
+        tprop = _get_title_prop_name(NOTION_DB_ID)
+        tmap = get_notion_db_property_types(NOTION_DB_ID) or {}
+        props = {}
+        _put_notion_prop(
+            props,
+            tmap,
+            tprop,
+            f"SELFTEST {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        )
+        create_res = api_request(
+            "post",
+            "https://api.notion.com/v1/pages",
+            headers=NOTION_HEADERS,
+            json={"parent": {"database_id": NOTION_DB_ID}, "properties": props},
+        )
+        report["write_create"] = f"HTTP {create_res.status_code}" if create_res is not None else "No response"
+        if create_res is None or create_res.status_code != 200:
+            return report
+        page_id = (create_res.json() or {}).get("id", "")
+        report["write_page_id"] = page_id
+        arc_res = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{page_id}",
+            headers=NOTION_HEADERS,
+            json={"archived": True},
+        )
+        report["write_archive"] = f"HTTP {arc_res.status_code}" if arc_res is not None else "No response"
+        return report
+    except Exception as e:
+        report["error"] = str(e)
+        return report
         return
     service = get_drive_service_safe()
     if service is None:
@@ -7672,6 +7762,18 @@ with st.sidebar:
                 st.session_state.pop("score_pages_cache", None)
                 st.session_state.pop("performance_pages_cache", None)
                 st.success(f"{len(st.session_state.pages)} 件取得しました（全媒体: {len(st.session_state.all_pages)} 件）")
+    with st.expander("🧪 本番APIセルフテスト", expanded=False):
+        st.caption("本番環境で Notion/Drive の疎通を確認します。書き込みテストはテストページを作成後すぐアーカイブします。")
+        tcol1, tcol2 = st.columns(2)
+        if tcol1.button("🔍 読み取りテスト", use_container_width=True, key="prod_selftest_read"):
+            with st.spinner("本番API 読み取りテスト実行中..."):
+                st.session_state["prod_selftest_report"] = run_production_api_selftest(enable_write=False)
+        if tcol2.button("✍️ 書き込みテスト", use_container_width=True, key="prod_selftest_write"):
+            with st.spinner("本番API 書き込みテスト実行中..."):
+                st.session_state["prod_selftest_report"] = run_production_api_selftest(enable_write=True)
+        rep = st.session_state.get("prod_selftest_report")
+        if rep:
+            st.json(rep)
     # 整備ツールは機能過多になりUXを損なっていたためUIからオミット
 
     if not st.session_state.pages_loaded:
