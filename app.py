@@ -55,8 +55,10 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.31"
+APP_VERSION = "11.36"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
+API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
+OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
 WIKIMEDIA_HEADERS = {
     "User-Agent": "ArteMisCERS/9.x (metadata resolver; contact: app operator)",
     "Accept": "application/json",
@@ -65,6 +67,74 @@ WIKIMEDIA_HEADERS = {
 
 def wikimedia_get(url: str, params: dict | None = None, timeout: int = DEFAULT_TIMEOUT):
     return requests.get(url, params=params, timeout=timeout, headers=WIKIMEDIA_HEADERS)
+
+
+def _truncate_text(value: str, max_len: int = 240) -> str:
+    text = str(value or "").replace("\n", " ").strip()
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1] + "…"
+
+
+def append_api_audit_log(event_type: str, payload: dict | None = None):
+    """API失敗の切り分け用に、軽量JSONLログを残す。"""
+    try:
+        API_AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        rec = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "event": event_type,
+            "payload": payload or {},
+        }
+        with API_AUDIT_LOG_PATH.open("a", encoding="utf-8") as fp:
+            fp.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        # ログ出力失敗で本処理は止めない
+        return
+
+
+def push_runtime_api_error(title: str, detail: str, *, where: str = "", status_code: int | None = None):
+    msg = f"{title}: {detail}".strip(": ")
+    append_api_audit_log(
+        "api_error",
+        {
+            "where": where,
+            "status_code": status_code,
+            "message": msg,
+        },
+    )
+    recent = st.session_state.get("runtime_api_errors", [])
+    recent.append(
+        {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "where": where or "unknown",
+            "status_code": status_code,
+            "message": msg,
+        }
+    )
+    st.session_state["runtime_api_errors"] = recent[-20:]
+
+
+def append_operation_audit_log(operation: str, stats: dict):
+    try:
+        OPERATION_AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        rec = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "operation": operation,
+            "stats": stats or {},
+        }
+        with OPERATION_AUDIT_LOG_PATH.open("a", encoding="utf-8") as fp:
+            fp.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        return
+    recent = st.session_state.get("operation_reports", [])
+    recent.append(
+        {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "operation": operation,
+            "summary": _truncate_text(json.dumps(stats or {}, ensure_ascii=False), 280),
+        }
+    )
+    st.session_state["operation_reports"] = recent[-10:]
 
 # ============================================================
 # 媒体マッピング
@@ -1068,6 +1138,12 @@ def api_request(method: str, url: str, max_retries: int = 3, **kwargs):
         try:
             res = fn(url, **kwargs)
             if res.status_code == 429:
+                push_runtime_api_error(
+                    "APIレート制限",
+                    f"{method_l.upper()} {url}",
+                    where="api_request",
+                    status_code=429,
+                )
                 retry_after = res.headers.get("Retry-After", 5)
                 try:
                     retry_after = int(retry_after)
@@ -1076,6 +1152,12 @@ def api_request(method: str, url: str, max_retries: int = 3, **kwargs):
                 time.sleep(retry_after + random.uniform(0.1, 0.6))
                 continue
             if res.status_code >= 500:
+                push_runtime_api_error(
+                    "APIサーバーエラー",
+                    f"{method_l.upper()} {url}",
+                    where="api_request",
+                    status_code=res.status_code,
+                )
                 time.sleep((2 ** attempt) + random.uniform(0.1, 0.6))
                 continue
             return res
@@ -1098,8 +1180,18 @@ def api_request(method: str, url: str, max_retries: int = 3, **kwargs):
             "⚠️ ネットワーク接続が不安定なため通信が切断されました（Broken pipe 等）。"
             " ページを再読み込みして再実行してください。"
         )
+        push_runtime_api_error(
+            "ネットワーク通信エラー",
+            f"{method_l.upper()} {url}: {last_exc}",
+            where="api_request",
+        )
     elif last_exc is not None:
         st.session_state["api_connection_error_hint"] = f"⚠️ API通信エラー: {last_exc}"
+        push_runtime_api_error(
+            "API通信エラー",
+            f"{method_l.upper()} {url}: {last_exc}",
+            where="api_request",
+        )
     return None
 
 # ============================================================
@@ -1115,8 +1207,22 @@ def load_notion_data() -> list:
         if next_cursor:
             payload["start_cursor"] = next_cursor
         res = api_request("post", url, headers=NOTION_HEADERS, json=payload)
-        if res is None or res.status_code != 200:
-            st.warning(f"Notion取得失敗: {res.status_code if res else 'None'}")
+        if res is None:
+            detail = "Notion API応答がありませんでした（timeout/通信断の可能性）"
+            st.warning(f"Notion取得失敗: {detail}")
+            push_runtime_api_error("Notion取得失敗", detail, where="load_notion_data")
+            st.session_state.last_notion_load_ok = False
+            break
+        if res.status_code != 200:
+            body_snip = _truncate_text(res.text or "")
+            detail = f"HTTP {res.status_code} / {body_snip or '(no body)'}"
+            st.warning(f"Notion取得失敗: {detail}")
+            push_runtime_api_error(
+                "Notion取得失敗",
+                detail,
+                where="load_notion_data",
+                status_code=res.status_code,
+            )
             st.session_state.last_notion_load_ok = False
             break
         data = res.json()
@@ -6258,11 +6364,13 @@ def refresh_score_db_composer_flag_icons() -> dict:
     stats = {"scanned": 0, "flagged": 0, "fallback": 0, "unresolved": 0, "skipped": 0, "failed": 0}
     if not NOTION_SCORE_DB_ID:
         stats["error"] = "NOTION_SCORE_DB_ID 未設定"
+        append_operation_audit_log("refresh_score_db_composer_flag_icons", stats)
         return stats
 
     type_map = get_notion_db_property_types(NOTION_SCORE_DB_ID)
     if not type_map:
         stats["error"] = "演奏曲DBのプロパティ取得失敗"
+        append_operation_audit_log("refresh_score_db_composer_flag_icons", stats)
         return stats
 
     relation_candidates = ["演奏曲", "曲", "関連演奏曲", "作品"]
@@ -6270,6 +6378,7 @@ def refresh_score_db_composer_flag_icons() -> dict:
     fallback_icon_url = get_media_icon_url("演奏曲")
     score_rows = query_notion_database_all(NOTION_SCORE_DB_ID)
     if not score_rows:
+        append_operation_audit_log("refresh_score_db_composer_flag_icons", stats)
         return stats
 
     parent_cache: dict[str, dict | None] = {}
@@ -6436,6 +6545,7 @@ def refresh_score_db_composer_flag_icons() -> dict:
         else:
             stats["failed"] += 1
 
+    append_operation_audit_log("refresh_score_db_composer_flag_icons", stats)
     return stats
 
 
@@ -6453,11 +6563,13 @@ def backfill_score_db_country_codes(dry_run: bool = True, fill_only_empty: bool 
     }
     if not NOTION_SCORE_DB_ID:
         stats["error"] = "NOTION_SCORE_DB_ID 未設定"
+        append_operation_audit_log("backfill_score_db_country_codes", stats)
         return stats
 
     type_map = get_notion_db_property_types(NOTION_SCORE_DB_ID)
     if not type_map:
         stats["error"] = "演奏曲DBのプロパティ取得失敗"
+        append_operation_audit_log("backfill_score_db_country_codes", stats)
         return stats
 
     relation_candidates = ["演奏曲", "曲", "関連演奏曲", "作品"]
@@ -6466,14 +6578,17 @@ def backfill_score_db_country_codes(dry_run: bool = True, fill_only_empty: bool 
     code_prop = next((k for k in code_prop_candidates if k in type_map), None)
     if not code_prop:
         stats["error"] = "国コード列が見つかりません"
+        append_operation_audit_log("backfill_score_db_country_codes", stats)
         return stats
     code_prop_type = type_map.get(code_prop) or ""
     if code_prop_type not in ("rich_text", "title", "select", "multi_select"):
         stats["error"] = f"国コード列({code_prop})は書き込み非対応の型です: {code_prop_type}"
+        append_operation_audit_log("backfill_score_db_country_codes", stats)
         return stats
 
     score_rows = query_notion_database_all(NOTION_SCORE_DB_ID)
     if not score_rows:
+        append_operation_audit_log("backfill_score_db_country_codes", stats)
         return stats
 
     parent_cache: dict[str, dict | None] = {}
@@ -6610,6 +6725,7 @@ def backfill_score_db_country_codes(dry_run: bool = True, fill_only_empty: bool 
         else:
             stats["failed"] += 1
 
+    append_operation_audit_log("backfill_score_db_country_codes", stats)
     return stats
 
 
@@ -6628,9 +6744,11 @@ def sync_score_country_master_relations(dry_run: bool = True, fill_only_empty: b
     }
     if not NOTION_SCORE_DB_ID:
         stats["error"] = "NOTION_SCORE_DB_ID 未設定"
+        append_operation_audit_log("sync_score_country_master_relations", stats)
         return stats
     if not NOTION_COUNTRY_MASTER_DB_ID:
         stats["error"] = "NOTION_COUNTRY_MASTER_DB_ID 未設定"
+        append_operation_audit_log("sync_score_country_master_relations", stats)
         return stats
 
     def _extract_dbid(raw: str) -> str:
@@ -6664,9 +6782,11 @@ def sync_score_country_master_relations(dry_run: bool = True, fill_only_empty: b
     master_type_map, master_err = _fetch_db_types_verbose(master_db_id)
     if not score_type_map:
         stats["error"] = "演奏曲DBのプロパティ取得失敗" + (f"（{score_err}）" if score_err else "")
+        append_operation_audit_log("sync_score_country_master_relations", stats)
         return stats
     if not master_type_map:
         stats["error"] = "国名マスタのプロパティ取得失敗" + (f"（{master_err}）" if master_err else "")
+        append_operation_audit_log("sync_score_country_master_relations", stats)
         return stats
 
     relation_candidates = ["国名マスタ", "CountryMaster", "Country Master", "国マスタ"]
@@ -6678,6 +6798,7 @@ def sync_score_country_master_relations(dry_run: bool = True, fill_only_empty: b
         )
     if not relation_prop:
         stats["error"] = "演奏曲DBに国名マスタ用Relation列が見つかりません"
+        append_operation_audit_log("sync_score_country_master_relations", stats)
         return stats
 
     code_prop_candidates = ["国コード", "CountryCode", "country_code"]
@@ -6685,9 +6806,11 @@ def sync_score_country_master_relations(dry_run: bool = True, fill_only_empty: b
     master_code_prop = next((k for k in code_prop_candidates if k in master_type_map), None)
     if not score_code_prop:
         stats["error"] = "演奏曲DBの国コード列が見つかりません"
+        append_operation_audit_log("sync_score_country_master_relations", stats)
         return stats
     if not master_code_prop:
         stats["error"] = "国名マスタの国コード列が見つかりません"
+        append_operation_audit_log("sync_score_country_master_relations", stats)
         return stats
 
     def _text_from_prop(meta: dict | None) -> str:
@@ -6722,6 +6845,7 @@ def sync_score_country_master_relations(dry_run: bool = True, fill_only_empty: b
 
     if not code_to_master_id:
         stats["error"] = "国名マスタに有効な国コードデータがありません"
+        append_operation_audit_log("sync_score_country_master_relations", stats)
         return stats
 
     score_rows = query_notion_database_all(score_db_id)
@@ -6763,6 +6887,7 @@ def sync_score_country_master_relations(dry_run: bool = True, fill_only_empty: b
             stats["linked"] += 1
         else:
             stats["failed"] += 1
+    append_operation_audit_log("sync_score_country_master_relations", stats)
     return stats
 
 
@@ -6913,6 +7038,14 @@ def emergency_restore_all_media_icons(progress_bar=None, progress_text=None, lim
             f"絵文字暫定 {stats['parent_emoji_fallback']} / "
             f"失敗 {stats['parent_failed']}"
         )
+    append_operation_audit_log("emergency_restore_all_media_icons", {
+        "parent_scanned": stats.get("parent_scanned", 0),
+        "parent_patched": stats.get("parent_patched", 0),
+        "parent_emoji_fallback": stats.get("parent_emoji_fallback", 0),
+        "parent_failed": stats.get("parent_failed", 0),
+        "limit": stats.get("limit", 0),
+        "pending_total": stats.get("pending_total", 0),
+    })
     return stats
 
 def force_restore_parent_media_icons_as_emoji(progress_bar=None, progress_text=None, limit: int = 120) -> dict:
@@ -6949,6 +7082,7 @@ def force_restore_parent_media_icons_as_emoji(progress_bar=None, progress_text=N
             stats["patched"] += 1
         else:
             stats["failed"] += 1
+    append_operation_audit_log("force_restore_parent_media_icons_as_emoji", stats)
     return stats
 
 def migrate_drive_cover_urls(pages: list[dict]) -> dict:
@@ -7321,7 +7455,11 @@ st.markdown(
     "<em><strong>ArtéMis</strong></em> — named after the goddess of the hunt and the moon. She keeps track of everything you've ever experienced.",
     unsafe_allow_html=True
 )
-st.caption("Engine: ArtéMis MUSE (Media Unified Sourcing Engine) / DB: ArtéMis ATLAS (Archive of Titles, Life, Art and Sound)")
+st.caption(
+    "Engine: ArtéMis MUSE (Media Unified Sourcing Engine) / "
+    "Parent DB: ArtéMis ATLAS (Archive of Titles, Life, Art and Sound) / "
+    "Score DB: ArtéMis APOLLO"
+)
 st.caption(f"v{APP_VERSION}")
 if is_drive_skip_mode():
     st.info("⏭ Driveデータスキップ機能ON: Drive保存/照合はスキップして動作中です。")
@@ -7333,6 +7471,17 @@ if "pending_warning" in st.session_state:
 
 if "api_connection_error_hint" in st.session_state:
     st.warning(st.session_state.pop("api_connection_error_hint"))
+recent_api_errors = st.session_state.get("runtime_api_errors", [])
+if recent_api_errors:
+    with st.expander("⚠️ 直近APIエラー（最新20件）", expanded=False):
+        for ev in reversed(recent_api_errors[-20:]):
+            code_part = f"HTTP {ev.get('status_code')} / " if ev.get("status_code") else ""
+            st.caption(f"{ev.get('time', '--:--:--')} [{ev.get('where', 'unknown')}] {code_part}{ev.get('message', '')}")
+recent_ops = st.session_state.get("operation_reports", [])
+if recent_ops:
+    with st.expander("🧾 直近の処理ログ（最新10件）", expanded=False):
+        for ev in reversed(recent_ops[-10:]):
+            st.caption(f"{ev.get('time', '--:--:--')} [{ev.get('operation', 'operation')}] {ev.get('summary', '')}")
 if st.session_state.pop("pending_force_scroll_top", False):
     emit_scroll_top_script()
 
@@ -10390,6 +10539,7 @@ if mode in ("出演者管理", "出演情報管理"):
         if st.session_state.get(perf_switch_key) != selected_perf.get("id"):
             st.session_state[perf_switch_key] = selected_perf.get("id")
             st.session_state.cast_mode_participants = []
+            st.session_state.pop("cast_mode_last_submit_report", None)
         if st.button("既定参加者をクリア", key="cast_mode_clear"):
             st.session_state.cast_mode_participants = []
             st.rerun()
@@ -10401,8 +10551,50 @@ if mode in ("出演者管理", "出演情報管理"):
         ):
             st.session_state.cast_mode_participants.insert(0, {"name": default_self, "instruments": "", "memo": ""})
 
-        with st.expander("📄 CSVで一括登録", expanded=False):
-            perf_title = selected_perf.get("title", "")
+        perf_title = selected_perf.get("title", "")
+        tab_input, tab_csv, tab_submit = st.tabs(["🧑‍🤝‍🧑 参加者入力", "📄 CSV一括取込", "📥 登録"])
+
+        with tab_input:
+            if master_names:
+                mq = st.text_input("演奏者マスタ検索", key="cast_mode_master_q", placeholder="例: 喜田")
+                mm = [n for n in master_names if mq.lower() in n.lower()] if mq.strip() else master_names[:100]
+                pick = st.selectbox("マスタ候補", ["（選択してください）"] + mm, key="cast_mode_master_pick")
+                if pick != "（選択してください）" and st.button("＋マスタから追加", key="cast_mode_master_add"):
+                    k = _normalize_person_name(pick)
+                    if not any(_normalize_person_name(x.get("name", "")) == k for x in st.session_state.cast_mode_participants):
+                        st.session_state.cast_mode_participants.append({"name": pick, "instruments": "", "memo": ""})
+                        st.rerun()
+            c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
+            pn = c1.text_input("出演者名", key="cast_mode_name")
+            pi = c2.text_input("担当楽器", key="cast_mode_inst")
+            pm = c3.text_input("メモ", key="cast_mode_memo")
+            if c4.button("👤 出演者を追加", key="cast_mode_add"):
+                if pn.strip():
+                    nk = _normalize_person_name(pn)
+                    dup = next((i for i, x in enumerate(st.session_state.cast_mode_participants) if _normalize_person_name(x.get("name", "")) == nk), None)
+                    row = {"name": pn.strip(), "instruments": pi.strip(), "memo": pm.strip()}
+                    if dup is None:
+                        st.session_state.cast_mode_participants.append(row)
+                    else:
+                        st.session_state.cast_mode_participants[dup] = row
+                    for k in ["cast_mode_name", "cast_mode_inst", "cast_mode_memo"]:
+                        st.session_state.pop(k, None)
+                    st.rerun()
+                else:
+                    st.warning("出演者名を入力してください。")
+
+            if st.session_state.cast_mode_participants:
+                st.caption("登録予定")
+                for i, row in enumerate(st.session_state.cast_mode_participants):
+                    rc1, rc2, rc3, rc4 = st.columns([2, 2, 2, 1])
+                    row["name"] = rc1.text_input("出演者名", value=row.get("name", ""), key=f"cast_mode_row_name_{i}", label_visibility="collapsed")
+                    row["instruments"] = rc2.text_input("担当楽器", value=row.get("instruments", ""), key=f"cast_mode_row_inst_{i}", label_visibility="collapsed")
+                    row["memo"] = rc3.text_input("メモ", value=row.get("memo", ""), key=f"cast_mode_row_memo_{i}", label_visibility="collapsed")
+                    if rc4.button("✕", key=f"cast_mode_rm_{i}"):
+                        st.session_state.cast_mode_participants = [x for j, x in enumerate(st.session_state.cast_mode_participants) if j != i]
+                        st.rerun()
+
+        with tab_csv:
             template_lines = ["演奏会名,出演者名,担当楽器,メモ"]
             for _ in range(100):
                 template_lines.append(f"\"{perf_title}\",,,")
@@ -10459,70 +10651,107 @@ if mode in ("出演者管理", "出演情報管理"):
                 except Exception as e:
                     st.error(f"CSV取込に失敗しました: {e}")
 
-        with st.expander("参加者を追加", expanded=True):
-            if master_names:
-                mq = st.text_input("演奏者マスタ検索", key="cast_mode_master_q", placeholder="例: 喜田")
-                mm = [n for n in master_names if mq.lower() in n.lower()] if mq.strip() else master_names[:100]
-                pick = st.selectbox("マスタ候補", ["（選択してください）"] + mm, key="cast_mode_master_pick")
-                if pick != "（選択してください）" and st.button("＋マスタから追加", key="cast_mode_master_add"):
-                    k = _normalize_person_name(pick)
-                    if not any(_normalize_person_name(x.get("name", "")) == k for x in st.session_state.cast_mode_participants):
-                        st.session_state.cast_mode_participants.append({"name": pick, "instruments": "", "memo": ""})
-                        st.rerun()
-            c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
-            pn = c1.text_input("出演者名", key="cast_mode_name")
-            pi = c2.text_input("担当楽器", key="cast_mode_inst")
-            pm = c3.text_input("メモ", key="cast_mode_memo")
-            if c4.button("👤 出演者を追加", key="cast_mode_add"):
-                if pn.strip():
-                    nk = _normalize_person_name(pn)
-                    dup = next((i for i, x in enumerate(st.session_state.cast_mode_participants) if _normalize_person_name(x.get("name", "")) == nk), None)
-                    row = {"name": pn.strip(), "instruments": pi.strip(), "memo": pm.strip()}
-                    if dup is None:
-                        st.session_state.cast_mode_participants.append(row)
-                    else:
-                        st.session_state.cast_mode_participants[dup] = row
-                    for k in ["cast_mode_name", "cast_mode_inst", "cast_mode_memo"]:
-                        st.session_state.pop(k, None)
-                    st.rerun()
-                else:
-                    st.warning("出演者名を入力してください。")
-
-            if st.session_state.cast_mode_participants:
-                st.caption("登録予定")
-                for i, row in enumerate(st.session_state.cast_mode_participants):
-                    rc1, rc2, rc3, rc4 = st.columns([2, 2, 2, 1])
-                    row["name"] = rc1.text_input("出演者名", value=row.get("name", ""), key=f"cast_mode_row_name_{i}", label_visibility="collapsed")
-                    row["instruments"] = rc2.text_input("担当楽器", value=row.get("instruments", ""), key=f"cast_mode_row_inst_{i}", label_visibility="collapsed")
-                    row["memo"] = rc3.text_input("メモ", value=row.get("memo", ""), key=f"cast_mode_row_memo_{i}", label_visibility="collapsed")
-                    if rc4.button("✕", key=f"cast_mode_rm_{i}"):
-                        st.session_state.cast_mode_participants = [x for j, x in enumerate(st.session_state.cast_mode_participants) if j != i]
-                        st.rerun()
-
-        if st.button("📥 この出演に参加者を登録", type="primary", key="cast_mode_submit"):
-            self_name = (DEFAULT_PERFORMER_NAME or "").strip()
-            if self_name:
-                self_row = next(
-                    (x for x in st.session_state.cast_mode_participants if _normalize_person_name(x.get("name", "")) == _normalize_person_name(self_name)),
-                    None,
+        with tab_submit:
+            st.caption(f"登録予定人数: {len(st.session_state.cast_mode_participants)} 件")
+            if st.button("📥 この出演に参加者を登録", type="primary", key="cast_mode_submit"):
+                submitted_rows = []
+                seen_submit = set()
+                for row in st.session_state.cast_mode_participants:
+                    nm = (row.get("name") or "").strip()
+                    if not nm:
+                        continue
+                    nk = _normalize_person_name(nm)
+                    if not nk or nk in seen_submit:
+                        continue
+                    seen_submit.add(nk)
+                    submitted_rows.append(
+                        {
+                            "name": nm,
+                            "instruments": (row.get("instruments") or "").strip(),
+                            "memo": (row.get("memo") or "").strip(),
+                            "norm": nk,
+                        }
+                    )
+                self_name = (DEFAULT_PERFORMER_NAME or "").strip()
+                if self_name:
+                    self_row = next(
+                        (x for x in st.session_state.cast_mode_participants if _normalize_person_name(x.get("name", "")) == _normalize_person_name(self_name)),
+                        None,
+                    )
+                    if self_row is not None and not (self_row.get("instruments", "") or "").strip():
+                        st.warning("自分の担当楽器が未入力です。登録予定欄で入力してから保存してください。")
+                        st.stop()
+                with st.spinner("登録中..."):
+                    c, f, msg, cast_row_map = create_performance_participant_rows(
+                        performance_page_id=selected_perf["id"],
+                        performance_title=selected_perf.get("title", ""),
+                        participants=st.session_state.cast_mode_participants,
+                    )
+                success_norm = set((cast_row_map or {}).keys())
+                result_rows = []
+                for r in submitted_rows:
+                    result_rows.append(
+                        {
+                            "name": r["name"],
+                            "instruments": r["instruments"],
+                            "memo": r["memo"],
+                            "status": "success" if r["norm"] in success_norm else "failed",
+                        }
+                    )
+                st.session_state["cast_mode_last_submit_report"] = {
+                    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "created": c,
+                    "failed": f,
+                    "message": msg or "",
+                    "rows": result_rows,
+                }
+                if c > 0 and f == 0:
+                    st.success(f"✅ 演奏会参加者DBに {c} 件登録しました")
+                elif c > 0 and f > 0:
+                    st.warning(f"⚠️ 成功 {c} 件 / 失敗 {f} 件")
+                elif f > 0:
+                    st.error(f"❌ 失敗 {f} 件")
+                elif msg:
+                    st.info(msg)
+            report = st.session_state.get("cast_mode_last_submit_report") or {}
+            if report.get("rows"):
+                st.divider()
+                st.caption(
+                    f"直近登録結果: {report.get('time', '')} / "
+                    f"成功 {report.get('created', 0)} 件 / 失敗 {report.get('failed', 0)} 件"
                 )
-                if self_row is not None and not (self_row.get("instruments", "") or "").strip():
-                    st.warning("自分の担当楽器が未入力です。登録予定欄で入力してから保存してください。")
-                    st.stop()
-            with st.spinner("登録中..."):
-                c, f, msg, _ = create_performance_participant_rows(
-                    performance_page_id=selected_perf["id"],
-                    performance_title=selected_perf.get("title", ""),
-                    participants=st.session_state.cast_mode_participants,
+                if report.get("message"):
+                    st.caption(f"補足: {report.get('message')}")
+                st.dataframe(
+                    [
+                        {
+                            "出演者名": x.get("name", ""),
+                            "担当楽器": x.get("instruments", ""),
+                            "メモ": x.get("memo", ""),
+                            "結果": x.get("status", ""),
+                        }
+                        for x in (report.get("rows") or [])
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
                 )
-            if c > 0 and f == 0:
-                st.success(f"✅ 演奏会参加者DBに {c} 件登録しました")
-            elif c > 0 and f > 0:
-                st.warning(f"⚠️ 成功 {c} 件 / 失敗 {f} 件")
-            elif f > 0:
-                st.error(f"❌ 失敗 {f} 件")
-            elif msg:
-                st.info(msg)
+                csv_lines = ["name,instruments,memo,status"]
+                for x in (report.get("rows") or []):
+                    csv_lines.append(
+                        "\"{name}\",\"{inst}\",\"{memo}\",\"{status}\"".format(
+                            name=str(x.get("name", "")).replace("\"", "\"\""),
+                            inst=str(x.get("instruments", "")).replace("\"", "\"\""),
+                            memo=str(x.get("memo", "")).replace("\"", "\"\""),
+                            status=str(x.get("status", "")).replace("\"", "\"\""),
+                        )
+                    )
+                st.download_button(
+                    "📄 登録結果CSVをダウンロード",
+                    data="\n".join(csv_lines).encode("utf-8-sig"),
+                    file_name=f"cast_submit_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="cast_mode_result_csv_dl",
+                )
     st.stop()
 
 # ============================================================
@@ -10582,6 +10811,7 @@ if mode == "自動同期" and st.session_state.is_running:
     processed_start = start_index if is_refresh else 0
     with st.status(f"{label_mode}中... {processed_start} / {total_count} 件", expanded=True) as status:
         pbar, count = st.progress(0), processed_start
+        _loop_started_at = time.time()
 
         def add_error(item_id: str | None, title: str, reason: str, media_label: str | None):
             error_log.append({
@@ -10849,7 +11079,15 @@ if mode == "自動同期" and st.session_state.is_running:
 
             count += 1
             pbar.progress((count) / total_count if total_count else 1)
-            status.update(label=f"{label_mode}中... {count} / {total_count} 件", state="running")
+            elapsed = max(0.001, time.time() - _loop_started_at)
+            processed = max(1, count - processed_start)
+            rate = processed / elapsed
+            remaining = max(0, total_count - count)
+            eta_sec = int(remaining / rate) if rate > 0 else 0
+            status.update(
+                label=f"{label_mode}中... {count} / {total_count} 件（残り約 {eta_sec} 秒）",
+                state="running"
+            )
             time.sleep(0.1)
 
         status.update(
@@ -10863,16 +11101,71 @@ if mode == "自動同期" and st.session_state.is_running:
             )
 
     # 完了後にexpanderで仕分け表示
+    if success_log or error_log:
+        media_counts = {}
+        for entry in error_log:
+            if isinstance(entry, dict):
+                m = entry.get("media") or "(不明)"
+                media_counts[m] = media_counts.get(m, 0) + 1
+        if media_counts:
+            summary = " / ".join([f"{k}:{v}" for k, v in sorted(media_counts.items(), key=lambda x: x[0])])
+            st.caption(f"失敗媒体サマリ: {summary}")
+
     if success_log:
         with st.expander(f"✅ 更新成功 （{len(success_log)} 件）", expanded=False):
             for msg in success_log:
                 st.write(msg)
+            try:
+                success_rows = [{"result": "success", "detail": str(m)} for m in success_log]
+                success_csv = "result,detail\n" + "\n".join(
+                    [f"\"{r['result']}\",\"{str(r['detail']).replace('\"','\"\"')}\"" for r in success_rows]
+                )
+                st.download_button(
+                    "✅ 成功ログCSVをダウンロード",
+                    data=success_csv.encode("utf-8-sig"),
+                    file_name=f"sync_success_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="sync_success_csv_dl",
+                )
+            except Exception:
+                pass
     if maintain_log:
         with st.expander(f"⏸️ 維持 （{len(maintain_log)} 件）", expanded=False):
             for msg in maintain_log:
                 st.write(msg)
     if error_log:
         with st.expander(f"❌ 失敗・要確認 （{len(error_log)} 件）", expanded=True):
+            try:
+                err_rows = []
+                for entry in error_log:
+                    if isinstance(entry, str):
+                        err_rows.append({"id": "", "title": "", "media": "", "reason": entry})
+                    else:
+                        err_rows.append({
+                            "id": entry.get("id", ""),
+                            "title": entry.get("title", ""),
+                            "media": entry.get("media", ""),
+                            "reason": entry.get("reason", ""),
+                        })
+                err_csv_lines = ["id,title,media,reason"]
+                for r in err_rows:
+                    err_csv_lines.append(
+                        "\"{id}\",\"{title}\",\"{media}\",\"{reason}\"".format(
+                            id=str(r["id"]).replace("\"", "\"\""),
+                            title=str(r["title"]).replace("\"", "\"\""),
+                            media=str(r["media"]).replace("\"", "\"\""),
+                            reason=str(r["reason"]).replace("\"", "\"\""),
+                        )
+                    )
+                st.download_button(
+                    "❌ 失敗ログCSVをダウンロード",
+                    data="\n".join(err_csv_lines).encode("utf-8-sig"),
+                    file_name=f"sync_error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="sync_error_csv_dl",
+                )
+            except Exception:
+                pass
             for entry in error_log:
                 if isinstance(entry, str):
                     st.write(entry)
@@ -11081,7 +11374,7 @@ if mode == "自動同期" and st.session_state.is_running:
 # 出演アーカイブモード
 # ============================================================
 if mode == "出演アーカイブ":
-    st.subheader("🗃 出演アーカイブ")
+    st.subheader("🗃 出演アーカイブ（ArtéMis APOLLO連携）")
     archive_media = ("出演", "演奏会（鑑賞）", "ライブ/ショー", "イベント")
     archive_pages = [p for p in target_pages if get_page_media(p) in archive_media]
     all_pages_for_archive = st.session_state.get("all_pages") or target_pages
