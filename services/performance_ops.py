@@ -444,10 +444,20 @@ def create_setlist_rows_for_performance_service(ctx: dict, performance_page_id: 
                     if movement_id:
                         movement_id_cache[mv_key] = movement_id
 
-        if work_id and type_map.get("作品マスタ") == "relation":
-            put_notion_prop(props, type_map, "作品マスタ", work_id)
-        if movement_id and type_map.get("作品楽章") == "relation":
-            put_notion_prop(props, type_map, "作品楽章", movement_id)
+        work_rel_prop = None
+        for k in ("作品マスタ", "作品", "Work"):
+            if type_map.get(k) == "relation":
+                work_rel_prop = k
+                break
+        movement_rel_prop = None
+        for k in ("作品楽章", "作品楽章マスタ", "楽章マスタ", "Movement"):
+            if type_map.get(k) == "relation":
+                movement_rel_prop = k
+                break
+        if work_id and work_rel_prop:
+            put_notion_prop(props, type_map, work_rel_prop, work_id)
+        if movement_id and movement_rel_prop:
+            put_notion_prop(props, type_map, movement_rel_prop, movement_id)
 
         if not props:
             failed += 1
@@ -880,10 +890,20 @@ def upsert_score_master_links_service(
 
     score_type = get_notion_db_property_types(ctx["NOTION_SCORE_DB_ID"]) or {}
     patch_props = {}
-    if work_id and score_type.get("作品マスタ") == "relation":
-        put_notion_prop(patch_props, score_type, "作品マスタ", work_id)
-    if movement_id and score_type.get("作品楽章") == "relation":
-        put_notion_prop(patch_props, score_type, "作品楽章", movement_id)
+    work_rel_prop = None
+    for k in ("作品マスタ", "作品", "Work"):
+        if score_type.get(k) == "relation":
+            work_rel_prop = k
+            break
+    movement_rel_prop = None
+    for k in ("作品楽章", "作品楽章マスタ", "楽章マスタ", "Movement"):
+        if score_type.get(k) == "relation":
+            movement_rel_prop = k
+            break
+    if work_id and work_rel_prop:
+        put_notion_prop(patch_props, score_type, work_rel_prop, work_id)
+    if movement_id and movement_rel_prop:
+        put_notion_prop(patch_props, score_type, movement_rel_prop, movement_id)
     if patch_props:
         target_ids = _resolve_score_target_ids(score_page_id)
         if not target_ids:
