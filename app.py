@@ -6312,6 +6312,14 @@ def _infer_movement_from_title(title: str) -> dict:
         if n:
             return {"movement_name": "", "movement_no": n, "movement_order": n, "movement_roman": roman}
 
+    # 4) タイトル中ローマ数字: "Symphony ... : I. Allegro" / "... - IV Finale"
+    m = re.search(r"(?:[:：/\-]\s*)([IVXLCDM]{1,8})(?:[\.\)\-:\s]|$)", txt, flags=re.IGNORECASE)
+    if m:
+        roman = m.group(1).upper()
+        n = _roman_to_int(roman)
+        if n:
+            return {"movement_name": "", "movement_no": n, "movement_order": n, "movement_roman": roman}
+
     return {"movement_name": "", "movement_no": None, "movement_order": None, "movement_roman": ""}
 
 
