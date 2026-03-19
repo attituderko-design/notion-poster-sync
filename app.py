@@ -59,7 +59,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.50"
+APP_VERSION = "11.51"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -9773,6 +9773,7 @@ if mode == "新規登録":
                         n_key = f"mb_edit_mv_name_{editor_scope}_{work_id}"
                         no_key = f"mb_edit_mv_no_{editor_scope}_{work_id}"
                         r_key = f"mb_edit_mv_roman_{editor_scope}_{work_id}"
+                        a_key = f"mb_edit_mv_roman_action_{editor_scope}_{work_id}"
                         if t_key not in st.session_state:
                             st.session_state[t_key] = register_title_default
                         if n_key not in st.session_state:
@@ -9781,13 +9782,22 @@ if mode == "新規登録":
                             st.session_state[no_key] = int(default_mv_no)
                         if r_key not in st.session_state:
                             st.session_state[r_key] = default_mv_roman
+                        pending_roman_action = st.session_state.pop(a_key, None)
+                        if pending_roman_action in ("inc", "dec"):
+                            current_no = _roman_to_int((st.session_state.get(r_key) or "").strip())
+                            if current_no is None:
+                                current_no = int(st.session_state.get(no_key) or 0)
+                            current_no = max(int(current_no), 1)
+                            next_no = current_no + 1 if pending_roman_action == "inc" else max(current_no - 1, 1)
+                            st.session_state[r_key] = _int_to_roman(next_no)
+                            st.session_state[no_key] = next_no
 
                         row_order_preview = common_order if group_selected_works else (common_order + idx)
                         with st.expander(f"{idx + 1}. {register_title_default}", expanded=(idx == 0)):
                             meta_left, meta_right = st.columns([1, 1])
                             meta_left.caption(f"区分: {common_section}")
                             meta_right.caption(f"曲順: {row_order_preview}")
-                            t_cols = st.columns([3, 2, 1, 1])
+                            t_cols = st.columns([3, 2, 1.2, 1.1, 0.4, 0.4])
                             t_cols[0].text_input(
                                 "タイトル",
                                 key=t_key,
@@ -9797,24 +9807,11 @@ if mode == "新規登録":
                             t_cols[1].text_input("楽章名", key=n_key, placeholder="例: Allegro con brio")
                             t_cols[2].number_input("楽章No.", min_value=0, step=1, key=no_key)
                             t_cols[3].text_input("ローマ数字", key=r_key, placeholder="I / II / III")
-                            roman_cols = st.columns([1, 1, 6])
-                            if roman_cols[0].button("－", key=f"mb_mv_roman_dec_{editor_scope}_{work_id}"):
-                                current_no = _roman_to_int((st.session_state.get(r_key) or "").strip())
-                                if current_no is None:
-                                    current_no = int(st.session_state.get(no_key) or 1)
-                                current_no = max(int(current_no), 1)
-                                next_no = max(current_no - 1, 1)
-                                st.session_state[r_key] = _int_to_roman(next_no)
-                                st.session_state[no_key] = next_no
+                            if t_cols[4].button("－", key=f"mb_mv_roman_dec_{editor_scope}_{work_id}"):
+                                st.session_state[a_key] = "dec"
                                 st.rerun()
-                            if roman_cols[1].button("＋", key=f"mb_mv_roman_inc_{editor_scope}_{work_id}"):
-                                current_no = _roman_to_int((st.session_state.get(r_key) or "").strip())
-                                if current_no is None:
-                                    current_no = int(st.session_state.get(no_key) or 0)
-                                current_no = max(int(current_no), 0)
-                                next_no = current_no + 1
-                                st.session_state[r_key] = _int_to_roman(next_no)
-                                st.session_state[no_key] = next_no
+                            if t_cols[5].button("＋", key=f"mb_mv_roman_inc_{editor_scope}_{work_id}"):
+                                st.session_state[a_key] = "inc"
                                 st.rerun()
 
                     if st.button(f"📋 {len(selected_works)} 件を登録リストに追加", key="mb_add_cart"):
