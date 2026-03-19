@@ -9140,18 +9140,8 @@ if mode == "新規登録":
                                     score_group_key = f"{score_comp}::{score_base.strip().lower()}"
                                     primary_score_id = score_primary_page_by_group.get(score_group_key)
                                     if primary_score_id:
-                                        m_ok, m_reason = upsert_score_master_links(
-                                            score_page_id=primary_score_id,
-                                            song_title=score_title,
-                                            composer_name=((item.get("details") or {}).get("director") or "").strip(),
-                                            composer_country=normalize_country_code_for_flag(item.get("composer_country", "")),
-                                            movement_name=item.get("movement_name", ""),
-                                            movement_no=item.get("movement_no"),
-                                            movement_order=item.get("movement_order"),
-                                            movement_roman=item.get("movement_roman", ""),
-                                        )
-                                        if not m_ok and m_reason:
-                                            linked_setlist_reasons.append(f"{score_title}: {m_reason}")
+                                        # グルーピング時の2件目以降はATLAS側の親ページ作成を省略。
+                                        # マスタ連動はAPOLLO行作成時に一元処理する。
                                         success_count += 1
                                         prog.progress((n + 1) / len(st.session_state.reg_cart))
                                         time.sleep(0.1)
@@ -9187,18 +9177,8 @@ if mode == "新規登録":
                                         created_id_for_master = st.session_state.get("last_created_page_id")
                                         if created_id_for_master:
                                             score_primary_page_by_group[score_group_key] = created_id_for_master
-                                            m_ok, m_reason = upsert_score_master_links(
-                                                score_page_id=created_id_for_master,
-                                                song_title=item.get("jp_title", ""),
-                                                composer_name=((item.get("details") or {}).get("director") or "").strip(),
-                                                composer_country=normalize_country_code_for_flag(item.get("composer_country", "")),
-                                                movement_name=item.get("movement_name", ""),
-                                                movement_no=item.get("movement_no"),
-                                                movement_order=item.get("movement_order"),
-                                                movement_roman=item.get("movement_roman", ""),
-                                            )
-                                            if not m_ok and m_reason:
-                                                st.caption(f"ℹ️ 作品/楽章マスタ連動: {m_reason}")
+                                            # ここはATLAS側ページIDのため、マスタ連動の実処理は
+                                            # APOLLO行作成後（create_setlist_rows_for_performance）に一元化する。
                                     if item.get("media_type") == "score" and rel_ids:
                                         created_id = st.session_state.get("last_created_page_id")
                                         if created_id:
