@@ -6705,6 +6705,184 @@ def relink_existing_score_master_links(
 
     return stats, failures
 
+def repair_apollo_grouped_work_links(
+    max_groups: int = 200,
+) -> tuple[dict, list[dict]]:
+    """
+    APOLLO既存データを「出演 + 曲順 (+作曲家)」で束ね、
+    同一グループ内の行を同一作品マスタへ再連動する補正処理。
+    """
+    stats = {
+        "scanned": 0,
+        "grouped": 0,
+        "processed_groups": 0,
+        "updated_rows": 0,
+        "skipped_rows": 0,
+        "failed_rows": 0,
+    }
+    failures: list[dict] = []
+    if not NOTION_SCORE_DB_ID:
+        stats["error"] = "NOTION_SCORE_DB_ID 未設定"
+        return stats, failures
+    if not NOTION_WORK_DB_ID:
+        stats["error"] = "NOTION_WORK_DB_ID 未設定"
+        return stats, failures
+
+    type_map = get_notion_db_property_types(NOTION_SCORE_DB_ID) or {}
+    if not type_map:
+        stats["error"] = "APOLLOのプロパティ取得失敗"
+        return stats, failures
+
+    perf_rel_prop = next((k for k in ("出演", "演奏会", "公演") if type_map.get(k) == "relation"), None)
+    parent_rel_prop = next((k for k in ("演奏曲", "作品", "関連演奏曲", "Score") if type_map.get(k) == "relation"), None)
+    order_prop = "曲順" if type_map.get("曲順") == "number" else None
+
+    rows = query_notion_database_all(NOTION_SCORE_DB_ID) or []
+    if not rows:
+        return stats, failures
+
+    parent_creator_cache: dict[str, str] = {}
+
+    def _norm(s: str) -> str:
+        return re.sub(r"\s+", " ", (s or "").strip()).lower()
+
+    def _text_from_prop(meta: dict | None) -> str:
+        if not isinstance(meta, dict):
+            return ""
+        ptype = meta.get("type")
+        if ptype == "rich_text":
+            return plain_text_join(meta.get("rich_text", []))
+        if ptype == "title":
+            return plain_text_join(meta.get("title", []))
+        if ptype == "select":
+            return ((meta.get("select") or {}).get("name") or "").strip()
+        if ptype == "multi_select":
+            vals = [((x or {}).get("name") or "").strip() for x in (meta.get("multi_select") or [])]
+            return " / ".join([x for x in vals if x])
+        return ""
+
+    def _composer_from_row(row_props: dict) -> str:
+        comp = plain_text_join((row_props.get("クリエイター") or {}).get("rich_text", []))
+        if comp:
+            return comp.strip()
+        for key, meta in (row_props or {}).items():
+            if ("クリエイター" in str(key)) or ("作曲家" in str(key)):
+                txt = _text_from_prop(meta)
+                if txt:
+                    return txt.strip()
+        if parent_rel_prop:
+            rels = ((row_props.get(parent_rel_prop) or {}).get("relation") or [])
+            parent_id = ((rels[0] or {}).get("id") or "") if rels else ""
+            if parent_id:
+                if parent_id not in parent_creator_cache:
+                    pres = api_request("get", f"https://api.notion.com/v1/pages/{parent_id}", headers=NOTION_HEADERS)
+                    if pres is not None and pres.status_code == 200:
+                        pprops = ((pres.json() or {}).get("properties") or {})
+                        parent_creator_cache[parent_id] = plain_text_join((pprops.get("クリエイター") or {}).get("rich_text", [])).strip()
+                    else:
+                        parent_creator_cache[parent_id] = ""
+                return parent_creator_cache.get(parent_id, "")
+        return ""
+
+    def _country_from_row(row_props: dict) -> str:
+        for key in ("国コード", "CountryCode", "country_code"):
+            cc = normalize_country_code_for_flag(_text_from_prop(row_props.get(key)))
+            if cc:
+                return cc
+        return ""
+
+    groups: dict[tuple[str, int, str], list[dict]] = {}
+    for row in rows:
+        stats["scanned"] += 1
+        props = (row or {}).get("properties") or {}
+        row_id = (row or {}).get("id") or ""
+        if not row_id or not order_prop:
+            stats["skipped_rows"] += 1
+            continue
+        order_no = (props.get(order_prop) or {}).get("number")
+        if order_no is None:
+            stats["skipped_rows"] += 1
+            continue
+        order_no = int(order_no)
+        perf_id = ""
+        if perf_rel_prop:
+            perf_rels = ((props.get(perf_rel_prop) or {}).get("relation") or [])
+            perf_id = ((perf_rels[0] or {}).get("id") or "") if perf_rels else ""
+        composer_name = _composer_from_row(props)
+        key = (perf_id, order_no, _norm(composer_name))
+        groups.setdefault(key, []).append(row)
+
+    grouped_items = [(k, v) for k, v in groups.items() if len(v) >= 2]
+    stats["grouped"] = len(grouped_items)
+    max_groups = max(1, int(max_groups or 1))
+
+    for idx, (_, g_rows) in enumerate(grouped_items):
+        if idx >= max_groups:
+            break
+        stats["processed_groups"] += 1
+
+        titles = []
+        for r in g_rows:
+            rprops = (r.get("properties") or {})
+            rtitle = (get_title(rprops) or ("", "", ""))[0].strip()
+            base = _normalize_work_title_for_group(rtitle)
+            if base:
+                titles.append(base)
+        canonical_title = ""
+        if titles:
+            canonical_title = sorted(titles, key=lambda x: (len(x), x))[0]
+
+        for r in g_rows:
+            r_id = (r.get("id") or "")
+            rprops = (r.get("properties") or {})
+            original_title = (get_title(rprops) or ("", "", ""))[0].strip()
+            if not canonical_title:
+                canonical_title = _normalize_work_title_for_group(original_title) or original_title
+            if not canonical_title:
+                stats["skipped_rows"] += 1
+                continue
+            composer_name = _composer_from_row(rprops)
+            cc = _country_from_row(rprops)
+
+            movement_name = _text_from_prop(rprops.get("楽章名"))
+            movement_no = (rprops.get("楽章番号") or {}).get("number")
+            movement_order = (rprops.get("表示順") or {}).get("number")
+            movement_roman = _text_from_prop(rprops.get("ローマ数字表示"))
+            if movement_order is None and movement_no is not None:
+                movement_order = movement_no
+            if not movement_name and movement_no is None and not movement_roman:
+                guessed = _infer_movement_from_title(original_title)
+                movement_name = guessed.get("movement_name", "") or ""
+                movement_no = guessed.get("movement_no", None)
+                movement_order = guessed.get("movement_order", None)
+                movement_roman = guessed.get("movement_roman", "") or ""
+
+            ok, msg = upsert_score_master_links(
+                score_page_id=r_id,
+                song_title=canonical_title,
+                composer_name=composer_name,
+                composer_country=cc,
+                movement_name=movement_name,
+                movement_no=movement_no,
+                movement_order=movement_order,
+                movement_roman=movement_roman,
+            )
+            if ok:
+                stats["updated_rows"] += 1
+            else:
+                stats["failed_rows"] += 1
+                failures.append(
+                    {
+                        "id": r_id,
+                        "title": original_title,
+                        "canonical_title": canonical_title,
+                        "composer": composer_name,
+                        "error": msg or "unknown",
+                    }
+                )
+
+    return stats, failures
+
 def _pick_prop_name(type_map: dict, candidates: list[str], p_type: str) -> str | None:
     for c in candidates:
         if type_map.get(c) == p_type:
@@ -11439,6 +11617,53 @@ if mode in ("出演者管理", "出演情報管理"):
                         file_name=f"apollo_master_relink_failures_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                         mime="text/csv",
                         key="relink_master_failures_dl",
+                    )
+        st.divider()
+        st.caption("既に行単位で連動済みのデータを、出演+曲順単位で1作品へ補正したい場合に使用します。")
+        group_max = int(
+            st.number_input(
+                "補正するグループ上限",
+                min_value=1,
+                max_value=1000,
+                value=200,
+                step=20,
+                key="repair_group_max_rows",
+            )
+        )
+        if st.button("🎼 曲順グルーピング補正を実行", key="repair_grouped_relink_btn"):
+            with st.spinner("グルーピング補正を実行中..."):
+                gp_stats, gp_failures = repair_apollo_grouped_work_links(max_groups=group_max)
+            if gp_stats.get("error"):
+                st.error(f"❌ グルーピング補正に失敗: {gp_stats['error']}")
+            else:
+                st.success(
+                    "✅ グルーピング補正完了: "
+                    f"走査 {gp_stats.get('scanned', 0)} / "
+                    f"対象グループ {gp_stats.get('grouped', 0)} / "
+                    f"処理グループ {gp_stats.get('processed_groups', 0)} / "
+                    f"更新行 {gp_stats.get('updated_rows', 0)} / "
+                    f"失敗行 {gp_stats.get('failed_rows', 0)}"
+                )
+                if gp_failures:
+                    st.warning(f"⚠️ 失敗 {len(gp_failures)} 件（先頭100件を表示）")
+                    st.dataframe(gp_failures[:100], use_container_width=True, hide_index=True)
+                    lines = ["id,title,canonical_title,composer,error"]
+                    for f in gp_failures:
+                        lines.append(
+                            "\"{id}\",\"{title}\",\"{canon}\",\"{composer}\",\"{error}\"".format(
+                                id=str(f.get("id", "")).replace("\"", "\"\""),
+                                title=str(f.get("title", "")).replace("\"", "\"\""),
+                                canon=str(f.get("canonical_title", "")).replace("\"", "\"\""),
+                                composer=str(f.get("composer", "")).replace("\"", "\"\""),
+                                error=str(f.get("error", "")).replace("\"", "\"\""),
+                            )
+                        )
+                    st.download_button(
+                        "📄 グルーピング補正失敗CSVをダウンロード",
+                        data="\n".join(lines).encode("utf-8-sig"),
+                        file_name=f"apollo_group_repair_failures_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        key="repair_group_failures_dl",
                     )
 
     perf_pages = _get_performance_pages(force_refresh=False)
