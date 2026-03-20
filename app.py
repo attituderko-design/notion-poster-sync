@@ -12751,6 +12751,30 @@ if mode == "出演アーカイブ":
     if not score_rows:
         score_rows = [p for p in target_pages if get_page_media(p) == "演奏曲"]
 
+    movement_id_to_label: dict[str, str] = {}
+    if NOTION_MOVEMENT_DB_ID:
+        try:
+            movement_rows = query_notion_database_all(NOTION_MOVEMENT_DB_ID)
+            for m in movement_rows:
+                mid = m.get("id")
+                if not mid:
+                    continue
+                mprops = m.get("properties") or {}
+                m_title = (get_title(mprops)[1] or "").strip()
+                m_name = plain_text_join((mprops.get("楽章名") or {}).get("rich_text", [])).strip()
+                m_roman = plain_text_join((mprops.get("ローマ数字表示") or {}).get("rich_text", [])).strip()
+                if m_roman and m_name:
+                    label = f"{m_roman}. {m_name}"
+                elif m_name:
+                    label = m_name
+                elif m_roman:
+                    label = m_roman
+                else:
+                    label = m_title or mid[:8]
+                movement_id_to_label[mid] = label
+        except Exception:
+            movement_id_to_label = {}
+
     def _archive_prop_text(meta: dict | None) -> str:
         if not isinstance(meta, dict):
             return ""
@@ -12854,6 +12878,7 @@ if mode == "出演アーカイブ":
         rprops = row.get("properties") or {}
         perf_ids = []
         score_ids = []
+        movement_ids = []
         for k, meta in rprops.items():
             if not isinstance(meta, dict) or meta.get("type") != "relation":
                 continue
@@ -12863,6 +12888,8 @@ if mode == "出演アーカイブ":
                 perf_ids.extend(rel_ids)
             elif ("演奏曲" in str(k)) or ("楽曲" in str(k)) or ("score" in kl):
                 score_ids.extend(rel_ids)
+            elif ("作品楽章" in str(k)) or ("楽章マスタ" in str(k)) or ("movement" in kl):
+                movement_ids.extend(rel_ids)
         if not perf_ids or not score_ids:
             continue
         sec = _archive_prop_text(rprops.get("区分"))
@@ -12880,11 +12907,37 @@ if mode == "出演アーカイブ":
         inst_vals = [v.strip() for v in re.split(r"\s*/\s*|、|,|\n", inst_txt) if v.strip()]
         if play_val is None:
             play_val = bool(inst_vals)
-        info = {"played": bool(play_val), "part": " / ".join(inst_vals), "section": sec, "order": order_num}
+        movement_labels = [movement_id_to_label.get(mid, mid[:8]) for mid in _clean_relation_ids(movement_ids)]
+        movement_labels = list(dict.fromkeys([x for x in movement_labels if x]))
+        info = {
+            "played": bool(play_val),
+            "part": " / ".join(inst_vals),
+            "section": sec,
+            "order": order_num,
+            "movements": movement_labels,
+        }
         for pid in perf_ids:
             perf_score_info.setdefault(pid, {})
             for sid in score_ids:
-                perf_score_info[pid][sid] = info
+                prev = perf_score_info[pid].get(sid) or {}
+                prev_parts = [x.strip() for x in str(prev.get("part") or "").split("/") if x.strip()]
+                merged_parts = list(dict.fromkeys(prev_parts + inst_vals))
+                prev_movs = prev.get("movements") or []
+                merged_movs = list(dict.fromkeys([x for x in (prev_movs + movement_labels) if x]))
+                prev_order = prev.get("order")
+                merged_order = order_num if prev_order is None else prev_order
+                try:
+                    if order_num is not None and prev_order is not None:
+                        merged_order = min(int(prev_order), int(order_num))
+                except Exception:
+                    merged_order = prev_order if prev_order is not None else order_num
+                perf_score_info[pid][sid] = {
+                    "played": bool(prev.get("played")) or bool(play_val),
+                    "part": " / ".join(merged_parts),
+                    "section": str(prev.get("section") or sec or ""),
+                    "order": merged_order,
+                    "movements": merged_movs,
+                }
 
     q = clearable_text_input(
         "🔎 横断検索（タイトル / クリエイター / キャスト / 演奏曲 / 動画URL）",
@@ -13052,6 +13105,7 @@ if mode == "出演アーカイブ":
                                 "is_concerto": is_concerto,
                                 "played": played,
                                 "part": part,
+                                "movements": extra.get("movements") or [],
                             })
 
                         display_sections = [s for s in section_order if s in grouped_rows] + [
@@ -13068,6 +13122,8 @@ if mode == "出演アーカイブ":
                             )
                             for row in rows:
                                 st.write(f"- {row['title']}")
+                                if row.get("movements"):
+                                    st.caption(f"Movements: {' / '.join(row.get('movements') or [])}")
                                 if row.get("is_concerto") and row.get("soloists"):
                                     st.caption(f"Soloist: {row['soloists']}")
                                 if row.get("played") and row.get("part"):
