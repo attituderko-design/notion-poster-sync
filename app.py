@@ -6715,6 +6715,7 @@ def relink_existing_score_master_links(
 
 def repair_apollo_grouped_work_links(
     max_groups: int = 200,
+    normalize_apollo_title: bool = True,
 ) -> tuple[dict, list[dict]]:
     """
     APOLLO既存データを「出演 + 曲順 (+作曲家)」で束ね、
@@ -6725,6 +6726,7 @@ def repair_apollo_grouped_work_links(
         "grouped": 0,
         "processed_groups": 0,
         "updated_rows": 0,
+        "title_normalized": 0,
         "skipped_rows": 0,
         "failed_rows": 0,
     }
@@ -6744,6 +6746,7 @@ def repair_apollo_grouped_work_links(
     perf_rel_prop = next((k for k in ("出演", "演奏会", "公演") if type_map.get(k) == "relation"), None)
     parent_rel_prop = next((k for k in ("演奏曲", "作品", "関連演奏曲", "Score") if type_map.get(k) == "relation"), None)
     order_prop = "曲順" if type_map.get("曲順") == "number" else None
+    score_title_prop = next((k for k, v in (type_map or {}).items() if v == "title"), None)
 
     rows = query_notion_database_all(NOTION_SCORE_DB_ID) or []
     if not rows:
@@ -6877,6 +6880,28 @@ def repair_apollo_grouped_work_links(
             )
             if ok:
                 stats["updated_rows"] += 1
+                if normalize_apollo_title and score_title_prop:
+                    if _norm(original_title) != _norm(canonical_title):
+                        tpatch = {"properties": {score_title_prop: {"title": [{"type": "text", "text": {"content": canonical_title}}]}}}
+                        tres = api_request(
+                            "patch",
+                            f"https://api.notion.com/v1/pages/{r_id}",
+                            headers=NOTION_HEADERS,
+                            json=tpatch,
+                        )
+                        if tres is not None and tres.status_code == 200:
+                            stats["title_normalized"] += 1
+                        else:
+                            stats["failed_rows"] += 1
+                            failures.append(
+                                {
+                                    "id": r_id,
+                                    "title": original_title,
+                                    "canonical_title": canonical_title,
+                                    "composer": composer_name,
+                                    "error": f"APOLLOタイトル更新失敗: {msg or 'unknown'}",
+                                }
+                            )
             else:
                 stats["failed_rows"] += 1
                 failures.append(
@@ -11638,9 +11663,13 @@ if mode in ("出演者管理", "出演情報管理"):
                 key="repair_group_max_rows",
             )
         )
+        normalize_group_title = st.checkbox("APOLLOタイトルを作品名に揃える", value=True, key="repair_group_normalize_title")
         if st.button("🎼 曲順グルーピング補正を実行", key="repair_grouped_relink_btn"):
             with st.spinner("グルーピング補正を実行中..."):
-                gp_stats, gp_failures = repair_apollo_grouped_work_links(max_groups=group_max)
+                gp_stats, gp_failures = repair_apollo_grouped_work_links(
+                    max_groups=group_max,
+                    normalize_apollo_title=normalize_group_title,
+                )
             if gp_stats.get("error"):
                 st.error(f"❌ グルーピング補正に失敗: {gp_stats['error']}")
             else:
@@ -11650,6 +11679,7 @@ if mode in ("出演者管理", "出演情報管理"):
                     f"対象グループ {gp_stats.get('grouped', 0)} / "
                     f"処理グループ {gp_stats.get('processed_groups', 0)} / "
                     f"更新行 {gp_stats.get('updated_rows', 0)} / "
+                    f"タイトル正規化 {gp_stats.get('title_normalized', 0)} / "
                     f"失敗行 {gp_stats.get('failed_rows', 0)}"
                 )
                 if gp_failures:
