@@ -6916,6 +6916,133 @@ def repair_apollo_grouped_work_links(
 
     return stats, failures
 
+def consolidate_apollo_duplicate_rows(
+    max_groups: int = 200,
+) -> tuple[dict, list[dict]]:
+    """
+    APOLLO内の同一グループ重複行（出演+曲順+作品）を1行に統合し、
+    楽章relationを集約した上で重複行をアーカイブする。
+    """
+    stats = {
+        "scanned": 0,
+        "duplicate_groups": 0,
+        "processed_groups": 0,
+        "keeper_patched": 0,
+        "archived_rows": 0,
+        "failed": 0,
+    }
+    failures: list[dict] = []
+
+    if not NOTION_SCORE_DB_ID:
+        stats["error"] = "NOTION_SCORE_DB_ID 未設定"
+        return stats, failures
+
+    type_map = get_notion_db_property_types(NOTION_SCORE_DB_ID) or {}
+    if not type_map:
+        stats["error"] = "APOLLOのプロパティ取得失敗"
+        return stats, failures
+
+    perf_rel_prop = next((k for k in ("出演", "演奏会", "公演") if type_map.get(k) == "relation"), None)
+    order_prop = "曲順" if type_map.get("曲順") == "number" else None
+    work_rel_prop = next((k for k in ("作品マスタ", "作品", "Work") if type_map.get(k) == "relation"), None)
+    movement_rel_prop = next((k for k in ("作品楽章", "作品楽章マスタ", "楽章マスタ", "Movement") if type_map.get(k) == "relation"), None)
+
+    rows = query_notion_database_all(NOTION_SCORE_DB_ID) or []
+    if not rows:
+        return stats, failures
+
+    def _norm(s: str) -> str:
+        return re.sub(r"\s+", " ", (s or "").strip()).lower()
+
+    grouped: dict[tuple[str, int, str, str], list[dict]] = {}
+    for row in rows:
+        stats["scanned"] += 1
+        props = (row.get("properties") or {})
+        row_id = (row.get("id") or "")
+        if not row_id:
+            continue
+        order_no = (props.get(order_prop) or {}).get("number") if order_prop else None
+        if order_no is None:
+            continue
+        order_no = int(order_no)
+        perf_id = ""
+        if perf_rel_prop:
+            rels = ((props.get(perf_rel_prop) or {}).get("relation") or [])
+            perf_id = ((rels[0] or {}).get("id") or "") if rels else ""
+        work_id = ""
+        if work_rel_prop:
+            wrels = ((props.get(work_rel_prop) or {}).get("relation") or [])
+            work_id = ((wrels[0] or {}).get("id") or "") if wrels else ""
+        title = (get_title(props) or ("", "", ""))[0]
+        key = (perf_id, order_no, work_id, _norm(_normalize_work_title_for_group(title)))
+        grouped.setdefault(key, []).append(row)
+
+    dup_groups = [(k, v) for k, v in grouped.items() if len(v) >= 2]
+    stats["duplicate_groups"] = len(dup_groups)
+    max_groups = max(1, int(max_groups or 1))
+
+    for idx, (_, g_rows) in enumerate(dup_groups):
+        if idx >= max_groups:
+            break
+        stats["processed_groups"] += 1
+        # 代表行: 楽章relationを最も多く持つ行を優先
+        def _mv_len(r: dict) -> int:
+            rprops = (r.get("properties") or {})
+            return len(((rprops.get(movement_rel_prop) or {}).get("relation") or [])) if movement_rel_prop else 0
+        keeper = sorted(g_rows, key=lambda r: _mv_len(r), reverse=True)[0]
+        keeper_id = keeper.get("id") or ""
+        keeper_props = (keeper.get("properties") or {})
+
+        movement_ids = []
+        mv_seen = set()
+        if movement_rel_prop:
+            for r in g_rows:
+                rprops = (r.get("properties") or {})
+                for rel in ((rprops.get(movement_rel_prop) or {}).get("relation") or []):
+                    rid = (rel or {}).get("id")
+                    if rid and rid not in mv_seen:
+                        mv_seen.add(rid)
+                        movement_ids.append(rid)
+
+        if keeper_id and movement_rel_prop and movement_ids:
+            patch = {"properties": {movement_rel_prop: {"relation": [{"id": rid} for rid in movement_ids]}}}
+            pres = api_request(
+                "patch",
+                f"https://api.notion.com/v1/pages/{keeper_id}",
+                headers=NOTION_HEADERS,
+                json=patch,
+            )
+            if pres is not None and pres.status_code == 200:
+                stats["keeper_patched"] += 1
+            else:
+                stats["failed"] += 1
+                failures.append(
+                    {
+                        "id": keeper_id,
+                        "title": (get_title(keeper_props) or ("", "", ""))[0],
+                        "error": "代表行の楽章集約に失敗",
+                    }
+                )
+                continue
+
+        archive_ids = [r.get("id") for r in g_rows if (r.get("id") or "") and (r.get("id") != keeper_id)]
+        ok, ng = archive_pages_by_id(archive_ids)
+        stats["archived_rows"] += ok
+        if ng > 0:
+            stats["failed"] += ng
+            for r in g_rows:
+                rid = r.get("id") or ""
+                if rid and rid != keeper_id:
+                    failures.append(
+                        {
+                            "id": rid,
+                            "title": (get_title((r.get("properties") or {})) or ("", "", ""))[0],
+                            "error": "重複行のアーカイブ失敗",
+                        }
+                    )
+
+    return stats, failures
+
 def _pick_prop_name(type_map: dict, candidates: list[str], p_type: str) -> str | None:
     for c in candidates:
         if type_map.get(c) == p_type:
@@ -11702,6 +11829,52 @@ if mode in ("出演者管理", "出演情報管理"):
                         file_name=f"apollo_group_repair_failures_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                         mime="text/csv",
                         key="repair_group_failures_dl",
+                    )
+        st.divider()
+        st.caption("同一グループ重複行を1行に統合（代表行へ楽章集約し、重複行はアーカイブ）")
+        consolidate_max = int(
+            st.number_input(
+                "統合する重複グループ上限",
+                min_value=1,
+                max_value=1000,
+                value=200,
+                step=20,
+                key="consolidate_group_max_rows",
+            )
+        )
+        if st.button("🧹 APOLLO重複行を統合", key="consolidate_apollo_rows_btn"):
+            with st.spinner("APOLLO重複行を統合中..."):
+                cs, c_fail = consolidate_apollo_duplicate_rows(max_groups=consolidate_max)
+            if cs.get("error"):
+                st.error(f"❌ APOLLO重複統合に失敗: {cs['error']}")
+            else:
+                st.success(
+                    "✅ APOLLO重複統合完了: "
+                    f"走査 {cs.get('scanned', 0)} / "
+                    f"重複グループ {cs.get('duplicate_groups', 0)} / "
+                    f"処理グループ {cs.get('processed_groups', 0)} / "
+                    f"代表更新 {cs.get('keeper_patched', 0)} / "
+                    f"アーカイブ {cs.get('archived_rows', 0)} / "
+                    f"失敗 {cs.get('failed', 0)}"
+                )
+                if c_fail:
+                    st.warning(f"⚠️ 失敗 {len(c_fail)} 件（先頭100件を表示）")
+                    st.dataframe(c_fail[:100], use_container_width=True, hide_index=True)
+                    lines = ["id,title,error"]
+                    for f in c_fail:
+                        lines.append(
+                            "\"{id}\",\"{title}\",\"{error}\"".format(
+                                id=str(f.get("id", "")).replace("\"", "\"\""),
+                                title=str(f.get("title", "")).replace("\"", "\"\""),
+                                error=str(f.get("error", "")).replace("\"", "\"\""),
+                            )
+                        )
+                    st.download_button(
+                        "📄 APOLLO重複統合失敗CSVをダウンロード",
+                        data="\n".join(lines).encode("utf-8-sig"),
+                        file_name=f"apollo_consolidate_failures_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        key="consolidate_failures_dl",
                     )
 
     perf_pages = _get_performance_pages(force_refresh=False)
