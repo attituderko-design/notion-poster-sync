@@ -434,8 +434,8 @@ def _upsert_partdef(
     song_id: str,
     song_name: str,
     part_name: str,
-    inst_id: str,
-    inst_name: str,
+    inst_ids: list[str],
+    inst_names: list[str],
     need_count: int,
     note: str,
     existing_id: str = "",
@@ -445,11 +445,16 @@ def _upsert_partdef(
     if not t:
         st.error("パート定義DBのプロパティ取得に失敗しました。")
         return False
+    clean_inst_ids = [x for x in (inst_ids or []) if x]
+    if not clean_inst_ids:
+        st.error("担当楽器を1つ以上選択してください。")
+        return False
+    inst_label = " / ".join([x for x in (inst_names or []) if x]) or "楽器未設定"
     props = {}
-    ctx["put_prop_any"](props, t, PARTDEF_RECORD_KEYS, f"{song_name} / {part_name}")
+    ctx["put_prop_any"](props, t, PARTDEF_RECORD_KEYS, f"{song_name} / {part_name} / {inst_label}")
     ctx["put_prop_any"](props, t, PARTDEF_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS, song_id)
-    ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS, inst_id)
+    ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS, clean_inst_ids)
     ctx["put_prop_any"](props, t, PARTDEF_COUNT_KEYS, int(max(need_count, 1)))
     ctx["put_prop_any"](props, t, PARTDEF_NOTE_KEYS, note)
     if existing_id:
@@ -497,16 +502,63 @@ def _render_partdef_tab(ctx: dict):
     if not instruments:
         st.info("先に楽器種別を登録してください。")
         return
-    inst_opts = {_instrument_name(i, ctx): i.get("id", "") for i in sorted(instruments, key=lambda x: _instrument_name(x, ctx))}
+    inst_opts_all = {
+        _instrument_name(i, ctx): i.get("id", "")
+        for i in sorted(instruments, key=lambda x: _instrument_name(x, ctx))
+    }
+
+    st.caption("担当楽器は複数選択できます（例: `Tamb. + Guiro + A.Cym.`）。")
+    inst_search = st.text_input(
+        "楽器を検索",
+        value=st.session_state.get("partdef_inst_search", ""),
+        key="partdef_inst_search",
+        placeholder="例: snare / cymbal / tam",
+    ).strip().lower()
+    if inst_search:
+        inst_opts = {k: v for k, v in inst_opts_all.items() if inst_search in k.lower()}
+    else:
+        inst_opts = dict(inst_opts_all)
+
+    c_new1, c_new2, c_new3 = st.columns([4, 2, 2])
+    new_inst_name = c_new1.text_input(
+        "楽器マスタに新規追加",
+        value=st.session_state.get("partdef_new_inst_name", ""),
+        key="partdef_new_inst_name",
+        placeholder="候補に無い楽器名を入力",
+    ).strip()
+    new_inst_cat = c_new2.selectbox(
+        "カテゴリ",
+        INSTRUMENT_CATEGORIES,
+        key="partdef_new_inst_cat",
+    )
+    if c_new3.button("➕ 楽器を追加", use_container_width=True, key="partdef_add_inst_btn"):
+        if not new_inst_name:
+            st.warning("新規追加する楽器名を入力してください。")
+        else:
+            with st.spinner("楽器マスタに追加中..."):
+                ok_add = _create_instrument(ctx, new_inst_name, new_inst_cat, "")
+            if ok_add:
+                st.success(f"✅ 楽器マスタへ追加しました: {new_inst_name}")
+                st.session_state.pop("instrument_list", None)
+                st.session_state["partdef_inst_search"] = new_inst_name
+                st.rerun()
+            else:
+                st.error("❌ 楽器マスタへの追加に失敗しました。")
 
     with st.form(f"partdef_new_{c_id}_{s_id}", border=True):
         p_name = st.text_input("パート名 *", placeholder="例: Part1 1stTimp.")
-        i_name = st.selectbox("担当楽器", list(inst_opts.keys()))
+        i_names = st.multiselect(
+            "担当楽器（複数選択可）",
+            list(inst_opts.keys()),
+            help="候補が多いときは上の「楽器を検索」で絞り込んでください。",
+        )
         need = st.number_input("必要人数", min_value=1, max_value=20, value=1, step=1)
         note = st.text_input("備考", placeholder="任意")
         if st.form_submit_button("💾 パートを追加", type="primary", use_container_width=True):
             if not p_name.strip():
                 st.error("パート名は必須です。")
+            elif not i_names:
+                st.error("担当楽器を1つ以上選択してください。")
             else:
                 ok = _upsert_partdef(
                     ctx,
@@ -514,8 +566,8 @@ def _render_partdef_tab(ctx: dict):
                     song_id=s_id,
                     song_name=s_name,
                     part_name=p_name.strip(),
-                    inst_id=inst_opts[i_name],
-                    inst_name=i_name,
+                    inst_ids=[inst_opts[n] for n in i_names if inst_opts.get(n)],
+                    inst_names=i_names,
                     need_count=int(need),
                     note=note,
                 )
@@ -534,7 +586,7 @@ def _render_partdef_tab(ctx: dict):
         rid = r.get("id", "")
         p_name = ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS) or ctx["extract_title"](r)
         cur_inst_ids = ctx["extract_relation_ids_any"](r, PARTDEF_INST_REL_KEYS)
-        cur_inst = next((k for k, v in inst_opts.items() if v == (cur_inst_ids[0] if cur_inst_ids else "")), "")
+        cur_inst_names = [k for k, v in inst_opts_all.items() if v in set(cur_inst_ids)]
         cur_need = ctx["extract_prop_text_any"](r, PARTDEF_COUNT_KEYS) or "1"
         try:
             cur_need_i = int(float(cur_need))
@@ -544,28 +596,36 @@ def _render_partdef_tab(ctx: dict):
         with st.expander(p_name, expanded=False):
             with st.form(f"partdef_edit_{rid}", border=True):
                 n_name = st.text_input("パート名 *", value=p_name)
-                n_inst = st.selectbox("担当楽器", list(inst_opts.keys()), index=(list(inst_opts.keys()).index(cur_inst) if cur_inst in inst_opts else 0))
+                n_inst = st.multiselect(
+                    "担当楽器（複数選択可）",
+                    list(inst_opts.keys()),
+                    default=[x for x in cur_inst_names if x in inst_opts],
+                )
                 n_need = st.number_input("必要人数", min_value=1, max_value=20, value=max(cur_need_i, 1), step=1)
                 n_note = st.text_input("備考", value=cur_note)
                 c1, c2 = st.columns(2)
                 if c1.form_submit_button("💾 更新", use_container_width=True):
-                    ok = _upsert_partdef(
-                        ctx,
-                        concert_id=c_id,
-                        song_id=s_id,
-                        song_name=s_name,
-                        part_name=n_name.strip() or p_name,
-                        inst_id=inst_opts[n_inst],
-                        inst_name=n_inst,
-                        need_count=int(n_need),
-                        note=n_note,
-                        existing_id=rid,
-                    )
+                    if not n_inst:
+                        st.error("担当楽器を1つ以上選択してください。")
+                        ok = False
+                    else:
+                        ok = _upsert_partdef(
+                            ctx,
+                            concert_id=c_id,
+                            song_id=s_id,
+                            song_name=s_name,
+                            part_name=n_name.strip() or p_name,
+                            inst_ids=[inst_opts[x] for x in n_inst if inst_opts.get(x)],
+                            inst_names=n_inst,
+                            need_count=int(n_need),
+                            note=n_note,
+                            existing_id=rid,
+                        )
                     if ok:
                         st.success("✅ 更新しました。")
                         st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
                         st.rerun()
-                    else:
+                    elif n_inst:
                         st.error("❌ 更新に失敗しました。")
                 if c2.form_submit_button("🗑 削除", use_container_width=True):
                     ok = _delete_page(ctx, rid)
