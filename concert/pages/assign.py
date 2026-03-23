@@ -81,6 +81,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
     participant_rows = _load_participants(ctx, concert_id)
     participant_by_player: dict[str, str] = {}
     participant_to_player: dict[str, str] = {}
+    participant_ids: set[str] = set()
     for row in participant_rows:
         pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
         if pids:
@@ -88,6 +89,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
             part_id = row.get("id", "")
             participant_by_player[pid] = part_id
             participant_to_player[part_id] = pid
+            participant_ids.add(part_id)
 
     # 対象演奏会に属する song/part だけを補完対象にする
     songs = _load_songs(ctx, concert_id)
@@ -106,7 +108,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
     participant_rel_key = ctx["find_prop_name"](t, ["演奏会参加者"])
     pref_key_prop = ctx["find_prop_name"](t, PREFERENCE_KEY_KEYS)
 
-    scanned = ok = ng = already = skipped = 0
+    scanned = ok = ng = already = skipped = unresolved = 0
     for row in pref_rows:
         rid = row.get("id", "")
         if not rid:
@@ -130,27 +132,37 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
             continue  # すでに入っている
 
         player_id = ""
+        participant_id = ""
         if player_rel_key:
             pids = ctx["extract_relation_ids"](row, player_rel_key)
             if pids:
                 pid0 = pids[0]
                 if pid0 in participant_by_player:
                     player_id = pid0
+                    participant_id = participant_by_player.get(pid0, "")
                 elif pid0 in participant_to_player:
                     player_id = participant_to_player[pid0]
+                    participant_id = pid0
                 else:
                     # relation先が演奏会参加者DBのケース：参加者ID->奏者IDへ逆引き
                     for k_pid, v_part in participant_by_player.items():
                         if v_part == pid0:
                             player_id = k_pid
+                            participant_id = v_part
                             break
         if not player_id and pref_key_prop and pref_key_prop in props:
             pref_key_text = ctx["extract_prop_text"](row, pref_key_prop)
             maybe_pid = _first_uuid_from_pref_key(pref_key_text)
-            if maybe_pid in participant_by_player:
+            if maybe_pid in participant_ids:
+                participant_id = maybe_pid
+                player_id = participant_to_player.get(maybe_pid, "")
+            elif maybe_pid in participant_by_player:
                 player_id = maybe_pid
-        participant_id = participant_by_player.get(player_id, "")
+                participant_id = participant_by_player.get(player_id, "")
+        if not participant_id and player_id:
+            participant_id = participant_by_player.get(player_id, "")
         if not participant_id:
+            unresolved += 1
             continue
 
         patch_props: dict = {}
@@ -177,6 +189,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
         "failed": ng,
         "already": already,
         "skipped": skipped,
+        "unresolved": unresolved,
     }
 
 
@@ -492,12 +505,13 @@ def _render_pref_tab(ctx: dict):
             if stats["failed"] == 0:
                 st.success(
                     f"✅ 補完完了: 更新 {stats['updated']}件 / 既設定 {stats['already']}件 / "
-                    f"対象外 {stats['skipped']}件 / 走査 {stats['scanned']}件"
+                    f"未解決 {stats.get('unresolved', 0)}件 / 対象外 {stats['skipped']}件 / 走査 {stats['scanned']}件"
                 )
             else:
                 st.warning(
                     f"⚠️ 補完結果: 更新 {stats['updated']} / 失敗 {stats['failed']} / "
-                    f"既設定 {stats['already']} / 対象外 {stats['skipped']} / 走査 {stats['scanned']}"
+                    f"既設定 {stats['already']} / 未解決 {stats.get('unresolved', 0)} / "
+                    f"対象外 {stats['skipped']} / 走査 {stats['scanned']}"
                 )
 
     players = _load_players(ctx)
