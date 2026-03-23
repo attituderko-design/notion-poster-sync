@@ -327,6 +327,15 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                         if lp in participant_by_player:
                             lpart = participant_by_player.get(lp, "")
                         break
+                    # 既知DBのIDに直接一致しない場合、さらに1段掘って救済
+                    rp2, rpl2, rname2, rtrace2 = _resolve_legacy_candidate(rid_rel, visited, depth + 1)
+                    if rtrace2:
+                        trace.extend(rtrace2)
+                    if rp2 or rpl2:
+                        lpart = lpart or rp2
+                        lp = lp or rpl2
+                        lname = lname or rname2
+                        break
             # 3) 名前から逆引き
             lname = (
                 ctx["extract_prop_text_any"](legacy_page, ["氏名", "名前", "表示名", "タイトル", "名称"])
