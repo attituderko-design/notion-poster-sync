@@ -416,6 +416,74 @@ def _render_pref_tab(ctx: dict):
             pid = participant_to_player.get(pid_raw, pid_raw)
             pi_lookup[(pid, sids[0], part_ids[0])] = pi
 
+    # 入力状況サマリー（奏者 × 演奏曲）
+    song_part_ids: dict[str, set[str]] = {}
+    for song in songs:
+        sid = song.get("id", "")
+        req_rows = _load_song_instruments(ctx, sid)
+        song_part_ids[sid] = {r.get("id", "") for r in req_rows if r.get("id", "")}
+    per_player_song_parts: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for (pid, sid, part_id), _row in pi_lookup.items():
+        if pid and sid and part_id:
+            per_player_song_parts[(pid, sid)].add(part_id)
+
+    with st.expander("📊 入力状況（奏者 × 演奏曲）", expanded=False):
+        status_song_opts = {"（全演奏曲）": ""}
+        for s in sorted(songs, key=lambda x: _song_name(x, ctx)):
+            status_song_opts[_song_name(s, ctx)] = s.get("id", "")
+        selected_status_song_label = st.selectbox(
+            "演奏曲を指定",
+            list(status_song_opts.keys()),
+            key="pref_status_song_sel",
+        )
+        selected_status_song_id = status_song_opts.get(selected_status_song_label, "")
+
+        summary_rows = []
+        for p in sorted(players, key=lambda x: _player_name(x, ctx)):
+            pid = p.get("id", "")
+            pname = _player_name(p, ctx)
+            if selected_status_song_id:
+                total = len(song_part_ids.get(selected_status_song_id, set()))
+                done = len(per_player_song_parts.get((pid, selected_status_song_id), set()))
+                if total == 0:
+                    status = "パート未定義"
+                elif done > 0:
+                    status = f"入力済 ({done}/{total})"
+                else:
+                    status = "未入力"
+                summary_rows.append({
+                    "奏者": pname,
+                    "演奏曲": selected_status_song_label,
+                    "状態": status,
+                })
+            else:
+                total_songs = sum(1 for s in songs if len(song_part_ids.get(s.get("id", ""), set())) > 0)
+                done_songs = 0
+                pending_song_names = []
+                for s in songs:
+                    sid = s.get("id", "")
+                    req = song_part_ids.get(sid, set())
+                    done = per_player_song_parts.get((pid, sid), set())
+                    if len(req) == 0:
+                        continue
+                    if len(done) > 0:
+                        done_songs += 1
+                    else:
+                        pending_song_names.append(_song_name(s, ctx))
+                if total_songs == 0:
+                    status = "対象なし"
+                elif done_songs == total_songs:
+                    status = f"入力済 ({done_songs}/{total_songs})"
+                else:
+                    status = f"未完了 ({done_songs}/{total_songs})"
+                summary_rows.append({
+                    "奏者": pname,
+                    "状態": status,
+                    "未入力の演奏曲": " / ".join(pending_song_names) if pending_song_names else "—",
+                })
+
+        st.dataframe(summary_rows, use_container_width=True, hide_index=True)
+
     player_opts = {_player_name(p, ctx): p.get("id", "") for p in
                    sorted(players, key=lambda x: _player_name(x, ctx))}
     selected_player_name = st.selectbox("奏者を選択", list(player_opts.keys()), key="pref_player_sel")
