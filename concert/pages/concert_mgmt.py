@@ -254,7 +254,13 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_en
     props: dict = {}
     ctx["put_prop_any"](props, type_map, PRACTICE_NAME_KEYS, name)
     if concert_id:
-        ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_REL_KEYS, concert_id)
+        rel_written = ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_REL_KEYS, concert_id)
+        # 候補名不一致でも relation 型の演奏会系プロパティへフォールバック
+        if not rel_written:
+            for k, t in (type_map or {}).items():
+                if t == "relation" and ("演奏会" in str(k) or "出演" in str(k)):
+                    ctx["put_prop"](props, type_map, k, concert_id)
+                    break
     date_key = ctx["find_prop_name"](type_map, PRACTICE_DATE_KEYS)
     if dt_start and date_key:
         date_val: dict = {"start": dt_start}
@@ -283,7 +289,12 @@ def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
     props: dict = {}
     ctx["put_prop_any"](props, type_map, PRACTICE_NAME_KEYS, name)
     if concert_id:
-        ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_REL_KEYS, concert_id)
+        rel_written = ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_REL_KEYS, concert_id)
+        if not rel_written:
+            for k, t in (type_map or {}).items():
+                if t == "relation" and ("演奏会" in str(k) or "出演" in str(k)):
+                    ctx["put_prop"](props, type_map, k, concert_id)
+                    break
     date_key = ctx["find_prop_name"](type_map, PRACTICE_DATE_KEYS)
     if dt_start and date_key:
         date_val: dict = {"start": dt_start}
@@ -727,6 +738,7 @@ def render(ctx: dict):
 
         with st.expander("⚙️ 練習回を一括生成", expanded=False):
             st.caption("演奏会を選択後、練習回数を入力すると「第1回練習〜第N回練習」と「第N+1回練習（本番）」を作成します。")
+            st.caption("生成後は、下の「登録済み練習」一覧を開いて各回の日時・会場を入力してください。")
             bulk_count = int(st.number_input("練習回数", min_value=1, value=3, step=1, key="practice_bulk_count"))
             if st.button("➕ 練習回を生成", key="practice_bulk_generate", type="primary", use_container_width=True):
                 if not filter_concert_id or not selected_concert_page:
