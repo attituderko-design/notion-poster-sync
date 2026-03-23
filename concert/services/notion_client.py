@@ -236,6 +236,51 @@ def extract_prop_text(page: dict, prop_name: str) -> str:
         return ((meta.get("date") or {}).get("start") or "")
     if ptype == "email":
         return (meta.get("email") or "")
+    if ptype == "url":
+        return (meta.get("url") or "")
+    if ptype == "formula":
+        f = meta.get("formula") or {}
+        ftype = f.get("type")
+        if ftype == "string":
+            return (f.get("string") or "")
+        if ftype == "number":
+            v = f.get("number")
+            return str(v) if v is not None else ""
+        if ftype == "boolean":
+            return str(bool(f.get("boolean")))
+        if ftype == "date":
+            return ((f.get("date") or {}).get("start") or "")
+    if ptype == "rollup":
+        r = meta.get("rollup") or {}
+        rtype = r.get("type")
+        if rtype == "number":
+            v = r.get("number")
+            return str(v) if v is not None else ""
+        if rtype == "date":
+            return ((r.get("date") or {}).get("start") or "")
+        if rtype == "array":
+            arr = r.get("array") or []
+            out = []
+            for item in arr:
+                itype = item.get("type")
+                if itype in ("title", "rich_text"):
+                    out.append("".join((c.get("plain_text") or "") for c in (item.get(itype) or [])))
+                elif itype == "select":
+                    out.append(((item.get("select") or {}).get("name") or ""))
+                elif itype == "number":
+                    nv = item.get("number")
+                    out.append(str(nv) if nv is not None else "")
+            return " / ".join([x for x in out if x])
+    if ptype == "location":
+        loc = meta.get("location") or {}
+        # Notionのlocation型（将来拡張）: name/address を優先表示
+        return (
+            loc.get("name")
+            or loc.get("address")
+            or loc.get("city")
+            or loc.get("region")
+            or ""
+        )
     return ""
 
 
