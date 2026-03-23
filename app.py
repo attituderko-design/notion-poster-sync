@@ -8270,21 +8270,30 @@ st.markdown("""
 
 st.image(get_asset_path_or_url("logo.png"), width=320)
 st.markdown(
-    "<em><strong>ArtéMis</strong></em> — named after the goddess of the hunt and the moon. She keeps track of everything you've ever experienced.",
+    "<em><strong>ArtéMis</strong></em> — named after the goddess of the hunt and the moon. "
+    "She keeps track of everything you've ever experienced — and everything you've ever played.",
     unsafe_allow_html=True
 )
 st.caption(
-    "Engine: ArtéMis MUSE (Media Unified Sourcing Engine) / "
-    "Parent DB: ArtéMis ATLAS (Archive of Titles, Life, Art and Sound) / "
-    "Score DB: ArtéMis APOLLO"
+    "MUSE: Media Unified Sourcing Engine / "
+    "ATLAS: Archive of Titles, Life, Art and Sound / "
+    "APOLLO: Archive of Performed Opuses, Live Logs, and Occasions / "
+    "HARMONIA: Harmonized Assignment and Resource Management for Orchestral Needs, Instruments, and Attendance"
 )
+st.caption("MUSE collects. ATLAS archives. APOLLO performs. HARMONIA orchestrates.")
 st.caption(f"v{APP_VERSION}")
 
 # ============================================================
 # システム切替（通常 / Concert）
 # ============================================================
-system_mode = st.sidebar.radio("システム切替", ["通常", "Concert"], key="system_mode")
-if system_mode == "Concert":
+if st.session_state.get("system_mode") == "通常":
+    st.session_state["system_mode"] = "MUSE"
+elif st.session_state.get("system_mode") == "Concert":
+    st.session_state["system_mode"] = "HARMONIA"
+
+system_mode = st.sidebar.radio("システム切替", ["MUSE", "HARMONIA"], key="system_mode")
+if system_mode == "HARMONIA":
+    st.sidebar.caption("ArtéMis HARMONIA")
     st.sidebar.divider()
     concert_page = st.sidebar.radio(
         "ページ",
@@ -8297,14 +8306,14 @@ if system_mode == "Concert":
         key="concert_page_radio",
     )
     if not CONCERT_SYSTEM_AVAILABLE:
-        st.error("Concert System のモジュールを読み込めませんでした。")
+        st.error("HARMONIA System のモジュールを読み込めませんでした。")
         if CONCERT_IMPORT_ERROR:
             st.caption(f"詳細: {CONCERT_IMPORT_ERROR}")
         st.stop()
     try:
         concert_ctx = build_concert_ctx()
     except KeyError as e:
-        st.error(f"Concert System の設定が不足しています。secrets.toml を確認してください。（{e}）")
+        st.error(f"HARMONIA System の設定が不足しています。secrets.toml を確認してください。（{e}）")
         st.stop()
 
     if concert_page == "演奏会・練習管理":
