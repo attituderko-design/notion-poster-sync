@@ -7,16 +7,16 @@ from datetime import date, datetime
 
 CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
 CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
-CONCERT_VENUE_KEYS = ["会場名", "ロケーション", "会場"]
-CONCERT_ADDRESS_KEYS = ["会場住所", "住所"]
+CONCERT_VENUE_KEYS = ["会場名", "ロケーション", "会場", "Location"]
+CONCERT_ADDRESS_KEYS = ["会場住所", "住所", "ロケーション", "Location"]
 CONCERT_MEMO_KEYS = ["メモ", "備考"]
 CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE"]
 
 PRACTICE_NAME_KEYS = ["練習名", "タイトル", "PK練習名"]
 PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 PRACTICE_DATE_KEYS = ["日時", "日付"]
-PRACTICE_VENUE_KEYS = ["会場名", "ロケーション", "会場"]
-PRACTICE_ADDRESS_KEYS = ["会場住所", "住所"]
+PRACTICE_VENUE_KEYS = ["会場名", "ロケーション", "会場", "Location"]
+PRACTICE_ADDRESS_KEYS = ["会場住所", "住所", "ロケーション", "Location"]
 PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ"]
 PRACTICE_MEMO_KEYS = ["メモ", "備考"]
 
@@ -241,6 +241,16 @@ def _render_concert_form(ctx: dict, existing: dict | None = None):
     prefix  = f"conc_edit_{existing.get('id','')}_" if is_edit else "conc_new_"
     ext     = ctx["extract_prop_text_any"]
 
+    venue_default = ext(existing, CONCERT_VENUE_KEYS) if is_edit else ""
+    address_default = ext(existing, CONCERT_ADDRESS_KEYS) if is_edit else ""
+    # ATLAS 側が「ロケーション」単独運用のデータでも会場欄に表示する
+    if is_edit:
+        location_fallback = ext(existing, ["ロケーション", "Location"])
+        if not venue_default and location_fallback:
+            venue_default = location_fallback
+        if not address_default and location_fallback:
+            address_default = location_fallback
+
     with st.form(key=f"{prefix}form", border=True):
         name = st.text_input(
             "演奏会名 *",
@@ -257,9 +267,9 @@ def _render_concert_form(ctx: dict, existing: dict | None = None):
         with col2:
             dt_end = st.date_input("終了日（任意）", value=dt_start_val, key=f"{prefix}dt_end")
 
-        venue   = st.text_input("会場名", value=ext(existing, CONCERT_VENUE_KEYS) if is_edit else "",
+        venue   = st.text_input("会場名", value=venue_default,
                                 placeholder="例：○○ホール", key=f"{prefix}venue")
-        address = st.text_input("会場住所", value=ext(existing, CONCERT_ADDRESS_KEYS) if is_edit else "",
+        address = st.text_input("会場住所", value=address_default,
                                 placeholder="任意", key=f"{prefix}address")
         memo    = st.text_area("メモ", value=ext(existing, CONCERT_MEMO_KEYS) if is_edit else "",
                                height=80, key=f"{prefix}memo")
@@ -312,6 +322,15 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
         (k for k, v in concert_options.items() if v == current_concert_id), "（未選択）"
     )
 
+    venue_default = ext(existing, PRACTICE_VENUE_KEYS) if is_edit else ""
+    address_default = ext(existing, PRACTICE_ADDRESS_KEYS) if is_edit else ""
+    if is_edit:
+        location_fallback = ext(existing, ["ロケーション", "Location"])
+        if not venue_default and location_fallback:
+            venue_default = location_fallback
+        if not address_default and location_fallback:
+            address_default = location_fallback
+
     with st.form(key=f"{prefix}form", border=True):
         name = st.text_input(
             "練習名 *",
@@ -337,10 +356,10 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
 
         col3, col4 = st.columns(2)
         with col3:
-            venue = st.text_input("会場名", value=ext(existing, PRACTICE_VENUE_KEYS) if is_edit else "",
+            venue = st.text_input("会場名", value=venue_default,
                                   placeholder="例：○○スタジオ", key=f"{prefix}venue")
         with col4:
-            address = st.text_input("会場住所", value=ext(existing, PRACTICE_ADDRESS_KEYS) if is_edit else "",
+            address = st.text_input("会場住所", value=address_default,
                                     placeholder="任意", key=f"{prefix}address")
 
         is_concert_day = st.checkbox(
