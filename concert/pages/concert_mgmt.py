@@ -419,6 +419,7 @@ def render(ctx: dict):
             st.info("演奏会がまだ登録されていません。")
         else:
             st.subheader(f"登録済み演奏会（{len(concerts)}件）")
+            st.caption("ここは演奏会の参照・選択が主目的です。編集は必要なときだけ開いてください。")
             col_search, col_refresh = st.columns([8, 1])
             concert_query = col_search.text_input(
                 "演奏会を検索",
@@ -452,7 +453,15 @@ def render(ctx: dict):
             for c in filtered_concerts:
                 label = _concert_display_name(c, ctx)
                 with st.expander(label, expanded=False):
-                    _render_concert_form(ctx, existing=c)
+                    cid = c.get("id", "")
+                    st.caption(f"ID: {cid}")
+                    sel_col, edit_col = st.columns([2, 3])
+                    if sel_col.button("✅ この演奏会を練習入力対象にする", key=f"use_concert_{cid}", use_container_width=True):
+                        st.session_state["practice_filter_concert"] = label
+                        st.success("練習タブでこの演奏会が選択されるように設定しました。")
+                    edit_open = edit_col.checkbox("この演奏会を編集する", key=f"open_edit_concert_{cid}", value=False)
+                    if edit_open:
+                        _render_concert_form(ctx, existing=c)
 
     # ── 練習タブ ──────────────────────────────────────────────
     with tab_practice:
