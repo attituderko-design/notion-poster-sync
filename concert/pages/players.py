@@ -16,6 +16,7 @@ CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE", "メディア", "種類"]
 PRACTICE_NAME_KEYS = ["練習名", "タイトル", "PK練習名"]
 PRACTICE_DATE_KEYS = ["日時", "日付"]
 PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ"]
+PRACTICE_PERCUSSION_OFF_KEYS = ["打楽器休み", "打楽器お休み", "打楽器OFF", "休み"]
 PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 
 INSTRUMENT_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
@@ -89,6 +90,10 @@ def _clear_player_cache():
 
 def _normalize_page_id(v: str) -> str:
     return (v or "").replace("-", "").strip().lower()
+
+
+def _is_truthy_text(v: str) -> bool:
+    return str(v or "").strip().lower() in {"true", "1", "yes", "on", "はい"}
 
 
 def _practice_rel_prop_candidates(type_map: dict, ctx: dict) -> list[str]:
@@ -224,7 +229,7 @@ def _is_performance_media_concert(c: dict) -> bool:
 def _practice_name(p: dict, ctx: dict) -> str:
     n = ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or ctx["extract_title"](p)
     d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
-    suffix = "【本番】" if ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS) == "True" else ""
+    suffix = "【本番】" if _is_truthy_text(ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS)) else ""
     return f"{n}（{d[:10] if d else ''}）{suffix}"
 
 
@@ -522,6 +527,7 @@ def _render_attendance_tab(ctx: dict):
     p_id = p_opts.get(p_name, "")
     if not p_id:
         return
+    practice_row = next((p for p in practices if p.get("id", "") == p_id), None)
 
     if not part_player_ids:
         st.info("先にこの演奏会の参加者を登録してください。")
@@ -541,6 +547,43 @@ def _render_attendance_tab(ctx: dict):
         # 出欠DBが「演奏会参加者DB」を参照している場合は player_id に戻して扱う
         pid = participant_to_player.get(rel_id, rel_id)
         by_player[pid] = row
+
+    # 打楽器休み日は全員を自動で×固定にする
+    if practice_row and _is_truthy_text(ctx["extract_prop_text_any"](practice_row, PRACTICE_PERCUSSION_OFF_KEYS)):
+        fixed_note = "楽器手配の無い日のため全員×"
+        changed = 0
+        failed = 0
+        for pl in sorted(players, key=lambda x: _player_name(x, ctx)):
+            pid = pl.get("id", "")
+            pname = _player_name(pl, ctx)
+            ex = by_player.get(pid)
+            cur_s = ctx["extract_prop_text_any"](ex, ATT_STATUS_KEYS) if ex else ""
+            cur_n = ctx["extract_prop_text_any"](ex, ATT_NOTE_KEYS) if ex else ""
+            if cur_s == "×" and cur_n == fixed_note:
+                continue
+            ok = _upsert_attendance(
+                ctx,
+                pid,
+                pname,
+                p_id,
+                p_name,
+                "×",
+                fixed_note,
+                ex.get("id", "") if ex else "",
+                participant_id_by_player_id.get(pid, ""),
+            )
+            if ok:
+                changed += 1
+            else:
+                failed += 1
+        st.session_state.pop(f"attendance_list_{p_id}", None)
+        if failed == 0:
+            st.info("この練習日は「打楽器休み」のため、出欠は全員「×」で自動固定されています。")
+            if changed > 0:
+                st.success(f"✅ 自動反映: {changed}件")
+        else:
+            st.warning(f"⚠️ 自動反映: 成功 {changed} / 失敗 {failed}")
+        return
 
     statuses = ["○", "×", "△"]
     with st.form(f"attendance_form_{p_id}", border=True):
