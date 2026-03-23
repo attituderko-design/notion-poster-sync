@@ -314,6 +314,23 @@ def _render_attendance_tab(ctx: dict):
     practices = _load_practices(ctx, c_id)
     if not practices:
         st.info("この演奏会に練習が登録されていません。")
+        with st.expander("🔍 練習読込デバッグ", expanded=False):
+            all_rows = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
+            st.caption(
+                f"CONCERT_DB_CONCERT: `{ctx['CONCERT_DB_CONCERT']}` / "
+                f"CONCERT_DB_PRACTICE: `{ctx['CONCERT_DB_PRACTICE']}`"
+            )
+            st.caption(f"選択演奏会ID: `{c_id or '(未選択)'}`")
+            st.caption(f"練習DB全件数: {len(all_rows)}")
+            if all_rows:
+                t = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"])
+                rel_props = _practice_rel_prop_candidates(t, ctx)
+                st.caption(f"練習DB relation候補: {', '.join(rel_props) if rel_props else '(なし)'}")
+                sample = all_rows[0]
+                st.caption(f"サンプル練習ID: `{sample.get('id', '')}`")
+                if rel_props:
+                    rel_dump = {rp: ctx["extract_relation_ids"](sample, rp) for rp in rel_props}
+                    st.json(rel_dump)
         return
 
     all_players = _load_players(ctx)
