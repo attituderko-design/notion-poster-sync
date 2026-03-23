@@ -20,6 +20,10 @@ PRACTICE_PERCUSSION_OFF_KEYS = ["打楽器休み", "打楽器お休み", "打楽
 PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 
 INSTRUMENT_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
+SONG_NAME_KEYS = ["曲名", "タイトル", "PK曲名", "作品名"]
+SONG_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
+PARTDEF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
+PARTDEF_INST_REL_KEYS = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
 
 ATT_RECORD_KEYS = ["レコード名", "タイトル"]
 ATT_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者"]
@@ -39,6 +43,8 @@ PI_INST_REL_KEYS = ["楽器種別", "楽器", "担当楽器", "FK楽器種別"]
 PI_ASSIGN_KEYS = ["担当フラグ", "担当", "担当有無"]
 PI_BRING_KEYS = ["持参可フラグ", "持参可", "持参"]
 PI_NOTE_KEYS = ["備考", "メモ"]
+PI_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
+PI_PARTICIPANT_REL_KEYS = ["演奏会参加者", "参加者", "FK参加者"]
 
 PLAYER_KEY_KEYS = ["player_key", "PlayerKey", "奏者キー", "PK奏者キー"]
 PARTICIPANT_KEY_KEYS = ["participant_key", "ParticipantKey", "参加者キー", "PK参加者キー"]
@@ -185,6 +191,46 @@ def _load_player_instruments(ctx, player_id: str) -> list[dict]:
         rel = ctx["find_prop_name"](t, PI_PLAYER_REL_KEYS)
         f = {"filter": {"property": rel, "relation": {"contains": player_id}}} if rel else None
         st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"], f)
+    return st.session_state.get(key, [])
+
+
+def _load_concert_songs(ctx, concert_id: str) -> list[dict]:
+    key = f"song_list_{concert_id}"
+    if key not in st.session_state:
+        t = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
+        rel = ctx["find_prop_name"](t, SONG_CONCERT_REL_KEYS)
+        f = {"filter": {"property": rel, "relation": {"contains": concert_id}}} if rel else None
+        st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_SONG"], f)
+    return st.session_state.get(key, [])
+
+
+def _load_partdefs_for_song(ctx, song_id: str) -> list[dict]:
+    key = f"partdef_list_{song_id}"
+    if key not in st.session_state:
+        t = ctx["get_prop_types"](ctx["CONCERT_DB_PART_DEFINITION"])
+        rel = ctx["find_prop_name"](t, PARTDEF_SONG_REL_KEYS)
+        f = {"filter": {"property": rel, "relation": {"contains": song_id}}} if rel else None
+        st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], f)
+    return st.session_state.get(key, [])
+
+
+def _load_player_instruments_for_concert(ctx, concert_id: str, player_id: str, participant_id: str = "") -> list[dict]:
+    key = f"pi_list_{concert_id}_{player_id}_{participant_id or 'nop'}"
+    if key not in st.session_state:
+        db_id = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
+        t = ctx["get_prop_types"](db_id)
+        rel_player = ctx["find_prop_name"](t, PI_PLAYER_REL_KEYS)
+        rel_participant = ctx["find_prop_name"](t, PI_PARTICIPANT_REL_KEYS)
+        rel_concert = ctx["find_prop_name"](t, PI_CONCERT_REL_KEYS)
+        filters = []
+        if rel_concert and concert_id:
+            filters.append({"property": rel_concert, "relation": {"contains": concert_id}})
+        if rel_participant and participant_id:
+            filters.append({"property": rel_participant, "relation": {"contains": participant_id}})
+        elif rel_player and player_id:
+            filters.append({"property": rel_player, "relation": {"contains": player_id}})
+        f = {"filter": {"and": filters}} if filters else None
+        st.session_state[key] = ctx["query_all"](db_id, f)
     return st.session_state.get(key, [])
 
 
@@ -377,6 +423,50 @@ def _upsert_player_instrument(ctx: dict, player_id: str, player_name: str, instr
     else:
         res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
+
+
+def _upsert_player_bring_for_concert(
+    ctx: dict,
+    concert_id: str,
+    concert_name: str,
+    player_id: str,
+    player_name: str,
+    participant_id: str,
+    instrument_id: str,
+    instrument_name: str,
+    can_bring: bool,
+    note: str,
+    existing_id: str = "",
+) -> bool:
+    db_id = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
+    t = ctx["get_prop_types"](db_id)
+    if not t:
+        st.error("楽器アサインDBのプロパティ取得に失敗しました。")
+        return False
+    props = {}
+    ctx["put_prop_any"](props, t, PI_RECORD_KEYS, f"{player_name} × {concert_name} × {instrument_name}")
+    if participant_id:
+        ctx["put_prop_any"](props, t, PI_PARTICIPANT_REL_KEYS, participant_id)
+    ctx["put_prop_any"](props, t, PI_PLAYER_REL_KEYS, player_id)
+    ctx["put_prop_any"](props, t, PI_CONCERT_REL_KEYS, concert_id)
+    ctx["put_prop_any"](props, t, PI_INST_REL_KEYS, instrument_id)
+    ctx["put_prop_any"](props, t, PI_ASSIGN_KEYS, False)
+    ctx["put_prop_any"](props, t, PI_BRING_KEYS, can_bring)
+    ctx["put_prop_any"](props, t, PI_NOTE_KEYS, note)
+    key_seed = participant_id or player_id
+    ctx["put_key_any"](props, t, ASSIGN_KEY_KEYS, concert_id, key_seed, instrument_id, prefix="bring")
+    if existing_id:
+        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
+    else:
+        res = ctx["api_request"](
+            "post",
+            "https://api.notion.com/v1/pages",
+            json={"parent": {"database_id": db_id}, "properties": props},
+        )
+    ok = res is not None and res.status_code == 200
+    if not ok:
+        st.error(f"持参可保存に失敗: {_response_error_message(res)}")
+    return ok
 
 
 def _render_player_tab(ctx: dict):
@@ -643,59 +733,124 @@ def _render_attendance_tab(ctx: dict):
 
 
 def _render_assign_tab(ctx: dict):
-    players = _load_players(ctx)
-    insts = _load_instruments(ctx)
-    if not players:
-        st.info("先に奏者を登録してください。")
+    st.caption("このタブは、選択演奏会で必要な楽器に対して『各奏者が持参可能か』のみを整理します。")
+    st.caption("パート希望・アサイン確定は『アサイン検討』画面で行います。")
+
+    concerts = [c for c in _load_concerts(ctx) if _is_performance_media_concert(c)]
+    if not concerts:
+        st.info("媒体=出演 の演奏会が見つかりません。")
         return
-    if not insts:
-        st.info("先に楽器種別を登録してください（楽曲・楽器管理 画面）。")
+
+    all_c_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
+    c_query = st.text_input(
+        "演奏会を検索",
+        value=st.session_state.get("bring_concert_search", ""),
+        key="bring_concert_search",
+        placeholder="例: Happy Hour / 2026 / 定期",
+    ).strip().lower()
+    c_opts = {k: v for k, v in all_c_opts.items() if (not c_query) or (c_query in k.lower())}
+    if not c_opts:
+        st.warning("検索条件に一致する演奏会がありません。")
         return
-    i_opts = {_instrument_name(i, ctx): i.get("id", "") for i in sorted(insts, key=lambda x: _instrument_name(x, ctx))}
-    p_opts = {_player_name(p, ctx): p.get("id", "") for p in sorted(players, key=lambda x: _player_name(x, ctx))}
-    p_name = st.selectbox("奏者を選択", list(p_opts.keys()), key="assign_player_sel")
+    c_name = st.selectbox("演奏会を選択", list(c_opts.keys()), key="bring_concert_sel")
+    c_id = c_opts.get(c_name, "")
+    if not c_id:
+        return
+
+    participants = _load_participants(ctx, c_id)
+    if not participants:
+        st.info("先に『出欠入力』タブでこの演奏会の参加者を保存してください。")
+        return
+    all_players = _load_players(ctx)
+    player_name_map = {p.get("id", ""): _player_name(p, ctx) for p in all_players}
+    participant_id_by_player_id = {}
+    player_ids = []
+    for row in participants:
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if not pids:
+            continue
+        pid = pids[0]
+        player_ids.append(pid)
+        participant_id_by_player_id[pid] = row.get("id", "")
+    player_ids = sorted(set(player_ids), key=lambda x: player_name_map.get(x, x))
+    if not player_ids:
+        st.info("演奏会参加者DBの出演者リレーションが空です。『出欠入力』で参加者を再保存してください。")
+        return
+
+    songs = _load_concert_songs(ctx, c_id)
+    required_inst_ids = set()
+    for s in songs:
+        sid = s.get("id", "")
+        for part in _load_partdefs_for_song(ctx, sid):
+            iids = ctx["extract_relation_ids_any"](part, PARTDEF_INST_REL_KEYS)
+            if iids:
+                required_inst_ids.update([x for x in iids if x])
+    if not required_inst_ids:
+        st.info("この演奏会の必要楽器（パート定義）が見つかりません。先に『楽曲・楽器管理』でパート定義を行ってください。")
+        return
+
+    inst_rows = _load_instruments(ctx)
+    inst_map = {i.get("id", ""): i for i in inst_rows}
+    inst_names = {iid: _instrument_name(inst_map.get(iid, {}), ctx) for iid in required_inst_ids}
+    ordered_inst_ids = sorted(required_inst_ids, key=lambda x: inst_names.get(x, x))
+
+    p_opts = {player_name_map.get(pid, pid): pid for pid in player_ids}
+    p_name = st.selectbox("奏者を選択", list(p_opts.keys()), key="bring_player_sel")
     p_id = p_opts.get(p_name, "")
     if not p_id:
         return
-    rows = _load_player_instruments(ctx, p_id)
+    participant_id = participant_id_by_player_id.get(p_id, "")
+
+    rows = _load_player_instruments_for_concert(ctx, c_id, p_id, participant_id)
     by_inst = {}
     for row in rows:
         iids = ctx["extract_relation_ids_any"](row, PI_INST_REL_KEYS)
         if iids:
             by_inst[iids[0]] = row
 
-    with st.form(f"assign_form_{p_id}", border=True):
+    with st.form(f"bring_form_{c_id}_{p_id}", border=True):
         changes = []
-        for iname, iid in i_opts.items():
+        for iid in ordered_inst_ids:
+            iname = inst_names.get(iid, iid)
             ex = by_inst.get(iid)
-            cur_a = (ctx["extract_prop_text_any"](ex, PI_ASSIGN_KEYS) == "True") if ex else False
             cur_b = (ctx["extract_prop_text_any"](ex, PI_BRING_KEYS) == "True") if ex else False
             cur_n = ctx["extract_prop_text_any"](ex, PI_NOTE_KEYS) if ex else ""
-            c1, c2, c3, c4 = st.columns([3, 1, 1, 4])
+            c1, c2, c3 = st.columns([4, 1, 5])
             c1.markdown(f"**{iname}**")
-            a = c2.checkbox("担当", value=cur_a, key=f"a_{p_id}_{iid}")
-            b = c3.checkbox("持参可", value=cur_b, key=f"b_{p_id}_{iid}")
-            n = c4.text_input("備考", value=cur_n, label_visibility="collapsed", key=f"n_{p_id}_{iid}")
-            changes.append({"iid": iid, "iname": iname, "a": a, "b": b, "n": n, "eid": ex.get("id", "") if ex else ""})
-        if st.form_submit_button("💾 アサインを保存", use_container_width=True, type="primary"):
+            b = c2.checkbox("持参可", value=cur_b, key=f"bring_{c_id}_{p_id}_{iid}", label_visibility="collapsed")
+            n = c3.text_input("備考", value=cur_n, label_visibility="collapsed", key=f"bring_note_{c_id}_{p_id}_{iid}")
+            changes.append({"iid": iid, "iname": iname, "b": b, "n": n, "eid": ex.get("id", "") if ex else ""})
+        if st.form_submit_button("💾 持参可を保存", use_container_width=True, type="primary"):
             ok_n, ng_n = 0, 0
             for ch in changes:
-                if not ch["a"] and not ch["b"] and not ch["eid"]:
+                if not ch["b"] and not ch["n"] and not ch["eid"]:
                     continue
-                ok = _upsert_player_instrument(ctx, p_id, p_name, ch["iid"], ch["iname"], ch["a"], ch["b"], ch["n"], ch["eid"])
+                ok = _upsert_player_bring_for_concert(
+                    ctx,
+                    c_id,
+                    c_name,
+                    p_id,
+                    p_name,
+                    participant_id,
+                    ch["iid"],
+                    ch["iname"],
+                    ch["b"],
+                    ch["n"],
+                    ch["eid"],
+                )
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
             if ng_n == 0:
                 st.success(f"✅ {ok_n}件を保存しました。")
             else:
                 st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗しました。")
-            st.session_state.pop(f"pi_list_{p_id}", None)
+            _clear_player_cache()
             st.rerun()
 
 
 def render(ctx: dict):
     st.header("🎻 奏者・出欠・アサイン")
-    t1, t2, t3 = st.tabs(["奏者管理", "出欠入力", "楽器アサイン"])
+    t1, t2, t3 = st.tabs(["奏者管理", "出欠入力", "持参楽器整理"])
     with t1:
         _render_player_tab(ctx)
     with t2:

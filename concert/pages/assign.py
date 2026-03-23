@@ -34,7 +34,7 @@ PARTDEF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作
 PARTDEF_INST_REL_KEYS = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
 PARTDEF_NAME_KEYS = ["パート名", "名称", "タイトル", "表示名"]
 PARTDEF_NOTE_KEYS = ["備考", "メモ", "注記"]
-PREF_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
+PREF_PLAYER_REL_KEYS = ["演奏会参加者", "奏者", "出演者", "FK奏者"]
 PREF_INST_REL_KEYS = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
 PREF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
 PREF_PART_REL_KEYS = ["パート", "パート定義", "FKパート"]
@@ -190,6 +190,7 @@ def _save_preference(ctx, player_id: str, player_name: str,
                      part_id: str, part_name: str,
                      instrument_id: str, instrument_name: str,
                      priority_int: int,
+                     participant_id: str = "",
                      existing_id: str = "") -> bool:
     """PlayerInstrumentに希望順位を書き込む。"""
     db_id    = ctx["CONCERT_DB_PREFERENCE"]
@@ -207,7 +208,9 @@ def _save_preference(ctx, player_id: str, player_name: str,
         ctx["put_prop"](props, type_map, rec_key,
                     f"{player_name} × {song_name} × {part_name}")
     if player_key:
-        ctx["put_prop"](props, type_map, player_key, player_id)
+        # 希望入力DBのrelation先が「演奏会参加者DB」の場合は participant_id を優先する
+        rel_target = participant_id or player_id
+        ctx["put_prop"](props, type_map, player_key, rel_target)
     if inst_key:
         # パート優先運用: 楽器relationが無いパートでも保存できるように任意扱い
         if instrument_id:
@@ -283,6 +286,14 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
                 required_count=qty,
             ))
 
+    # 参加者DB（演奏会参加者ID -> 奏者ID）マップ
+    participant_rows = _load_participants(ctx, concert_id)
+    participant_to_player: dict[str, str] = {}
+    for row in participant_rows:
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if pids:
+            participant_to_player[row.get("id", "")] = pids[0]
+
     # Prefs: 希望入力DBの希望順位から構築（パート単位）
     prefs: list[Pref] = []
     pi_rows = _load_player_instruments(ctx, concert_id)
@@ -298,7 +309,8 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
         inst_ids   = ctx["extract_relation_ids_any"](pi, PREF_INST_REL_KEYS)
         if not (player_ids and song_ids and part_ids):
             continue
-        pid    = player_ids[0]
+        pid_raw = player_ids[0]
+        pid = participant_to_player.get(pid_raw, pid_raw)
         sid    = song_ids[0]
         part_id = part_ids[0]
         iid    = inst_ids[0] if inst_ids else ""
@@ -358,8 +370,16 @@ def _render_pref_tab(ctx: dict):
     # 演奏会参加者DBに紐づいた奏者のみを希望入力対象にする
     participant_rows = _load_participants(ctx, concert_id)
     player_ids_in_concert: set[str] = set()
+    participant_id_by_player_id: dict[str, str] = {}
+    participant_to_player: dict[str, str] = {}
     for row in participant_rows:
-        player_ids_in_concert.update(ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS))
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if not pids:
+            continue
+        pid = pids[0]
+        player_ids_in_concert.add(pid)
+        participant_id_by_player_id[pid] = row.get("id", "")
+        participant_to_player[row.get("id", "")] = pid
 
     if not player_ids_in_concert:
         st.info("この演奏会の参加者が未登録です。先に「出欠入力」で参加者を保存してください。")
@@ -382,7 +402,9 @@ def _render_pref_tab(ctx: dict):
         sids = ctx["extract_relation_ids_any"](pi, PREF_SONG_REL_KEYS)
         part_ids = ctx["extract_relation_ids_any"](pi, PREF_PART_REL_KEYS)
         if pids and sids and part_ids:
-            pi_lookup[(pids[0], sids[0], part_ids[0])] = pi
+            pid_raw = pids[0]
+            pid = participant_to_player.get(pid_raw, pid_raw)
+            pi_lookup[(pid, sids[0], part_ids[0])] = pi
 
     player_opts = {_player_name(p, ctx): p.get("id", "") for p in
                    sorted(players, key=lambda x: _player_name(x, ctx))}
@@ -458,7 +480,7 @@ def _render_pref_tab(ctx: dict):
                             ok = _save_preference(
                                 ctx, player_id, selected_player_name,
                                 sid, sname, ch["part_id"], ch["part_name"], ch["iid"], ch["iname"],
-                                pri_int, ch["existing_id"],
+                                pri_int, participant_id_by_player_id.get(player_id, ""), ch["existing_id"],
                             )
                             if ok:
                                 ok_count += 1
