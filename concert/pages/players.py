@@ -222,7 +222,17 @@ def _update_player(ctx: dict, page_id: str, name: str, email: str, memo: str) ->
     return res is not None and res.status_code == 200
 
 
-def _upsert_attendance(ctx: dict, player_id: str, player_name: str, practice_id: str, practice_name: str, status: str, note: str, existing_id: str = "") -> bool:
+def _upsert_attendance(
+    ctx: dict,
+    player_id: str,
+    player_name: str,
+    practice_id: str,
+    practice_name: str,
+    status: str,
+    note: str,
+    existing_id: str = "",
+    participant_id: str = "",
+) -> bool:
     db_id = ctx["CONCERT_DB_ATTENDANCE"]
     t = ctx["get_prop_types"](db_id)
     if not t:
@@ -252,7 +262,9 @@ def _upsert_attendance(ctx: dict, player_id: str, player_name: str, practice_id:
     props = {}
     if record_key:
         ctx["put_prop"](props, t, record_key, f"{player_name} × {practice_name}")
-    ctx["put_prop"](props, t, player_rel_key, player_id)
+    # 出欠DBのrelation先が「演奏会参加者DB」の場合は participant_id を優先して紐づける
+    rel_target_id = participant_id or player_id
+    ctx["put_prop"](props, t, player_rel_key, rel_target_id)
     ctx["put_prop"](props, t, practice_rel_key, practice_id)
     if status_key:
         ctx["put_prop"](props, t, status_key, status)
@@ -426,6 +438,12 @@ def _render_attendance_tab(ctx: dict):
         part_player_ids.append(pid)
         part_row_by_pid[pid] = row
     part_player_ids = sorted(set(part_player_ids), key=lambda x: player_name_map.get(x, x))
+    participant_id_by_player_id = {}
+    for row in participants:
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if not pids:
+            continue
+        participant_id_by_player_id[pids[0]] = row.get("id", "")
 
     if all_players:
         selectable = { _player_name(p, ctx): p.get("id", "") for p in sorted(all_players, key=lambda x: _player_name(x, ctx)) if p.get("id") }
@@ -477,10 +495,18 @@ def _render_attendance_tab(ctx: dict):
     players = [p for p in all_players if p.get("id", "") in set(part_player_ids)]
     att = _load_attendance(ctx, p_id)
     by_player = {}
+    participant_to_player = {}
+    for pid, part_id in participant_id_by_player_id.items():
+        if part_id:
+            participant_to_player[part_id] = pid
     for row in att:
         pids = ctx["extract_relation_ids_any"](row, ATT_PLAYER_REL_KEYS)
-        if pids:
-            by_player[pids[0]] = row
+        if not pids:
+            continue
+        rel_id = pids[0]
+        # 出欠DBが「演奏会参加者DB」を参照している場合は player_id に戻して扱う
+        pid = participant_to_player.get(rel_id, rel_id)
+        by_player[pid] = row
 
     statuses = ["○", "×", "△"]
     with st.form(f"attendance_form_{p_id}", border=True):
@@ -497,11 +523,28 @@ def _render_attendance_tab(ctx: dict):
             c1.markdown(f"**{pname}**")
             s = c2.radio(pname, statuses, index=statuses.index(cur_s), horizontal=True, label_visibility="collapsed", key=f"att_{p_id}_{pid}")
             n = c3.text_input("備考", value=cur_n, label_visibility="collapsed", key=f"att_note_{p_id}_{pid}")
-            changes.append({"player_id": pid, "player_name": pname, "status": s, "note": n, "existing_id": ex.get("id", "") if ex else ""})
+            changes.append({
+                "player_id": pid,
+                "player_name": pname,
+                "status": s,
+                "note": n,
+                "existing_id": ex.get("id", "") if ex else "",
+                "participant_id": participant_id_by_player_id.get(pid, ""),
+            })
         if st.form_submit_button("💾 出欠を保存", use_container_width=True, type="primary"):
             ok_n, ng_n = 0, 0
             for ch in changes:
-                ok = _upsert_attendance(ctx, ch["player_id"], ch["player_name"], p_id, p_name, ch["status"], ch["note"], ch["existing_id"])
+                ok = _upsert_attendance(
+                    ctx,
+                    ch["player_id"],
+                    ch["player_name"],
+                    p_id,
+                    p_name,
+                    ch["status"],
+                    ch["note"],
+                    ch["existing_id"],
+                    ch.get("participant_id", ""),
+                )
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
             if ng_n == 0:
