@@ -8,6 +8,7 @@ concert.pages.assign
 import streamlit as st
 from collections import defaultdict
 import re
+import time
 
 
 # ============================================================
@@ -99,6 +100,17 @@ def _relation_target_db_id(ctx, db_id: str, prop_name: str) -> str:
     return (rel.get("database_id") or "").strip()
 
 
+def _db_property_id(ctx, db_id: str, prop_name: str) -> str:
+    if not db_id or not prop_name:
+        return ""
+    res = ctx["api_request"]("get", f"https://api.notion.com/v1/databases/{db_id}")
+    if res is None or res.status_code != 200:
+        return ""
+    props = ((res.json() or {}).get("properties") or {})
+    meta = props.get(prop_name) or {}
+    return (meta.get("id") or "").strip()
+
+
 # ============================================================
 # キャッシュ／ロードヘルパー
 # ============================================================
@@ -138,6 +150,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
     participant_rel_key = _find_prop_name_loose(ctx, t, ["演奏会参加者"])
     pref_key_prop = _find_prop_name_loose(ctx, t, PREFERENCE_KEY_KEYS)
     participant_target_db = _relation_target_db_id(ctx, db_id, participant_rel_key) if participant_rel_key else ""
+    participant_rel_prop_id = _db_property_id(ctx, db_id, participant_rel_key) if participant_rel_key else ""
     participant_source_db = participant_target_db or ctx["CONCERT_DB_PARTICIPANT"]
     participant_rows = _load_participants(ctx, concert_id, participant_source_db)
 
@@ -255,18 +268,46 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
             json={"properties": patch_props},
         )
         if res is not None and res.status_code == 200:
-            verify = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{rid}")
-            if verify is None or verify.status_code != 200:
-                ng += 1
-                continue
-            row2 = verify.json() or {}
             confirmed = []
-            if participant_rel_key:
-                confirmed = ctx["extract_relation_ids"](row2, participant_rel_key)
+            verify_status = 0
+            for _ in range(3):
+                verify = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{rid}")
+                verify_status = (verify.status_code if verify is not None else 0)
+                if verify is None or verify.status_code != 200:
+                    time.sleep(0.25)
+                    continue
+                row2 = verify.json() or {}
+                if participant_rel_key:
+                    confirmed = ctx["extract_relation_ids"](row2, participant_rel_key)
+                if confirmed or (not participant_rel_key and player_rel_key):
+                    break
+                time.sleep(0.25)
             # 専用列が無い場合は奏者relationへの書き込みを成功扱い
             if confirmed or (not participant_rel_key and player_rel_key):
                 ok += 1
             else:
+                # fallback: プロパティ名ではなくプロパティIDで再PATCH
+                if participant_rel_prop_id and participant_id:
+                    res2 = ctx["api_request"](
+                        "patch",
+                        f"https://api.notion.com/v1/pages/{rid}",
+                        json={"properties": {participant_rel_prop_id: {"relation": [{"id": participant_id}]}}},
+                    )
+                    if res2 is not None and res2.status_code == 200:
+                        for _ in range(3):
+                            verify2 = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{rid}")
+                            verify_status = (verify2.status_code if verify2 is not None else 0)
+                            if verify2 is None or verify2.status_code != 200:
+                                time.sleep(0.25)
+                                continue
+                            row3 = verify2.json() or {}
+                            confirmed = ctx["extract_relation_ids"](row3, participant_rel_key) if participant_rel_key else []
+                            if confirmed:
+                                break
+                            time.sleep(0.25)
+                if confirmed:
+                    ok += 1
+                    continue
                 unresolved += 1
                 if len(debug_unresolved) < 5:
                     debug_unresolved.append({
@@ -277,6 +318,8 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                         "patched_participant_id": participant_id,
                         "patched_player_id": player_id,
                         "confirmed_relation_ids": confirmed,
+                        "participant_rel_prop_id": participant_rel_prop_id,
+                        "verify_status": verify_status,
                     })
         else:
             ng += 1
@@ -297,6 +340,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
         "participant_source_db": participant_source_db,
         "participant_target_db": participant_target_db,
         "participant_ctx_db": ctx["CONCERT_DB_PARTICIPANT"],
+        "participant_rel_prop_id": participant_rel_prop_id,
     }
 
 
@@ -626,6 +670,7 @@ def _render_pref_tab(ctx: dict):
                         "participant_ctx_db": stats.get("participant_ctx_db", ""),
                         "participant_target_db": stats.get("participant_target_db", ""),
                         "participant_source_db": stats.get("participant_source_db", ""),
+                        "participant_rel_prop_id": stats.get("participant_rel_prop_id", ""),
                         "sample": stats.get("debug_unresolved", []),
                     })
             else:
@@ -644,6 +689,7 @@ def _render_pref_tab(ctx: dict):
                     "participant_ctx_db": stats.get("participant_ctx_db", ""),
                     "participant_target_db": stats.get("participant_target_db", ""),
                     "participant_source_db": stats.get("participant_source_db", ""),
+                    "participant_rel_prop_id": stats.get("participant_rel_prop_id", ""),
                     "sample": stats.get("debug_unresolved", []),
                 })
 
