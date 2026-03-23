@@ -7,16 +7,16 @@ from datetime import date, datetime
 
 CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
 CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
-CONCERT_VENUE_KEYS = ["会場名", "ロケーション", "会場", "Location"]
-CONCERT_ADDRESS_KEYS = ["会場住所", "住所", "ロケーション", "Location"]
+CONCERT_VENUE_KEYS = ["会場名", "ロケーション", "場所", "会場", "Location"]
+CONCERT_ADDRESS_KEYS = ["会場住所", "住所", "ロケーション", "場所", "Location"]
 CONCERT_MEMO_KEYS = ["メモ", "備考"]
 CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE"]
 
 PRACTICE_NAME_KEYS = ["練習名", "タイトル", "PK練習名"]
 PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 PRACTICE_DATE_KEYS = ["日時", "日付"]
-PRACTICE_VENUE_KEYS = ["会場名", "ロケーション", "会場", "Location"]
-PRACTICE_ADDRESS_KEYS = ["会場住所", "住所", "ロケーション", "Location"]
+PRACTICE_VENUE_KEYS = ["会場名", "ロケーション", "場所", "会場", "Location"]
+PRACTICE_ADDRESS_KEYS = ["会場住所", "住所", "ロケーション", "場所", "Location"]
 PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ"]
 PRACTICE_MEMO_KEYS = ["メモ", "備考"]
 
@@ -245,7 +245,7 @@ def _render_concert_form(ctx: dict, existing: dict | None = None):
     address_default = ext(existing, CONCERT_ADDRESS_KEYS) if is_edit else ""
     # ATLAS 側が「ロケーション」単独運用のデータでも会場欄に表示する
     if is_edit:
-        location_fallback = ext(existing, ["ロケーション", "Location"])
+        location_fallback = ext(existing, ["ロケーション", "場所", "Location"])
         if not venue_default and location_fallback:
             venue_default = location_fallback
         if not address_default and location_fallback:
@@ -325,7 +325,7 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
     venue_default = ext(existing, PRACTICE_VENUE_KEYS) if is_edit else ""
     address_default = ext(existing, PRACTICE_ADDRESS_KEYS) if is_edit else ""
     if is_edit:
-        location_fallback = ext(existing, ["ロケーション", "Location"])
+        location_fallback = ext(existing, ["ロケーション", "場所", "Location"])
         if not venue_default and location_fallback:
             venue_default = location_fallback
         if not address_default and location_fallback:
