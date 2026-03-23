@@ -4,6 +4,22 @@ concert.pages.songs
 """
 import streamlit as st
 
+SONG_NAME_KEYS = ["曲名", "タイトル"]
+SONG_COMPOSER_KEYS = ["作曲者", "クリエイター"]
+SONG_DURATION_KEYS = ["演奏時間（秒）", "演奏時間", "DurationSec"]
+SONG_NOTE_KEYS = ["難易度メモ", "メモ", "備考"]
+SONG_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
+
+INSTRUMENT_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
+INSTRUMENT_CATEGORY_KEYS = ["カテゴリ"]
+INSTRUMENT_MEMO_KEYS = ["メモ", "備考"]
+
+SONG_INSTR_RECORD_KEYS = ["レコード名", "タイトル"]
+SONG_INSTR_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲"]
+SONG_INSTR_INST_REL_KEYS = ["楽器種別", "楽器", "FK楽器種別"]
+SONG_INSTR_QTY_KEYS = ["必要台数", "台数"]
+SONG_INSTR_NOTE_KEYS = ["備考", "メモ"]
+
 
 # ============================================================
 # キャッシュ／ロードヘルパー
@@ -24,7 +40,12 @@ def _load_concerts(ctx) -> list[dict]:
 def _load_songs(ctx, concert_id: str = "") -> list[dict]:
     key = f"song_list_{concert_id}"
     if key not in st.session_state:
-        f = {"filter": {"property": "演奏会", "relation": {"contains": concert_id}}} if concert_id else None
+        f = None
+        if concert_id:
+            type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
+            rel_prop = ctx["find_prop_name"](type_map, SONG_CONCERT_REL_KEYS)
+            if rel_prop:
+                f = {"filter": {"property": rel_prop, "relation": {"contains": concert_id}}}
         st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_SONG"], f)
     return st.session_state.get(key, [])
 
@@ -38,26 +59,29 @@ def _load_instruments(ctx) -> list[dict]:
 def _load_song_instruments(ctx, song_id: str) -> list[dict]:
     key = f"si_list_{song_id}"
     if key not in st.session_state:
+        type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG_INSTRUMENT"])
+        rel_prop = ctx["find_prop_name"](type_map, SONG_INSTR_SONG_REL_KEYS)
+        filter_payload = {"filter": {"property": rel_prop, "relation": {"contains": song_id}}} if rel_prop else None
         rows = ctx["query_all"](
             ctx["CONCERT_DB_SONG_INSTRUMENT"],
-            {"filter": {"property": "楽曲", "relation": {"contains": song_id}}},
+            filter_payload,
         )
         st.session_state[key] = rows
     return st.session_state.get(key, [])
 
 
 def _concert_name(c: dict, ctx: dict) -> str:
-    n  = ctx["extract_prop_text"](c, "名称") or ctx["extract_title"](c)
-    dt = ctx["extract_prop_text"](c, "日時")
+    n  = ctx["extract_prop_text_any"](c, ["名称", "タイトル"]) or ctx["extract_title"](c)
+    dt = ctx["extract_prop_text_any"](c, ["日時", "日付", "出演日"])
     return f"{n}（{dt[:10] if dt else '日時未設定'}）"
 
 
 def _song_name(s: dict, ctx: dict) -> str:
-    return ctx["extract_prop_text"](s, "曲名") or ctx["extract_title"](s) or s.get("id", "")
+    return ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or ctx["extract_title"](s) or s.get("id", "")
 
 
 def _instrument_name(i: dict, ctx: dict) -> str:
-    return ctx["extract_prop_text"](i, "楽器名") or ctx["extract_title"](i) or i.get("id", "")
+    return ctx["extract_prop_text_any"](i, INSTRUMENT_NAME_KEYS) or ctx["extract_title"](i) or i.get("id", "")
 
 
 # ============================================================
@@ -72,13 +96,13 @@ def _create_song(ctx: dict, title: str, concert_ids: list[str],
         st.error("楽曲DBのプロパティ取得に失敗しました。")
         return False
     props: dict = {}
-    ctx["put_prop"](props, type_map, "曲名", title)
+    ctx["put_prop_any"](props, type_map, SONG_NAME_KEYS, title)
     if concert_ids:
-        ctx["put_prop"](props, type_map, "演奏会", concert_ids)
-    ctx["put_prop"](props, type_map, "作曲者", composer)
+        ctx["put_prop_any"](props, type_map, SONG_CONCERT_REL_KEYS, concert_ids)
+    ctx["put_prop_any"](props, type_map, SONG_COMPOSER_KEYS, composer)
     if duration_sec is not None:
-        ctx["put_prop"](props, type_map, "演奏時間（秒）", duration_sec)
-    ctx["put_prop"](props, type_map, "難易度メモ", note)
+        ctx["put_prop_any"](props, type_map, SONG_DURATION_KEYS, duration_sec)
+    ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
@@ -88,13 +112,13 @@ def _update_song(ctx: dict, page_id: str, title: str, concert_ids: list[str],
                  composer: str, duration_sec: int | None, note: str) -> bool:
     type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
     props: dict = {}
-    ctx["put_prop"](props, type_map, "曲名", title)
+    ctx["put_prop_any"](props, type_map, SONG_NAME_KEYS, title)
     if concert_ids:
-        ctx["put_prop"](props, type_map, "演奏会", concert_ids)
-    ctx["put_prop"](props, type_map, "作曲者", composer)
+        ctx["put_prop_any"](props, type_map, SONG_CONCERT_REL_KEYS, concert_ids)
+    ctx["put_prop_any"](props, type_map, SONG_COMPOSER_KEYS, composer)
     if duration_sec is not None:
-        ctx["put_prop"](props, type_map, "演奏時間（秒）", duration_sec)
-    ctx["put_prop"](props, type_map, "難易度メモ", note)
+        ctx["put_prop_any"](props, type_map, SONG_DURATION_KEYS, duration_sec)
+    ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200
@@ -114,9 +138,9 @@ def _create_instrument(ctx: dict, name: str, category: str, memo: str) -> bool:
         st.error("楽器種別DBのプロパティ取得に失敗しました。")
         return False
     props: dict = {}
-    ctx["put_prop"](props, type_map, "楽器名", name)
-    ctx["put_prop"](props, type_map, "カテゴリ", category)
-    ctx["put_prop"](props, type_map, "メモ", memo)
+    ctx["put_prop_any"](props, type_map, INSTRUMENT_NAME_KEYS, name)
+    ctx["put_prop_any"](props, type_map, INSTRUMENT_CATEGORY_KEYS, category)
+    ctx["put_prop_any"](props, type_map, INSTRUMENT_MEMO_KEYS, memo)
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
@@ -125,9 +149,9 @@ def _create_instrument(ctx: dict, name: str, category: str, memo: str) -> bool:
 def _update_instrument(ctx: dict, page_id: str, name: str, category: str, memo: str) -> bool:
     type_map = ctx["get_prop_types"](ctx["CONCERT_DB_INSTRUMENT"])
     props: dict = {}
-    ctx["put_prop"](props, type_map, "楽器名", name)
-    ctx["put_prop"](props, type_map, "カテゴリ", category)
-    ctx["put_prop"](props, type_map, "メモ", memo)
+    ctx["put_prop_any"](props, type_map, INSTRUMENT_NAME_KEYS, name)
+    ctx["put_prop_any"](props, type_map, INSTRUMENT_CATEGORY_KEYS, category)
+    ctx["put_prop_any"](props, type_map, INSTRUMENT_MEMO_KEYS, memo)
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200
@@ -147,11 +171,11 @@ def _upsert_song_instrument(ctx: dict, song_id: str, song_name: str,
         st.error("曲別必要楽器DBのプロパティ取得に失敗しました。")
         return False
     props: dict = {}
-    ctx["put_prop"](props, type_map, "レコード名", f"{song_name} × {instrument_name}")
-    ctx["put_prop"](props, type_map, "楽曲", song_id)
-    ctx["put_prop"](props, type_map, "楽器種別", instrument_id)
-    ctx["put_prop"](props, type_map, "必要台数", qty)
-    ctx["put_prop"](props, type_map, "備考", note)
+    ctx["put_prop_any"](props, type_map, SONG_INSTR_RECORD_KEYS, f"{song_name} × {instrument_name}")
+    ctx["put_prop_any"](props, type_map, SONG_INSTR_SONG_REL_KEYS, song_id)
+    ctx["put_prop_any"](props, type_map, SONG_INSTR_INST_REL_KEYS, instrument_id)
+    ctx["put_prop_any"](props, type_map, SONG_INSTR_QTY_KEYS, qty)
+    ctx["put_prop_any"](props, type_map, SONG_INSTR_NOTE_KEYS, note)
     if existing_id:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}",
                                  json={"properties": props})
@@ -253,19 +277,19 @@ def _render_song_tab(ctx: dict):
     for s in sorted(songs, key=lambda x: _song_name(x, ctx)):
         song_id    = s.get("id", "")
         song_label = _song_name(s, ctx)
-        composer   = ctx["extract_prop_text"](s, "作曲者")
-        dur_sec_str = ctx["extract_prop_text"](s, "演奏時間（秒）")
+        composer   = ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS)
+        dur_sec_str = ctx["extract_prop_text_any"](s, SONG_DURATION_KEYS)
         dur_disp   = _sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None)
         caption    = f"{composer}　{dur_disp}" if composer or dur_disp else ""
 
         with st.expander(f"{song_label}　{f'*{caption}*' if caption else ''}", expanded=False):
             # 既存紐づき演奏会
-            existing_concert_ids = ctx["extract_relation_ids"](s, "演奏会")
+            existing_concert_ids = ctx["extract_relation_ids_any"](s, SONG_CONCERT_REL_KEYS)
             existing_concert_names = [k for k, v in concert_opts.items() if v in existing_concert_ids]
 
             with st.form(f"song_edit_{song_id}", border=True):
                 title    = st.text_input("曲名 *", value=_song_name(s, ctx), key=f"se_title_{song_id}")
-                composer = st.text_input("作曲者", value=ctx["extract_prop_text"](s, "作曲者"),
+                composer = st.text_input("作曲者", value=ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS),
                                          key=f"se_composer_{song_id}")
                 dur_str  = st.text_input(
                     "演奏時間",
@@ -280,7 +304,7 @@ def _render_song_tab(ctx: dict):
                     key=f"se_concerts_{song_id}",
                 )
                 note = st.text_area("難易度メモ",
-                                    value=ctx["extract_prop_text"](s, "難易度メモ"),
+                                    value=ctx["extract_prop_text_any"](s, SONG_NOTE_KEYS),
                                     height=60, key=f"se_note_{song_id}")
 
                 if st.form_submit_button("💾 更新", use_container_width=True):
@@ -314,7 +338,7 @@ def _render_song_instrument_section(ctx: dict, song_id: str, song_label: str):
     si_rows = _load_song_instruments(ctx, song_id)
     si_by_inst: dict[str, dict] = {}
     for row in si_rows:
-        iids = ctx["extract_relation_ids"](row, "楽器種別")
+        iids = ctx["extract_relation_ids_any"](row, SONG_INSTR_INST_REL_KEYS)
         if iids:
             si_by_inst[iids[0]] = row
 
@@ -325,8 +349,8 @@ def _render_song_instrument_section(ctx: dict, song_id: str, song_label: str):
         changes: list[dict] = []
         for inst_name, inst_id in inst_opts.items():
             existing = si_by_inst.get(inst_id)
-            cur_qty  = int(float(ctx["extract_prop_text"](existing, "必要台数") or "0")) if existing else 0
-            cur_note = ctx["extract_prop_text"](existing, "備考") if existing else ""
+            cur_qty  = int(float(ctx["extract_prop_text_any"](existing, SONG_INSTR_QTY_KEYS) or "0")) if existing else 0
+            cur_note = ctx["extract_prop_text_any"](existing, SONG_INSTR_NOTE_KEYS) if existing else ""
 
             col_inst, col_qty, col_note = st.columns([3, 1, 4])
             col_inst.markdown(f"**{inst_name}**")
@@ -422,7 +446,7 @@ def _render_instrument_tab(ctx: dict):
     # カテゴリごとにグループ表示
     by_cat: dict[str, list] = {c: [] for c in INSTRUMENT_CATEGORIES}
     for i in instruments:
-        cat = ctx["extract_prop_text"](i, "カテゴリ") or "その他"
+        cat = ctx["extract_prop_text_any"](i, INSTRUMENT_CATEGORY_KEYS) or "その他"
         by_cat.setdefault(cat, []).append(i)
 
     for cat in INSTRUMENT_CATEGORIES:
@@ -434,13 +458,13 @@ def _render_instrument_tab(ctx: dict):
             iid   = inst.get("id", "")
             label = _instrument_name(inst, ctx)
             with st.expander(label, expanded=False):
-                cur_cat = ctx["extract_prop_text"](inst, "カテゴリ") or "その他"
+                cur_cat = ctx["extract_prop_text_any"](inst, INSTRUMENT_CATEGORY_KEYS) or "その他"
                 cat_idx = INSTRUMENT_CATEGORIES.index(cur_cat) if cur_cat in INSTRUMENT_CATEGORIES else 0
                 with st.form(f"inst_edit_{iid}", border=True):
                     name     = st.text_input("楽器名 *", value=label, key=f"ie_name_{iid}")
                     category = st.selectbox("カテゴリ", INSTRUMENT_CATEGORIES,
                                             index=cat_idx, key=f"ie_cat_{iid}")
-                    memo     = st.text_area("メモ", value=ctx["extract_prop_text"](inst, "メモ"),
+                    memo     = st.text_area("メモ", value=ctx["extract_prop_text_any"](inst, INSTRUMENT_MEMO_KEYS),
                                             height=60, key=f"ie_memo_{iid}")
                     if st.form_submit_button("💾 更新", use_container_width=True):
                         if not name.strip():

@@ -5,6 +5,21 @@ concert.pages.concert_mgmt
 import streamlit as st
 from datetime import date, datetime
 
+CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
+CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
+CONCERT_VENUE_KEYS = ["会場名", "ロケーション", "会場"]
+CONCERT_ADDRESS_KEYS = ["会場住所", "住所"]
+CONCERT_MEMO_KEYS = ["メモ", "備考"]
+CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE"]
+
+PRACTICE_NAME_KEYS = ["練習名", "タイトル", "PK練習名"]
+PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
+PRACTICE_DATE_KEYS = ["日時", "日付"]
+PRACTICE_VENUE_KEYS = ["会場名", "ロケーション", "会場"]
+PRACTICE_ADDRESS_KEYS = ["会場住所", "住所"]
+PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ"]
+PRACTICE_MEMO_KEYS = ["メモ", "備考"]
+
 
 # ============================================================
 # ヘルパー
@@ -25,7 +40,23 @@ def _clear_concert_cache(ctx):
 
 def _load_concerts(ctx) -> list[dict]:
     if "concert_list" not in st.session_state:
-        rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT"])
+        rows = []
+        db_id = ctx["CONCERT_DB_CONCERT"]
+        type_map = ctx["get_prop_types"](db_id)
+        media_prop = ctx["find_prop_name"](type_map, CONCERT_MEDIA_KEYS)
+        media_type = type_map.get(media_prop, "")
+        if media_prop and media_type == "select":
+            rows = ctx["query_all"](
+                db_id,
+                {"filter": {"property": media_prop, "select": {"equals": "出演"}}},
+            )
+        elif media_prop and media_type == "multi_select":
+            rows = ctx["query_all"](
+                db_id,
+                {"filter": {"property": media_prop, "multi_select": {"contains": "出演"}}},
+            )
+        else:
+            rows = ctx["query_all"](db_id)
         st.session_state["concert_list"] = rows
     return st.session_state.get("concert_list", [])
 
@@ -33,11 +64,16 @@ def _load_concerts(ctx) -> list[dict]:
 def _load_practices(ctx, concert_id: str = "") -> list[dict]:
     cache_key = f"practice_list_{concert_id}"
     if cache_key not in st.session_state:
+        type_map = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"])
+        rel_prop = ctx["find_prop_name"](type_map, PRACTICE_CONCERT_REL_KEYS)
         if concert_id:
-            rows = ctx["query_all"](
-                ctx["CONCERT_DB_PRACTICE"],
-                {"filter": {"property": "演奏会", "relation": {"contains": concert_id}}},
-            )
+            if rel_prop:
+                rows = ctx["query_all"](
+                    ctx["CONCERT_DB_PRACTICE"],
+                    {"filter": {"property": rel_prop, "relation": {"contains": concert_id}}},
+                )
+            else:
+                rows = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
         else:
             rows = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
         st.session_state[cache_key] = rows
@@ -45,18 +81,18 @@ def _load_practices(ctx, concert_id: str = "") -> list[dict]:
 
 
 def _concert_display_name(page: dict, ctx: dict) -> str:
-    name = ctx["extract_prop_text"](page, "名称")
+    name = ctx["extract_prop_text_any"](page, CONCERT_NAME_KEYS)
     if not name:
         name = ctx["extract_title"](page)
-    dt = ctx["extract_prop_text"](page, "日時")
+    dt = ctx["extract_prop_text_any"](page, CONCERT_DATE_KEYS)
     return f"{name}（{dt[:10] if dt else '日時未設定'}）" if name else page.get("id", "")
 
 
 def _practice_display_name(page: dict, ctx: dict) -> str:
-    name = ctx["extract_prop_text"](page, "練習名")
+    name = ctx["extract_prop_text_any"](page, PRACTICE_NAME_KEYS)
     if not name:
         name = ctx["extract_title"](page)
-    dt = ctx["extract_prop_text"](page, "日時")
+    dt = ctx["extract_prop_text_any"](page, PRACTICE_DATE_KEYS)
     return f"{name}（{dt[:10] if dt else '日時未設定'}）" if name else page.get("id", "")
 
 
@@ -77,15 +113,23 @@ def _create_concert(ctx: dict, name: str, dt_start: str, dt_end: str, venue: str
         return False
 
     props: dict = {}
-    put_p(props, type_map, "名称", name)
-    if dt_start:
+    ctx["put_prop_any"](props, type_map, CONCERT_NAME_KEYS, name)
+    date_key = ctx["find_prop_name"](type_map, CONCERT_DATE_KEYS)
+    if dt_start and date_key:
         date_val: dict = {"start": dt_start}
         if dt_end and dt_end != dt_start:
             date_val["end"] = dt_end
-        props["日時"] = {"date": date_val}
-    put_p(props, type_map, "会場名", venue)
-    put_p(props, type_map, "会場住所", address)
-    put_p(props, type_map, "メモ", memo)
+        props[date_key] = {"date": date_val}
+    ctx["put_prop_any"](props, type_map, CONCERT_VENUE_KEYS, venue)
+    ctx["put_prop_any"](props, type_map, CONCERT_ADDRESS_KEYS, address)
+    ctx["put_prop_any"](props, type_map, CONCERT_MEMO_KEYS, memo)
+    media_key = ctx["find_prop_name"](type_map, CONCERT_MEDIA_KEYS)
+    if media_key:
+        mtype = type_map.get(media_key, "")
+        if mtype == "select":
+            props[media_key] = {"select": {"name": "出演"}}
+        elif mtype == "multi_select":
+            props[media_key] = {"multi_select": [{"name": "出演"}]}
 
     res = api("post", "https://api.notion.com/v1/pages",
               json={"parent": {"database_id": db_id}, "properties": props})
@@ -100,15 +144,16 @@ def _update_concert(ctx: dict, page_id: str, name: str, dt_start: str, dt_end: s
 
     type_map = get_t(ctx["CONCERT_DB_CONCERT"])
     props: dict = {}
-    put_p(props, type_map, "名称", name)
-    if dt_start:
+    ctx["put_prop_any"](props, type_map, CONCERT_NAME_KEYS, name)
+    date_key = ctx["find_prop_name"](type_map, CONCERT_DATE_KEYS)
+    if dt_start and date_key:
         date_val: dict = {"start": dt_start}
         if dt_end and dt_end != dt_start:
             date_val["end"] = dt_end
-        props["日時"] = {"date": date_val}
-    put_p(props, type_map, "会場名", venue)
-    put_p(props, type_map, "会場住所", address)
-    put_p(props, type_map, "メモ", memo)
+        props[date_key] = {"date": date_val}
+    ctx["put_prop_any"](props, type_map, CONCERT_VENUE_KEYS, venue)
+    ctx["put_prop_any"](props, type_map, CONCERT_ADDRESS_KEYS, address)
+    ctx["put_prop_any"](props, type_map, CONCERT_MEMO_KEYS, memo)
 
     res = api("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
     return res is not None and res.status_code == 200
@@ -131,18 +176,19 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_en
         return False
 
     props: dict = {}
-    put_p(props, type_map, "練習名", name)
+    ctx["put_prop_any"](props, type_map, PRACTICE_NAME_KEYS, name)
     if concert_id:
-        put_p(props, type_map, "演奏会", concert_id)
-    if dt_start:
+        ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_REL_KEYS, concert_id)
+    date_key = ctx["find_prop_name"](type_map, PRACTICE_DATE_KEYS)
+    if dt_start and date_key:
         date_val: dict = {"start": dt_start}
         if dt_end and dt_end != dt_start:
             date_val["end"] = dt_end
-        props["日時"] = {"date": date_val}
-    put_p(props, type_map, "会場名", venue)
-    put_p(props, type_map, "会場住所", address)
-    put_p(props, type_map, "演奏会当日フラグ", is_concert_day)
-    put_p(props, type_map, "メモ", memo)
+        props[date_key] = {"date": date_val}
+    ctx["put_prop_any"](props, type_map, PRACTICE_VENUE_KEYS, venue)
+    ctx["put_prop_any"](props, type_map, PRACTICE_ADDRESS_KEYS, address)
+    ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
+    ctx["put_prop_any"](props, type_map, PRACTICE_MEMO_KEYS, memo)
 
     res = api("post", "https://api.notion.com/v1/pages",
               json={"parent": {"database_id": db_id}, "properties": props})
@@ -158,18 +204,19 @@ def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
 
     type_map = get_t(ctx["CONCERT_DB_PRACTICE"])
     props: dict = {}
-    put_p(props, type_map, "練習名", name)
+    ctx["put_prop_any"](props, type_map, PRACTICE_NAME_KEYS, name)
     if concert_id:
-        put_p(props, type_map, "演奏会", concert_id)
-    if dt_start:
+        ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_REL_KEYS, concert_id)
+    date_key = ctx["find_prop_name"](type_map, PRACTICE_DATE_KEYS)
+    if dt_start and date_key:
         date_val: dict = {"start": dt_start}
         if dt_end and dt_end != dt_start:
             date_val["end"] = dt_end
-        props["日時"] = {"date": date_val}
-    put_p(props, type_map, "会場名", venue)
-    put_p(props, type_map, "会場住所", address)
-    put_p(props, type_map, "演奏会当日フラグ", is_concert_day)
-    put_p(props, type_map, "メモ", memo)
+        props[date_key] = {"date": date_val}
+    ctx["put_prop_any"](props, type_map, PRACTICE_VENUE_KEYS, venue)
+    ctx["put_prop_any"](props, type_map, PRACTICE_ADDRESS_KEYS, address)
+    ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
+    ctx["put_prop_any"](props, type_map, PRACTICE_MEMO_KEYS, memo)
 
     res = api("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
     return res is not None and res.status_code == 200
@@ -183,29 +230,29 @@ def _render_concert_form(ctx: dict, existing: dict | None = None):
     """演奏会の新規登録 / 編集フォーム。existing が None なら新規。"""
     is_edit = existing is not None
     prefix  = f"conc_edit_{existing.get('id','')}_" if is_edit else "conc_new_"
-    ext     = ctx["extract_prop_text"]
+    ext     = ctx["extract_prop_text_any"]
 
     with st.form(key=f"{prefix}form", border=True):
         name = st.text_input(
             "演奏会名 *",
-            value=ext(existing, "名称") if is_edit else "",
+            value=ext(existing, CONCERT_NAME_KEYS) if is_edit else "",
             placeholder="例：第12回定期演奏会",
             key=f"{prefix}name",
         )
 
         col1, col2 = st.columns(2)
         with col1:
-            dt_start_str = ext(existing, "日時") if is_edit else ""
+            dt_start_str = ext(existing, CONCERT_DATE_KEYS) if is_edit else ""
             dt_start_val = date.fromisoformat(dt_start_str[:10]) if dt_start_str else date.today()
             dt_start = st.date_input("開催日 *", value=dt_start_val, key=f"{prefix}dt_start")
         with col2:
             dt_end = st.date_input("終了日（任意）", value=dt_start_val, key=f"{prefix}dt_end")
 
-        venue   = st.text_input("会場名", value=ext(existing, "会場名") if is_edit else "",
+        venue   = st.text_input("会場名", value=ext(existing, CONCERT_VENUE_KEYS) if is_edit else "",
                                 placeholder="例：○○ホール", key=f"{prefix}venue")
-        address = st.text_input("会場住所", value=ext(existing, "会場住所") if is_edit else "",
+        address = st.text_input("会場住所", value=ext(existing, CONCERT_ADDRESS_KEYS) if is_edit else "",
                                 placeholder="任意", key=f"{prefix}address")
-        memo    = st.text_area("メモ", value=ext(existing, "メモ") if is_edit else "",
+        memo    = st.text_area("メモ", value=ext(existing, CONCERT_MEMO_KEYS) if is_edit else "",
                                height=80, key=f"{prefix}memo")
 
         label = "更新" if is_edit else "登録"
@@ -241,7 +288,7 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
     """練習の新規登録 / 編集フォーム。"""
     is_edit = existing is not None
     prefix  = f"prac_edit_{existing.get('id','')}_" if is_edit else "prac_new_"
-    ext     = ctx["extract_prop_text"]
+    ext     = ctx["extract_prop_text_any"]
     ext_rel = ctx["extract_relation_ids"]
 
     # 演奏会セレクタ
@@ -250,7 +297,7 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
 
     current_concert_id = ""
     if is_edit:
-        ids = ext_rel(existing, "演奏会")
+        ids = ctx["extract_relation_ids_any"](existing, PRACTICE_CONCERT_REL_KEYS)
         current_concert_id = ids[0] if ids else ""
     current_concert_name = next(
         (k for k, v in concert_options.items() if v == current_concert_id), "（未選択）"
@@ -259,7 +306,7 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
     with st.form(key=f"{prefix}form", border=True):
         name = st.text_input(
             "練習名 *",
-            value=ext(existing, "練習名") if is_edit else "",
+            value=ext(existing, PRACTICE_NAME_KEYS) if is_edit else "",
             placeholder="例：第3回練習",
             key=f"{prefix}name",
         )
@@ -273,7 +320,7 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
 
         col1, col2 = st.columns(2)
         with col1:
-            dt_start_str = ext(existing, "日時") if is_edit else ""
+            dt_start_str = ext(existing, PRACTICE_DATE_KEYS) if is_edit else ""
             dt_start_val = date.fromisoformat(dt_start_str[:10]) if dt_start_str else date.today()
             dt_start = st.date_input("練習日 *", value=dt_start_val, key=f"{prefix}dt_start")
         with col2:
@@ -281,18 +328,18 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
 
         col3, col4 = st.columns(2)
         with col3:
-            venue = st.text_input("会場名", value=ext(existing, "会場名") if is_edit else "",
+            venue = st.text_input("会場名", value=ext(existing, PRACTICE_VENUE_KEYS) if is_edit else "",
                                   placeholder="例：○○スタジオ", key=f"{prefix}venue")
         with col4:
-            address = st.text_input("会場住所", value=ext(existing, "会場住所") if is_edit else "",
+            address = st.text_input("会場住所", value=ext(existing, PRACTICE_ADDRESS_KEYS) if is_edit else "",
                                     placeholder="任意", key=f"{prefix}address")
 
         is_concert_day = st.checkbox(
             "演奏会当日フラグ（本番日の場合はチェック）",
-            value=(ext(existing, "演奏会当日フラグ") == "True") if is_edit else False,
+            value=(ext(existing, PRACTICE_CONCERT_DAY_KEYS) == "True") if is_edit else False,
             key=f"{prefix}concert_day",
         )
-        memo = st.text_area("メモ", value=ext(existing, "メモ") if is_edit else "",
+        memo = st.text_area("メモ", value=ext(existing, PRACTICE_MEMO_KEYS) if is_edit else "",
                             height=80, key=f"{prefix}memo")
 
         label = "更新" if is_edit else "登録"
@@ -389,12 +436,12 @@ def render(ctx: dict):
 
             # 日付順ソート
             def _prac_date(p):
-                d = ctx["extract_prop_text"](p, "日時")
+                d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
                 return d[:10] if d else "9999"
 
             for p in sorted(practices, key=_prac_date):
                 label = _practice_display_name(p, ctx)
-                is_concert_day = ctx["extract_prop_text"](p, "演奏会当日フラグ") == "True"
+                is_concert_day = ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS) == "True"
                 if is_concert_day:
                     label = "🎼 " + label + "  【本番】"
                 with st.expander(label, expanded=False):

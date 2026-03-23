@@ -23,32 +23,46 @@ def get_concert_secrets() -> dict:
     """secrets.toml から Concert 用設定を取得する。
     APIトークンは ArtéMis と共用（NOTION_API_KEY）。
     """
-    required_keys = [
-        "NOTION_API_KEY",
-        "CONCERT_DB_CONCERT",
-        "CONCERT_DB_PRACTICE",
-        "CONCERT_DB_SONG",
-        "CONCERT_DB_INSTRUMENT",
-        "CONCERT_DB_SONG_INSTRUMENT",
-        "CONCERT_DB_PLAYER",
-        "CONCERT_DB_ATTENDANCE",
-        "CONCERT_DB_PLAYER_INSTRUMENT",
-        "CONCERT_DB_RENTAL",
-    ]
+    required_keys = ["NOTION_API_KEY"]
     missing = [k for k in required_keys if k not in st.secrets]
     if missing:
         raise KeyError(f"secrets.toml に以下のキーが見つかりません: {missing}")
+    # 既存 ArtéMis DB を優先的に流用し、未設定時のみ Concert 専用DBへフォールバックする
+    db_concert = st.secrets.get("NOTION_DB_ID") or st.secrets.get("CONCERT_DB_CONCERT", "")
+    db_song = st.secrets.get("NOTION_SCORE_DB_ID") or st.secrets.get("CONCERT_DB_SONG", "")
+    db_player = st.secrets.get("NOTION_PERFORMER_DB_ID") or st.secrets.get("CONCERT_DB_PLAYER", "")
+    db_attendance = st.secrets.get("NOTION_PERFORMANCE_CAST_DB_ID") or st.secrets.get("CONCERT_DB_ATTENDANCE", "")
+    db_player_instrument = st.secrets.get("NOTION_SONG_ASSIGN_DB_ID") or st.secrets.get("CONCERT_DB_PLAYER_INSTRUMENT", "")
+    # 以下は現時点では Concert 専用DBを使用（既存と責務分離）
+    db_practice = st.secrets.get("CONCERT_DB_PRACTICE", "")
+    db_instrument = st.secrets.get("CONCERT_DB_INSTRUMENT", "")
+    db_song_instrument = st.secrets.get("CONCERT_DB_SONG_INSTRUMENT", "")
+    db_rental = st.secrets.get("CONCERT_DB_RENTAL", "")
+    required_db = {
+        "演奏会DB": db_concert,
+        "練習DB": db_practice,
+        "楽曲DB": db_song,
+        "楽器種別DB": db_instrument,
+        "曲別必要楽器DB": db_song_instrument,
+        "奏者DB": db_player,
+        "出欠DB": db_attendance,
+        "楽器アサインDB": db_player_instrument,
+        "レンタルDB": db_rental,
+    }
+    missing_db = [name for name, val in required_db.items() if not val]
+    if missing_db:
+        raise KeyError(f"secrets.toml のDB ID設定が不足しています: {', '.join(missing_db)}")
     return {
         "api_key":              st.secrets["NOTION_API_KEY"],  # ArtéMis と共用
-        "db_concert":          st.secrets["CONCERT_DB_CONCERT"],
-        "db_practice":         st.secrets["CONCERT_DB_PRACTICE"],
-        "db_song":             st.secrets["CONCERT_DB_SONG"],
-        "db_instrument":       st.secrets["CONCERT_DB_INSTRUMENT"],
-        "db_song_instrument":  st.secrets["CONCERT_DB_SONG_INSTRUMENT"],
-        "db_player":           st.secrets["CONCERT_DB_PLAYER"],
-        "db_attendance":       st.secrets["CONCERT_DB_ATTENDANCE"],
-        "db_player_instrument":st.secrets["CONCERT_DB_PLAYER_INSTRUMENT"],
-        "db_rental":           st.secrets["CONCERT_DB_RENTAL"],
+        "db_concert":          db_concert,
+        "db_practice":         db_practice,
+        "db_song":             db_song,
+        "db_instrument":       db_instrument,
+        "db_song_instrument":  db_song_instrument,
+        "db_player":           db_player,
+        "db_attendance":       db_attendance,
+        "db_player_instrument":db_player_instrument,
+        "db_rental":           db_rental,
     }
 
 
@@ -231,6 +245,43 @@ def extract_relation_ids(page: dict, prop_name: str) -> list[str]:
     return [(r.get("id") or "") for r in (meta.get("relation") or []) if r.get("id")]
 
 
+def find_prop_name(type_map: dict, candidates: list[str]) -> str:
+    """候補名リストから、DBに存在する最初のプロパティ名を返す。"""
+    if not type_map:
+        return ""
+    for key in candidates:
+        if key in type_map:
+            return key
+    return ""
+
+
+def extract_prop_text_any(page: dict, candidates: list[str]) -> str:
+    """候補名リストのうち最初に見つかったプロパティの文字列値を返す。"""
+    for key in candidates:
+        v = extract_prop_text(page, key)
+        if v != "":
+            return v
+    return ""
+
+
+def extract_relation_ids_any(page: dict, candidates: list[str]) -> list[str]:
+    """候補名リストのうち最初に見つかったrelation ID配列を返す。"""
+    for key in candidates:
+        ids = extract_relation_ids(page, key)
+        if ids:
+            return ids
+    return []
+
+
+def put_concert_prop_any(props: dict, type_map: dict, candidates: list[str], value) -> str:
+    """候補名リストのうちDBに存在する最初のプロパティへ値を書き込む。"""
+    key = find_prop_name(type_map, candidates)
+    if not key:
+        return ""
+    put_concert_prop(props, type_map, key, value)
+    return key
+
+
 # ============================================================
 # ctx ビルダー
 # ============================================================
@@ -277,4 +328,8 @@ def build_concert_ctx() -> dict:
         "extract_title":               extract_concert_title,
         "extract_prop_text":           extract_prop_text,
         "extract_relation_ids":        extract_relation_ids,
+        "find_prop_name":              find_prop_name,
+        "extract_prop_text_any":       extract_prop_text_any,
+        "extract_relation_ids_any":    extract_relation_ids_any,
+        "put_prop_any":                put_concert_prop_any,
     }
