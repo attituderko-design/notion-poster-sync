@@ -13,10 +13,19 @@ from collections import defaultdict
 # 定数
 # ============================================================
 
-PRIORITY_OPTIONS = ["なし", "第1希望", "第2希望", "第3希望", "降り番希望", "絶対NG"]
-PRIORITY_TO_INT  = {"第1希望": 1, "第2希望": 2, "第3希望": 3, "降り番希望": 0, "絶対NG": -1, "なし": None}
-INT_TO_PRIORITY  = {1: "第1希望", 2: "第2希望", 3: "第3希望", 0: "降り番希望", -1: "絶対NG"}
-SCORE_LABEL      = {3.0: "第1希望", 2.0: "第2希望", 1.0: "第3希望", 0.5: "フォールバック", 0.0: "降り番希望", -9999.0: "絶対NG"}
+PRIORITY_OPTIONS = ["第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
+PRIORITY_TO_INT  = {
+    "第1希望": 1,
+    "第2希望": 2,
+    "第3希望": 3,
+    "希望なし/降り番でも可": 0,
+    "降り番希望": 0,  # 旧ラベル互換
+    "NG": -1,
+    "絶対NG": -1,      # 旧ラベル互換
+    "なし": None,      # 旧データ互換
+}
+INT_TO_PRIORITY  = {1: "第1希望", 2: "第2希望", 3: "第3希望", 0: "希望なし/降り番でも可", -1: "NG"}
+SCORE_LABEL      = {3.0: "第1希望", 2.0: "第2希望", 1.0: "第3希望", 0.5: "フォールバック", 0.0: "希望なし/降り番でも可", -9999.0: "NG"}
 
 CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE", "メディア", "種類"]
 CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
@@ -30,6 +39,8 @@ PREF_INST_REL_KEYS = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"
 PREF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
 PREF_PART_REL_KEYS = ["パート", "パート定義", "FKパート"]
 PREF_PRIORITY_KEYS = ["希望順位", "優先度", "希望", "希望区分"]
+PARTICIPANT_CONCERT_REL_KEYS = ["出演", "演奏会", "FK演奏会", "演奏会参加者"]
+PARTICIPANT_PLAYER_REL_KEYS = ["出演者", "奏者", "FK奏者", "演奏会参加者"]
 
 
 # ============================================================
@@ -103,6 +114,17 @@ def _load_players(ctx) -> list[dict]:
     if "player_list" not in st.session_state:
         st.session_state["player_list"] = ctx["query_all"](ctx["CONCERT_DB_PLAYER"])
     return st.session_state.get("player_list", [])
+
+
+def _load_participants(ctx, concert_id: str) -> list[dict]:
+    key = f"participant_list_{concert_id}"
+    if key not in st.session_state:
+        db_id = ctx["CONCERT_DB_PARTICIPANT"]
+        t = ctx["get_prop_types"](db_id)
+        rel = ctx["find_prop_name"](t, PARTICIPANT_CONCERT_REL_KEYS)
+        f = {"filter": {"property": rel, "relation": {"contains": concert_id}}} if rel else None
+        st.session_state[key] = ctx["query_all"](db_id, f)
+    return st.session_state.get(key, [])
 
 
 def _load_songs(ctx, concert_id: str) -> list[dict]:
@@ -194,7 +216,7 @@ def _save_preference(ctx, player_id: str, player_name: str,
     if part_key:
         ctx["put_prop"](props, type_map, part_key, part_id)
     if pri_key:
-        ctx["put_prop"](props, type_map, pri_key, INT_TO_PRIORITY.get(priority_int, "なし"))
+        ctx["put_prop"](props, type_map, pri_key, INT_TO_PRIORITY.get(priority_int, "希望なし/降り番でも可"))
 
     if existing_id:
         res = ctx["api_request"]("patch",
@@ -322,6 +344,21 @@ def _render_pref_tab(ctx: dict):
         st.info("この演奏会に楽曲が登録されていません。")
         return
 
+    # 演奏会参加者DBに紐づいた奏者のみを希望入力対象にする
+    participant_rows = _load_participants(ctx, concert_id)
+    player_ids_in_concert: set[str] = set()
+    for row in participant_rows:
+        player_ids_in_concert.update(ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS))
+
+    if not player_ids_in_concert:
+        st.info("この演奏会の参加者が未登録です。先に「出欠入力」で参加者を保存してください。")
+        return
+
+    players = [p for p in players if p.get("id", "") in player_ids_in_concert]
+    if not players:
+        st.info("この演奏会に紐づく奏者が見つかりませんでした。参加者DBのリレーションを確認してください。")
+        return
+
     # 楽器マスタ
     inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
     inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
@@ -357,7 +394,7 @@ def _render_pref_tab(ctx: dict):
         with st.expander(f"🎵 {sname}", expanded=True):
             with st.form(f"pref_form_{player_id}_{sid}", border=True):
                 changes = []
-                for si in si_rows:
+                for si_idx, si in enumerate(si_rows):
                     part_id = si.get("id", "")
                     iids = ctx["extract_relation_ids_any"](si, PARTDEF_INST_REL_KEYS)
                     iid   = iids[0] if iids else ""
@@ -367,9 +404,9 @@ def _render_pref_tab(ctx: dict):
                     label = f"{pname}（{note}）" if note else pname
 
                     existing = pi_lookup.get((player_id, sid, part_id))
-                    cur_priority_str = ctx["extract_prop_text_any"](existing, PREF_PRIORITY_KEYS) if existing else "なし"
+                    cur_priority_str = ctx["extract_prop_text_any"](existing, PREF_PRIORITY_KEYS) if existing else "希望なし/降り番でも可"
                     if cur_priority_str not in PRIORITY_OPTIONS:
-                        cur_priority_str = "なし"
+                        cur_priority_str = "希望なし/降り番でも可"
                     cur_idx = PRIORITY_OPTIONS.index(cur_priority_str)
 
                     col_inst, col_sel = st.columns([3, 2])
@@ -377,7 +414,7 @@ def _render_pref_tab(ctx: dict):
                     priority_sel = col_sel.selectbox(
                         label, PRIORITY_OPTIONS, index=cur_idx,
                         label_visibility="collapsed",
-                        key=f"pref_sel_{player_id}_{sid}_{iid}",
+                        key=f"pref_sel_{player_id}_{sid}_{part_id or 'no_part'}_{si_idx}",
                     )
                     changes.append({
                         "iid":         iid,
@@ -574,7 +611,7 @@ def _render_assignment_html(items: list[dict], pref_map: dict) -> str:
         "第2希望":      ("background:#E1F5EE;color:#085041", "第2希望"),
         "第3希望":      ("background:#FAEEDA;color:#633806", "第3希望"),
         "フォールバック":("background:#FCEBEB;color:#A32D2D", "FB"),
-        "降り番希望":   ("background:#F1EFE8;color:#5F5E5A", "降り番"),
+        "希望なし/降り番でも可":   ("background:#F1EFE8;color:#5F5E5A", "降り番"),
     }
     rows_html = ""
     for a in items:
@@ -587,7 +624,7 @@ def _render_assignment_html(items: list[dict], pref_map: dict) -> str:
             hope = "フォールバック"
             sc   = 0.5
         else:
-            hope = "降り番希望"
+            hope = "希望なし/降り番でも可"
             sc   = 0.0
 
         badge_style, badge_text = BADGE.get(hope, ("background:#F1EFE8;color:#5F5E5A", hope))
