@@ -20,9 +20,11 @@ _RETRY_STATUSES = {429, 500, 502, 503}
 # ============================================================
 
 def get_concert_secrets() -> dict:
-    """secrets.toml から Concert 用設定を取得する。"""
+    """secrets.toml から Concert 用設定を取得する。
+    APIトークンは ArtéMis と共用（NOTION_API_KEY）。
+    """
     required_keys = [
-        "NOTION_CONCERT_API_KEY",
+        "NOTION_API_KEY",
         "CONCERT_DB_CONCERT",
         "CONCERT_DB_PRACTICE",
         "CONCERT_DB_SONG",
@@ -37,7 +39,7 @@ def get_concert_secrets() -> dict:
     if missing:
         raise KeyError(f"secrets.toml に以下のキーが見つかりません: {missing}")
     return {
-        "api_key":              st.secrets["NOTION_CONCERT_API_KEY"],
+        "api_key":              st.secrets["NOTION_API_KEY"],  # ArtéMis と共用
         "db_concert":          st.secrets["CONCERT_DB_CONCERT"],
         "db_practice":         st.secrets["CONCERT_DB_PRACTICE"],
         "db_song":             st.secrets["CONCERT_DB_SONG"],
