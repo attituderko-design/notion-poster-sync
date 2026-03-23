@@ -1,13 +1,37 @@
 """
 concert.pages.players
 奏者の登録・出欠入力・楽器アサイン画面。
+既存ArtéMis DBのプロパティ名ゆれに対応。
 """
 import streamlit as st
 
+PLAYER_NAME_KEYS = ["氏名", "名前", "表示名", "タイトル"]
+PLAYER_EMAIL_KEYS = ["メールアドレス", "Email", "email"]
+PLAYER_MEMO_KEYS = ["メモ", "備考"]
 
-# ============================================================
-# キャッシュ／ロードヘルパー
-# ============================================================
+CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
+CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
+
+PRACTICE_NAME_KEYS = ["練習名", "タイトル", "PK練習名"]
+PRACTICE_DATE_KEYS = ["日時", "日付"]
+PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ"]
+PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
+
+INSTRUMENT_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
+
+ATT_RECORD_KEYS = ["レコード名", "タイトル"]
+ATT_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者"]
+ATT_PRACTICE_REL_KEYS = ["練習", "演奏会", "出演", "FK練習"]
+ATT_STATUS_KEYS = ["参加可否", "出欠", "参加状況"]
+ATT_NOTE_KEYS = ["備考", "メモ"]
+
+PI_RECORD_KEYS = ["レコード名", "タイトル"]
+PI_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者"]
+PI_INST_REL_KEYS = ["楽器種別", "楽器", "担当楽器", "FK楽器種別"]
+PI_ASSIGN_KEYS = ["担当フラグ", "担当", "担当有無"]
+PI_BRING_KEYS = ["持参可フラグ", "持参可", "持参"]
+PI_NOTE_KEYS = ["備考", "メモ"]
+
 
 def _clear_player_cache():
     for k in list(st.session_state.keys()):
@@ -30,7 +54,12 @@ def _load_concerts(ctx) -> list[dict]:
 def _load_practices(ctx, concert_id: str) -> list[dict]:
     key = f"practice_list_{concert_id}"
     if key not in st.session_state:
-        f = {"filter": {"property": "演奏会", "relation": {"contains": concert_id}}} if concert_id else None
+        f = None
+        if concert_id:
+            t = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"])
+            rel = ctx["find_prop_name"](t, PRACTICE_CONCERT_REL_KEYS)
+            if rel:
+                f = {"filter": {"property": rel, "relation": {"contains": concert_id}}}
         st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"], f)
     return st.session_state.get(key, [])
 
@@ -44,432 +73,266 @@ def _load_instruments(ctx) -> list[dict]:
 def _load_attendance(ctx, practice_id: str) -> list[dict]:
     key = f"attendance_list_{practice_id}"
     if key not in st.session_state:
-        rows = ctx["query_all"](
-            ctx["CONCERT_DB_ATTENDANCE"],
-            {"filter": {"property": "練習", "relation": {"contains": practice_id}}},
-        )
-        st.session_state[key] = rows
+        t = ctx["get_prop_types"](ctx["CONCERT_DB_ATTENDANCE"])
+        rel = ctx["find_prop_name"](t, ATT_PRACTICE_REL_KEYS)
+        f = {"filter": {"property": rel, "relation": {"contains": practice_id}}} if rel else None
+        st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], f)
     return st.session_state.get(key, [])
 
 
 def _load_player_instruments(ctx, player_id: str) -> list[dict]:
     key = f"pi_list_{player_id}"
     if key not in st.session_state:
-        rows = ctx["query_all"](
-            ctx["CONCERT_DB_PLAYER_INSTRUMENT"],
-            {"filter": {"property": "奏者", "relation": {"contains": player_id}}},
-        )
-        st.session_state[key] = rows
+        t = ctx["get_prop_types"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"])
+        rel = ctx["find_prop_name"](t, PI_PLAYER_REL_KEYS)
+        f = {"filter": {"property": rel, "relation": {"contains": player_id}}} if rel else None
+        st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"], f)
     return st.session_state.get(key, [])
 
 
 def _player_name(p: dict, ctx: dict) -> str:
-    return ctx["extract_prop_text"](p, "氏名") or ctx["extract_title"](p) or p.get("id", "")
+    return ctx["extract_prop_text_any"](p, PLAYER_NAME_KEYS) or ctx["extract_title"](p) or p.get("id", "")
 
 
 def _concert_name(c: dict, ctx: dict) -> str:
-    n = ctx["extract_prop_text"](c, "名称") or ctx["extract_title"](c)
-    dt = ctx["extract_prop_text"](c, "日時")
-    return f"{n}（{dt[:10] if dt else '日時未設定'}）"
+    n = ctx["extract_prop_text_any"](c, CONCERT_NAME_KEYS) or ctx["extract_title"](c)
+    d = ctx["extract_prop_text_any"](c, CONCERT_DATE_KEYS)
+    return f"{n}（{d[:10] if d else '日時未設定'}）"
 
 
 def _practice_name(p: dict, ctx: dict) -> str:
-    n = ctx["extract_prop_text"](p, "練習名") or ctx["extract_title"](p)
-    dt = ctx["extract_prop_text"](p, "日時")
-    suffix = "【本番】" if ctx["extract_prop_text"](p, "演奏会当日フラグ") == "True" else ""
-    return f"{n}（{dt[:10] if dt else ''}）{suffix}"
+    n = ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or ctx["extract_title"](p)
+    d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
+    suffix = "【本番】" if ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS) == "True" else ""
+    return f"{n}（{d[:10] if d else ''}）{suffix}"
 
 
 def _instrument_name(i: dict, ctx: dict) -> str:
-    return ctx["extract_prop_text"](i, "楽器名") or ctx["extract_title"](i) or i.get("id", "")
+    return ctx["extract_prop_text_any"](i, INSTRUMENT_NAME_KEYS) or ctx["extract_title"](i) or i.get("id", "")
 
-
-# ============================================================
-# 奏者 CRUD
-# ============================================================
 
 def _create_player(ctx: dict, name: str, email: str, memo: str) -> bool:
-    db_id    = ctx["CONCERT_DB_PLAYER"]
-    type_map = ctx["get_prop_types"](db_id)
-    if not type_map:
+    db_id = ctx["CONCERT_DB_PLAYER"]
+    t = ctx["get_prop_types"](db_id)
+    if not t:
         st.error("奏者DBのプロパティ取得に失敗しました。")
         return False
-    props: dict = {}
-    ctx["put_prop"](props, type_map, "氏名", name)
-    ctx["put_prop"](props, type_map, "メールアドレス", email)
-    ctx["put_prop"](props, type_map, "メモ", memo)
-    res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
-                             json={"parent": {"database_id": db_id}, "properties": props})
+    props = {}
+    ctx["put_prop_any"](props, t, PLAYER_NAME_KEYS, name)
+    ctx["put_prop_any"](props, t, PLAYER_EMAIL_KEYS, email)
+    ctx["put_prop_any"](props, t, PLAYER_MEMO_KEYS, memo)
+    res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
 
 
 def _update_player(ctx: dict, page_id: str, name: str, email: str, memo: str) -> bool:
-    type_map = ctx["get_prop_types"](ctx["CONCERT_DB_PLAYER"])
-    props: dict = {}
-    ctx["put_prop"](props, type_map, "氏名", name)
-    ctx["put_prop"](props, type_map, "メールアドレス", email)
-    ctx["put_prop"](props, type_map, "メモ", memo)
-    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
-                             json={"properties": props})
+    t = ctx["get_prop_types"](ctx["CONCERT_DB_PLAYER"])
+    props = {}
+    ctx["put_prop_any"](props, t, PLAYER_NAME_KEYS, name)
+    ctx["put_prop_any"](props, t, PLAYER_EMAIL_KEYS, email)
+    ctx["put_prop_any"](props, t, PLAYER_MEMO_KEYS, memo)
+    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
     return res is not None and res.status_code == 200
 
 
-# ============================================================
-# 出欠 CRUD
-# ============================================================
-
-def _upsert_attendance(ctx: dict, player_id: str, player_name: str,
-                       practice_id: str, practice_name: str,
-                       status: str, note: str,
-                       existing_id: str = "") -> bool:
-    """出欠レコードの新規作成 or 更新。existing_id があれば PATCH。"""
-    db_id    = ctx["CONCERT_DB_ATTENDANCE"]
-    type_map = ctx["get_prop_types"](db_id)
-    if not type_map:
+def _upsert_attendance(ctx: dict, player_id: str, player_name: str, practice_id: str, practice_name: str, status: str, note: str, existing_id: str = "") -> bool:
+    db_id = ctx["CONCERT_DB_ATTENDANCE"]
+    t = ctx["get_prop_types"](db_id)
+    if not t:
         st.error("出欠DBのプロパティ取得に失敗しました。")
         return False
-
-    props: dict = {}
-    ctx["put_prop"](props, type_map, "レコード名", f"{player_name} × {practice_name}")
-    ctx["put_prop"](props, type_map, "奏者", player_id)
-    ctx["put_prop"](props, type_map, "練習", practice_id)
-    ctx["put_prop"](props, type_map, "参加可否", status)
-    ctx["put_prop"](props, type_map, "備考", note)
-
+    props = {}
+    ctx["put_prop_any"](props, t, ATT_RECORD_KEYS, f"{player_name} × {practice_name}")
+    ctx["put_prop_any"](props, t, ATT_PLAYER_REL_KEYS, player_id)
+    ctx["put_prop_any"](props, t, ATT_PRACTICE_REL_KEYS, practice_id)
+    ctx["put_prop_any"](props, t, ATT_STATUS_KEYS, status)
+    ctx["put_prop_any"](props, t, ATT_NOTE_KEYS, note)
     if existing_id:
-        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}",
-                                 json={"properties": props})
+        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
     else:
-        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
-                                 json={"parent": {"database_id": db_id}, "properties": props})
+        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
 
 
-# ============================================================
-# 楽器アサイン CRUD
-# ============================================================
-
-def _upsert_player_instrument(ctx: dict, player_id: str, player_name: str,
-                               instrument_id: str, instrument_name: str,
-                               is_assign: bool, can_bring: bool, note: str,
-                               existing_id: str = "") -> bool:
-    db_id    = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
-    type_map = ctx["get_prop_types"](db_id)
-    if not type_map:
+def _upsert_player_instrument(ctx: dict, player_id: str, player_name: str, instrument_id: str, instrument_name: str, is_assign: bool, can_bring: bool, note: str, existing_id: str = "") -> bool:
+    db_id = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
+    t = ctx["get_prop_types"](db_id)
+    if not t:
         st.error("楽器アサインDBのプロパティ取得に失敗しました。")
         return False
-
-    props: dict = {}
-    ctx["put_prop"](props, type_map, "レコード名", f"{player_name} × {instrument_name}")
-    ctx["put_prop"](props, type_map, "奏者", player_id)
-    ctx["put_prop"](props, type_map, "楽器種別", instrument_id)
-    ctx["put_prop"](props, type_map, "担当フラグ", is_assign)
-    ctx["put_prop"](props, type_map, "持参可フラグ", can_bring)
-    ctx["put_prop"](props, type_map, "備考", note)
-
+    props = {}
+    ctx["put_prop_any"](props, t, PI_RECORD_KEYS, f"{player_name} × {instrument_name}")
+    ctx["put_prop_any"](props, t, PI_PLAYER_REL_KEYS, player_id)
+    ctx["put_prop_any"](props, t, PI_INST_REL_KEYS, instrument_id)
+    ctx["put_prop_any"](props, t, PI_ASSIGN_KEYS, is_assign)
+    ctx["put_prop_any"](props, t, PI_BRING_KEYS, can_bring)
+    ctx["put_prop_any"](props, t, PI_NOTE_KEYS, note)
     if existing_id:
-        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}",
-                                 json={"properties": props})
+        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
     else:
-        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
-                                 json={"parent": {"database_id": db_id}, "properties": props})
+        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
 
-
-def _delete_page(ctx: dict, page_id: str) -> bool:
-    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
-                             json={"archived": True})
-    return res is not None and res.status_code == 200
-
-
-# ============================================================
-# 奏者タブ
-# ============================================================
 
 def _render_player_tab(ctx: dict):
     players = _load_players(ctx)
-
     with st.expander("➕ 新規奏者を登録", expanded=(len(players) == 0)):
         with st.form("player_new_form", border=True):
-            name  = st.text_input("氏名 *", placeholder="例：山田 太郎", key="player_new_name")
-            email = st.text_input("メールアドレス", placeholder="任意", key="player_new_email")
-            memo  = st.text_area("メモ", height=60, key="player_new_memo")
+            name = st.text_input("氏名 *", placeholder="例：山田 太郎")
+            email = st.text_input("メールアドレス", placeholder="任意")
+            memo = st.text_area("メモ", height=60)
             if st.form_submit_button("💾 登録", use_container_width=True, type="primary"):
                 if not name.strip():
                     st.error("氏名は必須です。")
+                elif _create_player(ctx, name.strip(), email, memo):
+                    st.success("✅ 奏者を登録しました。")
+                    _clear_player_cache()
+                    st.rerun()
                 else:
-                    with st.spinner("登録中..."):
-                        ok = _create_player(ctx, name.strip(), email, memo)
-                    if ok:
-                        st.success("✅ 奏者を登録しました。")
-                        _clear_player_cache()
-                        st.rerun()
-                    else:
-                        st.error("❌ 登録に失敗しました。")
-
+                    st.error("❌ 登録に失敗しました。")
     st.divider()
-
     if not players:
         st.info("奏者がまだ登録されていません。")
         return
-
-    col_h, col_r = st.columns([8, 1])
-    col_h.subheader(f"登録済み奏者（{len(players)}件）")
-    if col_r.button("🔄", key="refresh_players", help="再読み込み"):
-        st.session_state.pop("player_list", None)
-        st.rerun()
-
+    st.subheader(f"登録済み奏者（{len(players)}件）")
     for p in sorted(players, key=lambda x: _player_name(x, ctx)):
-        name_label = _player_name(p, ctx)
-        with st.expander(name_label, expanded=False):
-            pid = p.get("id", "")
-            ext = ctx["extract_prop_text"]
+        pid = p.get("id", "")
+        with st.expander(_player_name(p, ctx), expanded=False):
             with st.form(f"player_edit_{pid}", border=True):
-                name  = st.text_input("氏名 *", value=ext(p, "氏名"), key=f"pe_name_{pid}")
-                email = st.text_input("メールアドレス", value=ext(p, "メールアドレス"), key=f"pe_email_{pid}")
-                memo  = st.text_area("メモ", value=ext(p, "メモ"), height=60, key=f"pe_memo_{pid}")
+                name = st.text_input("氏名 *", value=ctx["extract_prop_text_any"](p, PLAYER_NAME_KEYS))
+                email = st.text_input("メールアドレス", value=ctx["extract_prop_text_any"](p, PLAYER_EMAIL_KEYS))
+                memo = st.text_area("メモ", value=ctx["extract_prop_text_any"](p, PLAYER_MEMO_KEYS), height=60)
                 if st.form_submit_button("💾 更新", use_container_width=True):
                     if not name.strip():
                         st.error("氏名は必須です。")
+                    elif _update_player(ctx, pid, name.strip(), email, memo):
+                        st.success("✅ 更新しました。")
+                        _clear_player_cache()
+                        st.rerun()
                     else:
-                        with st.spinner("更新中..."):
-                            ok = _update_player(ctx, pid, name.strip(), email, memo)
-                        if ok:
-                            st.success("✅ 更新しました。")
-                            _clear_player_cache()
-                            st.rerun()
-                        else:
-                            st.error("❌ 更新に失敗しました。")
+                        st.error("❌ 更新に失敗しました。")
 
-
-# ============================================================
-# 出欠タブ
-# ============================================================
 
 def _render_attendance_tab(ctx: dict):
     concerts = _load_concerts(ctx)
     if not concerts:
         st.info("先に演奏会を登録してください。")
         return
-
-    concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
-    selected_concert = st.selectbox("演奏会を選択", list(concert_opts.keys()), key="att_concert_sel")
-    concert_id = concert_opts.get(selected_concert, "")
-    if not concert_id:
+    c_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
+    c_name = st.selectbox("演奏会を選択", list(c_opts.keys()), key="att_concert_sel")
+    c_id = c_opts.get(c_name, "")
+    if not c_id:
         return
-
-    practices = _load_practices(ctx, concert_id)
+    practices = _load_practices(ctx, c_id)
     if not practices:
         st.info("この演奏会に練習が登録されていません。")
         return
 
-    def _prac_date(p):
-        d = ctx["extract_prop_text"](p, "日時")
-        return d[:10] if d else "9999"
+    def _d(p):
+        x = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
+        return x[:10] if x else "9999"
 
-    practice_opts = {_practice_name(p, ctx): p.get("id", "")
-                     for p in sorted(practices, key=_prac_date)}
-    selected_practice = st.selectbox("練習日を選択", list(practice_opts.keys()), key="att_practice_sel")
-    practice_id = practice_opts.get(selected_practice, "")
-    if not practice_id:
+    p_opts = {_practice_name(p, ctx): p.get("id", "") for p in sorted(practices, key=_d)}
+    p_name = st.selectbox("練習日を選択", list(p_opts.keys()), key="att_practice_sel")
+    p_id = p_opts.get(p_name, "")
+    if not p_id:
         return
 
-    players   = _load_players(ctx)
-    if not players:
-        st.info("先に奏者を登録してください。")
-        return
-
-    # この練習日の出欠レコードを取得し、奏者IDで引けるようにする
-    att_rows  = _load_attendance(ctx, practice_id)
-    att_by_player: dict[str, dict] = {}
-    for row in att_rows:
-        pids = ctx["extract_relation_ids"](row, "奏者")
+    players = _load_players(ctx)
+    att = _load_attendance(ctx, p_id)
+    by_player = {}
+    for row in att:
+        pids = ctx["extract_relation_ids_any"](row, ATT_PLAYER_REL_KEYS)
         if pids:
-            att_by_player[pids[0]] = row
+            by_player[pids[0]] = row
 
-    st.subheader(f"出欠入力：{selected_practice}")
-    st.caption("変更後「保存」を押してください。")
-
-    STATUS_OPTIONS = ["○", "×", "△"]
-
-    with st.form(f"attendance_form_{practice_id}", border=True):
-        changes: list[dict] = []
+    statuses = ["○", "×", "△"]
+    with st.form(f"attendance_form_{p_id}", border=True):
+        changes = []
         for pl in sorted(players, key=lambda x: _player_name(x, ctx)):
-            pid   = pl.get("id", "")
+            pid = pl.get("id", "")
             pname = _player_name(pl, ctx)
-            existing = att_by_player.get(pid)
-            current_status = ctx["extract_prop_text"](existing, "参加可否") if existing else "△"
-            current_note   = ctx["extract_prop_text"](existing, "備考") if existing else ""
-            if current_status not in STATUS_OPTIONS:
-                current_status = "△"
-
-            col_name, col_status, col_note = st.columns([3, 2, 5])
-            col_name.markdown(f"**{pname}**")
-            status = col_status.radio(
-                pname,
-                STATUS_OPTIONS,
-                index=STATUS_OPTIONS.index(current_status),
-                horizontal=True,
-                label_visibility="collapsed",
-                key=f"att_status_{practice_id}_{pid}",
-            )
-            note = col_note.text_input(
-                "備考",
-                value=current_note,
-                placeholder="遅刻・早退等",
-                label_visibility="collapsed",
-                key=f"att_note_{practice_id}_{pid}",
-            )
-            changes.append({
-                "player_id":   pid,
-                "player_name": pname,
-                "status":      status,
-                "note":        note,
-                "existing_id": existing.get("id", "") if existing else "",
-            })
-
-        submitted = st.form_submit_button("💾 出欠を保存", use_container_width=True, type="primary")
-
-    if submitted:
-        practice_label = selected_practice
-        success, fail = 0, 0
-        with st.spinner("保存中..."):
+            ex = by_player.get(pid)
+            cur_s = ctx["extract_prop_text_any"](ex, ATT_STATUS_KEYS) if ex else "△"
+            cur_n = ctx["extract_prop_text_any"](ex, ATT_NOTE_KEYS) if ex else ""
+            if cur_s not in statuses:
+                cur_s = "△"
+            c1, c2, c3 = st.columns([3, 2, 5])
+            c1.markdown(f"**{pname}**")
+            s = c2.radio(pname, statuses, index=statuses.index(cur_s), horizontal=True, label_visibility="collapsed", key=f"att_{p_id}_{pid}")
+            n = c3.text_input("備考", value=cur_n, label_visibility="collapsed", key=f"att_note_{p_id}_{pid}")
+            changes.append({"player_id": pid, "player_name": pname, "status": s, "note": n, "existing_id": ex.get("id", "") if ex else ""})
+        if st.form_submit_button("💾 出欠を保存", use_container_width=True, type="primary"):
+            ok_n, ng_n = 0, 0
             for ch in changes:
-                ok = _upsert_attendance(
-                    ctx,
-                    player_id=ch["player_id"],
-                    player_name=ch["player_name"],
-                    practice_id=practice_id,
-                    practice_name=practice_label,
-                    status=ch["status"],
-                    note=ch["note"],
-                    existing_id=ch["existing_id"],
-                )
-                if ok:
-                    success += 1
-                else:
-                    fail += 1
-
-        if fail == 0:
-            st.success(f"✅ {success}件の出欠を保存しました。")
-            st.session_state.pop(f"attendance_list_{practice_id}", None)
+                ok = _upsert_attendance(ctx, ch["player_id"], ch["player_name"], p_id, p_name, ch["status"], ch["note"], ch["existing_id"])
+                ok_n += 1 if ok else 0
+                ng_n += 0 if ok else 1
+            if ng_n == 0:
+                st.success(f"✅ {ok_n}件の出欠を保存しました。")
+            else:
+                st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗しました。")
+            st.session_state.pop(f"attendance_list_{p_id}", None)
             st.rerun()
-        else:
-            st.warning(f"⚠️ {success}件成功、{fail}件失敗しました。")
-            st.session_state.pop(f"attendance_list_{practice_id}", None)
 
-
-# ============================================================
-# 楽器アサインタブ
-# ============================================================
 
 def _render_assign_tab(ctx: dict):
-    players     = _load_players(ctx)
-    instruments = _load_instruments(ctx)
-
+    players = _load_players(ctx)
+    insts = _load_instruments(ctx)
     if not players:
         st.info("先に奏者を登録してください。")
         return
-    if not instruments:
+    if not insts:
         st.info("先に楽器種別を登録してください（楽曲・楽器管理 画面）。")
         return
-
-    inst_opts = {_instrument_name(i, ctx): i.get("id", "") for i in
-                 sorted(instruments, key=lambda x: _instrument_name(x, ctx))}
-
-    player_opts = {_player_name(p, ctx): p.get("id", "") for p in
-                   sorted(players, key=lambda x: _player_name(x, ctx))}
-
-    selected_player_name = st.selectbox("奏者を選択", list(player_opts.keys()), key="assign_player_sel")
-    player_id = player_opts.get(selected_player_name, "")
-    if not player_id:
+    i_opts = {_instrument_name(i, ctx): i.get("id", "") for i in sorted(insts, key=lambda x: _instrument_name(x, ctx))}
+    p_opts = {_player_name(p, ctx): p.get("id", "") for p in sorted(players, key=lambda x: _player_name(x, ctx))}
+    p_name = st.selectbox("奏者を選択", list(p_opts.keys()), key="assign_player_sel")
+    p_id = p_opts.get(p_name, "")
+    if not p_id:
         return
-
-    pi_rows = _load_player_instruments(ctx, player_id)
-    # 楽器IDで既存レコードを引けるようにする
-    pi_by_inst: dict[str, dict] = {}
-    for row in pi_rows:
-        iids = ctx["extract_relation_ids"](row, "楽器種別")
+    rows = _load_player_instruments(ctx, p_id)
+    by_inst = {}
+    for row in rows:
+        iids = ctx["extract_relation_ids_any"](row, PI_INST_REL_KEYS)
         if iids:
-            pi_by_inst[iids[0]] = row
+            by_inst[iids[0]] = row
 
-    st.subheader(f"楽器アサイン：{selected_player_name}")
-    st.caption("担当フラグ＝この奏者がその楽器パートを担当　持参可フラグ＝実物を持参できる")
-
-    with st.form(f"assign_form_{player_id}", border=True):
-        changes: list[dict] = []
-        for inst_name, inst_id in inst_opts.items():
-            existing = pi_by_inst.get(inst_id)
-            cur_assign = (ctx["extract_prop_text"](existing, "担当フラグ") == "True") if existing else False
-            cur_bring  = (ctx["extract_prop_text"](existing, "持参可フラグ") == "True") if existing else False
-            cur_note   = ctx["extract_prop_text"](existing, "備考") if existing else ""
-
-            col_inst, col_asgn, col_bring, col_note = st.columns([3, 1, 1, 4])
-            col_inst.markdown(f"**{inst_name}**")
-            is_assign = col_asgn.checkbox("担当", value=cur_assign,
-                                          key=f"asgn_assign_{player_id}_{inst_id}")
-            can_bring = col_bring.checkbox("持参可", value=cur_bring,
-                                           key=f"asgn_bring_{player_id}_{inst_id}")
-            note = col_note.text_input("備考", value=cur_note, placeholder="マレット等",
-                                       label_visibility="collapsed",
-                                       key=f"asgn_note_{player_id}_{inst_id}")
-            changes.append({
-                "inst_id":     inst_id,
-                "inst_name":   inst_name,
-                "is_assign":   is_assign,
-                "can_bring":   can_bring,
-                "note":        note,
-                "existing_id": existing.get("id", "") if existing else "",
-            })
-
-        submitted = st.form_submit_button("💾 アサインを保存", use_container_width=True, type="primary")
-
-    if submitted:
-        success, fail = 0, 0
-        with st.spinner("保存中..."):
+    with st.form(f"assign_form_{p_id}", border=True):
+        changes = []
+        for iname, iid in i_opts.items():
+            ex = by_inst.get(iid)
+            cur_a = (ctx["extract_prop_text_any"](ex, PI_ASSIGN_KEYS) == "True") if ex else False
+            cur_b = (ctx["extract_prop_text_any"](ex, PI_BRING_KEYS) == "True") if ex else False
+            cur_n = ctx["extract_prop_text_any"](ex, PI_NOTE_KEYS) if ex else ""
+            c1, c2, c3, c4 = st.columns([3, 1, 1, 4])
+            c1.markdown(f"**{iname}**")
+            a = c2.checkbox("担当", value=cur_a, key=f"a_{p_id}_{iid}")
+            b = c3.checkbox("持参可", value=cur_b, key=f"b_{p_id}_{iid}")
+            n = c4.text_input("備考", value=cur_n, label_visibility="collapsed", key=f"n_{p_id}_{iid}")
+            changes.append({"iid": iid, "iname": iname, "a": a, "b": b, "n": n, "eid": ex.get("id", "") if ex else ""})
+        if st.form_submit_button("💾 アサインを保存", use_container_width=True, type="primary"):
+            ok_n, ng_n = 0, 0
             for ch in changes:
-                # 担当も持参も false で既存レコードなし → スキップ（空レコード作らない）
-                if not ch["is_assign"] and not ch["can_bring"] and not ch["existing_id"]:
+                if not ch["a"] and not ch["b"] and not ch["eid"]:
                     continue
-                ok = _upsert_player_instrument(
-                    ctx,
-                    player_id=player_id,
-                    player_name=selected_player_name,
-                    instrument_id=ch["inst_id"],
-                    instrument_name=ch["inst_name"],
-                    is_assign=ch["is_assign"],
-                    can_bring=ch["can_bring"],
-                    note=ch["note"],
-                    existing_id=ch["existing_id"],
-                )
-                if ok:
-                    success += 1
-                else:
-                    fail += 1
-
-        if fail == 0:
-            st.success(f"✅ {success}件を保存しました。")
-            st.session_state.pop(f"pi_list_{player_id}", None)
+                ok = _upsert_player_instrument(ctx, p_id, p_name, ch["iid"], ch["iname"], ch["a"], ch["b"], ch["n"], ch["eid"])
+                ok_n += 1 if ok else 0
+                ng_n += 0 if ok else 1
+            if ng_n == 0:
+                st.success(f"✅ {ok_n}件を保存しました。")
+            else:
+                st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗しました。")
+            st.session_state.pop(f"pi_list_{p_id}", None)
             st.rerun()
-        else:
-            st.warning(f"⚠️ {success}件成功、{fail}件失敗しました。")
-            st.session_state.pop(f"pi_list_{player_id}", None)
 
-
-# ============================================================
-# メイン描画
-# ============================================================
 
 def render(ctx: dict):
     st.header("🎻 奏者・出欠・アサイン")
-
-    tab_player, tab_attendance, tab_assign = st.tabs(["奏者管理", "出欠入力", "楽器アサイン"])
-
-    with tab_player:
+    t1, t2, t3 = st.tabs(["奏者管理", "出欠入力", "楽器アサイン"])
+    with t1:
         _render_player_tab(ctx)
-
-    with tab_attendance:
+    with t2:
         _render_attendance_tab(ctx)
-
-    with tab_assign:
+    with t3:
         _render_assign_tab(ctx)

@@ -5,6 +5,25 @@ concert.pages.rental
 import streamlit as st
 from concert.services.rental_calc import calc_rental_requirements, calc_rental_for_all_practices
 
+CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
+CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
+
+PRACTICE_NAME_KEYS = ["練習名", "タイトル", "PK練習名"]
+PRACTICE_DATE_KEYS = ["日時", "日付"]
+PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ"]
+PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
+
+INSTRUMENT_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
+
+RENTAL_RECORD_KEYS = ["レコード名", "タイトル", "PKレコード名"]
+RENTAL_INST_REL_KEYS = ["楽器種別", "楽器", "担当楽器", "FK楽器種別"]
+RENTAL_PRACTICE_REL_KEYS = ["練習", "演奏会", "出演", "FK練習"]
+RENTAL_VENDOR_KEYS = ["業者名", "ベンダー", "vendor"]
+RENTAL_QTY_KEYS = ["台数", "数量", "qty"]
+RENTAL_UNIT_PRICE_KEYS = ["単価（円）", "単価", "unit_price"]
+RENTAL_CONFIRMED_KEYS = ["確定フラグ", "確定", "is_confirmed"]
+RENTAL_NOTE_KEYS = ["備考", "メモ"]
+
 
 # ============================================================
 # キャッシュ／ロードヘルパー
@@ -25,7 +44,12 @@ def _load_concerts(ctx) -> list[dict]:
 def _load_practices(ctx, concert_id: str) -> list[dict]:
     key = f"practice_list_{concert_id}"
     if key not in st.session_state:
-        f = {"filter": {"property": "演奏会", "relation": {"contains": concert_id}}} if concert_id else None
+        f = None
+        if concert_id:
+            type_map = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"])
+            rel_name = ctx["find_prop_name"](type_map, PRACTICE_CONCERT_REL_KEYS)
+            if rel_name:
+                f = {"filter": {"property": rel_name, "relation": {"contains": concert_id}}}
         st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"], f)
     return st.session_state.get(key, [])
 
@@ -39,29 +63,31 @@ def _load_instruments(ctx) -> list[dict]:
 def _load_rentals(ctx, practice_id: str) -> list[dict]:
     key = f"rental_list_{practice_id}"
     if key not in st.session_state:
-        rows = ctx["query_all"](
-            ctx["CONCERT_DB_RENTAL"],
-            {"filter": {"property": "練習", "relation": {"contains": practice_id}}},
-        )
+        f = None
+        type_map = ctx["get_prop_types"](ctx["CONCERT_DB_RENTAL"])
+        rel_name = ctx["find_prop_name"](type_map, RENTAL_PRACTICE_REL_KEYS)
+        if rel_name:
+            f = {"filter": {"property": rel_name, "relation": {"contains": practice_id}}}
+        rows = ctx["query_all"](ctx["CONCERT_DB_RENTAL"], f)
         st.session_state[key] = rows
     return st.session_state.get(key, [])
 
 
 def _concert_name(c: dict, ctx: dict) -> str:
-    n  = ctx["extract_prop_text"](c, "名称") or ctx["extract_title"](c)
-    dt = ctx["extract_prop_text"](c, "日時")
+    n  = ctx["extract_prop_text_any"](c, CONCERT_NAME_KEYS) or ctx["extract_title"](c)
+    dt = ctx["extract_prop_text_any"](c, CONCERT_DATE_KEYS)
     return f"{n}（{dt[:10] if dt else '日時未設定'}）"
 
 
 def _practice_name(p: dict, ctx: dict) -> str:
-    n  = ctx["extract_prop_text"](p, "練習名") or ctx["extract_title"](p)
-    dt = ctx["extract_prop_text"](p, "日時")
-    suffix = "　🎼【本番】" if ctx["extract_prop_text"](p, "演奏会当日フラグ") == "True" else ""
+    n  = ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or ctx["extract_title"](p)
+    dt = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
+    suffix = "　🎼【本番】" if ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS) == "True" else ""
     return f"{n}（{dt[:10] if dt else ''}）{suffix}"
 
 
 def _instrument_name(i: dict, ctx: dict) -> str:
-    return ctx["extract_prop_text"](i, "楽器名") or ctx["extract_title"](i) or i.get("id", "")
+    return ctx["extract_prop_text_any"](i, INSTRUMENT_NAME_KEYS) or ctx["extract_title"](i) or i.get("id", "")
 
 
 # ============================================================
@@ -78,15 +104,14 @@ def _create_rental(ctx: dict, practice_id: str, practice_label: str,
         st.error("レンタル見積DBのプロパティ取得に失敗しました。")
         return False
     props: dict = {}
-    ctx["put_prop"](props, type_map, "レコード名",
-                    f"{instrument_name} × {practice_label} / {vendor}")
-    ctx["put_prop"](props, type_map, "楽器種別", instrument_id)
-    ctx["put_prop"](props, type_map, "練習", practice_id)
-    ctx["put_prop"](props, type_map, "業者名", vendor)
-    ctx["put_prop"](props, type_map, "台数", qty)
-    ctx["put_prop"](props, type_map, "単価（円）", unit_price)
-    ctx["put_prop"](props, type_map, "確定フラグ", confirmed)
-    ctx["put_prop"](props, type_map, "備考", note)
+    ctx["put_prop_any"](props, type_map, RENTAL_RECORD_KEYS, f"{instrument_name} × {practice_label} / {vendor}")
+    ctx["put_prop_any"](props, type_map, RENTAL_INST_REL_KEYS, instrument_id)
+    ctx["put_prop_any"](props, type_map, RENTAL_PRACTICE_REL_KEYS, practice_id)
+    ctx["put_prop_any"](props, type_map, RENTAL_VENDOR_KEYS, vendor)
+    ctx["put_prop_any"](props, type_map, RENTAL_QTY_KEYS, qty)
+    ctx["put_prop_any"](props, type_map, RENTAL_UNIT_PRICE_KEYS, unit_price)
+    ctx["put_prop_any"](props, type_map, RENTAL_CONFIRMED_KEYS, confirmed)
+    ctx["put_prop_any"](props, type_map, RENTAL_NOTE_KEYS, note)
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
@@ -98,15 +123,14 @@ def _update_rental(ctx: dict, page_id: str, practice_id: str, practice_label: st
                    confirmed: bool, note: str) -> bool:
     type_map = ctx["get_prop_types"](ctx["CONCERT_DB_RENTAL"])
     props: dict = {}
-    ctx["put_prop"](props, type_map, "レコード名",
-                    f"{instrument_name} × {practice_label} / {vendor}")
-    ctx["put_prop"](props, type_map, "楽器種別", instrument_id)
-    ctx["put_prop"](props, type_map, "練習", practice_id)
-    ctx["put_prop"](props, type_map, "業者名", vendor)
-    ctx["put_prop"](props, type_map, "台数", qty)
-    ctx["put_prop"](props, type_map, "単価（円）", unit_price)
-    ctx["put_prop"](props, type_map, "確定フラグ", confirmed)
-    ctx["put_prop"](props, type_map, "備考", note)
+    ctx["put_prop_any"](props, type_map, RENTAL_RECORD_KEYS, f"{instrument_name} × {practice_label} / {vendor}")
+    ctx["put_prop_any"](props, type_map, RENTAL_INST_REL_KEYS, instrument_id)
+    ctx["put_prop_any"](props, type_map, RENTAL_PRACTICE_REL_KEYS, practice_id)
+    ctx["put_prop_any"](props, type_map, RENTAL_VENDOR_KEYS, vendor)
+    ctx["put_prop_any"](props, type_map, RENTAL_QTY_KEYS, qty)
+    ctx["put_prop_any"](props, type_map, RENTAL_UNIT_PRICE_KEYS, unit_price)
+    ctx["put_prop_any"](props, type_map, RENTAL_CONFIRMED_KEYS, confirmed)
+    ctx["put_prop_any"](props, type_map, RENTAL_NOTE_KEYS, note)
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200
@@ -149,7 +173,7 @@ def _render_calc_tab(ctx: dict):
     practices = _load_practices(ctx, concert_id)
 
     def _prac_date(p):
-        d = ctx["extract_prop_text"](p, "日時")
+        d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
         return d[:10] if d else "9999"
 
     prac_by_id = {p.get("id"): p for p in practices}
@@ -218,7 +242,7 @@ def _render_estimate_tab(ctx: dict):
         return
 
     def _prac_date(p):
-        d = ctx["extract_prop_text"](p, "日時")
+        d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
         return d[:10] if d else "9999"
 
     practice_opts = {_practice_name(p, ctx): p.get("id", "")
@@ -275,18 +299,18 @@ def _render_estimate_tab(ctx: dict):
 
     for row in rental_rows:
         rid       = row.get("id", "")
-        ext       = ctx["extract_prop_text"]
-        ext_rel   = ctx["extract_relation_ids"]
-        inst_ids  = ext_rel(row, "楽器種別")
+        ext_any   = ctx["extract_prop_text_any"]
+        ext_rel   = ctx["extract_relation_ids_any"]
+        inst_ids  = ext_rel(row, RENTAL_INST_REL_KEYS)
         inst_id   = inst_ids[0] if inst_ids else ""
-        inst_name = next((k for k, v in inst_opts.items() if v == inst_id), ext(row, "楽器名") or "不明")
-        vendor    = ext(row, "業者名")
-        qty_str   = ext(row, "台数")
-        price_str = ext(row, "単価（円）")
+        inst_name = next((k for k, v in inst_opts.items() if v == inst_id), ext_any(row, INSTRUMENT_NAME_KEYS) or "不明")
+        vendor    = ext_any(row, RENTAL_VENDOR_KEYS)
+        qty_str   = ext_any(row, RENTAL_QTY_KEYS)
+        price_str = ext_any(row, RENTAL_UNIT_PRICE_KEYS)
         qty       = int(float(qty_str)) if qty_str else 0
         price     = int(float(price_str)) if price_str else 0
-        confirmed = ext(row, "確定フラグ") == "True"
-        note      = ext(row, "備考")
+        confirmed = ext_any(row, RENTAL_CONFIRMED_KEYS) == "True"
+        note      = ext_any(row, RENTAL_NOTE_KEYS)
 
         status_badge = "✅ 確定" if confirmed else "📋 見積"
         label = f"{status_badge}　{inst_name}　{vendor or '業者未設定'}　{qty}台　¥{price:,}/台　小計 ¥{qty * price:,}"
