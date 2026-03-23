@@ -23,7 +23,7 @@ INSTRUMENT_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
 SONG_NAME_KEYS = ["曲名", "タイトル", "PK曲名", "作品名"]
 SONG_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 PARTDEF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
-PARTDEF_INST_REL_KEYS = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
+PARTDEF_INST_REL_KEYS = ["必要楽器", "楽器", "楽器種別", "FK楽器種別", "担当楽器"]
 
 ATT_RECORD_KEYS = ["レコード名", "タイトル"]
 ATT_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者"]
