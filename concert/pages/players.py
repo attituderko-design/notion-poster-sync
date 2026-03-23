@@ -11,6 +11,7 @@ PLAYER_MEMO_KEYS = ["メモ", "備考"]
 
 CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
 CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
+CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE", "メディア", "種類"]
 
 PRACTICE_NAME_KEYS = ["練習名", "タイトル", "PK練習名"]
 PRACTICE_DATE_KEYS = ["日時", "日付"]
@@ -185,6 +186,39 @@ def _concert_name(c: dict, ctx: dict) -> str:
     n = ctx["extract_prop_text_any"](c, CONCERT_NAME_KEYS) or ctx["extract_title"](c)
     d = ctx["extract_prop_text_any"](c, CONCERT_DATE_KEYS)
     return f"{n}（{d[:10] if d else '日時未設定'}）"
+
+
+def _concert_media_values(c: dict) -> list[str]:
+    props = (c or {}).get("properties", {}) or {}
+    out = []
+    for key in CONCERT_MEDIA_KEYS:
+        meta = props.get(key) or {}
+        ptype = meta.get("type")
+        if ptype == "select":
+            n = ((meta.get("select") or {}).get("name") or "").strip()
+            if n:
+                out.append(n)
+        elif ptype == "multi_select":
+            for it in (meta.get("multi_select") or []):
+                n = (it.get("name") or "").strip()
+                if n:
+                    out.append(n)
+        elif ptype in ("rich_text", "title"):
+            txt = "".join((x.get("plain_text") or "") for x in (meta.get(ptype) or [])).strip()
+            if txt:
+                out.extend([s.strip() for s in txt.replace("／", "/").split("/") if s.strip()])
+        elif ptype == "formula":
+            f = meta.get("formula") or {}
+            if f.get("type") == "string":
+                txt = (f.get("string") or "").strip()
+                if txt:
+                    out.extend([s.strip() for s in txt.replace("／", "/").split("/") if s.strip()])
+    return list(dict.fromkeys(out))
+
+
+def _is_performance_media_concert(c: dict) -> bool:
+    medias = _concert_media_values(c)
+    return "出演" in medias
 
 
 def _practice_name(p: dict, ctx: dict) -> str:
@@ -370,9 +404,9 @@ def _render_player_tab(ctx: dict):
 
 
 def _render_attendance_tab(ctx: dict):
-    concerts = _load_concerts(ctx)
+    concerts = [c for c in _load_concerts(ctx) if _is_performance_media_concert(c)]
     if not concerts:
-        st.info("先に演奏会を登録してください。")
+        st.info("媒体=出演 の演奏会が見つかりません。ATLASで媒体設定を確認してください。")
         return
     all_c_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     c_query = st.text_input(
