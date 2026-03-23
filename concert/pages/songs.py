@@ -9,6 +9,7 @@ SONG_COMPOSER_KEYS = ["作曲者", "クリエイター"]
 SONG_DURATION_KEYS = ["演奏時間（秒）", "演奏時間", "DurationSec"]
 SONG_NOTE_KEYS = ["難易度メモ", "メモ", "備考"]
 SONG_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
+CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
 
 INSTRUMENT_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
 INSTRUMENT_CATEGORY_KEYS = ["カテゴリ"]
@@ -72,7 +73,7 @@ def _load_song_instruments(ctx, song_id: str) -> list[dict]:
 
 def _concert_name(c: dict, ctx: dict) -> str:
     n  = ctx["extract_prop_text_any"](c, ["名称", "タイトル"]) or ctx["extract_title"](c)
-    dt = ctx["extract_prop_text_any"](c, ["日時", "日付", "出演日"])
+    dt = ctx["extract_prop_text_any"](c, CONCERT_DATE_KEYS)
     return f"{n}（{dt[:10] if dt else '日時未設定'}）"
 
 
@@ -221,7 +222,23 @@ def _mmss_to_sec(mmss: str) -> int | None:
 
 def _render_song_tab(ctx: dict):
     concerts = _load_concerts(ctx)
-    concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
+    all_concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
+
+    concert_search = st.text_input(
+        "演奏会を検索",
+        value=st.session_state.get("songs_concert_search", ""),
+        key="songs_concert_search",
+        placeholder="例: 2026 / Osaka / 定期 / Happy Hour",
+    ).strip().lower()
+    if concert_search:
+        concert_opts = {
+            k: v for k, v in all_concert_opts.items()
+            if concert_search in k.lower()
+        }
+    else:
+        concert_opts = all_concert_opts
+    if not concert_opts:
+        st.warning("演奏会検索の条件に一致する候補がありません。絞り込みを緩めてください。")
 
     st.info(
         "🎼 楽曲の正式登録は ArtéMis MUSE（媒体=演奏曲）を推奨します。"
@@ -240,6 +257,8 @@ def _render_song_tab(ctx: dict):
     songs = _load_songs(ctx, filter_concert_id)
 
     with st.expander("➕ 新規楽曲を登録（簡易・手動）", expanded=(len(songs) == 0)):
+        st.caption("※ ここで設定する「必要楽器」は曲側の必要編成（人数・台数）です。")
+        st.caption("　誰が何を担当するかは「奏者・出欠・アサイン」画面で設定します。")
         with st.form("song_new_form", border=True):
             title    = st.text_input("曲名 *", placeholder="例：マリンバ協奏曲", key="sn_title")
             composer = st.text_input("作曲者", placeholder="例：安倍圭子", key="sn_composer")
@@ -250,7 +269,7 @@ def _render_song_tab(ctx: dict):
 
             concert_sel = st.multiselect(
                 "紐づける演奏会",
-                list(concert_opts.keys()),
+                list(all_concert_opts.keys()),
                 key="sn_concerts",
             )
             note = st.text_area("難易度メモ", height=60, key="sn_note")
@@ -260,7 +279,7 @@ def _render_song_tab(ctx: dict):
                     st.error("曲名は必須です。")
                 else:
                     duration_sec = _mmss_to_sec(duration_str)
-                    concert_ids  = [concert_opts[n] for n in concert_sel if concert_opts.get(n)]
+                    concert_ids  = [all_concert_opts[n] for n in concert_sel if all_concert_opts.get(n)]
                     with st.spinner("登録中..."):
                         ok = _create_song(ctx, title.strip(), concert_ids,
                                           composer, duration_sec, note)
@@ -294,7 +313,7 @@ def _render_song_tab(ctx: dict):
         with st.expander(f"{song_label}　{f'*{caption}*' if caption else ''}", expanded=False):
             # 既存紐づき演奏会
             existing_concert_ids = ctx["extract_relation_ids_any"](s, SONG_CONCERT_REL_KEYS)
-            existing_concert_names = [k for k, v in concert_opts.items() if v in existing_concert_ids]
+            existing_concert_names = [k for k, v in all_concert_opts.items() if v in existing_concert_ids]
 
             with st.form(f"song_edit_{song_id}", border=True):
                 title    = st.text_input("曲名 *", value=_song_name(s, ctx), key=f"se_title_{song_id}")
@@ -308,7 +327,7 @@ def _render_song_tab(ctx: dict):
                 )
                 concert_sel = st.multiselect(
                     "紐づける演奏会",
-                    list(concert_opts.keys()),
+                    list(all_concert_opts.keys()),
                     default=existing_concert_names,
                     key=f"se_concerts_{song_id}",
                 )
@@ -321,7 +340,7 @@ def _render_song_tab(ctx: dict):
                         st.error("曲名は必須です。")
                     else:
                         duration_sec = _mmss_to_sec(dur_str)
-                        concert_ids  = [concert_opts[n] for n in concert_sel if concert_opts.get(n)]
+                        concert_ids  = [all_concert_opts[n] for n in concert_sel if all_concert_opts.get(n)]
                         with st.spinner("更新中..."):
                             ok = _update_song(ctx, song_id, title.strip(), concert_ids,
                                               composer, duration_sec, note)
