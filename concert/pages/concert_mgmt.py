@@ -139,22 +139,17 @@ def _load_concerts(ctx) -> list[dict]:
 
 
 def _load_practices(ctx, concert_id: str = "") -> list[dict]:
-    cache_key = f"practice_list_{concert_id}"
-    if cache_key not in st.session_state:
-        type_map = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"])
-        rel_prop = ctx["find_prop_name"](type_map, PRACTICE_CONCERT_REL_KEYS)
-        if concert_id:
-            if rel_prop:
-                rows = ctx["query_all"](
-                    ctx["CONCERT_DB_PRACTICE"],
-                    {"filter": {"property": rel_prop, "relation": {"contains": concert_id}}},
-                )
-            else:
-                rows = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
-        else:
-            rows = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
-        st.session_state[cache_key] = rows
-    return st.session_state.get(cache_key, [])
+    # 練習データは手入力→即確認の運用が多いため毎回最新を取得する
+    type_map = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"])
+    rel_prop = ctx["find_prop_name"](type_map, PRACTICE_CONCERT_REL_KEYS)
+    if concert_id:
+        if rel_prop:
+            return ctx["query_all"](
+                ctx["CONCERT_DB_PRACTICE"],
+                {"filter": {"property": rel_prop, "relation": {"contains": concert_id}}},
+            )
+        return ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
+    return ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
 
 
 def _concert_display_name(page: dict, ctx: dict) -> str:
@@ -777,6 +772,7 @@ def render(ctx: dict):
 
     # ── 練習タブ ──────────────────────────────────────────────
     with tab_practice:
+        st.caption(f"Practice DB: `{ctx['CONCERT_DB_PRACTICE']}`")
         concerts = _load_concerts(ctx)
 
         # 演奏会フィルタ
