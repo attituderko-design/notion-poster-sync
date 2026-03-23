@@ -253,6 +253,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
 
     scanned = ok = ng = already = skipped = unresolved = recreated = 0
     legacy_player_cache: dict[str, str] = {}
+    legacy_participant_cache: dict[str, str] = {}
     debug_unresolved = []
     debug_failed = []
     for row in pref_rows:
@@ -316,17 +317,31 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                     break
                 # 旧演奏会参加者ページIDの可能性: /pages/{id} を直接引いて奏者IDを救済
                 if not participant_id:
-                    if cand in legacy_player_cache:
+                    if cand in legacy_player_cache or cand in legacy_participant_cache:
                         lp = legacy_player_cache.get(cand, "")
+                        lpart = legacy_participant_cache.get(cand, "")
                     else:
                         lp = ""
+                        lpart = ""
                         legacy = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{cand}")
                         if legacy is not None and legacy.status_code == 200:
                             legacy_page = legacy.json() or {}
+                            # 1) 旧ページが「奏者」を直接持っている場合
                             pids_legacy = ctx["extract_relation_ids_any"](legacy_page, PARTICIPANT_PLAYER_REL_KEYS)
                             if pids_legacy:
                                 lp = pids_legacy[0]
+                            # 2) 旧ページが「演奏会参加者」を直接持っている場合（旧出欠行ID等）
+                            part_ids_legacy = ctx["extract_relation_ids_any"](
+                                legacy_page, ["演奏会参加者", "参加者", "FK参加者"]
+                            )
+                            if part_ids_legacy:
+                                lpart = part_ids_legacy[0]
                         legacy_player_cache[cand] = lp
+                        legacy_participant_cache[cand] = lpart
+                    if lpart and lpart in participant_to_player:
+                        participant_id = lpart
+                        player_id = participant_to_player.get(lpart, "")
+                        break
                     if lp and lp in participant_by_player:
                         player_id = lp
                         participant_id = participant_by_player.get(lp, "")
