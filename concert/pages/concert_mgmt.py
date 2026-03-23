@@ -19,6 +19,7 @@ PRACTICE_DATE_KEYS = ["日時", "日付"]
 PRACTICE_VENUE_KEYS = ["会場名", "ロケーション", "場所", "会場", "Location"]
 PRACTICE_ADDRESS_KEYS = ["会場住所", "住所", "ロケーション", "場所", "Location"]
 PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ"]
+PRACTICE_REST_KEYS = ["打楽器休み", "休みフラグ", "休み", "Percussion休み"]
 PRACTICE_MEMO_KEYS = ["メモ", "備考"]
 
 
@@ -211,7 +212,7 @@ def _update_concert(ctx: dict, page_id: str, name: str, dt_start: str, dt_end: s
 # ============================================================
 
 def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_end: str,
-                     venue: str, address: str, is_concert_day: bool, memo: str) -> bool:
+                     venue: str, address: str, is_concert_day: bool, is_rest_day: bool, memo: str) -> bool:
     api   = ctx["api_request"]
     db_id = ctx["CONCERT_DB_PRACTICE"]
     get_t = ctx["get_prop_types"]
@@ -235,6 +236,7 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_en
     ctx["put_prop_any"](props, type_map, PRACTICE_VENUE_KEYS, venue)
     ctx["put_prop_any"](props, type_map, PRACTICE_ADDRESS_KEYS, address)
     ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
+    ctx["put_prop_any"](props, type_map, PRACTICE_REST_KEYS, is_rest_day)
     ctx["put_prop_any"](props, type_map, PRACTICE_MEMO_KEYS, memo)
 
     res = api("post", "https://api.notion.com/v1/pages",
@@ -244,7 +246,7 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_en
 
 def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
                      dt_start: str, dt_end: str, venue: str, address: str,
-                     is_concert_day: bool, memo: str) -> bool:
+                     is_concert_day: bool, is_rest_day: bool, memo: str) -> bool:
     api   = ctx["api_request"]
     get_t = ctx["get_prop_types"]
     put_p = ctx["put_prop"]
@@ -263,6 +265,7 @@ def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
     ctx["put_prop_any"](props, type_map, PRACTICE_VENUE_KEYS, venue)
     ctx["put_prop_any"](props, type_map, PRACTICE_ADDRESS_KEYS, address)
     ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
+    ctx["put_prop_any"](props, type_map, PRACTICE_REST_KEYS, is_rest_day)
     ctx["put_prop_any"](props, type_map, PRACTICE_MEMO_KEYS, memo)
 
     res = api("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
@@ -370,19 +373,46 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
             address_default = location_fallback
 
     with st.form(key=f"{prefix}form", border=True):
-        name = st.text_input(
-            "練習名 *",
-            value=ext(existing, PRACTICE_NAME_KEYS) if is_edit else "",
-            placeholder="例：第3回練習",
-            key=f"{prefix}name",
-        )
-
         selected_concert_name = st.selectbox(
             "演奏会",
             concert_names,
             index=concert_names.index(current_concert_name) if current_concert_name in concert_names else 0,
             key=f"{prefix}concert",
         )
+        selected_concert_id = concert_options.get(selected_concert_name, "")
+
+        if is_edit:
+            name = st.text_input(
+                "練習名 *",
+                value=ext(existing, PRACTICE_NAME_KEYS),
+                placeholder="例：第3回練習",
+                key=f"{prefix}name",
+            )
+            practice_round = None
+        else:
+            # 同演奏会の既存練習名から「第N回練習」を拾って次番号を提案
+            max_round = 0
+            if selected_concert_id:
+                for row in _load_practices(ctx, selected_concert_id):
+                    nm = ctx["extract_prop_text_any"](row, PRACTICE_NAME_KEYS) or ""
+                    m = re.search(r"第\s*(\d+)\s*回練習", nm)
+                    if m:
+                        max_round = max(max_round, int(m.group(1)))
+            suggested_round = max_round + 1 if max_round > 0 else 1
+            practice_round = int(st.number_input(
+                "練習回数 *",
+                min_value=1,
+                value=suggested_round,
+                step=1,
+                key=f"{prefix}round_no",
+            ))
+            auto_name = f"第{practice_round}回練習"
+            name = st.text_input(
+                "練習名（自動）",
+                value=auto_name,
+                disabled=True,
+                key=f"{prefix}name_auto",
+            )
 
         dt_start_str = ext(existing, PRACTICE_DATE_KEYS) if is_edit else ""
         dt_start_val = date.fromisoformat(dt_start_str[:10]) if dt_start_str else date.today()
@@ -408,22 +438,29 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
                 placeholder="例: 21:00",
                 key=f"{prefix}end_time",
             )
+        rest_default = (ext(existing, PRACTICE_REST_KEYS).strip().lower() == "true") if is_edit else False
+        is_rest_day = st.checkbox(
+            "打楽器休み（ON時は日時以外の入力を無効化）",
+            value=rest_default,
+            key=f"{prefix}rest_day",
+        )
 
         col3, col4 = st.columns(2)
         with col3:
             venue = st.text_input("会場名", value=venue_default,
-                                  placeholder="例：○○スタジオ", key=f"{prefix}venue")
+                                  placeholder="例：○○スタジオ", key=f"{prefix}venue", disabled=is_rest_day)
         with col4:
             address = st.text_input("会場住所", value=address_default,
-                                    placeholder="任意", key=f"{prefix}address")
+                                    placeholder="任意", key=f"{prefix}address", disabled=is_rest_day)
 
         is_concert_day = st.checkbox(
             "演奏会当日フラグ（本番日の場合はチェック）",
             value=(ext(existing, PRACTICE_CONCERT_DAY_KEYS) == "True") if is_edit else False,
             key=f"{prefix}concert_day",
+            disabled=is_rest_day,
         )
         memo = st.text_area("メモ", value=ext(existing, PRACTICE_MEMO_KEYS) if is_edit else "",
-                            height=80, key=f"{prefix}memo")
+                            height=80, key=f"{prefix}memo", disabled=is_rest_day)
 
         label = "更新" if is_edit else "登録"
         submitted = st.form_submit_button(f"💾 {label}", use_container_width=True, type="primary")
@@ -432,20 +469,28 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
         if not name.strip():
             st.error("練習名は必須です。")
             return
-        concert_id = concert_options.get(selected_concert_name, "")
+        concert_id = selected_concert_id
+        if not is_edit and practice_round:
+            name = f"第{practice_round}回練習"
         try:
             dt_s, dt_e = _compose_notion_date_with_optional_time(dt_start, start_time, end_time)
         except ValueError as e:
             st.error(str(e))
             return
 
+        if is_rest_day:
+            venue = ""
+            address = ""
+            is_concert_day = False
+            memo = ""
+
         with st.spinner(f"{label}中..."):
             if is_edit:
                 ok = _update_practice(ctx, existing["id"], name.strip(), concert_id,
-                                      dt_s, dt_e, venue, address, is_concert_day, memo)
+                                      dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo)
             else:
                 ok = _create_practice(ctx, name.strip(), concert_id,
-                                      dt_s, dt_e, venue, address, is_concert_day, memo)
+                                      dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo)
 
         if ok:
             st.success(f"✅ 練習を{label}しました。")
