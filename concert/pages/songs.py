@@ -301,59 +301,104 @@ def _render_song_tab(ctx: dict):
     if col_r.button("🔄", key="refresh_songs", help="再読み込み"):
         _clear_song_cache()
         st.rerun()
+    song_query = st.text_input(
+        "楽曲を検索",
+        value=st.session_state.get("songs_song_search", ""),
+        key="songs_song_search",
+        placeholder="例: Jupiter / marimba / concerto",
+    ).strip().lower()
 
-    for s in sorted(songs, key=lambda x: _song_name(x, ctx)):
-        song_id    = s.get("id", "")
-        song_label = _song_name(s, ctx)
-        composer   = ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS)
-        dur_sec_str = ctx["extract_prop_text_any"](s, SONG_DURATION_KEYS)
-        dur_disp   = _sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None)
-        caption    = f"{composer}　{dur_disp}" if composer or dur_disp else ""
+    sorted_songs = sorted(songs, key=lambda x: _song_name(x, ctx))
+    if song_query:
+        sorted_songs = [
+            s for s in sorted_songs
+            if song_query in (_song_name(s, ctx) or "").lower()
+            or song_query in (ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS) or "").lower()
+        ]
+    st.caption(f"表示件数: {len(sorted_songs)} / {len(songs)}")
+    if not sorted_songs:
+        st.info("検索条件に一致する楽曲がありません。")
+        return
 
-        with st.expander(f"{song_label}　{f'*{caption}*' if caption else ''}", expanded=False):
-            # 既存紐づき演奏会
-            existing_concert_ids = ctx["extract_relation_ids_any"](s, SONG_CONCERT_REL_KEYS)
-            existing_concert_names = [k for k, v in all_concert_opts.items() if v in existing_concert_ids]
+    # 重い全件描画を避け、基本は1件選択編集
+    mode_all = st.toggle("全件展開モード（重い）", value=False, key="songs_all_mode")
+    if not mode_all:
+        sel_map = {}
+        labels = []
+        for s in sorted_songs:
+            sid = s.get("id", "")
+            label = _song_name(s, ctx)
+            comp = ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS)
+            labels.append(f"{label} / {comp}" if comp else label)
+            sel_map[labels[-1]] = sid
+        pick = st.selectbox("編集対象の楽曲", ["（選択してください）"] + labels, key="songs_pick_one")
+        if pick == "（選択してください）":
+            st.info("上のプルダウンから1件選ぶと編集フォームを表示します。")
+            return
+        song_id = sel_map.get(pick, "")
+        target = next((s for s in sorted_songs if s.get("id", "") == song_id), None)
+        if not target:
+            st.warning("選択した楽曲が見つかりません。再読み込みしてください。")
+            return
+        _render_song_editor(ctx, target, all_concert_opts)
+        return
 
-            with st.form(f"song_edit_{song_id}", border=True):
-                title    = st.text_input("曲名 *", value=_song_name(s, ctx), key=f"se_title_{song_id}")
-                composer = st.text_input("作曲者", value=ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS),
-                                         key=f"se_composer_{song_id}")
-                dur_str  = st.text_input(
-                    "演奏時間",
-                    value=_sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None),
-                    placeholder="例：5:30",
-                    key=f"se_duration_{song_id}",
-                )
-                concert_sel = st.multiselect(
-                    "紐づける演奏会",
-                    list(all_concert_opts.keys()),
-                    default=existing_concert_names,
-                    key=f"se_concerts_{song_id}",
-                )
-                note = st.text_area("難易度メモ",
-                                    value=ctx["extract_prop_text_any"](s, SONG_NOTE_KEYS),
-                                    height=60, key=f"se_note_{song_id}")
+    for s in sorted_songs:
+        _render_song_editor(ctx, s, all_concert_opts)
 
-                if st.form_submit_button("💾 更新", use_container_width=True):
-                    if not title.strip():
-                        st.error("曲名は必須です。")
+
+def _render_song_editor(ctx: dict, s: dict, all_concert_opts: dict[str, str]):
+    song_id    = s.get("id", "")
+    song_label = _song_name(s, ctx)
+    composer   = ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS)
+    dur_sec_str = ctx["extract_prop_text_any"](s, SONG_DURATION_KEYS)
+    dur_disp   = _sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None)
+    caption    = f"{composer}　{dur_disp}" if composer or dur_disp else ""
+
+    with st.expander(f"{song_label}　{f'*{caption}*' if caption else ''}", expanded=True):
+        # 既存紐づき演奏会
+        existing_concert_ids = ctx["extract_relation_ids_any"](s, SONG_CONCERT_REL_KEYS)
+        existing_concert_names = [k for k, v in all_concert_opts.items() if v in existing_concert_ids]
+
+        with st.form(f"song_edit_{song_id}", border=True):
+            title    = st.text_input("曲名 *", value=_song_name(s, ctx), key=f"se_title_{song_id}")
+            composer = st.text_input("作曲者", value=ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS),
+                                     key=f"se_composer_{song_id}")
+            dur_str  = st.text_input(
+                "演奏時間",
+                value=_sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None),
+                placeholder="例：5:30",
+                key=f"se_duration_{song_id}",
+            )
+            concert_sel = st.multiselect(
+                "紐づける演奏会",
+                list(all_concert_opts.keys()),
+                default=existing_concert_names,
+                key=f"se_concerts_{song_id}",
+            )
+            note = st.text_area("難易度メモ",
+                                value=ctx["extract_prop_text_any"](s, SONG_NOTE_KEYS),
+                                height=60, key=f"se_note_{song_id}")
+
+            if st.form_submit_button("💾 更新", use_container_width=True):
+                if not title.strip():
+                    st.error("曲名は必須です。")
+                else:
+                    duration_sec = _mmss_to_sec(dur_str)
+                    concert_ids  = [all_concert_opts[n] for n in concert_sel if all_concert_opts.get(n)]
+                    with st.spinner("更新中..."):
+                        ok = _update_song(ctx, song_id, title.strip(), concert_ids,
+                                          composer, duration_sec, note)
+                    if ok:
+                        st.success("✅ 更新しました。")
+                        _clear_song_cache()
+                        st.rerun()
                     else:
-                        duration_sec = _mmss_to_sec(dur_str)
-                        concert_ids  = [all_concert_opts[n] for n in concert_sel if all_concert_opts.get(n)]
-                        with st.spinner("更新中..."):
-                            ok = _update_song(ctx, song_id, title.strip(), concert_ids,
-                                              composer, duration_sec, note)
-                        if ok:
-                            st.success("✅ 更新しました。")
-                            _clear_song_cache()
-                            st.rerun()
-                        else:
-                            st.error("❌ 更新に失敗しました。")
+                        st.error("❌ 更新に失敗しました。")
 
-            # 必要楽器サブセクション
-            st.caption("📋 この曲に必要な楽器")
-            _render_song_instrument_section(ctx, song_id, song_label)
+        # 必要楽器サブセクション
+        st.caption("📋 この曲に必要な楽器")
+        _render_song_instrument_section(ctx, song_id, song_label)
 
 
 def _render_song_instrument_section(ctx: dict, song_id: str, song_label: str):
