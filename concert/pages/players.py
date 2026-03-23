@@ -39,6 +39,47 @@ PI_BRING_KEYS = ["持参可フラグ", "持参可", "持参"]
 PI_NOTE_KEYS = ["備考", "メモ"]
 
 
+def _first_prop_by_type(type_map: dict, ptype: str) -> str:
+    for k, t in (type_map or {}).items():
+        if t == ptype:
+            return k
+    return ""
+
+
+def _find_relation_prop(type_map: dict, candidates: list[str], keywords: list[str], exclude: set[str] | None = None) -> str:
+    exclude = exclude or set()
+    found = [ctx_k for ctx_k in candidates if ctx_k in (type_map or {}) and (type_map or {}).get(ctx_k) == "relation"]
+    for k in found:
+        if k not in exclude:
+            return k
+    for k, t in (type_map or {}).items():
+        if t != "relation" or k in exclude:
+            continue
+        ks = str(k).lower()
+        if any(kw.lower() in ks for kw in keywords):
+            return k
+    for k, t in (type_map or {}).items():
+        if t == "relation" and k not in exclude:
+            return k
+    return ""
+
+
+def _response_error_message(res) -> str:
+    if res is None:
+        return "API応答なし（None）"
+    try:
+        js = res.json() or {}
+        msg = js.get("message") or js.get("code") or ""
+        if msg:
+            return f"HTTP {res.status_code}: {msg}"
+    except Exception:
+        pass
+    txt = (res.text or "").strip()
+    if txt:
+        return f"HTTP {res.status_code}: {txt[:200]}"
+    return f"HTTP {res.status_code}"
+
+
 def _clear_player_cache():
     for k in list(st.session_state.keys()):
         if k.startswith(("player_list", "attendance_list_", "pi_list_", "participant_list_", "practice_list_")):
@@ -187,17 +228,45 @@ def _upsert_attendance(ctx: dict, player_id: str, player_name: str, practice_id:
     if not t:
         st.error("出欠DBのプロパティ取得に失敗しました。")
         return False
+
+    record_key = ctx["find_prop_name"](t, ATT_RECORD_KEYS) or _first_prop_by_type(t, "title")
+    practice_rel_key = _find_relation_prop(t, ATT_PRACTICE_REL_KEYS, ["練習", "practice", "fk"])
+    player_rel_key = _find_relation_prop(t, ATT_PLAYER_REL_KEYS, ["奏者", "出演者", "player", "participant"], exclude={practice_rel_key} if practice_rel_key else set())
+    status_key = ctx["find_prop_name"](t, ATT_STATUS_KEYS)
+    if not status_key:
+        for k, typ in (t or {}).items():
+            if typ == "select" and ("出欠" in str(k) or "参加" in str(k)):
+                status_key = k
+                break
+        if not status_key:
+            status_key = _first_prop_by_type(t, "select")
+    note_key = ctx["find_prop_name"](t, ATT_NOTE_KEYS) or _first_prop_by_type(t, "rich_text")
+
+    if not practice_rel_key or not player_rel_key:
+        st.error(
+            "出欠DBのrelation列を特定できません。"
+            f" DB={db_id} / player_rel={player_rel_key or '未検出'} / practice_rel={practice_rel_key or '未検出'}"
+        )
+        return False
+
     props = {}
-    ctx["put_prop_any"](props, t, ATT_RECORD_KEYS, f"{player_name} × {practice_name}")
-    ctx["put_prop_any"](props, t, ATT_PLAYER_REL_KEYS, player_id)
-    ctx["put_prop_any"](props, t, ATT_PRACTICE_REL_KEYS, practice_id)
-    ctx["put_prop_any"](props, t, ATT_STATUS_KEYS, status)
-    ctx["put_prop_any"](props, t, ATT_NOTE_KEYS, note)
+    if record_key:
+        ctx["put_prop"](props, t, record_key, f"{player_name} × {practice_name}")
+    ctx["put_prop"](props, t, player_rel_key, player_id)
+    ctx["put_prop"](props, t, practice_rel_key, practice_id)
+    if status_key:
+        ctx["put_prop"](props, t, status_key, status)
+    if note_key:
+        ctx["put_prop"](props, t, note_key, note)
+
     if existing_id:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
     else:
         res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
-    return res is not None and res.status_code == 200
+    ok = res is not None and res.status_code == 200
+    if not ok:
+        st.error(f"出欠保存に失敗: {_response_error_message(res)} / DB={db_id}")
+    return ok
 
 
 def _upsert_participant(
@@ -311,6 +380,15 @@ def _render_attendance_tab(ctx: dict):
     c_id = c_opts.get(c_name, "")
     if not c_id:
         return
+    with st.expander("🔍 出欠DBデバッグ", expanded=False):
+        st.caption(
+            f"CONCERT_DB_CONCERT: `{ctx['CONCERT_DB_CONCERT']}` / "
+            f"CONCERT_DB_PRACTICE: `{ctx['CONCERT_DB_PRACTICE']}` / "
+            f"CONCERT_DB_ATTENDANCE: `{ctx['CONCERT_DB_ATTENDANCE']}`"
+        )
+        t_att = ctx["get_prop_types"](ctx["CONCERT_DB_ATTENDANCE"])
+        rels = [k for k, v in (t_att or {}).items() if v == "relation"]
+        st.caption(f"出欠DB relation候補: {', '.join(rels) if rels else '(なし)'}")
     practices = _load_practices(ctx, c_id)
     if not practices:
         st.info("この演奏会に練習が登録されていません。")
