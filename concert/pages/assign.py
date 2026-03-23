@@ -287,6 +287,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
         trace.append(f"{cand}:{status}")
         if legacy is not None and legacy.status_code == 200:
             legacy_page = legacy.json() or {}
+            legacy_props = (legacy_page.get("properties", {}) or {})
             # 1) 旧ページが「奏者」を直接持っている場合
             pids_legacy = ctx["extract_relation_ids_any"](legacy_page, PARTICIPANT_PLAYER_REL_KEYS)
             if pids_legacy:
@@ -297,6 +298,35 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
             )
             if part_ids_legacy:
                 lpart = part_ids_legacy[0]
+            # 2.5) relationのプロパティ名が変わっていても、全relation IDを走査して救済
+            if not lp and not lpart:
+                all_rel_ids: list[str] = []
+                for pv in legacy_props.values():
+                    if not isinstance(pv, dict):
+                        continue
+                    if (pv.get("type") or "") != "relation":
+                        continue
+                    rels = pv.get("relation") or []
+                    for rv in rels:
+                        rid_rel = (rv or {}).get("id") or ""
+                        if rid_rel:
+                            all_rel_ids.append(rid_rel)
+                if all_rel_ids:
+                    trace.append(f"rels:{','.join(all_rel_ids[:6])}")
+                for rid_rel in all_rel_ids:
+                    if rid_rel in participant_to_player:
+                        lpart = rid_rel
+                        lp = participant_to_player.get(rid_rel, "")
+                        break
+                    if rid_rel in participant_by_player:
+                        lp = rid_rel
+                        lpart = participant_by_player.get(rid_rel, "")
+                        break
+                    if rid_rel in player_name_by_id:
+                        lp = rid_rel
+                        if lp in participant_by_player:
+                            lpart = participant_by_player.get(lp, "")
+                        break
             # 3) 名前から逆引き
             lname = (
                 ctx["extract_prop_text_any"](legacy_page, ["氏名", "名前", "表示名", "タイトル", "名称"])
