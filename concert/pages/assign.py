@@ -75,7 +75,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
     db_id = ctx["CONCERT_DB_PREFERENCE"]
     t = ctx["get_prop_types"](db_id)
     if not t:
-        return {"scanned": 0, "updated": 0, "failed": 0, "already": 0, "skipped": 0}
+        return {"scanned": 0, "updated": 0, "failed": 0, "already": 0, "skipped": 0, "unresolved": 0, "participants": 0, "mapped": 0}
 
     pref_rows = _load_player_instruments(ctx, concert_id)
     participant_rows = _load_participants(ctx, concert_id)
@@ -150,17 +150,25 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                             player_id = k_pid
                             participant_id = v_part
                             break
-        if not player_id and pref_key_prop and pref_key_prop in props:
+        parsed_pref_id = ""
+        if pref_key_prop and pref_key_prop in props:
             pref_key_text = ctx["extract_prop_text"](row, pref_key_prop)
             maybe_pid = _first_uuid_from_pref_key(pref_key_text)
+            parsed_pref_id = maybe_pid
             if maybe_pid in participant_ids:
                 participant_id = maybe_pid
                 player_id = participant_to_player.get(maybe_pid, "")
             elif maybe_pid in participant_by_player:
                 player_id = maybe_pid
                 participant_id = participant_by_player.get(player_id, "")
+        if not player_id and pref_key_prop and pref_key_prop in props:
+            # player_id自体は無くても後続でparticipant_idが確定すればOK
+            pass
         if not participant_id and player_id:
             participant_id = participant_by_player.get(player_id, "")
+        if not participant_id and parsed_pref_id:
+            # 参加者マップが取れない環境でも、preference_key先頭のUUIDを参加者IDとして直接採用
+            participant_id = parsed_pref_id
         if not participant_id:
             unresolved += 1
             continue
@@ -190,6 +198,8 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
         "already": already,
         "skipped": skipped,
         "unresolved": unresolved,
+        "participants": len(participant_rows),
+        "mapped": len(participant_by_player),
     }
 
 
@@ -507,12 +517,14 @@ def _render_pref_tab(ctx: dict):
                     f"✅ 補完完了: 更新 {stats['updated']}件 / 既設定 {stats['already']}件 / "
                     f"未解決 {stats.get('unresolved', 0)}件 / 対象外 {stats['skipped']}件 / 走査 {stats['scanned']}件"
                 )
+                st.caption(f"参加者読込: {stats.get('participants', 0)}件 / 奏者マップ: {stats.get('mapped', 0)}件")
             else:
                 st.warning(
                     f"⚠️ 補完結果: 更新 {stats['updated']} / 失敗 {stats['failed']} / "
                     f"既設定 {stats['already']} / 未解決 {stats.get('unresolved', 0)} / "
                     f"対象外 {stats['skipped']} / 走査 {stats['scanned']}"
                 )
+                st.caption(f"参加者読込: {stats.get('participants', 0)}件 / 奏者マップ: {stats.get('mapped', 0)}件")
 
     players = _load_players(ctx)
     songs   = _load_songs(ctx, concert_id)
