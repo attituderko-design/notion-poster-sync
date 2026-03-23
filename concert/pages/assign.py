@@ -87,6 +87,18 @@ def _find_prop_name_loose(ctx, type_map: dict, candidates: list[str]) -> str:
     return ""
 
 
+def _relation_target_db_id(ctx, db_id: str, prop_name: str) -> str:
+    if not db_id or not prop_name:
+        return ""
+    res = ctx["api_request"]("get", f"https://api.notion.com/v1/databases/{db_id}")
+    if res is None or res.status_code != 200:
+        return ""
+    props = ((res.json() or {}).get("properties") or {})
+    meta = props.get(prop_name) or {}
+    rel = meta.get("relation") or {}
+    return (rel.get("database_id") or "").strip()
+
+
 # ============================================================
 # キャッシュ／ロードヘルパー
 # ============================================================
@@ -108,19 +120,6 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
         return {"scanned": 0, "updated": 0, "failed": 0, "already": 0, "skipped": 0, "unresolved": 0, "participants": 0, "mapped": 0}
 
     pref_rows = _load_player_instruments(ctx, concert_id)
-    participant_rows = _load_participants(ctx, concert_id)
-    participant_by_player: dict[str, str] = {}
-    participant_to_player: dict[str, str] = {}
-    participant_ids: set[str] = set()
-    for row in participant_rows:
-        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
-        if pids:
-            pid = pids[0]
-            part_id = row.get("id", "")
-            participant_by_player[pid] = part_id
-            participant_to_player[part_id] = pid
-            participant_ids.add(part_id)
-
     # 対象演奏会に属する song/part だけを補完対象にする
     songs = _load_songs(ctx, concert_id)
     valid_song_ids = {s.get("id", "") for s in songs if s.get("id", "")}
@@ -138,6 +137,21 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
     player_rel_key = _find_prop_name_loose(ctx, t, ["出演者", "奏者", "FK奏者"])
     participant_rel_key = _find_prop_name_loose(ctx, t, ["演奏会参加者"])
     pref_key_prop = _find_prop_name_loose(ctx, t, PREFERENCE_KEY_KEYS)
+    participant_target_db = _relation_target_db_id(ctx, db_id, participant_rel_key) if participant_rel_key else ""
+    participant_source_db = participant_target_db or ctx["CONCERT_DB_PARTICIPANT"]
+    participant_rows = _load_participants(ctx, concert_id, participant_source_db)
+
+    participant_by_player: dict[str, str] = {}
+    participant_to_player: dict[str, str] = {}
+    participant_ids: set[str] = set()
+    for row in participant_rows:
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if pids:
+            pid = pids[0]
+            part_id = row.get("id", "")
+            participant_by_player[pid] = part_id
+            participant_to_player[part_id] = pid
+            participant_ids.add(part_id)
 
     scanned = ok = ng = already = skipped = unresolved = 0
     debug_unresolved = []
@@ -280,6 +294,9 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
         "pref_key_prop": pref_key_prop,
         "debug_unresolved": debug_unresolved,
         "participant_ids_count": len(participant_ids),
+        "participant_source_db": participant_source_db,
+        "participant_target_db": participant_target_db,
+        "participant_ctx_db": ctx["CONCERT_DB_PARTICIPANT"],
     }
 
 
@@ -346,10 +363,10 @@ def _load_players(ctx) -> list[dict]:
     return st.session_state.get("player_list", [])
 
 
-def _load_participants(ctx, concert_id: str) -> list[dict]:
-    key = f"participant_list_{concert_id}"
+def _load_participants(ctx, concert_id: str, db_id_override: str = "") -> list[dict]:
+    db_id = (db_id_override or ctx["CONCERT_DB_PARTICIPANT"]).strip()
+    key = f"participant_list_{db_id}_{concert_id}"
     if key not in st.session_state:
-        db_id = ctx["CONCERT_DB_PARTICIPANT"]
         t = ctx["get_prop_types"](db_id)
         rel = ctx["find_prop_name"](t, PARTICIPANT_CONCERT_REL_KEYS)
         f = {"filter": {"property": rel, "relation": {"contains": concert_id}}} if rel else None
@@ -606,6 +623,9 @@ def _render_pref_tab(ctx: dict):
                         "player_rel_key": stats.get("player_rel_key", ""),
                         "pref_key_prop": stats.get("pref_key_prop", ""),
                         "participant_ids_count": stats.get("participant_ids_count", 0),
+                        "participant_ctx_db": stats.get("participant_ctx_db", ""),
+                        "participant_target_db": stats.get("participant_target_db", ""),
+                        "participant_source_db": stats.get("participant_source_db", ""),
                         "sample": stats.get("debug_unresolved", []),
                     })
             else:
@@ -621,6 +641,9 @@ def _render_pref_tab(ctx: dict):
                     "player_rel_key": stats.get("player_rel_key", ""),
                     "pref_key_prop": stats.get("pref_key_prop", ""),
                     "participant_ids_count": stats.get("participant_ids_count", 0),
+                    "participant_ctx_db": stats.get("participant_ctx_db", ""),
+                    "participant_target_db": stats.get("participant_target_db", ""),
+                    "participant_source_db": stats.get("participant_source_db", ""),
                     "sample": stats.get("debug_unresolved", []),
                 })
 
