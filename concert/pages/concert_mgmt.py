@@ -12,7 +12,7 @@ CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース
 CONCERT_VENUE_KEYS = ["会場名", "ロケーション", "場所", "会場", "Location"]
 CONCERT_ADDRESS_KEYS = ["会場住所", "住所", "ロケーション", "場所", "Location"]
 CONCERT_MEMO_KEYS = ["メモ", "備考"]
-CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE"]
+CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE", "メディア", "種類"]
 
 PRACTICE_NAME_KEYS = ["練習名", "タイトル", "PK練習名"]
 PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
@@ -141,8 +141,40 @@ def _clear_concert_cache(ctx):
         get_concert_db_property_types.clear()
     except Exception:
         pass
-    for k in ["concert_list", "practice_list"]:
+    for k in ["concertmgmt_concert_list", "practice_list"]:
         st.session_state.pop(k, None)
+
+
+def _concert_media_values(c: dict) -> list[str]:
+    props = (c or {}).get("properties", {}) or {}
+    out: list[str] = []
+    for key in CONCERT_MEDIA_KEYS:
+        meta = props.get(key) or {}
+        ptype = meta.get("type")
+        if ptype == "select":
+            n = ((meta.get("select") or {}).get("name") or "").strip()
+            if n:
+                out.append(n)
+        elif ptype == "multi_select":
+            for it in (meta.get("multi_select") or []):
+                n = (it.get("name") or "").strip()
+                if n:
+                    out.append(n)
+        elif ptype in ("rich_text", "title"):
+            txt = "".join((x.get("plain_text") or "") for x in (meta.get(ptype) or [])).strip()
+            if txt:
+                out.extend([s.strip() for s in txt.replace("／", "/").split("/") if s.strip()])
+        elif ptype == "formula":
+            f = meta.get("formula") or {}
+            if f.get("type") == "string":
+                txt = (f.get("string") or "").strip()
+                if txt:
+                    out.extend([s.strip() for s in txt.replace("／", "/").split("/") if s.strip()])
+    return list(dict.fromkeys(out))
+
+
+def _is_performance_media_concert(c: dict) -> bool:
+    return "出演" in _concert_media_values(c)
 
 
 def _location_payload(venue: str, address: str, lat=None, lon=None) -> dict:
@@ -162,26 +194,10 @@ def _location_payload(venue: str, address: str, lat=None, lon=None) -> dict:
 
 
 def _load_concerts(ctx) -> list[dict]:
-    if "concert_list" not in st.session_state:
-        rows = []
-        db_id = ctx["CONCERT_DB_CONCERT"]
-        type_map = ctx["get_prop_types"](db_id)
-        media_prop = ctx["find_prop_name"](type_map, CONCERT_MEDIA_KEYS)
-        media_type = type_map.get(media_prop, "")
-        if media_prop and media_type == "select":
-            rows = ctx["query_all"](
-                db_id,
-                {"filter": {"property": media_prop, "select": {"equals": "出演"}}},
-            )
-        elif media_prop and media_type == "multi_select":
-            rows = ctx["query_all"](
-                db_id,
-                {"filter": {"property": media_prop, "multi_select": {"contains": "出演"}}},
-            )
-        else:
-            rows = ctx["query_all"](db_id)
-        st.session_state["concert_list"] = rows
-    return st.session_state.get("concert_list", [])
+    if "concertmgmt_concert_list" not in st.session_state:
+        rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT"])
+        st.session_state["concertmgmt_concert_list"] = [r for r in rows if _is_performance_media_concert(r)]
+    return st.session_state.get("concertmgmt_concert_list", [])
 
 
 def _load_practices(ctx, concert_id: str = "") -> list[dict]:

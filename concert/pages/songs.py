@@ -10,6 +10,7 @@ SONG_DURATION_KEYS = ["演奏時間（秒）", "演奏時間", "DurationSec"]
 SONG_NOTE_KEYS = ["難易度メモ", "メモ", "備考"]
 SONG_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
+CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE", "メディア", "種類"]
 
 INSTRUMENT_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
 INSTRUMENT_CATEGORY_KEYS = ["カテゴリ"]
@@ -37,12 +38,46 @@ def _clear_song_cache():
     for k in list(st.session_state.keys()):
         if k.startswith(("song_list", "instrument_list", "si_list_")):
             st.session_state.pop(k, None)
+    st.session_state.pop("songs_concert_list", None)
+
+
+def _concert_media_values(c: dict) -> list[str]:
+    props = (c or {}).get("properties", {}) or {}
+    out: list[str] = []
+    for key in CONCERT_MEDIA_KEYS:
+        meta = props.get(key) or {}
+        ptype = meta.get("type")
+        if ptype == "select":
+            n = ((meta.get("select") or {}).get("name") or "").strip()
+            if n:
+                out.append(n)
+        elif ptype == "multi_select":
+            for it in (meta.get("multi_select") or []):
+                n = (it.get("name") or "").strip()
+                if n:
+                    out.append(n)
+        elif ptype in ("rich_text", "title"):
+            txt = "".join((x.get("plain_text") or "") for x in (meta.get(ptype) or [])).strip()
+            if txt:
+                out.extend([s.strip() for s in txt.replace("／", "/").split("/") if s.strip()])
+        elif ptype == "formula":
+            f = meta.get("formula") or {}
+            if f.get("type") == "string":
+                txt = (f.get("string") or "").strip()
+                if txt:
+                    out.extend([s.strip() for s in txt.replace("／", "/").split("/") if s.strip()])
+    return list(dict.fromkeys(out))
+
+
+def _is_performance_media_concert(c: dict) -> bool:
+    return "出演" in _concert_media_values(c)
 
 
 def _load_concerts(ctx) -> list[dict]:
-    if "concert_list" not in st.session_state:
-        st.session_state["concert_list"] = ctx["query_all"](ctx["CONCERT_DB_CONCERT"])
-    return st.session_state.get("concert_list", [])
+    if "songs_concert_list" not in st.session_state:
+        rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT"])
+        st.session_state["songs_concert_list"] = [r for r in rows if _is_performance_media_concert(r)]
+    return st.session_state.get("songs_concert_list", [])
 
 
 def _load_songs(ctx, concert_id: str = "") -> list[dict]:
