@@ -35,6 +35,7 @@ try:
         songs,
         players,
         rental,
+        assign,
     )
     CONCERT_SYSTEM_AVAILABLE = True
     CONCERT_IMPORT_ERROR = ""
@@ -8301,6 +8302,7 @@ if system_mode == "HARMONIA":
             "演奏会・練習管理",
             "楽曲・楽器管理",
             "奏者・出欠・アサイン",
+            "アサイン検討",
             "レンタル管理",
         ],
         key="concert_page_radio",
@@ -8322,6 +8324,8 @@ if system_mode == "HARMONIA":
         songs.render(concert_ctx)
     elif concert_page == "奏者・出欠・アサイン":
         players.render(concert_ctx)
+    elif concert_page == "アサイン検討":
+        assign.render(concert_ctx)
     elif concert_page == "レンタル管理":
         rental.render(concert_ctx)
 
