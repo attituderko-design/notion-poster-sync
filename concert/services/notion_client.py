@@ -14,6 +14,22 @@ DEFAULT_TIMEOUT = 20
 _MAX_RETRIES = 3
 _RETRY_STATUSES = {429, 500, 502, 503}
 
+# HARMONIA 用の既定DB（secrets未設定時の最終フォールバック）
+# 2026-03-23 時点: ユーザー指定DB
+_DEFAULT_CONCERT_DB_IDS = {
+    "concert": "2704532d7d5680ab9beed2574eb2daa5",          # ArtéMis ATLAS
+    "practice": "32c4532d7d56804caac4cae1fd4ada4f",         # 練習 Practice
+    "song": "3224532d7d56804a85dbd2eab6ac2050",             # ArtéMis APOLLO
+    "instrument": "32c4532d7d56800cb34ac6d1b1c3ecdb",       # 楽器種別 Instrument
+    "song_instrument": "32c4532d7d56803ba3e1c8c87d1cd0dc",  # パート定義DB（曲別必要楽器の代替）
+    "player": "3224532d7d568072bbb0c2cea44d67d9",           # 出演者DB
+    "attendance": "32c4532d7d5680e6813fe67bae986c39",       # 練習出欠DB
+    "player_instrument": "3224532d7d5680bd9acef5bbf042daa6",# 楽曲別担当者DB（既存）
+    "rental": "32c6e5f3-8885-8072-9131-ceaff635b895",       # レンタル見積 Rental
+    "part_definition": "32c4532d7d56803ba3e1c8c87d1cd0dc",  # パート定義DB
+    "preference": "32c4532d7d5680b1902dce3555590db3",       # 希望入力DB
+}
+
 
 # ============================================================
 # シークレット読み込み
@@ -28,16 +44,45 @@ def get_concert_secrets() -> dict:
     if missing:
         raise KeyError(f"secrets.toml に以下のキーが見つかりません: {missing}")
     # 既存 ArtéMis DB を優先的に流用し、未設定時のみ Concert 専用DBへフォールバックする
-    db_concert = st.secrets.get("NOTION_DB_ID") or st.secrets.get("CONCERT_DB_CONCERT", "")
-    db_song = st.secrets.get("NOTION_SCORE_DB_ID") or st.secrets.get("CONCERT_DB_SONG", "")
-    db_player = st.secrets.get("NOTION_PERFORMER_DB_ID") or st.secrets.get("CONCERT_DB_PLAYER", "")
-    db_attendance = st.secrets.get("NOTION_PERFORMANCE_CAST_DB_ID") or st.secrets.get("CONCERT_DB_ATTENDANCE", "")
-    db_player_instrument = st.secrets.get("NOTION_SONG_ASSIGN_DB_ID") or st.secrets.get("CONCERT_DB_PLAYER_INSTRUMENT", "")
+    db_concert = (
+        st.secrets.get("NOTION_DB_ID")
+        or st.secrets.get("CONCERT_DB_CONCERT", "")
+        or _DEFAULT_CONCERT_DB_IDS["concert"]
+    )
+    db_song = (
+        st.secrets.get("NOTION_SCORE_DB_ID")
+        or st.secrets.get("CONCERT_DB_SONG", "")
+        or _DEFAULT_CONCERT_DB_IDS["song"]
+    )
+    db_player = (
+        st.secrets.get("NOTION_PERFORMER_DB_ID")
+        or st.secrets.get("CONCERT_DB_PLAYER", "")
+        or _DEFAULT_CONCERT_DB_IDS["player"]
+    )
+    # 専用DBキーを優先（HARMONIA本設計）
+    db_attendance = (
+        st.secrets.get("CONCERT_DB_ATTENDANCE", "")
+        or st.secrets.get("NOTION_PERFORMANCE_CAST_DB_ID", "")
+        or _DEFAULT_CONCERT_DB_IDS["attendance"]
+    )
+    db_player_instrument = (
+        st.secrets.get("CONCERT_DB_PLAYER_INSTRUMENT", "")
+        or st.secrets.get("NOTION_SONG_ASSIGN_DB_ID", "")
+        or _DEFAULT_CONCERT_DB_IDS["player_instrument"]
+    )
+    db_part_definition = (
+        st.secrets.get("CONCERT_DB_PART_DEFINITION", "")
+        or _DEFAULT_CONCERT_DB_IDS["part_definition"]
+    )
+    db_preference = (
+        st.secrets.get("CONCERT_DB_PREFERENCE", "")
+        or _DEFAULT_CONCERT_DB_IDS["preference"]
+    )
     # 以下は現時点では Concert 専用DBを使用（既存と責務分離）
-    db_practice = st.secrets.get("CONCERT_DB_PRACTICE", "")
-    db_instrument = st.secrets.get("CONCERT_DB_INSTRUMENT", "")
-    db_song_instrument = st.secrets.get("CONCERT_DB_SONG_INSTRUMENT", "")
-    db_rental = st.secrets.get("CONCERT_DB_RENTAL", "")
+    db_practice = st.secrets.get("CONCERT_DB_PRACTICE", "") or _DEFAULT_CONCERT_DB_IDS["practice"]
+    db_instrument = st.secrets.get("CONCERT_DB_INSTRUMENT", "") or _DEFAULT_CONCERT_DB_IDS["instrument"]
+    db_song_instrument = st.secrets.get("CONCERT_DB_SONG_INSTRUMENT", "") or _DEFAULT_CONCERT_DB_IDS["song_instrument"]
+    db_rental = st.secrets.get("CONCERT_DB_RENTAL", "") or _DEFAULT_CONCERT_DB_IDS["rental"]
     required_db = {
         "演奏会DB": db_concert,
         "練習DB": db_practice,
@@ -48,6 +93,8 @@ def get_concert_secrets() -> dict:
         "出欠DB": db_attendance,
         "楽器アサインDB": db_player_instrument,
         "レンタルDB": db_rental,
+        "パート定義DB": db_part_definition,
+        "希望入力DB": db_preference,
     }
     missing_db = [name for name, val in required_db.items() if not val]
     if missing_db:
@@ -63,6 +110,8 @@ def get_concert_secrets() -> dict:
         "db_attendance":       db_attendance,
         "db_player_instrument":db_player_instrument,
         "db_rental":           db_rental,
+        "db_part_definition":  db_part_definition,
+        "db_preference":       db_preference,
     }
 
 
@@ -387,6 +436,8 @@ def build_concert_ctx() -> dict:
         "CONCERT_DB_ATTENDANCE":       secrets["db_attendance"],
         "CONCERT_DB_PLAYER_INSTRUMENT":secrets["db_player_instrument"],
         "CONCERT_DB_RENTAL":           secrets["db_rental"],
+        "CONCERT_DB_PART_DEFINITION":  secrets["db_part_definition"],
+        "CONCERT_DB_PREFERENCE":       secrets["db_preference"],
         # ユーティリティ
         "query_all":                   _query_all,
         "get_prop_types":              _get_prop_types,
