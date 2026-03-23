@@ -57,6 +57,18 @@ def _first_uuid_from_pref_key(key_text: str) -> str:
     return "-".join(m.groups())
 
 
+def _all_uuids_from_pref_key(key_text: str) -> list[str]:
+    """
+    preference_key 文字列から UUID 断片（8_4_4_4_12）をすべて抽出して
+    Notion page id 形式（8-4-4-4-12）へ戻す。
+    """
+    s = (key_text or "").lower()
+    vals = []
+    for m in re.finditer(r"([0-9a-f]{8})_([0-9a-f]{4})_([0-9a-f]{4})_([0-9a-f]{4})_([0-9a-f]{12})", s):
+        vals.append("-".join(m.groups()))
+    return vals
+
+
 def _norm_prop_key(s: str) -> str:
     return re.sub(r"\s+", "", str(s or "")).strip().lower()
 
@@ -171,16 +183,23 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                             participant_id = v_part
                             break
         parsed_pref_id = ""
+        parsed_pref_ids = []
+        pref_key_text = ""
         if pref_key_prop and pref_key_prop in props:
             pref_key_text = ctx["extract_prop_text"](row, pref_key_prop)
-            maybe_pid = _first_uuid_from_pref_key(pref_key_text)
+            parsed_pref_ids = _all_uuids_from_pref_key(pref_key_text)
+            maybe_pid = parsed_pref_ids[0] if parsed_pref_ids else _first_uuid_from_pref_key(pref_key_text)
             parsed_pref_id = maybe_pid
-            if maybe_pid in participant_ids:
-                participant_id = maybe_pid
-                player_id = participant_to_player.get(maybe_pid, "")
-            elif maybe_pid in participant_by_player:
-                player_id = maybe_pid
-                participant_id = participant_by_player.get(player_id, "")
+            # まず「参加者IDとして一致」→次に「奏者IDとして一致」の順で解決
+            for cand in parsed_pref_ids:
+                if cand in participant_ids:
+                    participant_id = cand
+                    player_id = participant_to_player.get(cand, "")
+                    break
+                if cand in participant_by_player:
+                    player_id = cand
+                    participant_id = participant_by_player.get(cand, "")
+                    break
         if not player_id and pref_key_prop and pref_key_prop in props:
             # player_id自体は無くても後続でparticipant_idが確定すればOK
             pass
@@ -194,11 +213,16 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
             if len(debug_unresolved) < 5:
                 debug_unresolved.append({
                     "row_id": rid,
-                    "pref_key": (ctx["extract_prop_text"](row, pref_key_prop) if pref_key_prop else ""),
+                    "reason": "no_participant_id_before_patch",
+                    "pref_key": pref_key_text,
                     "parsed_pref_id": parsed_pref_id,
+                    "parsed_pref_ids": parsed_pref_ids,
                     "player_rel_ids": (ctx["extract_relation_ids"](row, player_rel_key) if player_rel_key else []),
                     "parsed_is_participant_id": bool(parsed_pref_id and parsed_pref_id in participant_ids),
                     "parsed_is_player_id": bool(parsed_pref_id and parsed_pref_id in participant_by_player),
+                    "participant_rel_key": participant_rel_key,
+                    "player_rel_key": player_rel_key,
+                    "pref_key_prop": pref_key_prop,
                 })
             continue
 
@@ -230,6 +254,16 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                 ok += 1
             else:
                 unresolved += 1
+                if len(debug_unresolved) < 5:
+                    debug_unresolved.append({
+                        "row_id": rid,
+                        "reason": "verify_no_relation_after_patch",
+                        "participant_rel_key": participant_rel_key,
+                        "player_rel_key": player_rel_key,
+                        "patched_participant_id": participant_id,
+                        "patched_player_id": player_id,
+                        "confirmed_relation_ids": confirmed,
+                    })
         else:
             ng += 1
     return {
@@ -241,7 +275,11 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
         "unresolved": unresolved,
         "participants": len(participant_rows),
         "mapped": len(participant_by_player),
+        "participant_rel_key": participant_rel_key,
+        "player_rel_key": player_rel_key,
+        "pref_key_prop": pref_key_prop,
         "debug_unresolved": debug_unresolved,
+        "participant_ids_count": len(participant_ids),
     }
 
 
@@ -561,9 +599,15 @@ def _render_pref_tab(ctx: dict):
                     f"未解決 {stats.get('unresolved', 0)}件 / 対象外 {stats['skipped']}件 / 走査 {stats['scanned']}件"
                 )
                 st.caption(f"参加者読込: {stats.get('participants', 0)}件 / 奏者マップ: {stats.get('mapped', 0)}件")
-                if stats.get("unresolved", 0) > 0 and stats.get("debug_unresolved"):
-                    st.caption("未解決サンプル（先頭5件）")
-                    st.json(stats.get("debug_unresolved"))
+                if stats.get("unresolved", 0) > 0:
+                    st.caption("未解決デバッグ")
+                    st.json({
+                        "participant_rel_key": stats.get("participant_rel_key", ""),
+                        "player_rel_key": stats.get("player_rel_key", ""),
+                        "pref_key_prop": stats.get("pref_key_prop", ""),
+                        "participant_ids_count": stats.get("participant_ids_count", 0),
+                        "sample": stats.get("debug_unresolved", []),
+                    })
             else:
                 st.warning(
                     f"⚠️ 補完結果: 更新 {stats['updated']} / 失敗 {stats['failed']} / "
@@ -571,9 +615,14 @@ def _render_pref_tab(ctx: dict):
                     f"対象外 {stats['skipped']} / 走査 {stats['scanned']}"
                 )
                 st.caption(f"参加者読込: {stats.get('participants', 0)}件 / 奏者マップ: {stats.get('mapped', 0)}件")
-                if stats.get("debug_unresolved"):
-                    st.caption("未解決サンプル（先頭5件）")
-                    st.json(stats.get("debug_unresolved"))
+                st.caption("未解決デバッグ")
+                st.json({
+                    "participant_rel_key": stats.get("participant_rel_key", ""),
+                    "player_rel_key": stats.get("player_rel_key", ""),
+                    "pref_key_prop": stats.get("pref_key_prop", ""),
+                    "participant_ids_count": stats.get("participant_ids_count", 0),
+                    "sample": stats.get("debug_unresolved", []),
+                })
 
     players = _load_players(ctx)
     songs   = _load_songs(ctx, concert_id)
