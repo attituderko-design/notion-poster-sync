@@ -172,7 +172,7 @@ def _update_concert(ctx: dict, page_id: str, name: str, dt_start: str, dt_end: s
 # 練習 CRUD
 # ============================================================
 
-def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_end: str,
+def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str,
                      venue: str, address: str, is_concert_day: bool, memo: str) -> bool:
     api   = ctx["api_request"]
     db_id = ctx["CONCERT_DB_PRACTICE"]
@@ -190,10 +190,7 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_en
         ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_REL_KEYS, concert_id)
     date_key = ctx["find_prop_name"](type_map, PRACTICE_DATE_KEYS)
     if dt_start and date_key:
-        date_val: dict = {"start": dt_start}
-        if dt_end and dt_end != dt_start:
-            date_val["end"] = dt_end
-        props[date_key] = {"date": date_val}
+        props[date_key] = {"date": {"start": dt_start}}
     ctx["put_prop_any"](props, type_map, PRACTICE_VENUE_KEYS, venue)
     ctx["put_prop_any"](props, type_map, PRACTICE_ADDRESS_KEYS, address)
     ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
@@ -205,7 +202,7 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_en
 
 
 def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
-                     dt_start: str, dt_end: str, venue: str, address: str,
+                     dt_start: str, venue: str, address: str,
                      is_concert_day: bool, memo: str) -> bool:
     api   = ctx["api_request"]
     get_t = ctx["get_prop_types"]
@@ -218,10 +215,7 @@ def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
         ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_REL_KEYS, concert_id)
     date_key = ctx["find_prop_name"](type_map, PRACTICE_DATE_KEYS)
     if dt_start and date_key:
-        date_val: dict = {"start": dt_start}
-        if dt_end and dt_end != dt_start:
-            date_val["end"] = dt_end
-        props[date_key] = {"date": date_val}
+        props[date_key] = {"date": {"start": dt_start}}
     ctx["put_prop_any"](props, type_map, PRACTICE_VENUE_KEYS, venue)
     ctx["put_prop_any"](props, type_map, PRACTICE_ADDRESS_KEYS, address)
     ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
@@ -346,13 +340,9 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
             key=f"{prefix}concert",
         )
 
-        col1, col2 = st.columns(2)
-        with col1:
-            dt_start_str = ext(existing, PRACTICE_DATE_KEYS) if is_edit else ""
-            dt_start_val = date.fromisoformat(dt_start_str[:10]) if dt_start_str else date.today()
-            dt_start = st.date_input("練習日 *", value=dt_start_val, key=f"{prefix}dt_start")
-        with col2:
-            dt_end = st.date_input("終了日（任意）", value=dt_start_val, key=f"{prefix}dt_end")
+        dt_start_str = ext(existing, PRACTICE_DATE_KEYS) if is_edit else ""
+        dt_start_val = date.fromisoformat(dt_start_str[:10]) if dt_start_str else date.today()
+        dt_start = st.date_input("練習日 *", value=dt_start_val, key=f"{prefix}dt_start")
 
         col3, col4 = st.columns(2)
         with col3:
@@ -379,15 +369,14 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
             return
         concert_id = concert_options.get(selected_concert_name, "")
         dt_s = dt_start.isoformat()
-        dt_e = dt_end.isoformat() if dt_end and dt_end != dt_start else dt_s
 
         with st.spinner(f"{label}中..."):
             if is_edit:
                 ok = _update_practice(ctx, existing["id"], name.strip(), concert_id,
-                                      dt_s, dt_e, venue, address, is_concert_day, memo)
+                                      dt_s, venue, address, is_concert_day, memo)
             else:
                 ok = _create_practice(ctx, name.strip(), concert_id,
-                                      dt_s, dt_e, venue, address, is_concert_day, memo)
+                                      dt_s, venue, address, is_concert_day, memo)
 
         if ok:
             st.success(f"✅ 練習を{label}しました。")
