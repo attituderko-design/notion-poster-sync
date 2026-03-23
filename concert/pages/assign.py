@@ -28,6 +28,7 @@ PARTDEF_NOTE_KEYS = ["備考", "メモ", "注記"]
 PREF_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
 PREF_INST_REL_KEYS = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
 PREF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
+PREF_PART_REL_KEYS = ["パート", "パート定義", "FKパート"]
 PREF_PRIORITY_KEYS = ["希望順位", "優先度", "希望", "希望区分"]
 
 
@@ -163,6 +164,7 @@ def _instrument_name(i, ctx) -> str:
 
 def _save_preference(ctx, player_id: str, player_name: str,
                      song_id: str, song_name: str,
+                     part_id: str, part_name: str,
                      instrument_id: str, instrument_name: str,
                      priority_int: int,
                      existing_id: str = "") -> bool:
@@ -176,16 +178,21 @@ def _save_preference(ctx, player_id: str, player_name: str,
     player_key = ctx["find_prop_name"](type_map, PREF_PLAYER_REL_KEYS)
     inst_key = ctx["find_prop_name"](type_map, PREF_INST_REL_KEYS)
     song_key = ctx["find_prop_name"](type_map, PREF_SONG_REL_KEYS)
+    part_key = ctx["find_prop_name"](type_map, PREF_PART_REL_KEYS)
     pri_key = ctx["find_prop_name"](type_map, PREF_PRIORITY_KEYS)
     if rec_key:
         ctx["put_prop"](props, type_map, rec_key,
-                    f"{player_name} × {song_name} × {instrument_name}")
+                    f"{player_name} × {song_name} × {part_name}")
     if player_key:
         ctx["put_prop"](props, type_map, player_key, player_id)
     if inst_key:
-        ctx["put_prop"](props, type_map, inst_key, instrument_id)
+        # パート優先運用: 楽器relationが無いパートでも保存できるように任意扱い
+        if instrument_id:
+            ctx["put_prop"](props, type_map, inst_key, instrument_id)
     if song_key:
         ctx["put_prop"](props, type_map, song_key, song_id)
+    if part_key:
+        ctx["put_prop"](props, type_map, part_key, part_id)
     if pri_key:
         ctx["put_prop"](props, type_map, pri_key, INT_TO_PRIORITY.get(priority_int, "なし"))
 
@@ -217,26 +224,24 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
     inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
     inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
 
-    # Requirements: SongInstrumentから構築
+    # Requirements: パート定義DBから構築
     requirements: list[Requirement] = []
     for song in songs:
         sid = song.get("id", "")
         sname = _song_name(song, ctx)
-        si_rows = _load_song_instruments(ctx, sid)
-        for si in si_rows:
-            iids = ctx["extract_relation_ids_any"](si, PARTDEF_INST_REL_KEYS)
-            if not iids:
-                continue
-            iid   = iids[0]
-            iname = inst_name_map.get(iid, iid)
-            qty_str = ctx["extract_prop_text_any"](si, ["必要台数", "必要人数", "台数", "人数"])
+        part_rows = _load_song_instruments(ctx, sid)
+        for part in part_rows:
+            iids = ctx["extract_relation_ids_any"](part, PARTDEF_INST_REL_KEYS)
+            iid   = iids[0] if iids else ""
+            iname = inst_name_map.get(iid, iid) if iid else ""
+            qty_str = ctx["extract_prop_text_any"](part, ["必要台数", "必要人数", "台数", "人数"])
             try:
                 qty = max(int(float(qty_str)), 1) if qty_str else 1
             except ValueError:
                 qty = 1
-            note = ctx["extract_prop_text_any"](si, PARTDEF_NOTE_KEYS) or ""
-            part_id   = si.get("id", "")
-            pnm = ctx["extract_prop_text_any"](si, PARTDEF_NAME_KEYS) or iname
+            note = ctx["extract_prop_text_any"](part, PARTDEF_NOTE_KEYS) or ""
+            part_id   = part.get("id", "")
+            pnm = ctx["extract_prop_text_any"](part, PARTDEF_NAME_KEYS) or iname or "Part"
             part_name = f"{pnm}（{note}）" if note else pnm
             requirements.append(Requirement(
                 song_id=sid, song_name=sname,
@@ -245,7 +250,7 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
                 required_count=qty,
             ))
 
-    # Prefs: 希望入力DBの希望順位から構築
+    # Prefs: 希望入力DBの希望順位から構築（パート単位）
     prefs: list[Pref] = []
     pi_rows = _load_player_instruments(ctx, concert_id)
 
@@ -255,13 +260,15 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
 
     for pi in pi_rows:
         player_ids = ctx["extract_relation_ids_any"](pi, PREF_PLAYER_REL_KEYS)
-        inst_ids   = ctx["extract_relation_ids_any"](pi, PREF_INST_REL_KEYS)
         song_ids   = ctx["extract_relation_ids_any"](pi, PREF_SONG_REL_KEYS)
-        if not (player_ids and inst_ids and song_ids):
+        part_ids   = ctx["extract_relation_ids_any"](pi, PREF_PART_REL_KEYS)
+        inst_ids   = ctx["extract_relation_ids_any"](pi, PREF_INST_REL_KEYS)
+        if not (player_ids and song_ids and part_ids):
             continue
         pid    = player_ids[0]
-        iid    = inst_ids[0]
         sid    = song_ids[0]
+        part_id = part_ids[0]
+        iid    = inst_ids[0] if inst_ids else ""
         if sid not in song_id_set:
             continue
 
@@ -270,10 +277,9 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
         if priority_int is None:
             continue  # 「なし」はスキップ
 
-        # part_idはSongInstrumentのIDを使う（楽曲×楽器の組合せで一意）
-        matching_reqs = [r for r in requirements if r.song_id == sid and r.instrument_id == iid]
-        part_id   = matching_reqs[0].part_id   if matching_reqs else f"{sid}_{iid}"
-        part_name = matching_reqs[0].part_name  if matching_reqs else inst_name_map.get(iid, iid)
+        # part_idは希望入力DBのrelationを正とする
+        matching_reqs = [r for r in requirements if r.song_id == sid and r.part_id == part_id]
+        part_name = matching_reqs[0].part_name if matching_reqs else part_id
 
         prefs.append(Pref(
             player_id=pid,
@@ -283,7 +289,7 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
             part_id=part_id,
             part_name=part_name,
             instrument_id=iid,
-            instrument_name=inst_name_map.get(iid, iid),
+            instrument_name=inst_name_map.get(iid, iid) if iid else "",
             priority=priority_int,
             can_bring=False,  # 持参可フラグはスコア計算から除外済み
         ))
@@ -320,15 +326,15 @@ def _render_pref_tab(ctx: dict):
     inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
     inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
 
-    # 既存の希望入力を取得（奏者×楽曲×楽器 → レコードIDと現在の希望順位）
+    # 既存の希望入力を取得（奏者×楽曲×パート → レコードIDと現在の希望順位）
     pi_rows = _load_player_instruments(ctx, concert_id)
-    pi_lookup: dict[tuple, dict] = {}  # (player_id, song_id, inst_id) → row
+    pi_lookup: dict[tuple, dict] = {}  # (player_id, song_id, part_id) → row
     for pi in pi_rows:
         pids = ctx["extract_relation_ids_any"](pi, PREF_PLAYER_REL_KEYS)
-        iids = ctx["extract_relation_ids_any"](pi, PREF_INST_REL_KEYS)
         sids = ctx["extract_relation_ids_any"](pi, PREF_SONG_REL_KEYS)
-        if pids and iids and sids:
-            pi_lookup[(pids[0], sids[0], iids[0])] = pi
+        part_ids = ctx["extract_relation_ids_any"](pi, PREF_PART_REL_KEYS)
+        if pids and sids and part_ids:
+            pi_lookup[(pids[0], sids[0], part_ids[0])] = pi
 
     player_opts = {_player_name(p, ctx): p.get("id", "") for p in
                    sorted(players, key=lambda x: _player_name(x, ctx))}
@@ -352,16 +358,15 @@ def _render_pref_tab(ctx: dict):
             with st.form(f"pref_form_{player_id}_{sid}", border=True):
                 changes = []
                 for si in si_rows:
+                    part_id = si.get("id", "")
                     iids = ctx["extract_relation_ids_any"](si, PARTDEF_INST_REL_KEYS)
-                    if not iids:
-                        continue
-                    iid   = iids[0]
-                    iname = inst_name_map.get(iid, iid)
+                    iid   = iids[0] if iids else ""
+                    iname = inst_name_map.get(iid, iid) if iid else ""
                     note  = ctx["extract_prop_text_any"](si, PARTDEF_NOTE_KEYS) or ""
-                    pname = ctx["extract_prop_text_any"](si, PARTDEF_NAME_KEYS) or iname
+                    pname = ctx["extract_prop_text_any"](si, PARTDEF_NAME_KEYS) or iname or "Part"
                     label = f"{pname}（{note}）" if note else pname
 
-                    existing = pi_lookup.get((player_id, sid, iid))
+                    existing = pi_lookup.get((player_id, sid, part_id))
                     cur_priority_str = ctx["extract_prop_text_any"](existing, PREF_PRIORITY_KEYS) if existing else "なし"
                     if cur_priority_str not in PRIORITY_OPTIONS:
                         cur_priority_str = "なし"
@@ -377,6 +382,8 @@ def _render_pref_tab(ctx: dict):
                     changes.append({
                         "iid":         iid,
                         "iname":       iname,
+                        "part_id":     part_id,
+                        "part_name":   pname,
                         "priority_str": priority_sel,
                         "existing_id": existing.get("id", "") if existing else "",
                     })
@@ -402,7 +409,7 @@ def _render_pref_tab(ctx: dict):
                                 continue
                             ok = _save_preference(
                                 ctx, player_id, selected_player_name,
-                                sid, sname, ch["iid"], ch["iname"],
+                                sid, sname, ch["part_id"], ch["part_name"], ch["iid"], ch["iname"],
                                 pri_int, ch["existing_id"],
                             )
                             if ok:
