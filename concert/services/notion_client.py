@@ -204,6 +204,27 @@ def put_concert_prop(props: dict, type_map: dict, key: str, value) -> None:
     elif ptype == "url":
         props[key] = {"url": str(value) if value else None}
 
+    elif ptype == "location":
+        # Notion location 型:
+        # {"location":{"name","address","latitude","longitude"}}
+        if isinstance(value, dict):
+            payload = {}
+            for fld in ("name", "address", "city", "region", "country", "postal_code"):
+                if value.get(fld):
+                    payload[fld] = str(value.get(fld))
+            for fld in ("latitude", "longitude"):
+                v = value.get(fld)
+                if v not in (None, ""):
+                    try:
+                        payload[fld] = float(v)
+                    except Exception:
+                        pass
+            props[key] = {"location": payload if payload else None}
+        elif value:
+            props[key] = {"location": {"name": str(value)}}
+        else:
+            props[key] = {"location": None}
+
 
 # ============================================================
 # プロパティ読み取りヘルパー

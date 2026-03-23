@@ -19,7 +19,7 @@ PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 PRACTICE_DATE_KEYS = ["日時", "日付"]
 PRACTICE_VENUE_KEYS = ["会場名", "ロケーション", "場所", "会場", "Location"]
 PRACTICE_ADDRESS_KEYS = ["会場住所", "住所", "ロケーション", "場所", "Location"]
-PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ"]
+PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ", "本番日"]
 PRACTICE_REST_KEYS = ["打楽器休み", "休みフラグ", "休み", "Percussion休み"]
 PRACTICE_MEMO_KEYS = ["メモ", "備考"]
 
@@ -78,6 +78,15 @@ def _contains_query(values: list[str], query: str) -> bool:
     return q in blob
 
 
+def _extract_bool_any(ctx: dict, page: dict, keys: list[str], default: bool = False) -> bool:
+    raw = (ctx["extract_prop_text_any"](page, keys) or "").strip().lower()
+    if raw in ("true", "1", "yes", "on", "チェック済み"):
+        return True
+    if raw in ("false", "0", "no", "off"):
+        return False
+    return default
+
+
 def _geocode_nominatim(query: str) -> list[dict]:
     q = (query or "").strip()
     if not q:
@@ -98,6 +107,8 @@ def _geocode_nominatim(query: str) -> list[dict]:
                 {
                     "name": r.get("display_name") or "",
                     "address": r.get("display_name") or "",
+                    "lat": r.get("lat"),
+                    "lon": r.get("lon"),
                 }
             )
         return out
@@ -113,6 +124,22 @@ def _clear_concert_cache(ctx):
         pass
     for k in ["concert_list", "practice_list"]:
         st.session_state.pop(k, None)
+
+
+def _location_payload(venue: str, address: str, lat=None, lon=None) -> dict:
+    payload = {}
+    if venue:
+        payload["name"] = str(venue)
+    if address:
+        payload["address"] = str(address)
+    try:
+        if lat not in (None, ""):
+            payload["latitude"] = float(lat)
+        if lon not in (None, ""):
+            payload["longitude"] = float(lon)
+    except Exception:
+        pass
+    return payload
 
 
 def _load_concerts(ctx) -> list[dict]:
@@ -172,7 +199,9 @@ def _practice_display_name(page: dict, ctx: dict) -> str:
 # 演奏会 CRUD
 # ============================================================
 
-def _create_concert(ctx: dict, name: str, dt_start: str, dt_end: str, venue: str, address: str, memo: str) -> bool:
+def _create_concert(
+    ctx: dict, name: str, dt_start: str, dt_end: str, venue: str, address: str, memo: str, lat=None, lon=None
+) -> bool:
     api   = ctx["api_request"]
     hdrs  = ctx["NOTION_HEADERS"]
     db_id = ctx["CONCERT_DB_CONCERT"]
@@ -192,8 +221,15 @@ def _create_concert(ctx: dict, name: str, dt_start: str, dt_end: str, venue: str
         if dt_end and dt_end != dt_start:
             date_val["end"] = dt_end
         props[date_key] = {"date": date_val}
-    ctx["put_prop_any"](props, type_map, CONCERT_VENUE_KEYS, venue)
-    ctx["put_prop_any"](props, type_map, CONCERT_ADDRESS_KEYS, address)
+    venue_key = ctx["find_prop_name"](type_map, CONCERT_VENUE_KEYS)
+    address_key = ctx["find_prop_name"](type_map, CONCERT_ADDRESS_KEYS)
+    if venue_key:
+        if type_map.get(venue_key) == "location":
+            ctx["put_prop"](props, type_map, venue_key, _location_payload(venue, address, lat, lon))
+        else:
+            ctx["put_prop"](props, type_map, venue_key, venue)
+    if address_key and address_key != venue_key:
+        ctx["put_prop"](props, type_map, address_key, address)
     ctx["put_prop_any"](props, type_map, CONCERT_MEMO_KEYS, memo)
     media_key = ctx["find_prop_name"](type_map, CONCERT_MEDIA_KEYS)
     if media_key:
@@ -208,7 +244,9 @@ def _create_concert(ctx: dict, name: str, dt_start: str, dt_end: str, venue: str
     return res is not None and res.status_code == 200
 
 
-def _update_concert(ctx: dict, page_id: str, name: str, dt_start: str, dt_end: str, venue: str, address: str, memo: str) -> bool:
+def _update_concert(
+    ctx: dict, page_id: str, name: str, dt_start: str, dt_end: str, venue: str, address: str, memo: str, lat=None, lon=None
+) -> bool:
     api  = ctx["api_request"]
     hdrs = ctx["NOTION_HEADERS"]
     get_t = ctx["get_prop_types"]
@@ -223,8 +261,15 @@ def _update_concert(ctx: dict, page_id: str, name: str, dt_start: str, dt_end: s
         if dt_end and dt_end != dt_start:
             date_val["end"] = dt_end
         props[date_key] = {"date": date_val}
-    ctx["put_prop_any"](props, type_map, CONCERT_VENUE_KEYS, venue)
-    ctx["put_prop_any"](props, type_map, CONCERT_ADDRESS_KEYS, address)
+    venue_key = ctx["find_prop_name"](type_map, CONCERT_VENUE_KEYS)
+    address_key = ctx["find_prop_name"](type_map, CONCERT_ADDRESS_KEYS)
+    if venue_key:
+        if type_map.get(venue_key) == "location":
+            ctx["put_prop"](props, type_map, venue_key, _location_payload(venue, address, lat, lon))
+        else:
+            ctx["put_prop"](props, type_map, venue_key, venue)
+    if address_key and address_key != venue_key:
+        ctx["put_prop"](props, type_map, address_key, address)
     ctx["put_prop_any"](props, type_map, CONCERT_MEMO_KEYS, memo)
 
     res = api("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
@@ -235,8 +280,20 @@ def _update_concert(ctx: dict, page_id: str, name: str, dt_start: str, dt_end: s
 # 練習 CRUD
 # ============================================================
 
-def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_end: str,
-                     venue: str, address: str, is_concert_day: bool, is_rest_day: bool, memo: str) -> str:
+def _create_practice(
+    ctx: dict,
+    name: str,
+    concert_id: str,
+    dt_start: str,
+    dt_end: str,
+    venue: str,
+    address: str,
+    is_concert_day: bool,
+    is_rest_day: bool,
+    memo: str,
+    lat=None,
+    lon=None,
+) -> str:
     api   = ctx["api_request"]
     db_id = ctx["CONCERT_DB_PRACTICE"]
     get_t = ctx["get_prop_types"]
@@ -263,8 +320,15 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_en
         if dt_end and dt_end != dt_start:
             date_val["end"] = dt_end
         props[date_key] = {"date": date_val}
-    ctx["put_prop_any"](props, type_map, PRACTICE_VENUE_KEYS, venue)
-    ctx["put_prop_any"](props, type_map, PRACTICE_ADDRESS_KEYS, address)
+    venue_key = ctx["find_prop_name"](type_map, PRACTICE_VENUE_KEYS)
+    address_key = ctx["find_prop_name"](type_map, PRACTICE_ADDRESS_KEYS)
+    if venue_key:
+        if type_map.get(venue_key) == "location":
+            ctx["put_prop"](props, type_map, venue_key, _location_payload(venue, address, lat, lon))
+        else:
+            ctx["put_prop"](props, type_map, venue_key, venue)
+    if address_key and address_key != venue_key:
+        ctx["put_prop"](props, type_map, address_key, address)
     cday_written = ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
     if not cday_written:
         for k, t in (type_map or {}).items():
@@ -286,9 +350,21 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_en
     return ""
 
 
-def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
-                     dt_start: str, dt_end: str, venue: str, address: str,
-                     is_concert_day: bool, is_rest_day: bool, memo: str) -> bool:
+def _update_practice(
+    ctx: dict,
+    page_id: str,
+    name: str,
+    concert_id: str,
+    dt_start: str,
+    dt_end: str,
+    venue: str,
+    address: str,
+    is_concert_day: bool,
+    is_rest_day: bool,
+    memo: str,
+    lat=None,
+    lon=None,
+) -> bool:
     api   = ctx["api_request"]
     get_t = ctx["get_prop_types"]
     put_p = ctx["put_prop"]
@@ -309,8 +385,15 @@ def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
         if dt_end and dt_end != dt_start:
             date_val["end"] = dt_end
         props[date_key] = {"date": date_val}
-    ctx["put_prop_any"](props, type_map, PRACTICE_VENUE_KEYS, venue)
-    ctx["put_prop_any"](props, type_map, PRACTICE_ADDRESS_KEYS, address)
+    venue_key = ctx["find_prop_name"](type_map, PRACTICE_VENUE_KEYS)
+    address_key = ctx["find_prop_name"](type_map, PRACTICE_ADDRESS_KEYS)
+    if venue_key:
+        if type_map.get(venue_key) == "location":
+            ctx["put_prop"](props, type_map, venue_key, _location_payload(venue, address, lat, lon))
+        else:
+            ctx["put_prop"](props, type_map, venue_key, venue)
+    if address_key and address_key != venue_key:
+        ctx["put_prop"](props, type_map, address_key, address)
     cday_written = ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
     if not cday_written:
         for k, t in (type_map or {}).items():
@@ -407,9 +490,9 @@ def _render_concert_form(ctx: dict, existing: dict | None = None):
         with st.spinner(f"{label}中..."):
             if is_edit:
                 ok = _update_concert(ctx, existing["id"], name.strip(), dt_s, dt_e,
-                                     venue, address, memo)
+                                     venue, address, memo, None, None)
             else:
-                ok = _create_concert(ctx, name.strip(), dt_s, dt_e, venue, address, memo)
+                ok = _create_concert(ctx, name.strip(), dt_s, dt_e, venue, address, memo, None, None)
 
         if ok:
             st.success(f"✅ 演奏会を{label}しました。")
@@ -446,6 +529,8 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
     address_default = ext(existing, PRACTICE_ADDRESS_KEYS) if is_edit else ""
     prefill_venue_key = f"{prefix}prefill_venue"
     prefill_address_key = f"{prefix}prefill_address"
+    prefill_lat_key = f"{prefix}prefill_lat"
+    prefill_lon_key = f"{prefix}prefill_lon"
     if _ss(prefill_venue_key):
         venue_default = _ss(prefill_venue_key, "")
     if _ss(prefill_address_key):
@@ -481,12 +566,14 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
             if st.button("✅ この候補をフォームに反映", key=f"{prefix}apply_venue_candidate"):
                 st.session_state[prefill_venue_key] = picked.get("name", "")
                 st.session_state[prefill_address_key] = picked.get("address", "")
+                st.session_state[prefill_lat_key] = picked.get("lat")
+                st.session_state[prefill_lon_key] = picked.get("lon")
                 st.session_state[f"{prefix}venue"] = picked.get("name", "")
                 st.session_state[f"{prefix}address"] = picked.get("address", "")
                 st.rerun()
 
     # 休みフラグはフォーム外に置いて、ON/OFF時に即座に入力可否へ反映
-    rest_default = (ext(existing, PRACTICE_REST_KEYS).strip().lower() == "true") if is_edit else False
+    rest_default = _extract_bool_any(ctx, existing, PRACTICE_REST_KEYS, False) if is_edit else False
     live_rest_key = f"{prefix}rest_day_live"
     if live_rest_key not in st.session_state:
         st.session_state[live_rest_key] = rest_default
@@ -571,7 +658,7 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
 
         is_concert_day = st.checkbox(
             "演奏会当日フラグ（本番日の場合はチェック）",
-            value=(ext(existing, PRACTICE_CONCERT_DAY_KEYS) == "True") if is_edit else False,
+            value=_extract_bool_any(ctx, existing, PRACTICE_CONCERT_DAY_KEYS, False) if is_edit else False,
             key=f"{prefix}concert_day",
             disabled=is_rest_day,
         )
@@ -601,12 +688,14 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
             memo = ""
 
         with st.spinner(f"{label}中..."):
+            chosen_lat = _ss(prefill_lat_key, None)
+            chosen_lon = _ss(prefill_lon_key, None)
             if is_edit:
                 ok = _update_practice(ctx, existing["id"], name.strip(), concert_id,
-                                      dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo)
+                                      dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo, chosen_lat, chosen_lon)
             else:
                 created_id = _create_practice(ctx, name.strip(), concert_id,
-                                              dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo)
+                                              dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo, chosen_lat, chosen_lon)
                 ok = bool(created_id)
                 if ok and concert_id:
                     _bind_practice_concert_relation(ctx, created_id, concert_id)
@@ -615,6 +704,8 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
             st.success(f"✅ 練習を{label}しました。")
             st.session_state.pop(prefill_venue_key, None)
             st.session_state.pop(prefill_address_key, None)
+            st.session_state.pop(prefill_lat_key, None)
+            st.session_state.pop(prefill_lon_key, None)
             st.session_state.pop(venue_list_key, None)
             _clear_concert_cache(ctx)
             st.rerun()
@@ -867,7 +958,7 @@ def render(ctx: dict):
                 st.info("検索条件に一致する練習がありません。")
             for p in filtered_practices:
                 label = _practice_display_name(p, ctx)
-                is_concert_day = ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS) == "True"
+                is_concert_day = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
                 if is_concert_day:
                     label = "🎼 " + label + "  【本番】"
                 with st.expander(label, expanded=False):
