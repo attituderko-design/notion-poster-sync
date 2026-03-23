@@ -57,6 +57,24 @@ def _first_uuid_from_pref_key(key_text: str) -> str:
     return "-".join(m.groups())
 
 
+def _norm_prop_key(s: str) -> str:
+    return re.sub(r"\s+", "", str(s or "")).strip().lower()
+
+
+def _find_prop_name_loose(ctx, type_map: dict, candidates: list[str]) -> str:
+    key = ctx["find_prop_name"](type_map, candidates)
+    if key:
+        return key
+    if not type_map:
+        return ""
+    norm_to_actual = {_norm_prop_key(k): k for k in type_map.keys()}
+    for c in candidates:
+        got = norm_to_actual.get(_norm_prop_key(c), "")
+        if got:
+            return got
+    return ""
+
+
 # ============================================================
 # キャッシュ／ロードヘルパー
 # ============================================================
@@ -104,9 +122,9 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
             if pid:
                 valid_part_ids.add(pid)
 
-    player_rel_key = ctx["find_prop_name"](t, PREF_PLAYER_REL_KEYS)
-    participant_rel_key = ctx["find_prop_name"](t, ["演奏会参加者"])
-    pref_key_prop = ctx["find_prop_name"](t, PREFERENCE_KEY_KEYS)
+    player_rel_key = _find_prop_name_loose(ctx, t, PREF_PLAYER_REL_KEYS)
+    participant_rel_key = _find_prop_name_loose(ctx, t, ["演奏会参加者"])
+    pref_key_prop = _find_prop_name_loose(ctx, t, PREFERENCE_KEY_KEYS)
 
     scanned = ok = ng = already = skipped = unresolved = 0
     for row in pref_rows:
@@ -176,9 +194,9 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
         patch_props: dict = {}
         if participant_rel_key:
             ctx["put_prop"](patch_props, t, participant_rel_key, participant_id)
-        elif player_rel_key:
-            # 専用列がない場合は既存のプレイヤーrelationへ参加者IDを書き戻す
-            ctx["put_prop"](patch_props, t, player_rel_key, participant_id)
+        if player_rel_key and player_id:
+            # 互換性維持: 参加者relationとは別に奏者relationも同期
+            ctx["put_prop"](patch_props, t, player_rel_key, player_id)
         if not patch_props:
             continue
 
@@ -188,7 +206,19 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
             json={"properties": patch_props},
         )
         if res is not None and res.status_code == 200:
-            ok += 1
+            verify = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{rid}")
+            if verify is None or verify.status_code != 200:
+                ng += 1
+                continue
+            row2 = verify.json() or {}
+            confirmed = []
+            if participant_rel_key:
+                confirmed = ctx["extract_relation_ids"](row2, participant_rel_key)
+            # 専用列が無い場合は奏者relationへの書き込みを成功扱い
+            if confirmed or (not participant_rel_key and player_rel_key):
+                ok += 1
+            else:
+                unresolved += 1
         else:
             ng += 1
     return {
@@ -348,7 +378,8 @@ def _save_preference(ctx, player_id: str, player_name: str,
         return False
     props: dict = {}
     rec_key = ctx["find_prop_name"](type_map, ["レコード名", "タイトル", "名称"])
-    player_key = ctx["find_prop_name"](type_map, PREF_PLAYER_REL_KEYS)
+    participant_key = _find_prop_name_loose(ctx, type_map, ["演奏会参加者"])
+    player_key = _find_prop_name_loose(ctx, type_map, ["出演者", "奏者", "FK奏者"])
     inst_key = ctx["find_prop_name"](type_map, PREF_INST_REL_KEYS)
     song_key = ctx["find_prop_name"](type_map, PREF_SONG_REL_KEYS)
     part_key = ctx["find_prop_name"](type_map, PREF_PART_REL_KEYS)
@@ -356,10 +387,10 @@ def _save_preference(ctx, player_id: str, player_name: str,
     if rec_key:
         ctx["put_prop"](props, type_map, rec_key,
                     f"{player_name} × {song_name} × {part_name}")
-    if player_key:
-        # 希望入力DBのrelation先が「演奏会参加者DB」の場合は participant_id を優先する
-        rel_target = participant_id or player_id
-        ctx["put_prop"](props, type_map, player_key, rel_target)
+    if participant_key and participant_id:
+        ctx["put_prop"](props, type_map, participant_key, participant_id)
+    if player_key and player_id:
+        ctx["put_prop"](props, type_map, player_key, player_id)
     if inst_key:
         # パート優先運用: 楽器relationが無いパートでも保存できるように任意扱い
         if instrument_id:
