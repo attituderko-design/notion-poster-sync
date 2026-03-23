@@ -70,6 +70,10 @@ def _all_uuids_from_pref_key(key_text: str) -> list[str]:
     return vals
 
 
+def _norm_name(s: str) -> str:
+    return re.sub(r"\s+", "", str(s or "")).strip().lower()
+
+
 def _norm_prop_key(s: str) -> str:
     return re.sub(r"\s+", "", str(s or "")).strip().lower()
 
@@ -231,7 +235,10 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
 
     participant_by_player: dict[str, str] = {}
     participant_to_player: dict[str, str] = {}
+    participant_by_player_name: dict[str, str] = {}
     participant_ids: set[str] = set()
+    player_rows = _load_players(ctx)
+    player_name_by_id = {p.get("id", ""): _player_name(p, ctx) for p in player_rows}
     for row in participant_rows:
         pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
         if pids:
@@ -240,6 +247,9 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
             participant_by_player[pid] = part_id
             participant_to_player[part_id] = pid
             participant_ids.add(part_id)
+            nkey = _norm_name(player_name_by_id.get(pid, ""))
+            if nkey:
+                participant_by_player_name[nkey] = part_id
 
     scanned = ok = ng = already = skipped = unresolved = recreated = 0
     debug_unresolved = []
@@ -309,6 +319,18 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
         if not participant_id and player_id:
             participant_id = participant_by_player.get(player_id, "")
         if not participant_id:
+            # 最終フォールバック: レコード名の先頭（奏者名）で現在の参加者を逆引き
+            title_like = (
+                ctx["extract_prop_text_any"](row, ["レコード名", "タイトル", "名称"])
+                or ctx["extract_title"](row)
+                or ""
+            )
+            lead = str(title_like).split("×")[0].strip()
+            pid2 = participant_by_player_name.get(_norm_name(lead), "")
+            if pid2:
+                participant_id = pid2
+                player_id = participant_to_player.get(pid2, "")
+        if not participant_id:
             unresolved += 1
             if len(debug_unresolved) < 5:
                 debug_unresolved.append({
@@ -320,6 +342,11 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                     "player_rel_ids": (ctx["extract_relation_ids"](row, player_rel_key) if player_rel_key else []),
                     "parsed_is_participant_id": bool(parsed_pref_id and parsed_pref_id in participant_ids),
                     "parsed_is_player_id": bool(parsed_pref_id and parsed_pref_id in participant_by_player),
+                    "title_like": (
+                        ctx["extract_prop_text_any"](row, ["レコード名", "タイトル", "名称"])
+                        or ctx["extract_title"](row)
+                        or ""
+                    ),
                     "participant_rel_key": participant_rel_key,
                     "player_rel_key": player_rel_key,
                     "pref_key_prop": pref_key_prop,
