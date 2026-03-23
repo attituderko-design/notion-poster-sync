@@ -243,6 +243,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
 
     scanned = ok = ng = already = skipped = unresolved = recreated = 0
     debug_unresolved = []
+    debug_failed = []
     for row in pref_rows:
         rid = row.get("id", "")
         if not rid:
@@ -307,9 +308,6 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
             pass
         if not participant_id and player_id:
             participant_id = participant_by_player.get(player_id, "")
-        if not participant_id and parsed_pref_id:
-            # 参加者マップが取れない環境でも、preference_key先頭のUUIDを参加者IDとして直接採用
-            participant_id = parsed_pref_id
         if not participant_id:
             unresolved += 1
             if len(debug_unresolved) < 5:
@@ -406,7 +404,25 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                         "verify_status": verify_status,
                     })
         else:
+            # 既存行PATCHが失敗した場合も再作成ルートを試す
+            recreated_ok = _clone_preference_row_with_participant(
+                ctx, db_id, t, row, participant_rel_key, participant_id, player_rel_key
+            )
+            if recreated_ok:
+                recreated += 1
+                ok += 1
+                continue
             ng += 1
+            if len(debug_failed) < 5:
+                debug_failed.append({
+                    "row_id": rid,
+                    "stage": "patch",
+                    "status": (res.status_code if res is not None else 0),
+                    "body": ((res.text or "")[:300] if res is not None else ""),
+                    "participant_rel_key": participant_rel_key,
+                    "participant_rel_prop_id": participant_rel_prop_id,
+                    "patched_participant_id": participant_id,
+                })
     return {
         "scanned": scanned,
         "updated": ok,
@@ -426,6 +442,8 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
         "participant_target_db": participant_target_db,
         "participant_ctx_db": ctx["CONCERT_DB_PARTICIPANT"],
         "participant_rel_prop_id": participant_rel_prop_id,
+        "participant_rel_type": _db_property_type(ctx, db_id, participant_rel_key) if participant_rel_key else "",
+        "debug_failed": debug_failed,
     }
 
 
@@ -776,6 +794,7 @@ def _render_pref_tab(ctx: dict):
                     "participant_source_db": stats.get("participant_source_db", ""),
                     "participant_rel_prop_id": stats.get("participant_rel_prop_id", ""),
                     "sample": stats.get("debug_unresolved", []),
+                    "failed_sample": stats.get("debug_failed", []),
                 })
 
     players = _load_players(ctx)
