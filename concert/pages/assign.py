@@ -128,6 +128,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
     pref_key_prop = _find_prop_name_loose(ctx, t, PREFERENCE_KEY_KEYS)
 
     scanned = ok = ng = already = skipped = unresolved = 0
+    debug_unresolved = []
     for row in pref_rows:
         rid = row.get("id", "")
         if not rid:
@@ -190,6 +191,15 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
             participant_id = parsed_pref_id
         if not participant_id:
             unresolved += 1
+            if len(debug_unresolved) < 5:
+                debug_unresolved.append({
+                    "row_id": rid,
+                    "pref_key": (ctx["extract_prop_text"](row, pref_key_prop) if pref_key_prop else ""),
+                    "parsed_pref_id": parsed_pref_id,
+                    "player_rel_ids": (ctx["extract_relation_ids"](row, player_rel_key) if player_rel_key else []),
+                    "parsed_is_participant_id": bool(parsed_pref_id and parsed_pref_id in participant_ids),
+                    "parsed_is_player_id": bool(parsed_pref_id and parsed_pref_id in participant_by_player),
+                })
             continue
 
         patch_props: dict = {}
@@ -231,6 +241,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
         "unresolved": unresolved,
         "participants": len(participant_rows),
         "mapped": len(participant_by_player),
+        "debug_unresolved": debug_unresolved,
     }
 
 
@@ -557,6 +568,9 @@ def _render_pref_tab(ctx: dict):
                     f"対象外 {stats['skipped']} / 走査 {stats['scanned']}"
                 )
                 st.caption(f"参加者読込: {stats.get('participants', 0)}件 / 奏者マップ: {stats.get('mapped', 0)}件")
+                if stats.get("debug_unresolved"):
+                    st.caption("未解決サンプル（先頭5件）")
+                    st.json(stats.get("debug_unresolved"))
 
     players = _load_players(ctx)
     songs   = _load_songs(ctx, concert_id)
