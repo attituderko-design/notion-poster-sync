@@ -66,9 +66,10 @@ PART_NAME_KEYS = ["パート名", "名称", "タイトル", "表示名"]
 PART_COUNT_KEYS = ["必要人数", "必要台数", "台数", "人数"]
 PART_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 
-ATT_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者"]
+ATT_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
 ATT_STATUS_KEYS = ["参加可否", "出欠", "参加状況"]
 ATT_PRACTICE_REL_KEYS = ["練習", "FK練習", "演奏会"]
+PARTICIPANT_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
 
 PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 
@@ -108,6 +109,20 @@ def _extract_rel_name_cache(ctx: dict, db_id: str, ids: set[str]) -> dict[str, s
     return out
 
 
+def _participant_to_player_map(ctx: dict) -> dict[str, str]:
+    """演奏会参加者DB(page_id) -> 奏者DB(page_id) の逆引きマップ。"""
+    out: dict[str, str] = {}
+    rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"])
+    for r in rows:
+        part_id = r.get("id", "")
+        if not part_id:
+            continue
+        pids = ctx["extract_relation_ids_any"](r, PARTICIPANT_PLAYER_REL_KEYS)
+        if pids:
+            out[part_id] = pids[0]
+    return out
+
+
 def _build_absent_set(ctx: dict, concert_id: str) -> set[str]:
     practice_db = ctx["CONCERT_DB_PRACTICE"]
     attendance_db = ctx["CONCERT_DB_ATTENDANCE"]
@@ -122,6 +137,7 @@ def _build_absent_set(ctx: dict, concert_id: str) -> set[str]:
 
     a_rows = ctx["query_all"](attendance_db)
     absent = set()
+    participant_map = _participant_to_player_map(ctx)
     for r in a_rows:
         pids = ctx["extract_relation_ids_any"](r, ATT_PRACTICE_REL_KEYS)
         if not pids or pids[0] not in practice_ids:
@@ -131,7 +147,8 @@ def _build_absent_set(ctx: dict, concert_id: str) -> set[str]:
             continue
         p_rel_ids = ctx["extract_relation_ids_any"](r, ATT_PLAYER_REL_KEYS)
         if p_rel_ids:
-            absent.add(p_rel_ids[0])
+            pid = p_rel_ids[0]
+            absent.add(participant_map.get(pid, pid))
     return absent
 
 
@@ -194,12 +211,14 @@ def _load_preferences(ctx: dict, concert_id: str) -> list[Pref]:
     part_ids = set()
     inst_ids = set()
     raw = []
+    participant_map = _participant_to_player_map(ctx)
     for r in rows:
         if concert_rel_key:
             cids = ctx["extract_relation_ids"](r, concert_rel_key)
             if concert_id not in cids:
                 continue
-        pid = (ctx["extract_relation_ids_any"](r, PREF_PLAYER_REL_KEYS) or [""])[0]
+        raw_pid = (ctx["extract_relation_ids_any"](r, PREF_PLAYER_REL_KEYS) or [""])[0]
+        pid = participant_map.get(raw_pid, raw_pid)
         sid = (ctx["extract_relation_ids_any"](r, PREF_SONG_REL_KEYS) or [""])[0]
         part_id = (ctx["extract_relation_ids_any"](r, PREF_PART_REL_KEYS) or [""])[0]
         iid = (ctx["extract_relation_ids_any"](r, PREF_INSTR_REL_KEYS) or [""])[0]
@@ -519,4 +538,3 @@ def solve_all(ctx: dict, concert_id: str) -> list[dict]:
             }
         )
     return out
-
