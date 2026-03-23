@@ -8500,15 +8500,21 @@ with st.sidebar:
             key="concert_page_radio",
         )
         if CONCERT_SYSTEM_AVAILABLE:
-            concert_ctx = build_concert_ctx()
-            if concert_page == "演奏会・練習管理":
-                concert_mgmt.render(concert_ctx)
-            elif concert_page == "楽曲・楽器管理":
-                songs.render(concert_ctx)
-            elif concert_page == "奏者・出欠・アサイン":
-                players.render(concert_ctx)
-            elif concert_page == "レンタル管理":
-                rental.render(concert_ctx)
+            try:
+                if concert_page == "演奏会・練習管理":
+                    concert_ctx = build_concert_ctx()
+                    concert_mgmt.render(concert_ctx)
+                elif concert_page == "楽曲・楽器管理":
+                    concert_ctx = build_concert_ctx()
+                    songs.render(concert_ctx)
+                elif concert_page == "奏者・出欠・アサイン":
+                    concert_ctx = build_concert_ctx()
+                    players.render(concert_ctx)
+                elif concert_page == "レンタル管理":
+                    concert_ctx = build_concert_ctx()
+                    rental.render(concert_ctx)
+            except KeyError as e:
+                st.error(f"Concert System の設定が不足しています。secrets.toml を確認してください。（{e}）")
         else:
             st.sidebar.caption("Concert System のモジュールを読み込めませんでした。")
             if CONCERT_IMPORT_ERROR:
