@@ -823,7 +823,6 @@ def render(ctx: dict):
             sorted_practices = sorted(
                 practices,
                 key=lambda p: (_practice_round_no(p), _prac_date(p)),
-                reverse=True,
             )
             filtered_practices = []
             for p in sorted_practices:
