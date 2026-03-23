@@ -8279,6 +8279,45 @@ st.caption(
     "Score DB: ArtéMis APOLLO"
 )
 st.caption(f"v{APP_VERSION}")
+
+# ============================================================
+# システム切替（通常 / Concert）
+# ============================================================
+system_mode = st.sidebar.radio("システム切替", ["通常", "Concert"], key="system_mode")
+if system_mode == "Concert":
+    st.sidebar.divider()
+    concert_page = st.sidebar.radio(
+        "ページ",
+        [
+            "演奏会・練習管理",
+            "楽曲・楽器管理",
+            "奏者・出欠・アサイン",
+            "レンタル管理",
+        ],
+        key="concert_page_radio",
+    )
+    if not CONCERT_SYSTEM_AVAILABLE:
+        st.error("Concert System のモジュールを読み込めませんでした。")
+        if CONCERT_IMPORT_ERROR:
+            st.caption(f"詳細: {CONCERT_IMPORT_ERROR}")
+        st.stop()
+    try:
+        concert_ctx = build_concert_ctx()
+    except KeyError as e:
+        st.error(f"Concert System の設定が不足しています。secrets.toml を確認してください。（{e}）")
+        st.stop()
+
+    if concert_page == "演奏会・練習管理":
+        concert_mgmt.render(concert_ctx)
+    elif concert_page == "楽曲・楽器管理":
+        songs.render(concert_ctx)
+    elif concert_page == "奏者・出欠・アサイン":
+        players.render(concert_ctx)
+    elif concert_page == "レンタル管理":
+        rental.render(concert_ctx)
+
+    st.stop()
+
 if is_drive_skip_mode():
     st.info("⏭ Driveデータスキップ機能ON: Drive保存/照合はスキップして動作中です。")
 if "pending_notice" in st.session_state:
@@ -8483,42 +8522,6 @@ with st.sidebar:
             st.session_state.app_mode_widget = st.session_state.get("app_mode", "新規登録")
         mode = st.radio("モード", ["新規登録", "出演アーカイブ", "データ管理", "出演情報管理", "自動同期"], key="app_mode_widget")
         st.session_state.app_mode = mode
-
-        # ---- Concert System ナビゲーション ----
-        st.sidebar.divider()
-        st.sidebar.markdown("**Concert System**")
-        CONCERT_PAGES = [
-            "演奏会・練習管理",
-            "楽曲・楽器管理",
-            "奏者・出欠・アサイン",
-            "レンタル管理",
-        ]
-        concert_page = st.sidebar.radio(
-            "concert_nav",
-            CONCERT_PAGES,
-            label_visibility="collapsed",
-            key="concert_page_radio",
-        )
-        if CONCERT_SYSTEM_AVAILABLE:
-            try:
-                if concert_page == "演奏会・練習管理":
-                    concert_ctx = build_concert_ctx()
-                    concert_mgmt.render(concert_ctx)
-                elif concert_page == "楽曲・楽器管理":
-                    concert_ctx = build_concert_ctx()
-                    songs.render(concert_ctx)
-                elif concert_page == "奏者・出欠・アサイン":
-                    concert_ctx = build_concert_ctx()
-                    players.render(concert_ctx)
-                elif concert_page == "レンタル管理":
-                    concert_ctx = build_concert_ctx()
-                    rental.render(concert_ctx)
-            except KeyError as e:
-                st.error(f"Concert System の設定が不足しています。secrets.toml を確認してください。（{e}）")
-        else:
-            st.sidebar.caption("Concert System のモジュールを読み込めませんでした。")
-            if CONCERT_IMPORT_ERROR:
-                st.sidebar.caption(f"詳細: {CONCERT_IMPORT_ERROR}")
 
         sync_scope = "欠損のみ補填"  # legacy compat
         if mode == "データ管理":
