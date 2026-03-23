@@ -3,7 +3,7 @@ concert.pages.concert_mgmt
 演奏会・練習情報の登録・一覧・編集画面。
 """
 import streamlit as st
-from datetime import date, datetime
+from datetime import date, datetime, timezone, timedelta
 import re
 import requests
 
@@ -43,7 +43,8 @@ def _compose_notion_date_with_optional_time(d: date, start_hhmm: str, end_hhmm: 
 
     def _to_dt(hhmm: str) -> datetime:
         h, m = hhmm.split(":")
-        return datetime(d.year, d.month, d.day, int(h), int(m), 0)
+        jst = timezone(timedelta(hours=9))
+        return datetime(d.year, d.month, d.day, int(h), int(m), 0, tzinfo=jst)
 
     if s and not hhmm_re.match(s):
         raise ValueError("開始時刻は HH:MM 形式で入力してください（例: 19:30）")
@@ -269,8 +270,18 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_en
         props[date_key] = {"date": date_val}
     ctx["put_prop_any"](props, type_map, PRACTICE_VENUE_KEYS, venue)
     ctx["put_prop_any"](props, type_map, PRACTICE_ADDRESS_KEYS, address)
-    ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
-    ctx["put_prop_any"](props, type_map, PRACTICE_REST_KEYS, is_rest_day)
+    cday_written = ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
+    if not cday_written:
+        for k, t in (type_map or {}).items():
+            if t == "checkbox" and ("当日" in str(k) or "本番" in str(k)):
+                ctx["put_prop"](props, type_map, k, is_concert_day)
+                break
+    rest_written = ctx["put_prop_any"](props, type_map, PRACTICE_REST_KEYS, is_rest_day)
+    if not rest_written:
+        for k, t in (type_map or {}).items():
+            if t == "checkbox" and "休" in str(k):
+                ctx["put_prop"](props, type_map, k, is_rest_day)
+                break
     ctx["put_prop_any"](props, type_map, PRACTICE_MEMO_KEYS, memo)
 
     res = api("post", "https://api.notion.com/v1/pages",
@@ -305,8 +316,18 @@ def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
         props[date_key] = {"date": date_val}
     ctx["put_prop_any"](props, type_map, PRACTICE_VENUE_KEYS, venue)
     ctx["put_prop_any"](props, type_map, PRACTICE_ADDRESS_KEYS, address)
-    ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
-    ctx["put_prop_any"](props, type_map, PRACTICE_REST_KEYS, is_rest_day)
+    cday_written = ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
+    if not cday_written:
+        for k, t in (type_map or {}).items():
+            if t == "checkbox" and ("当日" in str(k) or "本番" in str(k)):
+                ctx["put_prop"](props, type_map, k, is_concert_day)
+                break
+    rest_written = ctx["put_prop_any"](props, type_map, PRACTICE_REST_KEYS, is_rest_day)
+    if not rest_written:
+        for k, t in (type_map or {}).items():
+            if t == "checkbox" and "休" in str(k):
+                ctx["put_prop"](props, type_map, k, is_rest_day)
+                break
     ctx["put_prop_any"](props, type_map, PRACTICE_MEMO_KEYS, memo)
 
     res = api("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
@@ -465,7 +486,19 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
             if st.button("✅ この候補をフォームに反映", key=f"{prefix}apply_venue_candidate"):
                 st.session_state[prefill_venue_key] = picked.get("name", "")
                 st.session_state[prefill_address_key] = picked.get("address", "")
+                st.session_state[f"{prefix}venue"] = picked.get("name", "")
+                st.session_state[f"{prefix}address"] = picked.get("address", "")
                 st.rerun()
+
+    # 休みフラグはフォーム外に置いて、ON/OFF時に即座に入力可否へ反映
+    rest_default = (ext(existing, PRACTICE_REST_KEYS).strip().lower() == "true") if is_edit else False
+    live_rest_key = f"{prefix}rest_day_live"
+    if live_rest_key not in st.session_state:
+        st.session_state[live_rest_key] = rest_default
+    is_rest_day = st.checkbox(
+        "打楽器休み（ON時は日時以外の入力を無効化）",
+        key=live_rest_key,
+    )
 
     with st.form(key=f"{prefix}form", border=True):
         selected_concert_name = st.selectbox(
@@ -533,13 +566,6 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
                 placeholder="例: 21:00",
                 key=f"{prefix}end_time",
             )
-        rest_default = (ext(existing, PRACTICE_REST_KEYS).strip().lower() == "true") if is_edit else False
-        is_rest_day = st.checkbox(
-            "打楽器休み（ON時は日時以外の入力を無効化）",
-            value=rest_default,
-            key=f"{prefix}rest_day",
-        )
-
         col3, col4 = st.columns(2)
         with col3:
             venue = st.text_input("会場名", value=venue_default,
