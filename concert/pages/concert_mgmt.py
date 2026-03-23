@@ -4,6 +4,7 @@ concert.pages.concert_mgmt
 """
 import streamlit as st
 from datetime import date, datetime
+import re
 
 CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
 CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
@@ -27,6 +28,43 @@ PRACTICE_MEMO_KEYS = ["メモ", "備考"]
 
 def _ss(key, default=None):
     return st.session_state.get(key, default)
+
+
+def _compose_notion_date_with_optional_time(d: date, start_hhmm: str, end_hhmm: str) -> tuple[str, str]:
+    """
+    練習日 + 任意時刻を Notion date.start/date.end 用のISO文字列に整形する。
+    return: (start_iso, end_iso)
+    """
+    s = (start_hhmm or "").strip()
+    e = (end_hhmm or "").strip()
+    hhmm_re = re.compile(r"^\d{1,2}:\d{2}$")
+
+    def _to_dt(hhmm: str) -> datetime:
+        h, m = hhmm.split(":")
+        return datetime(d.year, d.month, d.day, int(h), int(m), 0)
+
+    if s and not hhmm_re.match(s):
+        raise ValueError("開始時刻は HH:MM 形式で入力してください（例: 19:30）")
+    if e and not hhmm_re.match(e):
+        raise ValueError("終了時刻は HH:MM 形式で入力してください（例: 21:00）")
+
+    if s:
+        sdt = _to_dt(s)
+        if not (0 <= sdt.hour <= 23 and 0 <= sdt.minute <= 59):
+            raise ValueError("開始時刻が不正です。")
+        if e:
+            edt = _to_dt(e)
+            if not (0 <= edt.hour <= 23 and 0 <= edt.minute <= 59):
+                raise ValueError("終了時刻が不正です。")
+            if edt < sdt:
+                raise ValueError("終了時刻は開始時刻以降にしてください。")
+            return sdt.isoformat(), edt.isoformat()
+        return sdt.isoformat(), ""
+
+    if e:
+        raise ValueError("終了時刻のみは指定できません。開始時刻も入力してください。")
+
+    return d.isoformat(), ""
 
 
 def _contains_query(values: list[str], query: str) -> bool:
@@ -172,7 +210,7 @@ def _update_concert(ctx: dict, page_id: str, name: str, dt_start: str, dt_end: s
 # 練習 CRUD
 # ============================================================
 
-def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str,
+def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_end: str,
                      venue: str, address: str, is_concert_day: bool, memo: str) -> bool:
     api   = ctx["api_request"]
     db_id = ctx["CONCERT_DB_PRACTICE"]
@@ -190,7 +228,10 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str,
         ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_REL_KEYS, concert_id)
     date_key = ctx["find_prop_name"](type_map, PRACTICE_DATE_KEYS)
     if dt_start and date_key:
-        props[date_key] = {"date": {"start": dt_start}}
+        date_val: dict = {"start": dt_start}
+        if dt_end and dt_end != dt_start:
+            date_val["end"] = dt_end
+        props[date_key] = {"date": date_val}
     ctx["put_prop_any"](props, type_map, PRACTICE_VENUE_KEYS, venue)
     ctx["put_prop_any"](props, type_map, PRACTICE_ADDRESS_KEYS, address)
     ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
@@ -202,7 +243,7 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str,
 
 
 def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
-                     dt_start: str, venue: str, address: str,
+                     dt_start: str, dt_end: str, venue: str, address: str,
                      is_concert_day: bool, memo: str) -> bool:
     api   = ctx["api_request"]
     get_t = ctx["get_prop_types"]
@@ -215,7 +256,10 @@ def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
         ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_REL_KEYS, concert_id)
     date_key = ctx["find_prop_name"](type_map, PRACTICE_DATE_KEYS)
     if dt_start and date_key:
-        props[date_key] = {"date": {"start": dt_start}}
+        date_val: dict = {"start": dt_start}
+        if dt_end and dt_end != dt_start:
+            date_val["end"] = dt_end
+        props[date_key] = {"date": date_val}
     ctx["put_prop_any"](props, type_map, PRACTICE_VENUE_KEYS, venue)
     ctx["put_prop_any"](props, type_map, PRACTICE_ADDRESS_KEYS, address)
     ctx["put_prop_any"](props, type_map, PRACTICE_CONCERT_DAY_KEYS, is_concert_day)
@@ -342,7 +386,28 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
 
         dt_start_str = ext(existing, PRACTICE_DATE_KEYS) if is_edit else ""
         dt_start_val = date.fromisoformat(dt_start_str[:10]) if dt_start_str else date.today()
+        start_time_default = ""
+        if dt_start_str and "T" in dt_start_str:
+            try:
+                start_time_default = dt_start_str.split("T", 1)[1][:5]
+            except Exception:
+                start_time_default = ""
         dt_start = st.date_input("練習日 *", value=dt_start_val, key=f"{prefix}dt_start")
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            start_time = st.text_input(
+                "開始時刻（任意）",
+                value=start_time_default,
+                placeholder="例: 19:00",
+                key=f"{prefix}start_time",
+            )
+        with col_t2:
+            end_time = st.text_input(
+                "終了時刻（任意）",
+                value="",
+                placeholder="例: 21:00",
+                key=f"{prefix}end_time",
+            )
 
         col3, col4 = st.columns(2)
         with col3:
@@ -368,15 +433,19 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
             st.error("練習名は必須です。")
             return
         concert_id = concert_options.get(selected_concert_name, "")
-        dt_s = dt_start.isoformat()
+        try:
+            dt_s, dt_e = _compose_notion_date_with_optional_time(dt_start, start_time, end_time)
+        except ValueError as e:
+            st.error(str(e))
+            return
 
         with st.spinner(f"{label}中..."):
             if is_edit:
                 ok = _update_practice(ctx, existing["id"], name.strip(), concert_id,
-                                      dt_s, venue, address, is_concert_day, memo)
+                                      dt_s, dt_e, venue, address, is_concert_day, memo)
             else:
                 ok = _create_practice(ctx, name.strip(), concert_id,
-                                      dt_s, venue, address, is_concert_day, memo)
+                                      dt_s, dt_e, venue, address, is_concert_day, memo)
 
         if ok:
             st.success(f"✅ 練習を{label}しました。")
