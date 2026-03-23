@@ -67,38 +67,66 @@ def _clear_assign_cache():
             st.session_state.pop(k, None)
 
 
-def _backfill_preference_participant_relation(ctx, concert_id: str) -> tuple[int, int]:
+def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
     """
     既存の希望入力DBレコードに対して「演奏会参加者」relation を補完する。
-    戻り値: (更新件数, 失敗件数)
+    戻り値: 結果統計dict
     """
     db_id = ctx["CONCERT_DB_PREFERENCE"]
     t = ctx["get_prop_types"](db_id)
     if not t:
-        return 0, 0
+        return {"scanned": 0, "updated": 0, "failed": 0, "already": 0, "skipped": 0}
 
     pref_rows = _load_player_instruments(ctx, concert_id)
     participant_rows = _load_participants(ctx, concert_id)
     participant_by_player: dict[str, str] = {}
+    participant_to_player: dict[str, str] = {}
     for row in participant_rows:
         pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
         if pids:
-            participant_by_player[pids[0]] = row.get("id", "")
+            pid = pids[0]
+            part_id = row.get("id", "")
+            participant_by_player[pid] = part_id
+            participant_to_player[part_id] = pid
+
+    # 対象演奏会に属する song/part だけを補完対象にする
+    songs = _load_songs(ctx, concert_id)
+    valid_song_ids = {s.get("id", "") for s in songs if s.get("id", "")}
+    valid_part_ids = set()
+    for s in songs:
+        sid = s.get("id", "")
+        if not sid:
+            continue
+        for part in _load_song_instruments(ctx, sid):
+            pid = part.get("id", "")
+            if pid:
+                valid_part_ids.add(pid)
 
     player_rel_key = ctx["find_prop_name"](t, PREF_PLAYER_REL_KEYS)
     participant_rel_key = ctx["find_prop_name"](t, ["演奏会参加者"])
     pref_key_prop = ctx["find_prop_name"](t, PREFERENCE_KEY_KEYS)
 
-    ok = ng = 0
+    scanned = ok = ng = already = skipped = 0
     for row in pref_rows:
         rid = row.get("id", "")
         if not rid:
             continue
+        # selected concert に関係ない希望データはスキップ
+        row_song_ids = set(ctx["extract_relation_ids_any"](row, PREF_SONG_REL_KEYS))
+        row_part_ids = set(ctx["extract_relation_ids_any"](row, PREF_PART_REL_KEYS))
+        if valid_song_ids and valid_part_ids:
+            in_concert = bool((row_song_ids & valid_song_ids) or (row_part_ids & valid_part_ids))
+            if not in_concert:
+                skipped += 1
+                continue
+        scanned += 1
+
         props = (row.get("properties", {}) or {})
         current_participant_ids = []
         if participant_rel_key:
             current_participant_ids = ctx["extract_relation_ids"](row, participant_rel_key)
         if current_participant_ids:
+            already += 1
             continue  # すでに入っている
 
         player_id = ""
@@ -108,6 +136,8 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> tuple[int
                 pid0 = pids[0]
                 if pid0 in participant_by_player:
                     player_id = pid0
+                elif pid0 in participant_to_player:
+                    player_id = participant_to_player[pid0]
                 else:
                     # relation先が演奏会参加者DBのケース：参加者ID->奏者IDへ逆引き
                     for k_pid, v_part in participant_by_player.items():
@@ -141,7 +171,13 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> tuple[int
             ok += 1
         else:
             ng += 1
-    return ok, ng
+    return {
+        "scanned": scanned,
+        "updated": ok,
+        "failed": ng,
+        "already": already,
+        "skipped": skipped,
+    }
 
 
 def _load_concerts(ctx) -> list[dict]:
@@ -451,13 +487,18 @@ def _render_pref_tab(ctx: dict):
     with st.expander("🛠 既存データ整備", expanded=False):
         st.caption("既存の希望入力DBで空欄になっている『演奏会参加者』リレーションを補完します。")
         if st.button("演奏会参加者リレーションを補完", key=f"pref_backfill_participant_{concert_id}"):
-            ok_n, ng_n = _backfill_preference_participant_relation(ctx, concert_id)
+            stats = _backfill_preference_participant_relation(ctx, concert_id)
             st.session_state.pop(f"pi_list_{concert_id}", None)
-            if ng_n == 0:
-                st.success(f"✅ 補完完了: {ok_n}件")
+            if stats["failed"] == 0:
+                st.success(
+                    f"✅ 補完完了: 更新 {stats['updated']}件 / 既設定 {stats['already']}件 / "
+                    f"対象外 {stats['skipped']}件 / 走査 {stats['scanned']}件"
+                )
             else:
-                st.warning(f"⚠️ 補完結果: 成功 {ok_n} / 失敗 {ng_n}")
-            st.rerun()
+                st.warning(
+                    f"⚠️ 補完結果: 更新 {stats['updated']} / 失敗 {stats['failed']} / "
+                    f"既設定 {stats['already']} / 対象外 {stats['skipped']} / 走査 {stats['scanned']}"
+                )
 
     players = _load_players(ctx)
     songs   = _load_songs(ctx, concert_id)
