@@ -29,6 +29,10 @@ PARTDEF_INST_REL_KEYS = ["楽器種別", "楽器", "FK楽器種別", "担当楽�
 PARTDEF_COUNT_KEYS = ["必要人数", "必要台数", "台数", "人数"]
 PARTDEF_NOTE_KEYS = ["備考", "メモ"]
 
+SONG_KEY_KEYS = ["song_key", "SongKey", "PK曲キー", "曲キー"]
+INSTRUMENT_KEY_KEYS = ["instrument_key", "InstrumentKey", "PK楽器キー", "楽器キー"]
+PARTDEF_KEY_KEYS = ["part_key", "PartKey", "PKパートキー", "パートキー"]
+
 
 # ============================================================
 # キャッシュ／ロードヘルパー
@@ -166,6 +170,7 @@ def _create_song(ctx: dict, title: str, concert_ids: list[str],
     if duration_sec is not None:
         ctx["put_prop_any"](props, type_map, SONG_DURATION_KEYS, duration_sec)
     ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
+    ctx["put_key_any"](props, type_map, SONG_KEY_KEYS, title, composer, prefix="song")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
@@ -182,6 +187,7 @@ def _update_song(ctx: dict, page_id: str, title: str, concert_ids: list[str],
     if duration_sec is not None:
         ctx["put_prop_any"](props, type_map, SONG_DURATION_KEYS, duration_sec)
     ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
+    ctx["put_key_any"](props, type_map, SONG_KEY_KEYS, title, composer, prefix="song")
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200
@@ -204,6 +210,7 @@ def _create_instrument(ctx: dict, name: str, category: str, memo: str) -> bool:
     ctx["put_prop_any"](props, type_map, INSTRUMENT_NAME_KEYS, name)
     ctx["put_prop_any"](props, type_map, INSTRUMENT_CATEGORY_KEYS, category)
     ctx["put_prop_any"](props, type_map, INSTRUMENT_MEMO_KEYS, memo)
+    ctx["put_key_any"](props, type_map, INSTRUMENT_KEY_KEYS, name, prefix="inst")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
@@ -215,6 +222,7 @@ def _update_instrument(ctx: dict, page_id: str, name: str, category: str, memo: 
     ctx["put_prop_any"](props, type_map, INSTRUMENT_NAME_KEYS, name)
     ctx["put_prop_any"](props, type_map, INSTRUMENT_CATEGORY_KEYS, category)
     ctx["put_prop_any"](props, type_map, INSTRUMENT_MEMO_KEYS, memo)
+    ctx["put_key_any"](props, type_map, INSTRUMENT_KEY_KEYS, name, prefix="inst")
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200
@@ -492,6 +500,17 @@ def _upsert_partdef(
     ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS, clean_inst_ids)
     ctx["put_prop_any"](props, t, PARTDEF_COUNT_KEYS, int(max(need_count, 1)))
     ctx["put_prop_any"](props, t, PARTDEF_NOTE_KEYS, note)
+    ctx["put_key_any"](
+        props,
+        t,
+        PARTDEF_KEY_KEYS,
+        concert_id,
+        song_id,
+        part_no,
+        part_name,
+        "|".join(clean_inst_ids),
+        prefix="part",
+    )
     if existing_id:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
     else:

@@ -40,6 +40,11 @@ PI_ASSIGN_KEYS = ["担当フラグ", "担当", "担当有無"]
 PI_BRING_KEYS = ["持参可フラグ", "持参可", "持参"]
 PI_NOTE_KEYS = ["備考", "メモ"]
 
+PLAYER_KEY_KEYS = ["player_key", "PlayerKey", "奏者キー", "PK奏者キー"]
+PARTICIPANT_KEY_KEYS = ["participant_key", "ParticipantKey", "参加者キー", "PK参加者キー"]
+ATTENDANCE_KEY_KEYS = ["attendance_key", "AttendanceKey", "出欠キー", "PK出欠キー"]
+ASSIGN_KEY_KEYS = ["assign_key", "assignment_key", "AssignmentKey", "割当キー", "PK割当キー"]
+
 
 def _first_prop_by_type(type_map: dict, ptype: str) -> str:
     for k, t in (type_map or {}).items():
@@ -247,6 +252,7 @@ def _create_player(ctx: dict, name: str, email: str, memo: str) -> bool:
     ctx["put_prop_any"](props, t, PLAYER_NAME_KEYS, name)
     ctx["put_prop_any"](props, t, PLAYER_EMAIL_KEYS, email)
     ctx["put_prop_any"](props, t, PLAYER_MEMO_KEYS, memo)
+    ctx["put_key_any"](props, t, PLAYER_KEY_KEYS, name, prefix="player")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
 
@@ -257,6 +263,7 @@ def _update_player(ctx: dict, page_id: str, name: str, email: str, memo: str) ->
     ctx["put_prop_any"](props, t, PLAYER_NAME_KEYS, name)
     ctx["put_prop_any"](props, t, PLAYER_EMAIL_KEYS, email)
     ctx["put_prop_any"](props, t, PLAYER_MEMO_KEYS, memo)
+    ctx["put_key_any"](props, t, PLAYER_KEY_KEYS, name, prefix="player")
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
     return res is not None and res.status_code == 200
 
@@ -309,6 +316,7 @@ def _upsert_attendance(
         ctx["put_prop"](props, t, status_key, status)
     if note_key:
         ctx["put_prop"](props, t, note_key, note)
+    ctx["put_key_any"](props, t, ATTENDANCE_KEY_KEYS, rel_target_id, practice_id, prefix="att")
 
     if existing_id:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
@@ -337,6 +345,7 @@ def _upsert_participant(
     ctx["put_prop_any"](props, t, PARTICIPANT_RECORD_KEYS, f"{player_name} × {concert_name}")
     ctx["put_prop_any"](props, t, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PARTICIPANT_PLAYER_REL_KEYS, player_id)
+    ctx["put_key_any"](props, t, PARTICIPANT_KEY_KEYS, concert_id, player_id, prefix="participant")
     if existing_id:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
     else:
@@ -362,6 +371,7 @@ def _upsert_player_instrument(ctx: dict, player_id: str, player_name: str, instr
     ctx["put_prop_any"](props, t, PI_ASSIGN_KEYS, is_assign)
     ctx["put_prop_any"](props, t, PI_BRING_KEYS, can_bring)
     ctx["put_prop_any"](props, t, PI_NOTE_KEYS, note)
+    ctx["put_key_any"](props, t, ASSIGN_KEY_KEYS, player_id, instrument_id, prefix="assign")
     if existing_id:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
     else:

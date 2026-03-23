@@ -24,6 +24,7 @@ RENTAL_QTY_KEYS = ["台数", "数量", "qty"]
 RENTAL_UNIT_PRICE_KEYS = ["単価（円）", "単価", "unit_price"]
 RENTAL_CONFIRMED_KEYS = ["確定フラグ", "確定", "is_confirmed"]
 RENTAL_NOTE_KEYS = ["備考", "メモ"]
+RENTAL_KEY_KEYS = ["rental_key", "RentalKey", "見積キー", "PK見積キー"]
 
 
 # ============================================================
@@ -147,6 +148,7 @@ def _create_rental(ctx: dict, practice_id: str, practice_label: str,
     ctx["put_prop_any"](props, type_map, RENTAL_UNIT_PRICE_KEYS, unit_price)
     ctx["put_prop_any"](props, type_map, RENTAL_CONFIRMED_KEYS, confirmed)
     ctx["put_prop_any"](props, type_map, RENTAL_NOTE_KEYS, note)
+    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id, vendor, prefix="rental")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
@@ -166,6 +168,7 @@ def _update_rental(ctx: dict, page_id: str, practice_id: str, practice_label: st
     ctx["put_prop_any"](props, type_map, RENTAL_UNIT_PRICE_KEYS, unit_price)
     ctx["put_prop_any"](props, type_map, RENTAL_CONFIRMED_KEYS, confirmed)
     ctx["put_prop_any"](props, type_map, RENTAL_NOTE_KEYS, note)
+    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id, vendor, prefix="rental")
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200

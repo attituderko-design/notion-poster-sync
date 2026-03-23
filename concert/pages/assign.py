@@ -41,6 +41,7 @@ PREF_PART_REL_KEYS = ["パート", "パート定義", "FKパート"]
 PREF_PRIORITY_KEYS = ["希望順位", "優先度", "希望", "希望区分"]
 PARTICIPANT_CONCERT_REL_KEYS = ["出演", "演奏会", "FK演奏会", "演奏会参加者"]
 PARTICIPANT_PLAYER_REL_KEYS = ["出演者", "奏者", "FK奏者", "演奏会参加者"]
+PREFERENCE_KEY_KEYS = ["preference_key", "PreferenceKey", "希望キー", "PK希望キー"]
 
 
 # ============================================================
@@ -217,6 +218,16 @@ def _save_preference(ctx, player_id: str, player_name: str,
         ctx["put_prop"](props, type_map, part_key, part_id)
     if pri_key:
         ctx["put_prop"](props, type_map, pri_key, INT_TO_PRIORITY.get(priority_int, "希望なし/降り番でも可"))
+    ctx["put_key_any"](
+        props,
+        type_map,
+        PREFERENCE_KEY_KEYS,
+        player_id,
+        song_id,
+        part_id,
+        instrument_id,
+        prefix="pref",
+    )
 
     if existing_id:
         res = ctx["api_request"]("patch",

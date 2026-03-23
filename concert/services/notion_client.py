@@ -8,6 +8,8 @@ import requests
 import time
 import streamlit as st
 from functools import lru_cache
+import re
+import unicodedata
 
 NOTION_VERSION = "2022-06-28"
 DEFAULT_TIMEOUT = 20
@@ -404,6 +406,56 @@ def put_concert_prop_any(props: dict, type_map: dict, candidates: list[str], val
     return key
 
 
+def make_concert_key(*parts, prefix: str = "") -> str:
+    """
+    可読性のある安定キーを生成する。
+    例:
+      make_concert_key("Happy Hour Orchestre お祭りコンサート", prefix="concert")
+      -> concert_happy_hour_orchestre_お祭りコンサート
+    """
+    raw = " ".join([str(p or "").strip() for p in parts if str(p or "").strip()])
+    if not raw:
+        raw = "item"
+    txt = unicodedata.normalize("NFKC", raw).lower()
+    txt = re.sub(r"[^\w]+", "_", txt, flags=re.UNICODE)
+    txt = re.sub(r"_+", "_", txt).strip("_")
+    if not txt:
+        txt = "item"
+    if prefix:
+        p = re.sub(r"[^\w]+", "_", unicodedata.normalize("NFKC", str(prefix).lower()), flags=re.UNICODE)
+        p = re.sub(r"_+", "_", p).strip("_")
+        if p:
+            return f"{p}_{txt}"
+    return txt
+
+
+def put_concert_key_any(
+    props: dict,
+    type_map: dict,
+    candidates: list[str],
+    *parts,
+    prefix: str = "",
+) -> str:
+    """
+    key候補列（例: part_key / preference_key）へ自動生成したキーを格納する。
+    返値: 書き込んだプロパティ名（未検出時は ""）
+    """
+    key_prop = find_prop_name(type_map, candidates)
+    if not key_prop:
+        # 緩く *_key / key を含む列へフォールバック
+        for k, t in (type_map or {}).items():
+            if t not in ("title", "rich_text"):
+                continue
+            kl = str(k).lower()
+            if kl.endswith("_key") or kl == "key" or "key" in kl or "キー" in str(k):
+                key_prop = k
+                break
+    if not key_prop:
+        return ""
+    put_concert_prop(props, type_map, key_prop, make_concert_key(*parts, prefix=prefix))
+    return key_prop
+
+
 # ============================================================
 # ctx ビルダー
 # ============================================================
@@ -457,4 +509,6 @@ def build_concert_ctx() -> dict:
         "extract_prop_text_any":       extract_prop_text_any,
         "extract_relation_ids_any":    extract_relation_ids_any,
         "put_prop_any":                put_concert_prop_any,
+        "make_key":                    make_concert_key,
+        "put_key_any":                 put_concert_key_any,
     }

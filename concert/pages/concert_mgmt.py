@@ -23,6 +23,18 @@ PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ", "本
 PRACTICE_REST_KEYS = ["打楽器休み", "休みフラグ", "休み", "Percussion休み"]
 PRACTICE_MEMO_KEYS = ["メモ", "備考"]
 
+CONCERT_KEY_KEYS = ["concert_key", "ConcertKey", "演奏会キー", "PK演奏会キー"]
+PRACTICE_KEY_KEYS = ["practice_key", "PracticeKey", "練習キー", "PK練習キー"]
+SONG_KEY_KEYS = ["song_key", "SongKey", "曲キー", "PK曲キー"]
+INSTRUMENT_KEY_KEYS = ["instrument_key", "InstrumentKey", "楽器キー", "PK楽器キー"]
+PARTDEF_KEY_KEYS = ["part_key", "PartKey", "パートキー", "PKパートキー"]
+PLAYER_KEY_KEYS = ["player_key", "PlayerKey", "奏者キー", "PK奏者キー"]
+PARTICIPANT_KEY_KEYS = ["participant_key", "ParticipantKey", "参加者キー", "PK参加者キー"]
+ATTENDANCE_KEY_KEYS = ["attendance_key", "AttendanceKey", "出欠キー", "PK出欠キー"]
+ASSIGN_KEY_KEYS = ["assign_key", "assignment_key", "AssignmentKey", "割当キー", "PK割当キー"]
+PREFERENCE_KEY_KEYS = ["preference_key", "PreferenceKey", "希望キー", "PK希望キー"]
+RENTAL_KEY_KEYS = ["rental_key", "RentalKey", "見積キー", "PK見積キー"]
+
 
 # ============================================================
 # ヘルパー
@@ -143,6 +155,180 @@ def _clear_concert_cache(ctx):
         pass
     for k in ["concertmgmt_concert_list", "practice_list"]:
         st.session_state.pop(k, None)
+
+
+def _backfill_pk_for_db(
+    ctx: dict,
+    db_id: str,
+    key_candidates: list[str],
+    prefix: str,
+    parts_builder,
+) -> tuple[int, int, int]:
+    """
+    既存レコードに key 列を付与/補正する。
+    return: (scanned, updated, skipped)
+    """
+    t = ctx["get_prop_types"](db_id)
+    rows = ctx["query_all"](db_id)
+    scanned = len(rows)
+    updated = 0
+    skipped = 0
+    for r in rows:
+        parts = parts_builder(r)
+        if not any(str(p or "").strip() for p in parts):
+            skipped += 1
+            continue
+        props = {}
+        key_prop = ctx["put_key_any"](props, t, key_candidates, *parts, prefix=prefix)
+        if not key_prop:
+            skipped += 1
+            continue
+        new_key = ctx["make_key"](*parts, prefix=prefix)
+        cur_key = ctx["extract_prop_text"](r, key_prop)
+        if cur_key == new_key:
+            skipped += 1
+            continue
+        res = ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{r.get('id','')}",
+            json={"properties": props},
+        )
+        if res is not None and res.status_code == 200:
+            updated += 1
+        else:
+            skipped += 1
+    return scanned, updated, skipped
+
+
+def _backfill_all_concert_keys(ctx: dict) -> dict:
+    """
+    Concert System で使うDBの既存レコードへ key を一括反映する。
+    """
+    song_rel_keys = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
+    part_rel_keys = ["パート", "パート定義", "FKパート"]
+    participant_player_rel = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
+    participant_concert_rel = ["演奏会", "出演", "FK演奏会"]
+    attendance_player_rel = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
+    attendance_practice_rel = ["練習", "演奏会", "出演", "FK練習"]
+    inst_rel_keys = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
+    out = {}
+
+    out["concert"] = _backfill_pk_for_db(
+        ctx,
+        ctx["CONCERT_DB_CONCERT"],
+        CONCERT_KEY_KEYS,
+        "concert",
+        lambda r: [
+            ctx["extract_prop_text_any"](r, CONCERT_NAME_KEYS) or ctx["extract_title"](r),
+            ctx["extract_prop_text_any"](r, CONCERT_DATE_KEYS),
+        ],
+    )
+    out["practice"] = _backfill_pk_for_db(
+        ctx,
+        ctx["CONCERT_DB_PRACTICE"],
+        PRACTICE_KEY_KEYS,
+        "practice",
+        lambda r: [
+            ",".join(ctx["extract_relation_ids_any"](r, PRACTICE_CONCERT_REL_KEYS)),
+            ctx["extract_prop_text_any"](r, PRACTICE_NAME_KEYS) or ctx["extract_title"](r),
+            ctx["extract_prop_text_any"](r, PRACTICE_DATE_KEYS),
+        ],
+    )
+    out["song"] = _backfill_pk_for_db(
+        ctx,
+        ctx["CONCERT_DB_SONG"],
+        SONG_KEY_KEYS,
+        "song",
+        lambda r: [
+            ctx["extract_prop_text_any"](r, ["曲名", "タイトル"]) or ctx["extract_title"](r),
+            ctx["extract_prop_text_any"](r, ["作曲者", "クリエイター"]),
+        ],
+    )
+    out["instrument"] = _backfill_pk_for_db(
+        ctx,
+        ctx["CONCERT_DB_INSTRUMENT"],
+        INSTRUMENT_KEY_KEYS,
+        "inst",
+        lambda r: [
+            ctx["extract_prop_text_any"](r, ["楽器名", "タイトル"]) or ctx["extract_title"](r),
+        ],
+    )
+    out["part_definition"] = _backfill_pk_for_db(
+        ctx,
+        ctx["CONCERT_DB_PART_DEFINITION"],
+        PARTDEF_KEY_KEYS,
+        "part",
+        lambda r: [
+            ",".join(ctx["extract_relation_ids_any"](r, PRACTICE_CONCERT_REL_KEYS)),
+            ",".join(ctx["extract_relation_ids_any"](r, song_rel_keys)),
+            ctx["extract_prop_text_any"](r, ["パートNo", "パート番号"]),
+            ctx["extract_prop_text_any"](r, ["パート名", "名称", "タイトル"]) or ctx["extract_title"](r),
+            ",".join(ctx["extract_relation_ids_any"](r, inst_rel_keys)),
+        ],
+    )
+    out["player"] = _backfill_pk_for_db(
+        ctx,
+        ctx["CONCERT_DB_PLAYER"],
+        PLAYER_KEY_KEYS,
+        "player",
+        lambda r: [ctx["extract_prop_text_any"](r, ["氏名", "名前", "表示名", "タイトル"]) or ctx["extract_title"](r)],
+    )
+    out["participant"] = _backfill_pk_for_db(
+        ctx,
+        ctx["CONCERT_DB_PARTICIPANT"],
+        PARTICIPANT_KEY_KEYS,
+        "participant",
+        lambda r: [
+            ",".join(ctx["extract_relation_ids_any"](r, participant_concert_rel)),
+            ",".join(ctx["extract_relation_ids_any"](r, participant_player_rel)),
+        ],
+    )
+    out["attendance"] = _backfill_pk_for_db(
+        ctx,
+        ctx["CONCERT_DB_ATTENDANCE"],
+        ATTENDANCE_KEY_KEYS,
+        "att",
+        lambda r: [
+            ",".join(ctx["extract_relation_ids_any"](r, attendance_player_rel)),
+            ",".join(ctx["extract_relation_ids_any"](r, attendance_practice_rel)),
+        ],
+    )
+    out["assign"] = _backfill_pk_for_db(
+        ctx,
+        ctx["CONCERT_DB_PLAYER_INSTRUMENT"],
+        ASSIGN_KEY_KEYS,
+        "assign",
+        lambda r: [
+            ",".join(ctx["extract_relation_ids_any"](r, participant_player_rel)),
+            ",".join(ctx["extract_relation_ids_any"](r, inst_rel_keys)),
+            ",".join(ctx["extract_relation_ids_any"](r, song_rel_keys)),
+        ],
+    )
+    out["preference"] = _backfill_pk_for_db(
+        ctx,
+        ctx["CONCERT_DB_PREFERENCE"],
+        PREFERENCE_KEY_KEYS,
+        "pref",
+        lambda r: [
+            ",".join(ctx["extract_relation_ids_any"](r, participant_player_rel)),
+            ",".join(ctx["extract_relation_ids_any"](r, song_rel_keys)),
+            ",".join(ctx["extract_relation_ids_any"](r, part_rel_keys)),
+            ",".join(ctx["extract_relation_ids_any"](r, inst_rel_keys)),
+        ],
+    )
+    if ctx.get("CONCERT_DB_RENTAL"):
+        out["rental"] = _backfill_pk_for_db(
+            ctx,
+            ctx["CONCERT_DB_RENTAL"],
+            RENTAL_KEY_KEYS,
+            "rental",
+            lambda r: [
+                ",".join(ctx["extract_relation_ids_any"](r, ["練習", "演奏会", "出演", "FK練習"])),
+                ",".join(ctx["extract_relation_ids_any"](r, inst_rel_keys)),
+                ctx["extract_prop_text_any"](r, ["業者名", "ベンダー", "vendor"]),
+            ],
+        )
+    return out
 
 
 def _concert_media_values(c: dict) -> list[str]:
@@ -277,6 +463,7 @@ def _create_concert(
     if address_key and address_key != venue_key:
         ctx["put_prop"](props, type_map, address_key, address)
     ctx["put_prop_any"](props, type_map, CONCERT_MEMO_KEYS, memo)
+    ctx["put_key_any"](props, type_map, CONCERT_KEY_KEYS, name, dt_start, prefix="concert")
     media_key = ctx["find_prop_name"](type_map, CONCERT_MEDIA_KEYS)
     if media_key:
         mtype = type_map.get(media_key, "")
@@ -317,6 +504,7 @@ def _update_concert(
     if address_key and address_key != venue_key:
         ctx["put_prop"](props, type_map, address_key, address)
     ctx["put_prop_any"](props, type_map, CONCERT_MEMO_KEYS, memo)
+    ctx["put_key_any"](props, type_map, CONCERT_KEY_KEYS, name, dt_start, prefix="concert")
 
     res = api("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
     return res is not None and res.status_code == 200
@@ -388,6 +576,7 @@ def _create_practice(
                 ctx["put_prop"](props, type_map, k, is_rest_day)
                 break
     ctx["put_prop_any"](props, type_map, PRACTICE_MEMO_KEYS, memo)
+    ctx["put_key_any"](props, type_map, PRACTICE_KEY_KEYS, concert_id, name, dt_start, prefix="practice")
 
     res = api("post", "https://api.notion.com/v1/pages",
               json={"parent": {"database_id": db_id}, "properties": props})
@@ -453,6 +642,7 @@ def _update_practice(
                 ctx["put_prop"](props, type_map, k, is_rest_day)
                 break
     ctx["put_prop_any"](props, type_map, PRACTICE_MEMO_KEYS, memo)
+    ctx["put_key_any"](props, type_map, PRACTICE_KEY_KEYS, concert_id, name, dt_start, prefix="practice")
 
     res = api("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
     return res is not None and res.status_code == 200
@@ -847,6 +1037,21 @@ def _bulk_generate_practice_rows(ctx: dict, concert_page: dict, practice_count: 
 
 def render(ctx: dict):
     st.header("🎼 演奏会・練習管理")
+
+    with st.expander("🧩 キー整備（既存データ反映）", expanded=False):
+        st.caption("Concert System関連DBの `*_key` / `PK*` 列を既存レコードへ一括補完します。")
+        if st.button("🛠 既存データへキーを補完", key="concert_backfill_pk_btn"):
+            with st.spinner("キー補完を実行中..."):
+                stats = _backfill_all_concert_keys(ctx)
+            total_scanned = sum(v[0] for v in stats.values())
+            total_updated = sum(v[1] for v in stats.values())
+            total_skipped = sum(v[2] for v in stats.values())
+            st.success(
+                f"✅ キー補完完了: 走査 {total_scanned} / 更新 {total_updated} / スキップ {total_skipped}"
+            )
+            for name, (scanned, updated, skipped) in stats.items():
+                st.caption(f"- {name}: 走査 {scanned} / 更新 {updated} / スキップ {skipped}")
+            _clear_concert_cache(ctx)
 
     tab_concert, tab_practice = st.tabs(["演奏会", "練習"])
 
