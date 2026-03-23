@@ -25,6 +25,12 @@ ATT_PRACTICE_REL_KEYS = ["練習", "演奏会", "出演", "FK練習"]
 ATT_STATUS_KEYS = ["参加可否", "出欠", "参加状況"]
 ATT_NOTE_KEYS = ["備考", "メモ"]
 
+PARTICIPANT_RECORD_KEYS = ["レコード名", "タイトル", "名称"]
+PARTICIPANT_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
+PARTICIPANT_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
+PARTICIPANT_INST_KEYS = ["担当楽器", "楽器", "楽器種別"]
+PARTICIPANT_NOTE_KEYS = ["備考", "メモ"]
+
 PI_RECORD_KEYS = ["レコード名", "タイトル"]
 PI_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者"]
 PI_INST_REL_KEYS = ["楽器種別", "楽器", "担当楽器", "FK楽器種別"]
@@ -35,7 +41,7 @@ PI_NOTE_KEYS = ["備考", "メモ"]
 
 def _clear_player_cache():
     for k in list(st.session_state.keys()):
-        if k.startswith(("player_list", "attendance_list_", "pi_list_")):
+        if k.startswith(("player_list", "attendance_list_", "pi_list_", "participant_list_", "practice_list_")):
             st.session_state.pop(k, None)
 
 
@@ -77,6 +83,16 @@ def _load_attendance(ctx, practice_id: str) -> list[dict]:
         rel = ctx["find_prop_name"](t, ATT_PRACTICE_REL_KEYS)
         f = {"filter": {"property": rel, "relation": {"contains": practice_id}}} if rel else None
         st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], f)
+    return st.session_state.get(key, [])
+
+
+def _load_participants(ctx, concert_id: str) -> list[dict]:
+    key = f"participant_list_{concert_id}"
+    if key not in st.session_state:
+        t = ctx["get_prop_types"](ctx["CONCERT_DB_PARTICIPANT"])
+        rel = ctx["find_prop_name"](t, PARTICIPANT_CONCERT_REL_KEYS)
+        f = {"filter": {"property": rel, "relation": {"contains": concert_id}}} if rel else None
+        st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], f)
     return st.session_state.get(key, [])
 
 
@@ -151,6 +167,35 @@ def _upsert_attendance(ctx: dict, player_id: str, player_name: str, practice_id:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
     else:
         res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
+    return res is not None and res.status_code == 200
+
+
+def _upsert_participant(
+    ctx: dict,
+    concert_id: str,
+    concert_name: str,
+    player_id: str,
+    player_name: str,
+    existing_id: str = "",
+) -> bool:
+    db_id = ctx["CONCERT_DB_PARTICIPANT"]
+    t = ctx["get_prop_types"](db_id)
+    if not t:
+        st.error("演奏会参加者DBのプロパティ取得に失敗しました。")
+        return False
+    props = {}
+    ctx["put_prop_any"](props, t, PARTICIPANT_RECORD_KEYS, f"{player_name} × {concert_name}")
+    ctx["put_prop_any"](props, t, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
+    ctx["put_prop_any"](props, t, PARTICIPANT_PLAYER_REL_KEYS, player_id)
+    if existing_id:
+        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
+    else:
+        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
+    return res is not None and res.status_code == 200
+
+
+def _archive_participant(ctx: dict, page_id: str) -> bool:
+    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"archived": True})
     return res is not None and res.status_code == 200
 
 
@@ -241,6 +286,56 @@ def _render_attendance_tab(ctx: dict):
         st.info("この演奏会に練習が登録されていません。")
         return
 
+    all_players = _load_players(ctx)
+    player_name_map = {p.get("id", ""): _player_name(p, ctx) for p in all_players}
+
+    st.markdown("### 演奏会参加者")
+    participants = _load_participants(ctx, c_id)
+    part_player_ids = []
+    part_row_by_pid = {}
+    for row in participants:
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if not pids:
+            continue
+        pid = pids[0]
+        part_player_ids.append(pid)
+        part_row_by_pid[pid] = row
+    part_player_ids = sorted(set(part_player_ids), key=lambda x: player_name_map.get(x, x))
+
+    if all_players:
+        selectable = { _player_name(p, ctx): p.get("id", "") for p in sorted(all_players, key=lambda x: _player_name(x, ctx)) if p.get("id") }
+        default_names = [name for name, pid in selectable.items() if pid in part_player_ids]
+        with st.form(f"participant_form_{c_id}", border=True):
+            sel_names = st.multiselect(
+                "この演奏会の参加者を選択",
+                list(selectable.keys()),
+                default=default_names,
+                key=f"participant_select_{c_id}",
+            )
+            remove_unselected = st.checkbox("未選択の既存参加者をアーカイブ", value=False, key=f"participant_remove_{c_id}")
+            if st.form_submit_button("💾 参加者を保存", type="primary", use_container_width=True):
+                selected_ids = {selectable[n] for n in sel_names if selectable.get(n)}
+                ok_n, ng_n = 0, 0
+                for pid in selected_ids:
+                    pname = player_name_map.get(pid, pid)
+                    ex = part_row_by_pid.get(pid)
+                    ok = _upsert_participant(ctx, c_id, c_name, pid, pname, ex.get("id", "") if ex else "")
+                    ok_n += 1 if ok else 0
+                    ng_n += 0 if ok else 1
+                if remove_unselected:
+                    for pid, row in part_row_by_pid.items():
+                        if pid in selected_ids:
+                            continue
+                        ok = _archive_participant(ctx, row.get("id", ""))
+                        ok_n += 1 if ok else 0
+                        ng_n += 0 if ok else 1
+                if ng_n == 0:
+                    st.success(f"✅ 参加者更新完了: {ok_n}件")
+                else:
+                    st.warning(f"⚠️ 参加者更新: 成功 {ok_n} / 失敗 {ng_n}")
+                st.session_state.pop(f"participant_list_{c_id}", None)
+                st.rerun()
+
     def _d(p):
         x = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
         return x[:10] if x else "9999"
@@ -251,7 +346,10 @@ def _render_attendance_tab(ctx: dict):
     if not p_id:
         return
 
-    players = _load_players(ctx)
+    if not part_player_ids:
+        st.info("先にこの演奏会の参加者を登録してください。")
+        return
+    players = [p for p in all_players if p.get("id", "") in set(part_player_ids)]
     att = _load_attendance(ctx, p_id)
     by_player = {}
     for row in att:

@@ -21,6 +21,13 @@ SONG_INSTR_INST_REL_KEYS = ["楽器種別", "楽器", "FK楽器種別"]
 SONG_INSTR_QTY_KEYS = ["必要台数", "台数"]
 SONG_INSTR_NOTE_KEYS = ["備考", "メモ"]
 
+PARTDEF_RECORD_KEYS = ["レコード名", "タイトル", "名称", "パート名"]
+PARTDEF_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
+PARTDEF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
+PARTDEF_INST_REL_KEYS = ["楽器種別", "楽器", "FK楽器種別", "担当楽器"]
+PARTDEF_COUNT_KEYS = ["必要人数", "必要台数", "台数", "人数"]
+PARTDEF_NOTE_KEYS = ["備考", "メモ"]
+
 
 # ============================================================
 # キャッシュ／ロードヘルパー
@@ -68,6 +75,26 @@ def _load_song_instruments(ctx, song_id: str) -> list[dict]:
             filter_payload,
         )
         st.session_state[key] = rows
+    return st.session_state.get(key, [])
+
+
+def _load_partdefs(ctx, concert_id: str = "", song_id: str = "") -> list[dict]:
+    key = f"partdef_list_{concert_id}_{song_id}"
+    if key not in st.session_state:
+        rows = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"])
+        t = ctx["get_prop_types"](ctx["CONCERT_DB_PART_DEFINITION"])
+        c_rel = ctx["find_prop_name"](t, PARTDEF_CONCERT_REL_KEYS)
+        s_rel = ctx["find_prop_name"](t, PARTDEF_SONG_REL_KEYS)
+        out = []
+        for r in rows:
+            ok = True
+            if concert_id and c_rel:
+                ok = concert_id in ctx["extract_relation_ids"](r, c_rel)
+            if ok and song_id and s_rel:
+                ok = song_id in ctx["extract_relation_ids"](r, s_rel)
+            if ok:
+                out.append(r)
+        st.session_state[key] = out
     return st.session_state.get(key, [])
 
 
@@ -401,6 +428,155 @@ def _render_song_editor(ctx: dict, s: dict, all_concert_opts: dict[str, str]):
         _render_song_instrument_section(ctx, song_id, song_label)
 
 
+def _upsert_partdef(
+    ctx: dict,
+    concert_id: str,
+    song_id: str,
+    song_name: str,
+    part_name: str,
+    inst_id: str,
+    inst_name: str,
+    need_count: int,
+    note: str,
+    existing_id: str = "",
+) -> bool:
+    db_id = ctx["CONCERT_DB_PART_DEFINITION"]
+    t = ctx["get_prop_types"](db_id)
+    if not t:
+        st.error("パート定義DBのプロパティ取得に失敗しました。")
+        return False
+    props = {}
+    ctx["put_prop_any"](props, t, PARTDEF_RECORD_KEYS, f"{song_name} / {part_name}")
+    ctx["put_prop_any"](props, t, PARTDEF_CONCERT_REL_KEYS, concert_id)
+    ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS, song_id)
+    ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS, inst_id)
+    ctx["put_prop_any"](props, t, PARTDEF_COUNT_KEYS, int(max(need_count, 1)))
+    ctx["put_prop_any"](props, t, PARTDEF_NOTE_KEYS, note)
+    if existing_id:
+        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
+    else:
+        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
+    return res is not None and res.status_code == 200
+
+
+def _render_partdef_tab(ctx: dict):
+    st.subheader("🧩 パート定義")
+    st.caption("楽曲ごとに、担当パート（楽器・必要人数）を明示管理します。")
+
+    concerts = _load_concerts(ctx)
+    all_concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
+    c_query = st.text_input(
+        "演奏会を検索",
+        value=st.session_state.get("partdef_concert_search", ""),
+        key="partdef_concert_search",
+        placeholder="例: 2026 / 定期 / Happy Hour",
+    ).strip().lower()
+    if c_query:
+        concert_opts = {k: v for k, v in all_concert_opts.items() if c_query in k.lower()}
+    else:
+        concert_opts = all_concert_opts
+    if not concert_opts:
+        st.warning("一致する演奏会がありません。")
+        return
+
+    c_name = st.selectbox("演奏会", list(concert_opts.keys()), key="partdef_concert_sel")
+    c_id = concert_opts.get(c_name, "")
+    if not c_id:
+        return
+
+    songs = _load_songs(ctx, c_id)
+    if not songs:
+        st.info("この演奏会に紐づく楽曲がありません。先に楽曲を登録してください。")
+        return
+    song_opts = {_song_name(s, ctx): s for s in songs}
+    s_name = st.selectbox("楽曲", list(song_opts.keys()), key="partdef_song_sel")
+    s = song_opts[s_name]
+    s_id = s.get("id", "")
+
+    instruments = _load_instruments(ctx)
+    if not instruments:
+        st.info("先に楽器種別を登録してください。")
+        return
+    inst_opts = {_instrument_name(i, ctx): i.get("id", "") for i in sorted(instruments, key=lambda x: _instrument_name(x, ctx))}
+
+    with st.form(f"partdef_new_{c_id}_{s_id}", border=True):
+        p_name = st.text_input("パート名 *", placeholder="例: Part1 1stTimp.")
+        i_name = st.selectbox("担当楽器", list(inst_opts.keys()))
+        need = st.number_input("必要人数", min_value=1, max_value=20, value=1, step=1)
+        note = st.text_input("備考", placeholder="任意")
+        if st.form_submit_button("💾 パートを追加", type="primary", use_container_width=True):
+            if not p_name.strip():
+                st.error("パート名は必須です。")
+            else:
+                ok = _upsert_partdef(
+                    ctx,
+                    concert_id=c_id,
+                    song_id=s_id,
+                    song_name=s_name,
+                    part_name=p_name.strip(),
+                    inst_id=inst_opts[i_name],
+                    inst_name=i_name,
+                    need_count=int(need),
+                    note=note,
+                )
+                if ok:
+                    st.success("✅ パート定義を追加しました。")
+                    st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
+                    st.rerun()
+                else:
+                    st.error("❌ 追加に失敗しました。")
+
+    part_rows = _load_partdefs(ctx, c_id, s_id)
+    st.caption(f"登録済みパート: {len(part_rows)}件")
+    if not part_rows:
+        return
+    for r in part_rows:
+        rid = r.get("id", "")
+        p_name = ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS) or ctx["extract_title"](r)
+        cur_inst_ids = ctx["extract_relation_ids_any"](r, PARTDEF_INST_REL_KEYS)
+        cur_inst = next((k for k, v in inst_opts.items() if v == (cur_inst_ids[0] if cur_inst_ids else "")), "")
+        cur_need = ctx["extract_prop_text_any"](r, PARTDEF_COUNT_KEYS) or "1"
+        try:
+            cur_need_i = int(float(cur_need))
+        except Exception:
+            cur_need_i = 1
+        cur_note = ctx["extract_prop_text_any"](r, PARTDEF_NOTE_KEYS)
+        with st.expander(p_name, expanded=False):
+            with st.form(f"partdef_edit_{rid}", border=True):
+                n_name = st.text_input("パート名 *", value=p_name)
+                n_inst = st.selectbox("担当楽器", list(inst_opts.keys()), index=(list(inst_opts.keys()).index(cur_inst) if cur_inst in inst_opts else 0))
+                n_need = st.number_input("必要人数", min_value=1, max_value=20, value=max(cur_need_i, 1), step=1)
+                n_note = st.text_input("備考", value=cur_note)
+                c1, c2 = st.columns(2)
+                if c1.form_submit_button("💾 更新", use_container_width=True):
+                    ok = _upsert_partdef(
+                        ctx,
+                        concert_id=c_id,
+                        song_id=s_id,
+                        song_name=s_name,
+                        part_name=n_name.strip() or p_name,
+                        inst_id=inst_opts[n_inst],
+                        inst_name=n_inst,
+                        need_count=int(n_need),
+                        note=n_note,
+                        existing_id=rid,
+                    )
+                    if ok:
+                        st.success("✅ 更新しました。")
+                        st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
+                        st.rerun()
+                    else:
+                        st.error("❌ 更新に失敗しました。")
+                if c2.form_submit_button("🗑 削除", use_container_width=True):
+                    ok = _delete_page(ctx, rid)
+                    if ok:
+                        st.success("✅ 削除しました。")
+                        st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
+                        st.rerun()
+                    else:
+                        st.error("❌ 削除に失敗しました。")
+
+
 def _render_song_instrument_section(ctx: dict, song_id: str, song_label: str):
     """曲の下に展開する必要楽器設定UI。"""
     instruments = _load_instruments(ctx)
@@ -596,10 +772,13 @@ def _render_instrument_tab(ctx: dict):
 def render(ctx: dict):
     st.header("🎵 楽曲・楽器管理")
 
-    tab_song, tab_instrument = st.tabs(["楽曲", "楽器種別"])
+    tab_song, tab_partdef, tab_instrument = st.tabs(["楽曲", "パート定義", "楽器種別"])
 
     with tab_song:
         _render_song_tab(ctx)
+
+    with tab_partdef:
+        _render_partdef_tab(ctx)
 
     with tab_instrument:
         _render_instrument_tab(ctx)

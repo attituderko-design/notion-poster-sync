@@ -23,6 +23,7 @@ _DEFAULT_CONCERT_DB_IDS = {
     "instrument": "32c4532d7d56800cb34ac6d1b1c3ecdb",       # 楽器種別 Instrument
     "song_instrument": "32c4532d7d56803ba3e1c8c87d1cd0dc",  # パート定義DB（曲別必要楽器の代替）
     "player": "3224532d7d568072bbb0c2cea44d67d9",           # 出演者DB
+    "participant": "3224532d7d56808e8dd0eb06c11f92db",      # 演奏会参加者DB（既存）
     "attendance": "32c4532d7d5680e6813fe67bae986c39",       # 練習出欠DB
     "player_instrument": "3224532d7d5680bd9acef5bbf042daa6",# 楽曲別担当者DB（既存）
     "rental": "32c6e5f3-8885-8072-9131-ceaff635b895",       # レンタル見積 Rental
@@ -59,10 +60,14 @@ def get_concert_secrets() -> dict:
         or st.secrets.get("CONCERT_DB_PLAYER", "")
         or _DEFAULT_CONCERT_DB_IDS["player"]
     )
+    db_participant = (
+        st.secrets.get("CONCERT_DB_PARTICIPANT", "")
+        or st.secrets.get("NOTION_PERFORMANCE_CAST_DB_ID", "")
+        or _DEFAULT_CONCERT_DB_IDS["participant"]
+    )
     # 専用DBキーを優先（HARMONIA本設計）
     db_attendance = (
         st.secrets.get("CONCERT_DB_ATTENDANCE", "")
-        or st.secrets.get("NOTION_PERFORMANCE_CAST_DB_ID", "")
         or _DEFAULT_CONCERT_DB_IDS["attendance"]
     )
     db_player_instrument = (
@@ -90,6 +95,7 @@ def get_concert_secrets() -> dict:
         "楽器種別DB": db_instrument,
         "曲別必要楽器DB": db_song_instrument,
         "奏者DB": db_player,
+        "演奏会参加者DB": db_participant,
         "出欠DB": db_attendance,
         "楽器アサインDB": db_player_instrument,
         "レンタルDB": db_rental,
@@ -107,6 +113,7 @@ def get_concert_secrets() -> dict:
         "db_instrument":       db_instrument,
         "db_song_instrument":  db_song_instrument,
         "db_player":           db_player,
+        "db_participant":      db_participant,
         "db_attendance":       db_attendance,
         "db_player_instrument":db_player_instrument,
         "db_rental":           db_rental,
@@ -433,6 +440,7 @@ def build_concert_ctx() -> dict:
         "CONCERT_DB_INSTRUMENT":       secrets["db_instrument"],
         "CONCERT_DB_SONG_INSTRUMENT":  secrets["db_song_instrument"],
         "CONCERT_DB_PLAYER":           secrets["db_player"],
+        "CONCERT_DB_PARTICIPANT":      secrets["db_participant"],
         "CONCERT_DB_ATTENDANCE":       secrets["db_attendance"],
         "CONCERT_DB_PLAYER_INSTRUMENT":secrets["db_player_instrument"],
         "CONCERT_DB_RENTAL":           secrets["db_rental"],
