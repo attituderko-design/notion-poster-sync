@@ -5,6 +5,7 @@ concert.pages.concert_mgmt
 import streamlit as st
 from datetime import date, datetime
 import re
+import requests
 
 CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
 CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
@@ -74,6 +75,33 @@ def _contains_query(values: list[str], query: str) -> bool:
         return True
     blob = " ".join([(v or "") for v in values]).lower()
     return q in blob
+
+
+def _geocode_nominatim(query: str) -> list[dict]:
+    q = (query or "").strip()
+    if not q:
+        return []
+    try:
+        res = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": q, "format": "jsonv2", "addressdetails": 1, "limit": 8},
+            headers={"User-Agent": "artemis-harmonia/1.0"},
+            timeout=10,
+        )
+        if res.status_code != 200:
+            return []
+        rows = res.json() or []
+        out = []
+        for r in rows:
+            out.append(
+                {
+                    "name": r.get("display_name") or "",
+                    "address": r.get("display_name") or "",
+                }
+            )
+        return out
+    except Exception:
+        return []
 
 
 def _clear_concert_cache(ctx):
@@ -365,12 +393,44 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
 
     venue_default = ext(existing, PRACTICE_VENUE_KEYS) if is_edit else ""
     address_default = ext(existing, PRACTICE_ADDRESS_KEYS) if is_edit else ""
+    prefill_venue_key = f"{prefix}prefill_venue"
+    prefill_address_key = f"{prefix}prefill_address"
+    if _ss(prefill_venue_key):
+        venue_default = _ss(prefill_venue_key, "")
+    if _ss(prefill_address_key):
+        address_default = _ss(prefill_address_key, "")
     if is_edit:
         location_fallback = ext(existing, ["ロケーション", "場所", "Location"])
         if not venue_default and location_fallback:
             venue_default = location_fallback
         if not address_default and location_fallback:
             address_default = location_fallback
+
+    # 会場検索（フォーム外）
+    venue_q_key = f"{prefix}venue_query"
+    venue_list_key = f"{prefix}venue_candidates"
+    venue_sel_key = f"{prefix}venue_candidate_index"
+    with st.expander("🗺️ 会場を検索して反映（任意）", expanded=False):
+        c1, c2 = st.columns([4, 1])
+        c1.text_input("会場検索ワード", key=venue_q_key, placeholder="例: 門真市民文化会館")
+        if c2.button("🔎 検索", key=f"{prefix}venue_search_btn", use_container_width=True):
+            st.session_state[venue_list_key] = _geocode_nominatim(_ss(venue_q_key, ""))
+            st.session_state[venue_sel_key] = 0
+        candidates = _ss(venue_list_key, [])
+        if candidates:
+            labels = [c.get("name", "") for c in candidates]
+            idx = st.selectbox(
+                "候補",
+                options=list(range(len(labels))),
+                format_func=lambda i: labels[i],
+                index=min(_ss(venue_sel_key, 0), max(len(labels) - 1, 0)),
+                key=venue_sel_key,
+            )
+            picked = candidates[idx]
+            if st.button("✅ この候補をフォームに反映", key=f"{prefix}apply_venue_candidate"):
+                st.session_state[prefill_venue_key] = picked.get("name", "")
+                st.session_state[prefill_address_key] = picked.get("address", "")
+                st.rerun()
 
     with st.form(key=f"{prefix}form", border=True):
         selected_concert_name = st.selectbox(
@@ -494,6 +554,9 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
 
         if ok:
             st.success(f"✅ 練習を{label}しました。")
+            st.session_state.pop(prefill_venue_key, None)
+            st.session_state.pop(prefill_address_key, None)
+            st.session_state.pop(venue_list_key, None)
             _clear_concert_cache(ctx)
             st.rerun()
         else:
