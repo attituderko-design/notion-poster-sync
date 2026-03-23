@@ -111,6 +111,81 @@ def _db_property_id(ctx, db_id: str, prop_name: str) -> str:
     return (meta.get("id") or "").strip()
 
 
+def _db_property_type(ctx, db_id: str, prop_name: str) -> str:
+    if not db_id or not prop_name:
+        return ""
+    res = ctx["api_request"]("get", f"https://api.notion.com/v1/databases/{db_id}")
+    if res is None or res.status_code != 200:
+        return ""
+    props = ((res.json() or {}).get("properties") or {})
+    meta = props.get(prop_name) or {}
+    return (meta.get("type") or "").strip()
+
+
+def _clone_preference_row_with_participant(
+    ctx,
+    db_id: str,
+    type_map: dict,
+    row: dict,
+    participant_rel_key: str,
+    participant_id: str,
+    player_rel_key: str,
+) -> bool:
+    props_new: dict = {}
+
+    rec_key = _find_prop_name_loose(ctx, type_map, ["レコード名", "タイトル", "名称", "PK"])
+    if rec_key:
+        ctx["put_prop"](props_new, type_map, rec_key, ctx["extract_prop_text_any"](row, ["レコード名", "タイトル", "名称"]) or ctx["extract_title"](row) or "")
+
+    # 主要relationをそのまま複製
+    for k in [participant_rel_key, player_rel_key]:
+        if not k:
+            continue
+        ids = ctx["extract_relation_ids"](row, k)
+        if k == participant_rel_key:
+            ids = [participant_id] if participant_id else ids
+        if ids:
+            ctx["put_prop"](props_new, type_map, k, ids)
+
+    song_key = _find_prop_name_loose(ctx, type_map, PREF_SONG_REL_KEYS)
+    part_key = _find_prop_name_loose(ctx, type_map, PREF_PART_REL_KEYS)
+    inst_key = _find_prop_name_loose(ctx, type_map, PREF_INST_REL_KEYS)
+    pri_key = _find_prop_name_loose(ctx, type_map, PREF_PRIORITY_KEYS)
+    pref_key_prop = _find_prop_name_loose(ctx, type_map, PREFERENCE_KEY_KEYS)
+    if song_key:
+        ids = ctx["extract_relation_ids_any"](row, PREF_SONG_REL_KEYS)
+        if ids:
+            ctx["put_prop"](props_new, type_map, song_key, ids)
+    if part_key:
+        ids = ctx["extract_relation_ids_any"](row, PREF_PART_REL_KEYS)
+        if ids:
+            ctx["put_prop"](props_new, type_map, part_key, ids)
+    if inst_key:
+        ids = ctx["extract_relation_ids_any"](row, PREF_INST_REL_KEYS)
+        if ids:
+            ctx["put_prop"](props_new, type_map, inst_key, ids)
+    if pri_key:
+        v = ctx["extract_prop_text_any"](row, PREF_PRIORITY_KEYS)
+        if v:
+            ctx["put_prop"](props_new, type_map, pri_key, v)
+    if pref_key_prop:
+        v = ctx["extract_prop_text"](row, pref_key_prop)
+        if v:
+            ctx["put_prop"](props_new, type_map, pref_key_prop, v)
+
+    res = ctx["api_request"](
+        "post",
+        "https://api.notion.com/v1/pages",
+        json={"parent": {"database_id": db_id}, "properties": props_new},
+    )
+    if res is None or res.status_code != 200:
+        return False
+    old_id = row.get("id", "")
+    if old_id:
+        ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{old_id}", json={"archived": True})
+    return True
+
+
 # ============================================================
 # キャッシュ／ロードヘルパー
 # ============================================================
@@ -166,7 +241,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
             participant_to_player[part_id] = pid
             participant_ids.add(part_id)
 
-    scanned = ok = ng = already = skipped = unresolved = 0
+    scanned = ok = ng = already = skipped = unresolved = recreated = 0
     debug_unresolved = []
     for row in pref_rows:
         rid = row.get("id", "")
@@ -308,6 +383,14 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                 if confirmed:
                     ok += 1
                     continue
+                # fallback2: 既存行更新が失敗するケース向けに新規行を再作成
+                recreated_ok = _clone_preference_row_with_participant(
+                    ctx, db_id, t, row, participant_rel_key, participant_id, player_rel_key
+                )
+                if recreated_ok:
+                    recreated += 1
+                    ok += 1
+                    continue
                 unresolved += 1
                 if len(debug_unresolved) < 5:
                     debug_unresolved.append({
@@ -319,6 +402,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                         "patched_player_id": player_id,
                         "confirmed_relation_ids": confirmed,
                         "participant_rel_prop_id": participant_rel_prop_id,
+                        "participant_rel_type": _db_property_type(ctx, db_id, participant_rel_key),
                         "verify_status": verify_status,
                     })
         else:
@@ -326,6 +410,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
     return {
         "scanned": scanned,
         "updated": ok,
+        "recreated": recreated,
         "failed": ng,
         "already": already,
         "skipped": skipped,
@@ -656,7 +741,7 @@ def _render_pref_tab(ctx: dict):
             st.session_state.pop(f"pi_list_{concert_id}", None)
             if stats["failed"] == 0:
                 st.success(
-                    f"✅ 補完完了: 更新 {stats['updated']}件 / 既設定 {stats['already']}件 / "
+                    f"✅ 補完完了: 更新 {stats['updated']}件（再作成 {stats.get('recreated',0)}件） / 既設定 {stats['already']}件 / "
                     f"未解決 {stats.get('unresolved', 0)}件 / 対象外 {stats['skipped']}件 / 走査 {stats['scanned']}件"
                 )
                 st.caption(f"参加者読込: {stats.get('participants', 0)}件 / 奏者マップ: {stats.get('mapped', 0)}件")
@@ -675,7 +760,7 @@ def _render_pref_tab(ctx: dict):
                     })
             else:
                 st.warning(
-                    f"⚠️ 補完結果: 更新 {stats['updated']} / 失敗 {stats['failed']} / "
+                    f"⚠️ 補完結果: 更新 {stats['updated']}（再作成 {stats.get('recreated',0)}） / 失敗 {stats['failed']} / "
                     f"既設定 {stats['already']} / 未解決 {stats.get('unresolved', 0)} / "
                     f"対象外 {stats['skipped']} / 走査 {stats['scanned']}"
                 )
