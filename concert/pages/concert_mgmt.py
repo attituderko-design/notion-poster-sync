@@ -78,6 +78,25 @@ def _contains_query(values: list[str], query: str) -> bool:
     return q in blob
 
 
+def _normalize_page_id(v: str) -> str:
+    return (v or "").replace("-", "").strip().lower()
+
+
+def _practice_rel_prop_candidates(type_map: dict, ctx: dict) -> list[str]:
+    out = []
+    rel = ctx["find_prop_name"](type_map, PRACTICE_CONCERT_REL_KEYS)
+    if rel:
+        out.append(rel)
+    for k, t in (type_map or {}).items():
+        if t != "relation":
+            continue
+        ks = str(k)
+        if ("演奏会" in ks) or ("出演" in ks) or ("concert" in ks.lower()) or ("fk" in ks.lower()):
+            if k not in out:
+                out.append(k)
+    return out
+
+
 def _extract_bool_any(ctx: dict, page: dict, keys: list[str], default: bool = False) -> bool:
     raw = (ctx["extract_prop_text_any"](page, keys) or "").strip().lower()
     if raw in ("true", "1", "yes", "on", "チェック済み"):
@@ -167,16 +186,27 @@ def _load_concerts(ctx) -> list[dict]:
 
 def _load_practices(ctx, concert_id: str = "") -> list[dict]:
     # 練習データは手入力→即確認の運用が多いため毎回最新を取得する
+    rows = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
+    if not concert_id:
+        return rows
+
     type_map = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"])
-    rel_prop = ctx["find_prop_name"](type_map, PRACTICE_CONCERT_REL_KEYS)
-    if concert_id:
-        if rel_prop:
-            return ctx["query_all"](
-                ctx["CONCERT_DB_PRACTICE"],
-                {"filter": {"property": rel_prop, "relation": {"contains": concert_id}}},
-            )
-        return ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
-    return ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
+    rel_props = _practice_rel_prop_candidates(type_map, ctx)
+    if not rel_props:
+        return rows
+
+    target = _normalize_page_id(concert_id)
+    filtered = []
+    for r in rows:
+        hit = False
+        for rp in rel_props:
+            ids = ctx["extract_relation_ids"](r, rp)
+            if any(_normalize_page_id(x) == target for x in ids):
+                hit = True
+                break
+        if hit:
+            filtered.append(r)
+    return filtered
 
 
 def _concert_display_name(page: dict, ctx: dict) -> str:

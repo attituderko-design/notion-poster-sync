@@ -45,6 +45,25 @@ def _clear_player_cache():
             st.session_state.pop(k, None)
 
 
+def _normalize_page_id(v: str) -> str:
+    return (v or "").replace("-", "").strip().lower()
+
+
+def _practice_rel_prop_candidates(type_map: dict, ctx: dict) -> list[str]:
+    out = []
+    rel = ctx["find_prop_name"](type_map, PRACTICE_CONCERT_REL_KEYS)
+    if rel:
+        out.append(rel)
+    for k, t in (type_map or {}).items():
+        if t != "relation":
+            continue
+        ks = str(k)
+        if ("演奏会" in ks) or ("出演" in ks) or ("concert" in ks.lower()) or ("fk" in ks.lower()):
+            if k not in out:
+                out.append(k)
+    return out
+
+
 def _load_players(ctx) -> list[dict]:
     if "player_list" not in st.session_state:
         st.session_state["player_list"] = ctx["query_all"](ctx["CONCERT_DB_PLAYER"])
@@ -58,16 +77,27 @@ def _load_concerts(ctx) -> list[dict]:
 
 
 def _load_practices(ctx, concert_id: str) -> list[dict]:
-    key = f"practice_list_{concert_id}"
-    if key not in st.session_state:
-        f = None
-        if concert_id:
-            t = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"])
-            rel = ctx["find_prop_name"](t, PRACTICE_CONCERT_REL_KEYS)
-            if rel:
-                f = {"filter": {"property": rel, "relation": {"contains": concert_id}}}
-        st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"], f)
-    return st.session_state.get(key, [])
+    rows = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
+    if not concert_id:
+        return rows
+
+    t = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"])
+    rel_props = _practice_rel_prop_candidates(t, ctx)
+    if not rel_props:
+        return rows
+
+    target = _normalize_page_id(concert_id)
+    out = []
+    for r in rows:
+        hit = False
+        for rp in rel_props:
+            ids = ctx["extract_relation_ids"](r, rp)
+            if any(_normalize_page_id(x) == target for x in ids):
+                hit = True
+                break
+        if hit:
+            out.append(r)
+    return out
 
 
 def _load_instruments(ctx) -> list[dict]:
