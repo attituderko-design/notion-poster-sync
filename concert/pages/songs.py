@@ -191,7 +191,7 @@ def _update_song(ctx: dict, page_id: str, title: str, concert_ids: list[str],
 # 楽器種別 CRUD
 # ============================================================
 
-INSTRUMENT_CATEGORIES = ["鍵盤打楽器", "膜鳴", "金属打楽器", "小物打楽器", "その他"]
+INSTRUMENT_CATEGORIES = ["鍵盤楽器", "膜鳴楽器", "金属楽器", "小物楽器", "特殊楽器・効果音"]
 
 
 def _create_instrument(ctx: dict, name: str, category: str, memo: str) -> bool:
