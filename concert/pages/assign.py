@@ -45,15 +45,56 @@ def _load_concerts(ctx) -> list[dict]:
         rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT"])
         filtered = []
         for r in rows:
-            medias = []
-            for k in CONCERT_MEDIA_KEYS:
-                v = ctx["extract_prop_text"](r, k)
-                if v:
-                    medias.extend([x.strip() for x in v.replace("／", "/").split("/") if x.strip()])
-            if "出演" in medias:
+            medias = _extract_concert_media_labels(r, ctx)
+            title_hint = (ctx["extract_prop_text_any"](r, ["名称", "演奏会名", "タイトル"]) or ctx["extract_title"](r) or "")
+            if ("出演" in medias) or ("出演" in title_hint):
                 filtered.append(r)
         st.session_state["concert_list"] = filtered
     return st.session_state.get("concert_list", [])
+
+
+def _extract_concert_media_labels(c: dict, ctx) -> list[str]:
+    labels = []
+    for k in CONCERT_MEDIA_KEYS:
+        v = ctx["extract_prop_text"](c, k)
+        if v:
+            labels.extend([x.strip() for x in str(v).replace("／", "/").split("/") if x.strip()])
+    props = (c or {}).get("properties", {}) or {}
+    for pname, meta in props.items():
+        ptype = (meta or {}).get("type")
+        # 媒体っぽい列名は候補に追加
+        if ("媒体" not in str(pname)) and ("media" not in str(pname).lower()):
+            continue
+        if ptype == "select":
+            n = ((meta.get("select") or {}).get("name") or "").strip()
+            if n:
+                labels.append(n)
+        elif ptype == "multi_select":
+            for it in (meta.get("multi_select") or []):
+                n = (it.get("name") or "").strip()
+                if n:
+                    labels.append(n)
+        elif ptype in ("rich_text", "title"):
+            txt = "".join((x.get("plain_text") or "") for x in (meta.get(ptype) or [])).strip()
+            if txt:
+                labels.extend([x.strip() for x in txt.replace("／", "/").split("/") if x.strip()])
+    # 重複除去
+    return list(dict.fromkeys(labels))
+
+
+def _select_concert_with_search(ctx, concerts: list[dict], key_prefix: str):
+    all_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
+    q = st.text_input(
+        "演奏会を検索",
+        key=f"{key_prefix}_concert_search",
+        placeholder="例: Happy Hour / 2026 / 定期",
+    ).strip().lower()
+    opts = {k: v for k, v in all_opts.items() if (not q) or (q in k.lower())}
+    if not opts:
+        st.warning("検索条件に一致する出演演奏会がありません。")
+        return "", ""
+    selected = st.selectbox("演奏会を選択", list(opts.keys()), key=f"{key_prefix}_concert_sel")
+    return selected, opts.get(selected, "")
 
 
 def _load_players(ctx) -> list[dict]:
@@ -258,9 +299,7 @@ def _render_pref_tab(ctx: dict):
         st.info("先に演奏会を登録してください。")
         return
 
-    concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
-    selected_concert = st.selectbox("演奏会を選択", list(concert_opts.keys()), key="pref_concert_sel")
-    concert_id = concert_opts.get(selected_concert, "")
+    selected_concert, concert_id = _select_concert_with_search(ctx, concerts, "pref")
     if not concert_id:
         return
 
@@ -387,9 +426,7 @@ def _render_solver_tab(ctx: dict):
         st.info("演奏会を先に登録してください。")
         return
 
-    concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
-    selected_concert = st.selectbox("演奏会を選択", list(concert_opts.keys()), key="solver_concert_sel")
-    concert_id = concert_opts.get(selected_concert, "")
+    selected_concert, concert_id = _select_concert_with_search(ctx, concerts, "solver")
     if not concert_id:
         return
 
@@ -693,9 +730,7 @@ def _render_result_tab(ctx: dict):
         st.info("演奏会を先に登録してください。")
         return
 
-    concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
-    selected_concert = st.selectbox("演奏会を選択", list(concert_opts.keys()), key="result_concert_sel")
-    concert_id = concert_opts.get(selected_concert, "")
+    selected_concert, concert_id = _select_concert_with_search(ctx, concerts, "result")
     if not concert_id:
         return
 
