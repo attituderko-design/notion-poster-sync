@@ -561,6 +561,9 @@ def _render_pref_tab(ctx: dict):
                     f"未解決 {stats.get('unresolved', 0)}件 / 対象外 {stats['skipped']}件 / 走査 {stats['scanned']}件"
                 )
                 st.caption(f"参加者読込: {stats.get('participants', 0)}件 / 奏者マップ: {stats.get('mapped', 0)}件")
+                if stats.get("unresolved", 0) > 0 and stats.get("debug_unresolved"):
+                    st.caption("未解決サンプル（先頭5件）")
+                    st.json(stats.get("debug_unresolved"))
             else:
                 st.warning(
                     f"⚠️ 補完結果: 更新 {stats['updated']} / 失敗 {stats['failed']} / "
