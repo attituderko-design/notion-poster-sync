@@ -563,6 +563,86 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
             st.error(f"❌ {label}に失敗しました。")
 
 
+def _bulk_generate_practice_rows(ctx: dict, concert_page: dict, practice_count: int) -> tuple[int, int]:
+    """
+    指定演奏会に対して練習回を一括生成する。
+    return: (created_count, skipped_count)
+    """
+    if not concert_page or practice_count <= 0:
+        return 0, 0
+
+    concert_id = concert_page.get("id", "")
+    if not concert_id:
+        return 0, 0
+
+    existing_rows = _load_practices(ctx, concert_id)
+    existing_names = set()
+    for r in existing_rows:
+        nm = (ctx["extract_prop_text_any"](r, PRACTICE_NAME_KEYS) or "").strip()
+        if nm:
+            existing_names.add(nm)
+
+    concert_date = (ctx["extract_prop_text_any"](concert_page, CONCERT_DATE_KEYS) or "").strip()
+    concert_dt = concert_date[:10] if concert_date else ""
+    concert_venue = (ctx["extract_prop_text_any"](concert_page, CONCERT_VENUE_KEYS) or "").strip()
+    concert_addr = (ctx["extract_prop_text_any"](concert_page, CONCERT_ADDRESS_KEYS) or "").strip()
+    if not concert_venue:
+        loc_fallback = (ctx["extract_prop_text_any"](concert_page, ["ロケーション", "場所", "Location"]) or "").strip()
+        if loc_fallback:
+            concert_venue = loc_fallback
+            if not concert_addr:
+                concert_addr = loc_fallback
+
+    created = 0
+    skipped = 0
+
+    # 1..N: 通常練習（日時/会場は後で入力）
+    for i in range(1, practice_count + 1):
+        name = f"第{i}回練習"
+        if name in existing_names:
+            skipped += 1
+            continue
+        ok = _create_practice(
+            ctx=ctx,
+            name=name,
+            concert_id=concert_id,
+            dt_start="",
+            dt_end="",
+            venue="",
+            address="",
+            is_concert_day=False,
+            is_rest_day=False,
+            memo="",
+        )
+        if ok:
+            created += 1
+            existing_names.add(name)
+
+    # N+1: 本番回（演奏会情報を自動反映）
+    final_name = f"第{practice_count + 1}回練習（本番）"
+    if final_name in existing_names:
+        skipped += 1
+    else:
+        ok = _create_practice(
+            ctx=ctx,
+            name=final_name,
+            concert_id=concert_id,
+            dt_start=concert_dt,
+            dt_end="",
+            venue=concert_venue,
+            address=concert_addr,
+            is_concert_day=True,
+            is_rest_day=False,
+            memo="",
+        )
+        if ok:
+            created += 1
+        else:
+            skipped += 1
+
+    return created, skipped
+
+
 # ============================================================
 # メイン描画
 # ============================================================
@@ -643,6 +723,22 @@ def render(ctx: dict):
             key="practice_filter_concert",
         )
         filter_concert_id = concert_filter_opts.get(selected_filter, "")
+        selected_concert_page = next((c for c in concerts if c.get("id") == filter_concert_id), None)
+
+        with st.expander("⚙️ 練習回を一括生成", expanded=False):
+            st.caption("演奏会を選択後、練習回数を入力すると「第1回練習〜第N回練習」と「第N+1回練習（本番）」を作成します。")
+            bulk_count = int(st.number_input("練習回数", min_value=1, value=3, step=1, key="practice_bulk_count"))
+            if st.button("➕ 練習回を生成", key="practice_bulk_generate", type="primary", use_container_width=True):
+                if not filter_concert_id or not selected_concert_page:
+                    st.error("先に「絞り込み：演奏会」で対象演奏会を選択してください。")
+                else:
+                    with st.spinner("練習回を生成中..."):
+                        created, skipped = _bulk_generate_practice_rows(ctx, selected_concert_page, bulk_count)
+                    st.success(f"✅ 生成完了: 作成 {created} 件 / スキップ {skipped} 件")
+                    for k in list(st.session_state.keys()):
+                        if k.startswith("practice_list_"):
+                            st.session_state.pop(k, None)
+                    st.rerun()
 
         with st.expander("➕ 新規練習を登録", expanded=False):
             _render_practice_form(ctx, concerts)
