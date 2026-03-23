@@ -471,11 +471,47 @@ def _render_instrument_tab(ctx: dict):
         st.session_state.pop("instrument_list", None)
         st.rerun()
 
+    q = st.text_input(
+        "楽器種別を検索",
+        value=st.session_state.get("instrument_search", ""),
+        key="instrument_search",
+        placeholder="例: marimba / cymbal / membrane",
+    ).strip().lower()
+    edit_mode = st.toggle("編集フォームを表示（重い場合はOFF推奨）", value=False, key="instrument_edit_mode")
+
+    if q:
+        def _hit(inst: dict) -> bool:
+            name = (_instrument_name(inst, ctx) or "").lower()
+            cat = (ctx["extract_prop_text_any"](inst, INSTRUMENT_CATEGORY_KEYS) or "").lower()
+            memo = (ctx["extract_prop_text_any"](inst, INSTRUMENT_MEMO_KEYS) or "").lower()
+            return q in name or q in cat or q in memo
+        instruments = [i for i in instruments if _hit(i)]
+    st.caption(f"表示件数: {len(instruments)}")
+    if not instruments:
+        st.info("検索条件に一致する楽器種別がありません。")
+        return
+
     # カテゴリごとにグループ表示
     by_cat: dict[str, list] = {c: [] for c in INSTRUMENT_CATEGORIES}
     for i in instruments:
         cat = ctx["extract_prop_text_any"](i, INSTRUMENT_CATEGORY_KEYS) or "その他"
         by_cat.setdefault(cat, []).append(i)
+
+    # 読み取り専用の軽量表示
+    if not edit_mode:
+        for cat in INSTRUMENT_CATEGORIES:
+            items = by_cat.get(cat, [])
+            if not items:
+                continue
+            st.markdown(f"**{cat}**")
+            for inst in sorted(items, key=lambda x: _instrument_name(x, ctx)):
+                label = _instrument_name(inst, ctx)
+                memo = ctx["extract_prop_text_any"](inst, INSTRUMENT_MEMO_KEYS)
+                if memo:
+                    st.markdown(f"- {label}  \n  <span style='color:#9aa0a6'>{memo}</span>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"- {label}")
+        return
 
     for cat in INSTRUMENT_CATEGORIES:
         items = by_cat.get(cat, [])
