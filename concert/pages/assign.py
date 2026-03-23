@@ -254,8 +254,82 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
     scanned = ok = ng = already = skipped = unresolved = recreated = 0
     legacy_player_cache: dict[str, str] = {}
     legacy_participant_cache: dict[str, str] = {}
+    legacy_name_cache: dict[str, str] = {}
+    legacy_trace_cache: dict[str, list[str]] = {}
     debug_unresolved = []
     debug_failed = []
+
+    def _resolve_legacy_candidate(cand: str, visited: set[str] | None = None, depth: int = 0) -> tuple[str, str, str, list[str]]:
+        """
+        pref_key内のUUIDが古い希望行IDを指しているケースを救済するため、
+        参照先ページを辿って participant_id / player_id を解決する。
+        戻り値: (participant_id, player_id, legacy_name, trace)
+        """
+        if not cand:
+            return "", "", "", []
+        if visited is None:
+            visited = set()
+        trace: list[str] = []
+        if cand in visited or depth > 4:
+            return "", "", "", trace
+        visited.add(cand)
+        if cand in legacy_player_cache or cand in legacy_participant_cache or cand in legacy_name_cache:
+            lp = legacy_player_cache.get(cand, "")
+            lpart = legacy_participant_cache.get(cand, "")
+            lname = legacy_name_cache.get(cand, "")
+            return lpart, lp, lname, legacy_trace_cache.get(cand, [])
+
+        lp = ""
+        lpart = ""
+        lname = ""
+        legacy = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{cand}")
+        status = legacy.status_code if legacy is not None else 0
+        trace.append(f"{cand}:{status}")
+        if legacy is not None and legacy.status_code == 200:
+            legacy_page = legacy.json() or {}
+            # 1) 旧ページが「奏者」を直接持っている場合
+            pids_legacy = ctx["extract_relation_ids_any"](legacy_page, PARTICIPANT_PLAYER_REL_KEYS)
+            if pids_legacy:
+                lp = pids_legacy[0]
+            # 2) 旧ページが「演奏会参加者」を直接持っている場合（旧出欠行ID等）
+            part_ids_legacy = ctx["extract_relation_ids_any"](
+                legacy_page, ["演奏会参加者", "参加者", "FK参加者"]
+            )
+            if part_ids_legacy:
+                lpart = part_ids_legacy[0]
+            # 3) 名前から逆引き
+            lname = (
+                ctx["extract_prop_text_any"](legacy_page, ["氏名", "名前", "表示名", "タイトル", "名称"])
+                or ctx["extract_title"](legacy_page)
+                or ""
+            )
+            # 4) さらにpref_keyの連鎖を辿る（古い希望行ID -> さらに古い行ID）
+            if not lpart and not lp:
+                next_ids: list[str] = []
+                legacy_pref_text = (
+                    ctx["extract_prop_text_any"](legacy_page, PREFERENCE_KEY_KEYS)
+                    or ctx["extract_title"](legacy_page)
+                    or ""
+                )
+                if legacy_pref_text:
+                    next_ids = _all_uuids_from_pref_key(legacy_pref_text)
+                for nid in next_ids:
+                    if nid == cand:
+                        continue
+                    rp, rpl, rname, rtrace = _resolve_legacy_candidate(nid, visited, depth + 1)
+                    if rtrace:
+                        trace.extend(rtrace)
+                    if rp or rpl:
+                        lpart = lpart or rp
+                        lp = lp or rpl
+                        lname = lname or rname
+                        break
+
+        legacy_player_cache[cand] = lp
+        legacy_participant_cache[cand] = lpart
+        legacy_name_cache[cand] = lname
+        legacy_trace_cache[cand] = trace
+        return lpart, lp, lname, trace
     for row in pref_rows:
         rid = row.get("id", "")
         if not rid:
@@ -317,27 +391,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                     break
                 # 旧演奏会参加者ページIDの可能性: /pages/{id} を直接引いて奏者IDを救済
                 if not participant_id:
-                    if cand in legacy_player_cache or cand in legacy_participant_cache:
-                        lp = legacy_player_cache.get(cand, "")
-                        lpart = legacy_participant_cache.get(cand, "")
-                    else:
-                        lp = ""
-                        lpart = ""
-                        legacy = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{cand}")
-                        if legacy is not None and legacy.status_code == 200:
-                            legacy_page = legacy.json() or {}
-                            # 1) 旧ページが「奏者」を直接持っている場合
-                            pids_legacy = ctx["extract_relation_ids_any"](legacy_page, PARTICIPANT_PLAYER_REL_KEYS)
-                            if pids_legacy:
-                                lp = pids_legacy[0]
-                            # 2) 旧ページが「演奏会参加者」を直接持っている場合（旧出欠行ID等）
-                            part_ids_legacy = ctx["extract_relation_ids_any"](
-                                legacy_page, ["演奏会参加者", "参加者", "FK参加者"]
-                            )
-                            if part_ids_legacy:
-                                lpart = part_ids_legacy[0]
-                        legacy_player_cache[cand] = lp
-                        legacy_participant_cache[cand] = lpart
+                    lpart, lp, lname, _ = _resolve_legacy_candidate(cand)
                     if lpart and lpart in participant_to_player:
                         participant_id = lpart
                         player_id = participant_to_player.get(lpart, "")
@@ -346,6 +400,12 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                         player_id = lp
                         participant_id = participant_by_player.get(lp, "")
                         break
+                    if lname:
+                        p_by_name = participant_by_player_name.get(_norm_name(lname), "")
+                        if p_by_name:
+                            participant_id = p_by_name
+                            player_id = participant_to_player.get(p_by_name, "")
+                            break
         if not player_id and pref_key_prop and pref_key_prop in props:
             # player_id自体は無くても後続でparticipant_idが確定すればOK
             pass
@@ -383,6 +443,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
                     "participant_rel_key": participant_rel_key,
                     "player_rel_key": player_rel_key,
                     "pref_key_prop": pref_key_prop,
+                    "legacy_trace": legacy_trace_cache.get(parsed_pref_id or "", []),
                 })
             continue
 
