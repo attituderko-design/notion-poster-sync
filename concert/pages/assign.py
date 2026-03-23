@@ -1,261 +1,642 @@
 """
 concert.pages.assign
-アサイン検討画面（希望入力 / 候補生成 / 反映）。
+パート割当画面。
+  タブ1：希望入力（管理者が転記）
+  タブ2：アルゴリズム実行・候補案表示
+  タブ3：割当結果確認（マトリクス表示）
 """
-from __future__ import annotations
-
 import streamlit as st
-
-from concert.services.assign_solver import solve_all
-
-
-CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
-CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
-CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE"]
-
-SONG_NAME_KEYS = ["タイトル", "曲名", "名称"]
-SONG_CONCERT_REL_KEYS = ["出演", "演奏会", "FK演奏会"]
-
-PLAYER_NAME_KEYS = ["氏名", "名前", "表示名", "タイトル"]
-
-INST_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
-
-PART_NAME_KEYS = ["パート名", "名称", "表示名", "タイトル"]
-PART_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
-PART_INST_REL_KEYS = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
-PART_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
-
-PREF_RECORD_KEYS = ["レコード名", "タイトル", "名称"]
-PREF_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
-PREF_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
-PREF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
-PREF_PART_REL_KEYS = ["パート", "パート定義", "FKパート"]
-PREF_INST_REL_KEYS = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
-PREF_PRIORITY_KEYS = ["希望順位", "優先度", "希望", "希望区分"]
-PREF_CAN_BRING_KEYS = ["持参可", "持参可フラグ", "持参"]
-
-ASSIGN_RECORD_KEYS = ["レコード名", "タイトル", "名称"]
-ASSIGN_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
-ASSIGN_PLAYER_REL_KEYS = ["奏者", "出演者", "演奏会参加者", "FK奏者"]
-ASSIGN_SONG_REL_KEYS = ["楽曲", "演奏曲", "スコア", "FK楽曲", "作品楽章"]
-ASSIGN_INST_REL_KEYS = ["楽器", "楽器種別", "担当楽器", "FK楽器種別", "パート"]
-ASSIGN_STATUS_KEYS = ["確定フラグ", "担当フラグ", "確定", "ステータス"]
-ASSIGN_NOTE_KEYS = ["メモ", "備考"]
+from collections import defaultdict
 
 
-def _concert_label(ctx: dict, page: dict) -> str:
-    name = ctx["extract_prop_text_any"](page, CONCERT_NAME_KEYS) or ctx["extract_title"](page)
-    d = (ctx["extract_prop_text_any"](page, CONCERT_DATE_KEYS) or "")[:10]
-    return f"{name}（{d if d else '日時未設定'}）"
+# ============================================================
+# 定数
+# ============================================================
+
+PRIORITY_OPTIONS = ["なし", "第1希望", "第2希望", "第3希望", "降り番希望", "絶対NG"]
+PRIORITY_TO_INT  = {"第1希望": 1, "第2希望": 2, "第3希望": 3, "降り番希望": 0, "絶対NG": -1, "なし": None}
+INT_TO_PRIORITY  = {1: "第1希望", 2: "第2希望", 3: "第3希望", 0: "降り番希望", -1: "絶対NG"}
+SCORE_LABEL      = {3.0: "第1希望", 2.0: "第2希望", 1.0: "第3希望", 0.5: "フォールバック", 0.0: "降り番希望", -9999.0: "絶対NG"}
 
 
-def _load_concerts(ctx: dict) -> list[dict]:
-    rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT"])
-    out = []
-    for r in rows:
-        media = ctx["extract_prop_text_any"](r, CONCERT_MEDIA_KEYS)
-        if media and "出演" not in media:
-            continue
-        out.append(r)
-    return out
+# ============================================================
+# キャッシュ／ロードヘルパー
+# ============================================================
+
+def _clear_assign_cache():
+    for k in list(st.session_state.keys()):
+        if k.startswith(("assign_pref_", "assign_result_", "song_list_", "si_list_", "pi_list_")):
+            st.session_state.pop(k, None)
 
 
-def _load_songs_by_concert(ctx: dict, concert_id: str) -> list[dict]:
-    rows = ctx["query_all"](ctx["CONCERT_DB_SONG"])
-    t = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
-    rel = ctx["find_prop_name"](t, SONG_CONCERT_REL_KEYS)
-    if not rel:
-        return rows
-    out = []
-    for r in rows:
-        ids = ctx["extract_relation_ids"](r, rel)
-        if concert_id in ids:
-            out.append(r)
-    return out
+def _load_concerts(ctx) -> list[dict]:
+    if "concert_list" not in st.session_state:
+        st.session_state["concert_list"] = ctx["query_all"](ctx["CONCERT_DB_CONCERT"])
+    return st.session_state.get("concert_list", [])
 
 
-def _load_parts(ctx: dict, concert_id: str, song_id: str) -> list[dict]:
-    rows = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"])
-    t = ctx["get_prop_types"](ctx["CONCERT_DB_PART_DEFINITION"])
-    c_rel = ctx["find_prop_name"](t, PART_CONCERT_REL_KEYS)
-    s_rel = ctx["find_prop_name"](t, PART_SONG_REL_KEYS)
-    out = []
-    for r in rows:
-        ok = True
-        if c_rel:
-            ok = concert_id in ctx["extract_relation_ids"](r, c_rel)
-        if ok and s_rel:
-            ok = song_id in ctx["extract_relation_ids"](r, s_rel)
-        if ok:
-            out.append(r)
-    return out
+def _load_players(ctx) -> list[dict]:
+    if "player_list" not in st.session_state:
+        st.session_state["player_list"] = ctx["query_all"](ctx["CONCERT_DB_PLAYER"])
+    return st.session_state.get("player_list", [])
 
 
-def _create_pref(ctx: dict, concert_id: str, player_id: str, song_id: str, part_id: str, inst_id: str, priority_label: str, can_bring: bool):
-    db_id = ctx["CONCERT_DB_PREFERENCE"]
-    t = ctx["get_prop_types"](db_id)
-    props = {}
-    ctx["put_prop_any"](props, t, PREF_RECORD_KEYS, f"{player_id[:6]}:{song_id[:6]}:{part_id[:6]}")
-    ctx["put_prop_any"](props, t, PREF_CONCERT_REL_KEYS, concert_id)
-    ctx["put_prop_any"](props, t, PREF_PLAYER_REL_KEYS, player_id)
-    ctx["put_prop_any"](props, t, PREF_SONG_REL_KEYS, song_id)
-    ctx["put_prop_any"](props, t, PREF_PART_REL_KEYS, part_id)
-    if inst_id:
-        ctx["put_prop_any"](props, t, PREF_INST_REL_KEYS, inst_id)
-    ctx["put_prop_any"](props, t, PREF_PRIORITY_KEYS, priority_label)
-    ctx["put_prop_any"](props, t, PREF_CAN_BRING_KEYS, can_bring)
-    res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
+def _load_songs(ctx, concert_id: str) -> list[dict]:
+    key = f"song_list_{concert_id}"
+    if key not in st.session_state:
+        st.session_state[key] = ctx["query_all"](
+            ctx["CONCERT_DB_SONG"],
+            {"filter": {"property": "演奏会", "relation": {"contains": concert_id}}},
+        )
+    return st.session_state.get(key, [])
+
+
+def _load_song_instruments(ctx, song_id: str) -> list[dict]:
+    key = f"si_list_{song_id}"
+    if key not in st.session_state:
+        st.session_state[key] = ctx["query_all"](
+            ctx["CONCERT_DB_SONG_INSTRUMENT"],
+            {"filter": {"property": "楽曲", "relation": {"contains": song_id}}},
+        )
+    return st.session_state.get(key, [])
+
+
+def _load_player_instruments(ctx, concert_id: str) -> list[dict]:
+    key = f"pi_list_{concert_id}"
+    if key not in st.session_state:
+        st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"])
+    return st.session_state.get(key, [])
+
+
+def _concert_name(c, ctx) -> str:
+    n  = ctx["extract_prop_text"](c, "名称") or ctx["extract_title"](c)
+    dt = ctx["extract_prop_text"](c, "日時")
+    return f"{n}（{dt[:10] if dt else '日時未設定'}）"
+
+
+def _player_name(p, ctx) -> str:
+    return ctx["extract_prop_text"](p, "氏名") or ctx["extract_title"](p) or p.get("id", "")
+
+
+def _song_name(s, ctx) -> str:
+    return ctx["extract_prop_text"](s, "曲名") or ctx["extract_title"](s) or s.get("id", "")
+
+
+def _instrument_name(i, ctx) -> str:
+    return ctx["extract_prop_text"](i, "楽器名") or ctx["extract_title"](i) or i.get("id", "")
+
+
+# ============================================================
+# Notionへの希望保存
+# ============================================================
+
+def _save_preference(ctx, player_id: str, player_name: str,
+                     song_id: str, song_name: str,
+                     instrument_id: str, instrument_name: str,
+                     priority_int: int,
+                     existing_id: str = "") -> bool:
+    """PlayerInstrumentに希望順位を書き込む。"""
+    db_id    = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
+    type_map = ctx["get_prop_types"](db_id)
+    if not type_map:
+        return False
+    props: dict = {}
+    ctx["put_prop"](props, type_map, "レコード名",
+                    f"{player_name} × {song_name} × {instrument_name}")
+    ctx["put_prop"](props, type_map, "奏者",     player_id)
+    ctx["put_prop"](props, type_map, "楽器種別", instrument_id)
+    ctx["put_prop"](props, type_map, "楽曲",     song_id)
+    ctx["put_prop"](props, type_map, "希望順位",
+                    INT_TO_PRIORITY.get(priority_int, "なし"))
+
+    if existing_id:
+        res = ctx["api_request"]("patch",
+                                 f"https://api.notion.com/v1/pages/{existing_id}",
+                                 json={"properties": props})
+    else:
+        res = ctx["api_request"]("post",
+                                 "https://api.notion.com/v1/pages",
+                                 json={"parent": {"database_id": db_id},
+                                       "properties": props})
     return res is not None and res.status_code == 200
 
 
-def _apply_candidate(ctx: dict, concert_id: str, candidate: dict) -> tuple[int, int]:
-    db_id = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
-    t = ctx["get_prop_types"](db_id)
-    ok_n = 0
-    ng_n = 0
-    for a in candidate.get("assignments", []):
-        props = {}
-        label = f"{a.get('song_name','')} / {a.get('part_name','')} / {a.get('player_name','')}"
-        ctx["put_prop_any"](props, t, ASSIGN_RECORD_KEYS, label)
-        ctx["put_prop_any"](props, t, ASSIGN_CONCERT_REL_KEYS, concert_id)
-        ctx["put_prop_any"](props, t, ASSIGN_PLAYER_REL_KEYS, a.get("player_id", ""))
-        ctx["put_prop_any"](props, t, ASSIGN_SONG_REL_KEYS, a.get("song_id", ""))
-        if a.get("instrument_id"):
-            ctx["put_prop_any"](props, t, ASSIGN_INST_REL_KEYS, a.get("instrument_id"))
-        ctx["put_prop_any"](props, t, ASSIGN_STATUS_KEYS, True)
-        ctx["put_prop_any"](props, t, ASSIGN_NOTE_KEYS, f"HARMONIA候補反映: {candidate.get('label','')}")
-        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
-        if res is not None and res.status_code == 200:
-            ok_n += 1
-        else:
-            ng_n += 1
-    return ok_n, ng_n
+# ============================================================
+# assign_solver用データ変換
+# ============================================================
+
+def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
+    """
+    NotionのDBからsolve_all()に渡すPrefs/Requirementsを構築する。
+    assign_solver.pyのPref/Requirementデータクラスを直接使わず、
+    dictで渡してsolve_all内で変換する形にする。
+    """
+    from concert.services.assign_solver import Pref, Requirement
+
+    # 楽器マスタ
+    inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
+    inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
+
+    # Requirements: SongInstrumentから構築
+    requirements: list[Requirement] = []
+    for song in songs:
+        sid   = song.get("id", "")
+        sname = _song_name(song, ctx)
+        si_rows = _load_song_instruments(ctx, sid)
+        for si in si_rows:
+            iids = ctx["extract_relation_ids"](si, "楽器種別")
+            if not iids:
+                continue
+            iid   = iids[0]
+            iname = inst_name_map.get(iid, iid)
+            qty_str = ctx["extract_prop_text"](si, "必要台数")
+            try:
+                qty = max(int(float(qty_str)), 1) if qty_str else 1
+            except ValueError:
+                qty = 1
+            note = ctx["extract_prop_text"](si, "備考") or ""
+            part_id   = si.get("id", "")
+            part_name = f"{iname}（{note}）" if note else iname
+            requirements.append(Requirement(
+                song_id=sid, song_name=sname,
+                part_id=part_id, part_name=part_name,
+                instrument_id=iid, instrument_name=iname,
+                required_count=qty,
+            ))
+
+    # Prefs: PlayerInstrumentの希望順位から構築
+    prefs: list[Pref] = []
+    pi_rows = _load_player_instruments(ctx, concert_id)
+
+    player_name_map = {p.get("id"): _player_name(p, ctx) for p in players}
+    song_name_map   = {s.get("id"): _song_name(s, ctx) for s in songs}
+    song_id_set     = {s.get("id") for s in songs}
+
+    for pi in pi_rows:
+        player_ids = ctx["extract_relation_ids"](pi, "奏者")
+        inst_ids   = ctx["extract_relation_ids"](pi, "楽器種別")
+        song_ids   = ctx["extract_relation_ids"](pi, "楽曲")
+        if not (player_ids and inst_ids and song_ids):
+            continue
+        pid    = player_ids[0]
+        iid    = inst_ids[0]
+        sid    = song_ids[0]
+        if sid not in song_id_set:
+            continue
+
+        priority_str = ctx["extract_prop_text"](pi, "希望順位")
+        priority_int = PRIORITY_TO_INT.get(priority_str)
+        if priority_int is None:
+            continue  # 「なし」はスキップ
+
+        # part_idはSongInstrumentのIDを使う（楽曲×楽器の組合せで一意）
+        matching_reqs = [r for r in requirements if r.song_id == sid and r.instrument_id == iid]
+        part_id   = matching_reqs[0].part_id   if matching_reqs else f"{sid}_{iid}"
+        part_name = matching_reqs[0].part_name  if matching_reqs else inst_name_map.get(iid, iid)
+
+        prefs.append(Pref(
+            player_id=pid,
+            player_name=player_name_map.get(pid, pid),
+            song_id=sid,
+            song_name=song_name_map.get(sid, sid),
+            part_id=part_id,
+            part_name=part_name,
+            instrument_id=iid,
+            instrument_name=inst_name_map.get(iid, iid),
+            priority=priority_int,
+            can_bring=False,  # 持参可フラグはスコア計算から除外済み
+        ))
+
+    return prefs, requirements
 
 
-def render(ctx: dict):
-    st.header("🎼 アサイン検討")
-    st.caption("希望入力 → 候補生成（A〜E） → 採用案の反映、の順で進めます。")
+# ============================================================
+# タブ1：希望入力
+# ============================================================
+
+def _render_pref_tab(ctx: dict):
+    st.caption("管理者がアンケート結果を転記する画面です。奏者×曲×楽器ごとに希望順位を選択して保存してください。")
 
     concerts = _load_concerts(ctx)
     if not concerts:
-        st.info("出演演奏会が見つかりません。先に演奏会を登録してください。")
+        st.info("先に演奏会を登録してください。")
         return
 
-    c_opts = {_concert_label(ctx, c): c for c in concerts}
-    c_query = st.text_input("演奏会を検索", key="assign_concert_search", placeholder="例: 2026 / Happy Hour / 定期").strip().lower()
-    if c_query:
-        c_opts = {k: v for k, v in c_opts.items() if c_query in k.lower()}
-    if not c_opts:
-        st.warning("一致する演奏会がありません。")
-        return
-
-    c_name = st.selectbox("演奏会を選択", list(c_opts.keys()), key="assign_concert_sel")
-    concert = c_opts[c_name]
-    concert_id = concert.get("id", "")
+    concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
+    selected_concert = st.selectbox("演奏会を選択", list(concert_opts.keys()), key="pref_concert_sel")
+    concert_id = concert_opts.get(selected_concert, "")
     if not concert_id:
         return
 
-    t1, t2, t3 = st.tabs(["希望入力", "アルゴリズム実行", "結果確認"])
+    players = _load_players(ctx)
+    songs   = _load_songs(ctx, concert_id)
+    if not players:
+        st.info("奏者を先に登録してください。")
+        return
+    if not songs:
+        st.info("この演奏会に楽曲が登録されていません。")
+        return
 
-    with t1:
-        players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"])
-        songs = _load_songs_by_concert(ctx, concert_id)
-        if not players or not songs:
-            st.info("奏者または演奏会紐づき楽曲が不足しています。")
-        else:
-            p_opts = {
-                (ctx["extract_prop_text_any"](p, PLAYER_NAME_KEYS) or ctx["extract_title"](p) or p.get("id", "")): p
-                for p in players
-            }
-            s_opts = {
-                (ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or ctx["extract_title"](s) or s.get("id", "")): s
-                for s in songs
-            }
-            col1, col2 = st.columns(2)
-            with col1:
-                p_name = st.selectbox("奏者", list(p_opts.keys()), key="pref_player")
-            with col2:
-                s_name = st.selectbox("楽曲", list(s_opts.keys()), key="pref_song")
-            p_id = p_opts[p_name]["id"]
-            s_id = s_opts[s_name]["id"]
+    # 楽器マスタ
+    inst_rows     = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
+    inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
 
-            parts = _load_parts(ctx, concert_id, s_id)
-            if not parts:
-                st.warning("この曲のパート定義が見つかりません。先にパート定義DBを登録してください。")
-            else:
-                part_opts = {
-                    (ctx["extract_prop_text_any"](x, PART_NAME_KEYS) or ctx["extract_title"](x) or x.get("id", "")): x
-                    for x in parts
-                }
-                part_name = st.selectbox("パート", list(part_opts.keys()), key="pref_part")
-                part = part_opts[part_name]
-                part_id = part["id"]
-                inst_id = (ctx["extract_relation_ids_any"](part, PART_INST_REL_KEYS) or [""])[0]
+    # 既存のPlayerInstrumentを取得（奏者×楽曲×楽器 → レコードIDと現在の希望順位）
+    pi_rows = _load_player_instruments(ctx, concert_id)
+    pi_lookup: dict[tuple, dict] = {}  # (player_id, song_id, inst_id) → row
+    for pi in pi_rows:
+        pids = ctx["extract_relation_ids"](pi, "奏者")
+        iids = ctx["extract_relation_ids"](pi, "楽器種別")
+        sids = ctx["extract_relation_ids"](pi, "楽曲")
+        if pids and iids and sids:
+            pi_lookup[(pids[0], sids[0], iids[0])] = pi
 
-                c1, c2 = st.columns([2, 1])
-                with c1:
-                    pr = st.selectbox("希望順位", ["第1希望", "第2希望", "第3希望", "降り番希望", "絶対NG", "なし"], index=0, key="pref_priority")
-                with c2:
-                    can_bring = st.checkbox("持参可", value=False, key="pref_can_bring")
+    player_opts = {_player_name(p, ctx): p.get("id", "") for p in
+                   sorted(players, key=lambda x: _player_name(x, ctx))}
+    selected_player_name = st.selectbox("奏者を選択", list(player_opts.keys()), key="pref_player_sel")
+    player_id = player_opts.get(selected_player_name, "")
+    if not player_id:
+        return
 
-                if st.button("➕ 希望を保存", type="primary", use_container_width=True):
-                    if _create_pref(ctx, concert_id, p_id, s_id, part_id, inst_id, pr, can_bring):
-                        st.success("✅ 希望入力DBへ保存しました。")
-                    else:
-                        st.error("❌ 保存に失敗しました。")
+    st.subheader(f"希望入力：{selected_player_name}")
 
-    with t2:
-        if st.button("🚀 割当候補を生成", type="primary", use_container_width=True):
-            cands = solve_all(ctx, concert_id)
-            st.session_state["assign_candidates"] = cands
+    for song in sorted(songs, key=lambda x: _song_name(x, ctx)):
+        sid   = song.get("id", "")
+        sname = _song_name(song, ctx)
 
-        cands = st.session_state.get("assign_candidates", [])
-        if not cands:
-            st.info("候補はまだ生成されていません。")
-        else:
-            for i, cand in enumerate(cands):
-                with st.expander(cand["label"], expanded=(i == 0)):
-                    stats = cand.get("stats", {})
-                    st.caption(
-                        f"第1希望率: {stats.get('first_choice_rate',0):.2%} / "
-                        f"総スコア: {stats.get('total_score',0)} / "
-                        f"最低スコア: {stats.get('min_score',0)} / "
-                        f"レンタル必要: {stats.get('rental_count',0)} / "
-                        f"降り番分散: {stats.get('rest_std',0)}"
+        si_rows = _load_song_instruments(ctx, sid)
+        if not si_rows:
+            st.caption(f"　{sname}：必要楽器が未登録です。")
+            continue
+
+        with st.expander(f"🎵 {sname}", expanded=True):
+            with st.form(f"pref_form_{player_id}_{sid}", border=True):
+                changes = []
+                for si in si_rows:
+                    iids = ctx["extract_relation_ids"](si, "楽器種別")
+                    if not iids:
+                        continue
+                    iid   = iids[0]
+                    iname = inst_name_map.get(iid, iid)
+                    note  = ctx["extract_prop_text"](si, "備考") or ""
+                    label = f"{iname}（{note}）" if note else iname
+
+                    existing = pi_lookup.get((player_id, sid, iid))
+                    cur_priority_str = ctx["extract_prop_text"](existing, "希望順位") if existing else "なし"
+                    if cur_priority_str not in PRIORITY_OPTIONS:
+                        cur_priority_str = "なし"
+                    cur_idx = PRIORITY_OPTIONS.index(cur_priority_str)
+
+                    col_inst, col_sel = st.columns([3, 2])
+                    col_inst.markdown(f"**{label}**")
+                    priority_sel = col_sel.selectbox(
+                        label, PRIORITY_OPTIONS, index=cur_idx,
+                        label_visibility="collapsed",
+                        key=f"pref_sel_{player_id}_{sid}_{iid}",
                     )
-                    rows = []
-                    for a in cand.get("assignments", []):
-                        rows.append(
-                            {
-                                "楽曲": a.get("song_name", ""),
-                                "パート": a.get("part_name", ""),
-                                "奏者": a.get("player_name", ""),
-                                "楽器": a.get("instrument_name", ""),
-                                "由来": a.get("source", ""),
-                            }
-                        )
-                    st.dataframe(rows, use_container_width=True, hide_index=True)
-                    if st.button(f"✅ この候補を反映: {cand['label']}", key=f"apply_cand_{i}", use_container_width=True):
-                        ok_n, ng_n = _apply_candidate(ctx, concert_id, cand)
-                        if ng_n == 0:
-                            st.success(f"✅ 反映完了: {ok_n}件")
-                        else:
-                            st.warning(f"⚠️ 反映: 成功 {ok_n} / 失敗 {ng_n}")
+                    changes.append({
+                        "iid":         iid,
+                        "iname":       iname,
+                        "priority_str": priority_sel,
+                        "existing_id": existing.get("id", "") if existing else "",
+                    })
 
-    with t3:
-        st.caption("ここでは演奏会別の既存アサイン（楽曲別担当者DB）を確認します。")
-        rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"])
-        out = []
-        for r in rows:
-            cids = ctx["extract_relation_ids_any"](r, ASSIGN_CONCERT_REL_KEYS)
-            if cids and concert_id not in cids:
-                continue
-            out.append(
-                {
-                    "ラベル": ctx["extract_prop_text_any"](r, ASSIGN_RECORD_KEYS) or ctx["extract_title"](r),
-                    "確定": ctx["extract_prop_text_any"](r, ASSIGN_STATUS_KEYS),
-                    "備考": ctx["extract_prop_text_any"](r, ASSIGN_NOTE_KEYS),
-                }
+                if st.form_submit_button("💾 保存", use_container_width=True, type="primary"):
+                    ok_count = fail_count = 0
+                    with st.spinner("保存中..."):
+                        for ch in changes:
+                            pri_int = PRIORITY_TO_INT.get(ch["priority_str"])
+                            if pri_int is None and not ch["existing_id"]:
+                                continue  # 「なし」かつ未登録はスキップ
+                            if pri_int is None and ch["existing_id"]:
+                                # 「なし」に変更 → アーカイブ
+                                res = ctx["api_request"](
+                                    "patch",
+                                    f"https://api.notion.com/v1/pages/{ch['existing_id']}",
+                                    json={"archived": True},
+                                )
+                                if res and res.status_code == 200:
+                                    ok_count += 1
+                                else:
+                                    fail_count += 1
+                                continue
+                            ok = _save_preference(
+                                ctx, player_id, selected_player_name,
+                                sid, sname, ch["iid"], ch["iname"],
+                                pri_int, ch["existing_id"],
+                            )
+                            if ok:
+                                ok_count += 1
+                            else:
+                                fail_count += 1
+
+                    if fail_count == 0:
+                        st.success(f"✅ {ok_count}件を保存しました。")
+                        st.session_state.pop(f"pi_list_{concert_id}", None)
+                    else:
+                        st.warning(f"⚠️ {ok_count}件成功、{fail_count}件失敗。")
+                    st.rerun()
+
+
+# ============================================================
+# タブ2：アルゴリズム実行
+# ============================================================
+
+def _render_solver_tab(ctx: dict):
+    st.caption("希望入力が完了したら、アルゴリズムを実行して候補案を生成します。")
+
+    concerts = _load_concerts(ctx)
+    if not concerts:
+        st.info("演奏会を先に登録してください。")
+        return
+
+    concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
+    selected_concert = st.selectbox("演奏会を選択", list(concert_opts.keys()), key="solver_concert_sel")
+    concert_id = concert_opts.get(selected_concert, "")
+    if not concert_id:
+        return
+
+    players = _load_players(ctx)
+    songs   = _load_songs(ctx, concert_id)
+    if not players or not songs:
+        st.info("奏者・楽曲が登録されていません。")
+        return
+
+    if st.button("▶ 割当を実行", type="primary", key="run_solver"):
+        with st.spinner("アルゴリズム実行中..."):
+            try:
+                from concert.services.assign_solver import (
+                    greedy_solve, local_search, _calc_stats,
+                    _first_choice_rate, _total_score,
+                    _min_player_score, _bring_count, _rest_std,
+                )
+                prefs, requirements = _build_solver_input(ctx, concert_id, songs, players)
+                if not prefs:
+                    st.warning("希望データがありません。先に希望入力を行ってください。")
+                    return
+                if not requirements:
+                    st.warning("必要楽器が登録されていません。楽曲・楽器管理から登録してください。")
+                    return
+
+                all_pids = sorted({p.player_id for p in prefs})
+                pref_map = {(p.player_id, p.song_id, p.part_id): p for p in prefs}
+                base     = greedy_solve(prefs, requirements, set())
+
+                def obj_a(sol):
+                    return _first_choice_rate(sol, pref_map) * 10000 + _total_score(sol, pref_map)
+                def obj_b(sol):
+                    return _total_score(sol, pref_map)
+                def obj_c(sol):
+                    return _min_player_score(sol, pref_map) * 1000 + _total_score(sol, pref_map)
+                def obj_d(sol):
+                    return int((1000 - _rest_std(sol, all_pids) * 100) * 100) + _total_score(sol, pref_map)
+
+                variants = [
+                    ("候補A：第1希望率最大", obj_a),
+                    ("候補B：総スコア最大",  obj_b),
+                    ("候補C：公平性重視",    obj_c),
+                    ("候補D：降り番均等",    obj_d),
+                ]
+                results = []
+                for label, fn in variants:
+                    sol   = local_search(base, pref_map, fn, max_iter=250)
+                    stats = _calc_stats(sol, pref_map, all_pids)
+                    results.append({
+                        "label":       label,
+                        "assignments": [a.__dict__ for a in sol],
+                        "stats":       stats,
+                        "pref_map":    {str(k): v.__dict__ for k, v in pref_map.items()},
+                    })
+                st.session_state[f"assign_result_{concert_id}"] = results
+                st.success("✅ 候補案を生成しました。")
+            except Exception as e:
+                st.error(f"❌ 実行エラー：{e}")
+                return
+
+    results = st.session_state.get(f"assign_result_{concert_id}")
+    if not results:
+        return
+
+    st.divider()
+    st.subheader("候補案比較")
+
+    # サマリーカード
+    cols = st.columns(len(results))
+    for i, (col, r) in enumerate(zip(cols, results)):
+        st._arrow = None
+        s = r["stats"]
+        col.metric(r["label"].split("：")[1],
+                   f"{s['total_score']:.1f}点",
+                   f"第1希望率 {s['first_choice_rate']*100:.0f}%")
+
+    st.divider()
+
+    # 各候補の詳細
+    tabs = st.tabs([r["label"] for r in results])
+    song_name_map = {s.get("id"): _song_name(s, ctx) for s in songs}
+    song_order    = [s.get("id") for s in sorted(songs, key=lambda x: _song_name(x, ctx))]
+
+    for tab, result in zip(tabs, results):
+        with tab:
+            s = result["stats"]
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("総スコア",   f"{s['total_score']:.1f}点")
+            m2.metric("第1希望率",  f"{s['first_choice_rate']*100:.1f}%")
+            m3.metric("最低スコア", f"{s['min_score']:.1f}点")
+            m4.metric("FB件数",     f"{sum(1 for a in result['assignments'] if a['source']=='fallback')}件")
+
+            # 曲ごとの割当
+            by_song: dict[str, list] = defaultdict(list)
+            for a in result["assignments"]:
+                by_song[a["song_id"]].append(a)
+
+            for sid in song_order:
+                items = by_song.get(sid, [])
+                if not items:
+                    continue
+                st.markdown(f"**{song_name_map.get(sid, sid)}**")
+
+                rows = []
+                for a in items:
+                    pk   = str((a["player_id"], a["song_id"], a["part_id"]))
+                    pref = result["pref_map"].get(pk)
+                    if pref and pref["priority"] > 0:
+                        hope = INT_TO_PRIORITY.get(pref["priority"], "—")
+                        sc   = {1:3.0, 2:2.0, 3:1.0}.get(pref["priority"], 0.0)
+                    elif a["source"] == "fallback":
+                        hope = "フォールバック"
+                        sc   = 0.5
+                    else:
+                        hope = "降り番希望"
+                        sc   = 0.0
+                    rows.append({
+                        "奏者":   a["player_name"],
+                        "パート": a["part_name"],
+                        "希望":   hope,
+                        "点数":   sc,
+                        "FB":     "⚠️" if a["source"] == "fallback" else "",
+                    })
+
+                st.dataframe(
+                    rows,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "点数": st.column_config.NumberColumn(format="%.1f"),
+                        "FB":   st.column_config.TextColumn(width="small"),
+                    },
+                )
+
+            # 採用ボタン
+            st.divider()
+            if st.button(f"✅ この案を採用してNotionに書き込む",
+                         key=f"adopt_{result['label']}", type="primary"):
+                _write_assignments_to_notion(ctx, result["assignments"], result["pref_map"])
+
+
+def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: dict):
+    """採用した割当をPlayerInstrumentの担当フラグに書き込む。"""
+    db_id    = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
+    type_map = ctx["get_prop_types"](db_id)
+    if not type_map:
+        st.error("PlayerInstrument DBのプロパティ取得に失敗しました。")
+        return
+
+    ok = fail = 0
+    with st.spinner("Notionに書き込み中..."):
+        for a in assignments:
+            # 該当するPlayerInstrumentレコードを特定
+            pi_rows = ctx["query_all"](
+                db_id,
+                {"filter": {"and": [
+                    {"property": "奏者",    "relation": {"contains": a["player_id"]}},
+                    {"property": "楽曲",    "relation": {"contains": a["song_id"]}},
+                    {"property": "楽器種別","relation": {"contains": a["instrument_id"]}},
+                ]}},
             )
-        st.dataframe(out, use_container_width=True, hide_index=True)
+            props: dict = {}
+            ctx["put_prop"](props, type_map, "担当フラグ", True)
 
+            if pi_rows:
+                rid = pi_rows[0].get("id", "")
+                res = ctx["api_request"]("patch",
+                                         f"https://api.notion.com/v1/pages/{rid}",
+                                         json={"properties": props})
+            else:
+                # レコードがなければ新規作成
+                ctx["put_prop"](props, type_map, "レコード名",
+                                f"{a['player_name']} × {a['song_name']} × {a['part_name']}")
+                ctx["put_prop"](props, type_map, "奏者",     a["player_id"])
+                ctx["put_prop"](props, type_map, "楽曲",     a["song_id"])
+                ctx["put_prop"](props, type_map, "楽器種別", a["instrument_id"])
+                res = ctx["api_request"]("post",
+                                         "https://api.notion.com/v1/pages",
+                                         json={"parent": {"database_id": db_id},
+                                               "properties": props})
+            if res and res.status_code == 200:
+                ok += 1
+            else:
+                fail += 1
+
+    if fail == 0:
+        st.success(f"✅ {ok}件の担当フラグを書き込みました。")
+        _clear_assign_cache()
+    else:
+        st.warning(f"⚠️ {ok}件成功、{fail}件失敗。")
+
+
+# ============================================================
+# タブ3：割当結果確認
+# ============================================================
+
+def _render_result_tab(ctx: dict):
+    st.caption("採用済み割当のマトリクス表示。担当フラグが立っているレコードを表示します。")
+
+    concerts = _load_concerts(ctx)
+    if not concerts:
+        st.info("演奏会を先に登録してください。")
+        return
+
+    concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
+    selected_concert = st.selectbox("演奏会を選択", list(concert_opts.keys()), key="result_concert_sel")
+    concert_id = concert_opts.get(selected_concert, "")
+    if not concert_id:
+        return
+
+    col_h, col_r = st.columns([8, 1])
+    col_h.subheader("担当パート一覧")
+    if col_r.button("🔄", key="refresh_result", help="再読み込み"):
+        _clear_assign_cache()
+        st.rerun()
+
+    players = _load_players(ctx)
+    songs   = _load_songs(ctx, concert_id)
+    if not players or not songs:
+        st.info("奏者・楽曲が登録されていません。")
+        return
+
+    # 担当フラグ=Trueのレコードを取得
+    pi_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"])
+    assigned_rows = [r for r in pi_rows
+                     if ctx["extract_prop_text"](r, "担当フラグ") == "True"]
+
+    if not assigned_rows:
+        st.info("まだ担当が確定していません。「アルゴリズム実行」タブから割当を実行してください。")
+        return
+
+    # 楽器マスタ
+    inst_rows     = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
+    inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
+
+    # 曲ごとにまとめて表示
+    player_name_map = {p.get("id"): _player_name(p, ctx) for p in players}
+    song_name_map   = {s.get("id"): _song_name(s, ctx) for s in songs}
+    song_id_set     = {s.get("id") for s in songs}
+
+    by_song: dict[str, list] = defaultdict(list)
+    for r in assigned_rows:
+        sids = ctx["extract_relation_ids"](r, "楽曲")
+        if not sids or sids[0] not in song_id_set:
+            continue
+        pids = ctx["extract_relation_ids"](r, "奏者")
+        iids = ctx["extract_relation_ids"](r, "楽器種別")
+        sid  = sids[0]
+        by_song[sid].append({
+            "奏者":   player_name_map.get(pids[0], "不明") if pids else "不明",
+            "楽器":   inst_name_map.get(iids[0], "不明") if iids else "不明",
+            "備考":   ctx["extract_prop_text"](r, "備考") or "",
+        })
+
+    for song in sorted(songs, key=lambda x: _song_name(x, ctx)):
+        sid   = song.get("id", "")
+        sname = _song_name(song, ctx)
+        items = by_song.get(sid, [])
+        if not items:
+            st.markdown(f"**{sname}**　—　割当なし")
+            continue
+        st.markdown(f"**{sname}**（{len(items)}パート）")
+        st.dataframe(items, use_container_width=True, hide_index=True)
+        st.write("")
+
+
+# ============================================================
+# メイン描画
+# ============================================================
+
+def render(ctx: dict):
+    st.header("🎯 パート割当")
+
+    tab_pref, tab_solver, tab_result = st.tabs([
+        "希望入力",
+        "アルゴリズム実行",
+        "割当結果確認",
+    ])
+
+    with tab_pref:
+        _render_pref_tab(ctx)
+
+    with tab_solver:
+        _render_solver_tab(ctx)
+
+    with tab_result:
+        _render_result_tab(ctx)

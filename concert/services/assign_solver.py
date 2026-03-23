@@ -50,7 +50,7 @@ class Assignment:
     source: str  # "preference" / "fallback"
 
 
-SCORE_MAP = {1: 3, 2: 2, 3: 1, 0: 0}
+SCORE_MAP = {1: 3.0, 2: 2.0, 3: 1.0, 0: 0.0}
 
 PREF_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
 PREF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
@@ -238,14 +238,18 @@ def _load_preferences(ctx: dict, concert_id: str) -> list[Pref]:
     return out
 
 
-def score_assignment(a: Assignment, pref_map: dict[tuple[str, str, str], Pref]) -> int:
+def score_assignment(a: Assignment, pref_map: dict[tuple[str, str, str], Pref]) -> float:
     k = (a.player_id, a.song_id, a.part_id)
     p = pref_map.get(k)
     if not p:
-        return 0
+        # 希望データ自体が存在しない = フォールバック割当
+        return 0.5
     if p.priority == -1:
-        return -9999
-    base = SCORE_MAP.get(p.priority, 0)
+        return -9999.0
+    if p.priority == 0:
+        # 降り番希望 → 降り番 = 0点（割当がある場合はフォールバック扱いで0.5）
+        return 0.5 if a.source in ("fallback", "swap") else 0.0
+    base = SCORE_MAP.get(p.priority, 0.5)
     return base
 
 
@@ -273,10 +277,24 @@ def greedy_solve(
 ) -> list[Assignment]:
     by_req_key: dict[tuple[str, str], list[Pref]] = {}
     ng_map = {(p.player_id, p.song_id, p.part_id) for p in prefs if p.priority == -1}
+
+    # 奏者ごとの有効希望数（priority > 0 のもの）をカウント
+    # 希望数が少ない = 集中投票しているほど同点時に優先される
+    from collections import Counter
+    pref_count: Counter = Counter(
+        p.player_id for p in prefs if p.priority > 0
+    )
+
     for p in prefs:
         by_req_key.setdefault((p.song_id, p.part_id), []).append(p)
     for k in by_req_key:
-        by_req_key[k].sort(key=lambda x: (SCORE_MAP.get(x.priority, 0), 1 if x.can_bring else 0), reverse=True)
+        by_req_key[k].sort(
+            key=lambda x: (
+                SCORE_MAP.get(x.priority, 0),   # 第1キー：高スコア優先（降順）
+                -pref_count[x.player_id],        # 第2キー：希望数が少ない人優先（昇順→負値で降順に）
+            ),
+            reverse=True,
+        )
 
     assigned: list[Assignment] = []
     assigned_song_players: set[tuple[str, str]] = set()
@@ -331,7 +349,7 @@ def greedy_solve(
     return assigned
 
 
-def _total_score(solution: list[Assignment], pref_map: dict[tuple[str, str, str], Pref]) -> int:
+def _total_score(solution: list[Assignment], pref_map: dict[tuple[str, str, str], Pref]) -> float:
     return sum(max(score_assignment(a, pref_map), 0) for a in solution)
 
 
@@ -346,7 +364,7 @@ def _first_choice_rate(solution: list[Assignment], pref_map: dict[tuple[str, str
     return n / len(solution)
 
 
-def _min_player_score(solution: list[Assignment], pref_map: dict[tuple[str, str, str], Pref]) -> int:
+def _min_player_score(solution: list[Assignment], pref_map: dict[tuple[str, str, str], Pref]) -> float:
     by_player: dict[str, int] = {}
     for a in solution:
         by_player.setdefault(a.player_id, 0)
