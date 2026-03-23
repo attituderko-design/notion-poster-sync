@@ -122,7 +122,8 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
             if pid:
                 valid_part_ids.add(pid)
 
-    player_rel_key = _find_prop_name_loose(ctx, t, PREF_PLAYER_REL_KEYS)
+    # 注意: ここは「参加者relation」と分離する（同一キー上書き防止）
+    player_rel_key = _find_prop_name_loose(ctx, t, ["出演者", "奏者", "FK奏者"])
     participant_rel_key = _find_prop_name_loose(ctx, t, ["演奏会参加者"])
     pref_key_prop = _find_prop_name_loose(ctx, t, PREFERENCE_KEY_KEYS)
 
@@ -194,7 +195,7 @@ def _backfill_preference_participant_relation(ctx, concert_id: str) -> dict:
         patch_props: dict = {}
         if participant_rel_key:
             ctx["put_prop"](patch_props, t, participant_rel_key, participant_id)
-        if player_rel_key and player_id:
+        if player_rel_key and player_id and player_rel_key != participant_rel_key:
             # 互換性維持: 参加者relationとは別に奏者relationも同期
             ctx["put_prop"](patch_props, t, player_rel_key, player_id)
         if not patch_props:
