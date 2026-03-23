@@ -223,6 +223,15 @@ def _render_song_tab(ctx: dict):
     concerts = _load_concerts(ctx)
     concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
 
+    st.info(
+        "🎼 楽曲の正式登録は ArtéMis MUSE（媒体=演奏曲）を推奨します。"
+        " MUSE経由だと MusicBrainz / 初演情報 / 肖像画 / 作品・楽章マスタ連動まで一括反映されます。"
+    )
+    st.caption(
+        "この画面の「新規楽曲を登録」は簡易手動登録です。"
+        "急ぎの追記や、MUSE未収載データの暫定入力に使ってください。"
+    )
+
     # 絞り込み
     filter_opts = {"すべて": ""} | concert_opts
     selected_filter = st.selectbox("絞り込み：演奏会", list(filter_opts.keys()), key="song_filter")
@@ -230,7 +239,7 @@ def _render_song_tab(ctx: dict):
 
     songs = _load_songs(ctx, filter_concert_id)
 
-    with st.expander("➕ 新規楽曲を登録", expanded=(len(songs) == 0)):
+    with st.expander("➕ 新規楽曲を登録（簡易・手動）", expanded=(len(songs) == 0)):
         with st.form("song_new_form", border=True):
             title    = st.text_input("曲名 *", placeholder="例：マリンバ協奏曲", key="sn_title")
             composer = st.text_input("作曲者", placeholder="例：安倍圭子", key="sn_composer")
