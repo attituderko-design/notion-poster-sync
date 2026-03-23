@@ -503,6 +503,12 @@ def _render_partdef_tab(ctx: dict):
     st.subheader("🧩 パート定義")
     st.caption("楽曲ごとに、担当パート（楽器・必要人数）を明示管理します。")
 
+    # Streamlitのwidget keyへ直接代入すると例外になるため、
+    # 追加直後の検索語反映は「次回反映キー」を経由して先頭で適用する。
+    pending_inst_search = st.session_state.pop("partdef_inst_search_next", "")
+    if pending_inst_search:
+        st.session_state["partdef_inst_search"] = pending_inst_search
+
     concerts = _load_concerts(ctx)
     all_concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     c_query = st.text_input(
@@ -575,7 +581,7 @@ def _render_partdef_tab(ctx: dict):
             if ok_add:
                 st.success(f"✅ 楽器マスタへ追加しました: {new_inst_name}")
                 st.session_state.pop("instrument_list", None)
-                st.session_state["partdef_inst_search"] = new_inst_name
+                st.session_state["partdef_inst_search_next"] = new_inst_name
                 st.rerun()
             else:
                 st.error("❌ 楽器マスタへの追加に失敗しました。")
