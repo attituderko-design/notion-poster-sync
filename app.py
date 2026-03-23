@@ -28,6 +28,19 @@ from services.performance_ops import create_setlist_rows_for_performance_service
 from services.performance_ops import create_song_assignment_rows_service as _create_song_assign_service
 from services.performance_ops import get_cast_row_map_for_performance_service as _get_cast_row_map_service
 from services.performance_ops import upsert_score_master_links_service as _upsert_score_master_links_service
+try:
+    from concert.services.notion_client import build_concert_ctx
+    from concert.pages import (
+        concert_mgmt,
+        songs,
+        players,
+        rental,
+    )
+    CONCERT_SYSTEM_AVAILABLE = True
+    CONCERT_IMPORT_ERROR = ""
+except Exception as _concert_import_error:
+    CONCERT_SYSTEM_AVAILABLE = False
+    CONCERT_IMPORT_ERROR = str(_concert_import_error)
 
 # ============================================================
 # 設定（secrets.toml から読み込み）
@@ -8470,6 +8483,37 @@ with st.sidebar:
             st.session_state.app_mode_widget = st.session_state.get("app_mode", "新規登録")
         mode = st.radio("モード", ["新規登録", "出演アーカイブ", "データ管理", "出演情報管理", "自動同期"], key="app_mode_widget")
         st.session_state.app_mode = mode
+
+        # ---- Concert System ナビゲーション ----
+        st.sidebar.divider()
+        st.sidebar.markdown("**Concert System**")
+        CONCERT_PAGES = [
+            "演奏会・練習管理",
+            "楽曲・楽器管理",
+            "奏者・出欠・アサイン",
+            "レンタル管理",
+        ]
+        concert_page = st.sidebar.radio(
+            "concert_nav",
+            CONCERT_PAGES,
+            label_visibility="collapsed",
+            key="concert_page_radio",
+        )
+        if CONCERT_SYSTEM_AVAILABLE:
+            concert_ctx = build_concert_ctx()
+            if concert_page == "演奏会・練習管理":
+                concert_mgmt.render(concert_ctx)
+            elif concert_page == "楽曲・楽器管理":
+                songs.render(concert_ctx)
+            elif concert_page == "奏者・出欠・アサイン":
+                players.render(concert_ctx)
+            elif concert_page == "レンタル管理":
+                rental.render(concert_ctx)
+        else:
+            st.sidebar.caption("Concert System のモジュールを読み込めませんでした。")
+            if CONCERT_IMPORT_ERROR:
+                st.sidebar.caption(f"詳細: {CONCERT_IMPORT_ERROR}")
+
         sync_scope = "欠損のみ補填"  # legacy compat
         if mode == "データ管理":
             if "manual_sort_order" not in st.session_state:
