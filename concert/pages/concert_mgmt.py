@@ -28,6 +28,15 @@ PRACTICE_MEMO_KEYS = ["メモ", "備考"]
 def _ss(key, default=None):
     return st.session_state.get(key, default)
 
+
+def _contains_query(values: list[str], query: str) -> bool:
+    q = (query or "").strip().lower()
+    if not q:
+        return True
+    blob = " ".join([(v or "") for v in values]).lower()
+    return q in blob
+
+
 def _clear_concert_cache(ctx):
     try:
         from concert.services.notion_client import get_concert_db_property_types
@@ -391,12 +400,37 @@ def render(ctx: dict):
             st.info("演奏会がまだ登録されていません。")
         else:
             st.subheader(f"登録済み演奏会（{len(concerts)}件）")
-            col_refresh = st.columns([8, 1])[1]
+            col_search, col_refresh = st.columns([8, 1])
+            concert_query = col_search.text_input(
+                "演奏会を検索",
+                value=_ss("concert_mgmt_concert_query", ""),
+                placeholder="例: Osaka / 2026 / Summer / 門真",
+                key="concert_mgmt_concert_query",
+            )
             if col_refresh.button("🔄", key="refresh_concerts", help="一覧を再読み込み"):
                 st.session_state.pop("concert_list", None)
                 st.rerun()
 
+            filtered_concerts = []
             for c in concerts:
+                if not _contains_query(
+                    [
+                        _concert_display_name(c, ctx),
+                        ctx["extract_prop_text_any"](c, CONCERT_NAME_KEYS),
+                        ctx["extract_prop_text_any"](c, CONCERT_DATE_KEYS),
+                        ctx["extract_prop_text_any"](c, CONCERT_VENUE_KEYS),
+                        ctx["extract_prop_text_any"](c, CONCERT_ADDRESS_KEYS),
+                        ctx["extract_prop_text_any"](c, CONCERT_MEMO_KEYS),
+                    ],
+                    concert_query,
+                ):
+                    continue
+                filtered_concerts.append(c)
+
+            st.caption(f"表示件数: {len(filtered_concerts)} / {len(concerts)}")
+            if not filtered_concerts:
+                st.info("検索条件に一致する演奏会がありません。")
+            for c in filtered_concerts:
                 label = _concert_display_name(c, ctx)
                 with st.expander(label, expanded=False):
                     _render_concert_form(ctx, existing=c)
@@ -427,7 +461,13 @@ def render(ctx: dict):
             st.info("練習がまだ登録されていません。")
         else:
             st.subheader(f"登録済み練習（{len(practices)}件）")
-            col_refresh = st.columns([8, 1])[1]
+            col_search, col_refresh = st.columns([8, 1])
+            practice_query = col_search.text_input(
+                "練習を検索",
+                value=_ss("concert_mgmt_practice_query", ""),
+                placeholder="例: 第3回 / 2026-07 / 本番 / スタジオ",
+                key="concert_mgmt_practice_query",
+            )
             if col_refresh.button("🔄", key="refresh_practices", help="一覧を再読み込み"):
                 for k in list(st.session_state.keys()):
                     if k.startswith("practice_list_"):
@@ -439,7 +479,27 @@ def render(ctx: dict):
                 d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
                 return d[:10] if d else "9999"
 
-            for p in sorted(practices, key=_prac_date):
+            sorted_practices = sorted(practices, key=_prac_date)
+            filtered_practices = []
+            for p in sorted_practices:
+                if not _contains_query(
+                    [
+                        _practice_display_name(p, ctx),
+                        ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS),
+                        ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS),
+                        ctx["extract_prop_text_any"](p, PRACTICE_VENUE_KEYS),
+                        ctx["extract_prop_text_any"](p, PRACTICE_ADDRESS_KEYS),
+                        ctx["extract_prop_text_any"](p, PRACTICE_MEMO_KEYS),
+                    ],
+                    practice_query,
+                ):
+                    continue
+                filtered_practices.append(p)
+
+            st.caption(f"表示件数: {len(filtered_practices)} / {len(practices)}")
+            if not filtered_practices:
+                st.info("検索条件に一致する練習がありません。")
+            for p in filtered_practices:
                 label = _practice_display_name(p, ctx)
                 is_concert_day = ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS) == "True"
                 if is_concert_day:
