@@ -810,12 +810,21 @@ def render(ctx: dict):
                         st.session_state.pop(k, None)
                 st.rerun()
 
-            # 日付順ソート
-            def _prac_date(p):
-                d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
-                return d[:10] if d else "9999"
+            # 練習回（第N回練習）を優先して降順表示（未設定日時でも入力しやすくする）
+            def _practice_round_no(p: dict) -> int:
+                nm = ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or ""
+                m = re.search(r"第\s*(\d+)\s*回練習", nm)
+                return int(m.group(1)) if m else 0
 
-            sorted_practices = sorted(practices, key=_prac_date)
+            def _prac_date(p: dict) -> str:
+                d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
+                return d[:10] if d else ""
+
+            sorted_practices = sorted(
+                practices,
+                key=lambda p: (_practice_round_no(p), _prac_date(p)),
+                reverse=True,
+            )
             filtered_practices = []
             for p in sorted_practices:
                 if not _contains_query(
