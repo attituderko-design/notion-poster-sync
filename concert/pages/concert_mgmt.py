@@ -240,7 +240,7 @@ def _update_concert(ctx: dict, page_id: str, name: str, dt_start: str, dt_end: s
 # ============================================================
 
 def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_end: str,
-                     venue: str, address: str, is_concert_day: bool, is_rest_day: bool, memo: str) -> bool:
+                     venue: str, address: str, is_concert_day: bool, is_rest_day: bool, memo: str) -> str:
     api   = ctx["api_request"]
     db_id = ctx["CONCERT_DB_PRACTICE"]
     get_t = ctx["get_prop_types"]
@@ -249,7 +249,7 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_en
     type_map = get_t(db_id)
     if not type_map:
         st.error("練習DBのプロパティ取得に失敗しました。")
-        return False
+        return ""
 
     props: dict = {}
     ctx["put_prop_any"](props, type_map, PRACTICE_NAME_KEYS, name)
@@ -275,7 +275,9 @@ def _create_practice(ctx: dict, name: str, concert_id: str, dt_start: str, dt_en
 
     res = api("post", "https://api.notion.com/v1/pages",
               json={"parent": {"database_id": db_id}, "properties": props})
-    return res is not None and res.status_code == 200
+    if res is not None and res.status_code == 200:
+        return (res.json() or {}).get("id", "")
+    return ""
 
 
 def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
@@ -309,6 +311,28 @@ def _update_practice(ctx: dict, page_id: str, name: str, concert_id: str,
 
     res = api("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
     return res is not None and res.status_code == 200
+
+
+def _bind_practice_concert_relation(ctx: dict, page_id: str, concert_id: str) -> bool:
+    """練習ページを演奏会へ強制紐付け（relationキー名ゆれ対策）。"""
+    if not page_id or not concert_id:
+        return False
+    type_map = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"]) or {}
+    relation_keys = [
+        k for k, t in type_map.items()
+        if t == "relation" and ("演奏会" in str(k) or "出演" in str(k) or "concert" in str(k).lower())
+    ]
+    if not relation_keys:
+        return False
+    for rk in relation_keys:
+        res = ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{page_id}",
+            json={"properties": {rk: {"relation": [{"id": concert_id}]}}},
+        )
+        if res is not None and res.status_code == 200:
+            return True
+    return False
 
 
 # ============================================================
@@ -560,8 +584,11 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
                 ok = _update_practice(ctx, existing["id"], name.strip(), concert_id,
                                       dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo)
             else:
-                ok = _create_practice(ctx, name.strip(), concert_id,
-                                      dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo)
+                created_id = _create_practice(ctx, name.strip(), concert_id,
+                                              dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo)
+                ok = bool(created_id)
+                if ok and concert_id:
+                    _bind_practice_concert_relation(ctx, created_id, concert_id)
 
         if ok:
             st.success(f"✅ 練習を{label}しました。")
@@ -613,7 +640,7 @@ def _bulk_generate_practice_rows(ctx: dict, concert_page: dict, practice_count: 
         if name in existing_names:
             skipped += 1
             continue
-        ok = _create_practice(
+        created_id = _create_practice(
             ctx=ctx,
             name=name,
             concert_id=concert_id,
@@ -625,7 +652,8 @@ def _bulk_generate_practice_rows(ctx: dict, concert_page: dict, practice_count: 
             is_rest_day=False,
             memo="",
         )
-        if ok:
+        if created_id:
+            _bind_practice_concert_relation(ctx, created_id, concert_id)
             created += 1
             existing_names.add(name)
 
@@ -634,7 +662,7 @@ def _bulk_generate_practice_rows(ctx: dict, concert_page: dict, practice_count: 
     if final_name in existing_names:
         skipped += 1
     else:
-        ok = _create_practice(
+        created_id = _create_practice(
             ctx=ctx,
             name=final_name,
             concert_id=concert_id,
@@ -646,7 +674,8 @@ def _bulk_generate_practice_rows(ctx: dict, concert_page: dict, practice_count: 
             is_rest_day=False,
             memo="",
         )
-        if ok:
+        if created_id:
+            _bind_practice_concert_relation(ctx, created_id, concert_id)
             created += 1
         else:
             skipped += 1
@@ -758,6 +787,11 @@ def render(ctx: dict):
         st.divider()
 
         practices = _load_practices(ctx, filter_concert_id)
+        if filter_concert_id and not practices:
+            fallback_all = _load_practices(ctx, "")
+            if fallback_all:
+                st.warning("選択演奏会へのリレーション未設定の可能性があります。未絞り込みの練習を表示します。")
+                practices = fallback_all
 
         if not practices:
             st.info("練習がまだ登録されていません。")
