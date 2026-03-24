@@ -207,12 +207,11 @@ def _render_calc_tab(ctx: dict):
 
     concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     global_concert_id, global_concert_name = _get_global_concert_filter(ctx, concert_opts)
-    if global_concert_id:
-        concert_id = global_concert_id
-        st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
-    else:
-        selected = st.selectbox("演奏会を選択", list(concert_opts.keys()), key="rental_calc_concert")
-        concert_id = concert_opts.get(selected, "")
+    if not global_concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
+        return
+    concert_id = global_concert_id
+    st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
     if not concert_id:
         return
 
@@ -288,13 +287,13 @@ def _render_estimate_tab(ctx: dict):
 
     concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     global_concert_id, global_concert_name = _get_global_concert_filter(ctx, concert_opts)
-    if global_concert_id:
-        concert_id = global_concert_id
-        selected_concert = global_concert_name or global_concert_id
-        st.caption(f"対象演奏会: {selected_concert}")
-    else:
-        selected_concert = st.selectbox("演奏会", list(concert_opts.keys()), key="est_concert")
-        concert_id = concert_opts.get(selected_concert, "")
+    if not global_concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
+        return
+    concert_id = global_concert_id
+    selected_concert = global_concert_name or global_concert_id
+    st.caption(f"対象演奏会: {selected_concert}")
+    concert_id_tmp = concert_opts.get(selected_concert, "")
     if not concert_id:
         return
 
@@ -432,12 +431,11 @@ def _render_summary_tab(ctx: dict):
 
     concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     global_concert_id, global_concert_name = _get_global_concert_filter(ctx, concert_opts)
-    if global_concert_id:
-        concert_id = global_concert_id
-        st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
-    else:
-        selected = st.selectbox("演奏会を選択", list(concert_opts.keys()), key="summary_concert")
-        concert_id = concert_opts.get(selected, "")
+    if not global_concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
+        return
+    concert_id = global_concert_id
+    st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
     if not concert_id:
         return
 
