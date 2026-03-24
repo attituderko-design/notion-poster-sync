@@ -165,7 +165,7 @@ def _load_requirements(ctx: dict, concert_id: str) -> list[Requirement]:
     tmp = []
     for r in rows:
         if concert_rel_key:
-            cids = ctx["extract_relation_ids"](r, concert_rel_key)
+            cids = ctx["extract_relation_ids_any"](r, [concert_rel_key] if concert_rel_key else SONG_CONCERT_REL_KEYS)
             if concert_id not in cids:
                 continue
         sid = (ctx["extract_relation_ids_any"](r, PART_SONG_REL_KEYS) or [""])[0]
@@ -216,7 +216,7 @@ def _load_preferences(ctx: dict, concert_id: str) -> list[Pref]:
     participant_map = _participant_to_player_map(ctx)
     for r in rows:
         if concert_rel_key:
-            cids = ctx["extract_relation_ids"](r, concert_rel_key)
+            cids = ctx["extract_relation_ids_any"](r, [concert_rel_key] if concert_rel_key else SONG_CONCERT_REL_KEYS)
             if concert_id not in cids:
                 continue
         raw_pid = (ctx["extract_relation_ids_any"](r, PREF_PLAYER_REL_KEYS) or [""])[0]
