@@ -8299,9 +8299,9 @@ if system_mode == "HARMONIA":
     concert_page = st.sidebar.radio(
         "ページ",
         [
-            "演奏会・練習管理",
+            "練習管理",
             "楽曲・楽器管理",
-            "奏者・出欠・アサイン",
+            "奏者・出欠・持参楽器",
             "アサイン検討",
             "レンタル管理",
         ],
@@ -8381,11 +8381,11 @@ if system_mode == "HARMONIA":
             concert_ctx["SELECTED_CONCERT_ID"] = concert_opt_map.get(selected_name, "")
             concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
 
-    if concert_page == "演奏会・練習管理":
+    if concert_page == "練習管理":
         concert_mgmt.render(concert_ctx)
     elif concert_page == "楽曲・楽器管理":
         songs.render(concert_ctx)
-    elif concert_page == "奏者・出欠・アサイン":
+    elif concert_page == "奏者・出欠・持参楽器":
         players.render(concert_ctx)
     elif concert_page == "アサイン検討":
         assign.render(concert_ctx)
