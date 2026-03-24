@@ -1037,6 +1037,8 @@ def _bulk_generate_practice_rows(ctx: dict, concert_page: dict, practice_count: 
 
 def render(ctx: dict):
     st.header("🎼 演奏会・練習管理")
+    global_concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+    global_concert_name = (ctx.get("SELECTED_CONCERT_NAME") or "").strip()
 
     with st.expander("🧩 キー整備（既存データ反映）", expanded=False):
         st.caption("Concert System関連DBの `*_key` / `PK*` 列を既存レコードへ一括補完します。")
@@ -1058,6 +1060,8 @@ def render(ctx: dict):
     # ── 演奏会タブ ────────────────────────────────────────────
     with tab_concert:
         concerts = _load_concerts(ctx)
+        if global_concert_id:
+            concerts = [c for c in concerts if c.get("id", "") == global_concert_id]
 
         with st.expander("➕ 新規演奏会を登録", expanded=(len(concerts) == 0)):
             _render_concert_form(ctx)
@@ -1069,16 +1073,20 @@ def render(ctx: dict):
         else:
             st.subheader(f"登録済み演奏会（{len(concerts)}件）")
             st.caption("ここは演奏会の参照・選択が主目的です。編集は必要なときだけ開いてください。")
-            col_search, col_refresh = st.columns([8, 1])
-            concert_query = col_search.text_input(
-                "演奏会を検索",
-                value=_ss("concert_mgmt_concert_query", ""),
-                placeholder="例: Osaka / 2026 / Summer / 門真",
-                key="concert_mgmt_concert_query",
-            )
-            if col_refresh.button("🔄", key="refresh_concerts", help="一覧を再読み込み"):
-                st.session_state.pop("concert_list", None)
-                st.rerun()
+            if global_concert_id:
+                st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
+                concert_query = ""
+            else:
+                col_search, col_refresh = st.columns([8, 1])
+                concert_query = col_search.text_input(
+                    "演奏会を検索",
+                    value=_ss("concert_mgmt_concert_query", ""),
+                    placeholder="例: Osaka / 2026 / Summer / 門真",
+                    key="concert_mgmt_concert_query",
+                )
+                if col_refresh.button("🔄", key="refresh_concerts", help="一覧を再読み込み"):
+                    st.session_state.pop("concert_list", None)
+                    st.rerun()
 
             filtered_concerts = []
             for c in concerts:
@@ -1118,15 +1126,20 @@ def render(ctx: dict):
         concerts = _load_concerts(ctx)
 
         # 演奏会フィルタ
-        concert_filter_opts = {"すべて": ""} | {
-            _concert_display_name(c, ctx): c.get("id", "") for c in concerts
-        }
-        selected_filter = st.selectbox(
-            "絞り込み：演奏会",
-            list(concert_filter_opts.keys()),
-            key="practice_filter_concert",
-        )
-        filter_concert_id = concert_filter_opts.get(selected_filter, "")
+        if global_concert_id:
+            filter_concert_id = global_concert_id
+            selected_filter = global_concert_name or global_concert_id
+            st.caption(f"絞り込み：演奏会 = {selected_filter}")
+        else:
+            concert_filter_opts = {"すべて": ""} | {
+                _concert_display_name(c, ctx): c.get("id", "") for c in concerts
+            }
+            selected_filter = st.selectbox(
+                "絞り込み：演奏会",
+                list(concert_filter_opts.keys()),
+                key="practice_filter_concert",
+            )
+            filter_concert_id = concert_filter_opts.get(selected_filter, "")
         selected_concert_page = next((c for c in concerts if c.get("id") == filter_concert_id), None)
 
         with st.expander("⚙️ 練習回を一括生成", expanded=False):

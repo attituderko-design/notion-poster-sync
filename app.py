@@ -8318,6 +8318,53 @@ if system_mode == "HARMONIA":
         st.error(f"HARMONIA System の設定が不足しています。secrets.toml を確認してください。（{e}）")
         st.stop()
 
+    # HARMONIA共通: 演奏会を先に1つ選び、各画面はその演奏会だけを対象にする
+    def _harmony_concert_name(page: dict) -> str:
+        name = (
+            concert_ctx["extract_prop_text_any"](page, ["名称", "演奏会名", "タイトル", "PK名称"])
+            or concert_ctx["extract_title"](page)
+        )
+        dt = concert_ctx["extract_prop_text_any"](page, ["日時", "日付", "出演日", "体験日", "リリース日"])
+        return f"{name}（{dt[:10] if dt else '日時未設定'}）"
+
+    def _harmony_is_performance_media(page: dict) -> bool:
+        labels = []
+        for k in ["媒体", "MEDIA_TYPE", "メディア", "種類"]:
+            v = concert_ctx["extract_prop_text"](page, k)
+            if v:
+                labels.extend([x.strip() for x in str(v).replace("／", "/").split("/") if x.strip()])
+        return ("出演" in labels) or ("出演" in (_harmony_concert_name(page) or ""))
+
+    concert_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_CONCERT"])
+    concert_rows = [r for r in concert_rows if _harmony_is_performance_media(r)]
+    concert_opt_map = {_harmony_concert_name(r): r.get("id", "") for r in concert_rows if r.get("id")}
+
+    st.sidebar.markdown("### 演奏会フィルタ")
+    harmony_query = st.sidebar.text_input(
+        "演奏会検索",
+        value=st.session_state.get("harmonia_global_concert_query", ""),
+        key="harmonia_global_concert_query",
+        placeholder="例: Happy Hour / 2026 / 定期",
+    ).strip().lower()
+    if harmony_query:
+        concert_opt_map = {k: v for k, v in concert_opt_map.items() if harmony_query in k.lower()}
+    if not concert_opt_map:
+        st.sidebar.warning("一致する出演演奏会がありません。")
+        concert_ctx["SELECTED_CONCERT_ID"] = ""
+        concert_ctx["SELECTED_CONCERT_NAME"] = ""
+    else:
+        previous_name = st.session_state.get("harmonia_global_concert_name", "")
+        if previous_name not in concert_opt_map:
+            previous_name = next(iter(concert_opt_map.keys()))
+        selected_name = st.sidebar.selectbox(
+            "対象演奏会",
+            list(concert_opt_map.keys()),
+            index=list(concert_opt_map.keys()).index(previous_name),
+            key="harmonia_global_concert_name",
+        )
+        concert_ctx["SELECTED_CONCERT_ID"] = concert_opt_map.get(selected_name, "")
+        concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
+
     if concert_page == "演奏会・練習管理":
         concert_mgmt.render(concert_ctx)
     elif concert_page == "楽曲・楽器管理":

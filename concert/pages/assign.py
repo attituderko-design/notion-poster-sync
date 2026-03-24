@@ -106,6 +106,17 @@ def _extract_concert_media_labels(c: dict, ctx) -> list[str]:
 
 
 def _select_concert_with_search(ctx, concerts: list[dict], key_prefix: str):
+    global_concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+    global_concert_name = (ctx.get("SELECTED_CONCERT_NAME") or "").strip()
+    if global_concert_id:
+        if not global_concert_name:
+            for c in concerts:
+                if c.get("id", "") == global_concert_id:
+                    global_concert_name = _concert_name(c, ctx)
+                    break
+        st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
+        return global_concert_name, global_concert_id
+
     all_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     q = st.text_input(
         "演奏会を検索",
