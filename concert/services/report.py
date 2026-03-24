@@ -203,20 +203,39 @@ def generate_assign_report(
                 row.append("\n".join(parts) if parts else "—")
             mat_rows.append(row)
 
-        song_col_w = [25*mm] + [max(12*mm, 120*mm // len(song_order))] * len(song_order)
-        mtbl = Table(mat_rows, colWidths=song_col_w)
+        # マトリクスのセル内容をParagraphで折り返し対応
+        cell_style = ParagraphStyle("cell", fontName=font, fontSize=6.5, leading=9)
+        hdr_style  = ParagraphStyle("hdr",  fontName=font_b, fontSize=6.5, leading=9)
+        mat_rows_p = []
+        for ri, row in enumerate(mat_rows):
+            new_row = []
+            for ci, cell in enumerate(row):
+                if isinstance(cell, str):
+                    s = hdr_style if (ri == 0 or ci == 0) else cell_style
+                    new_row.append(Paragraph(cell.replace("/", "/<br/>"), s))
+                else:
+                    new_row.append(cell)
+            mat_rows_p.append(new_row)
+
+        available_w = 165*mm  # A4幅 - 余白
+        name_col_w  = 22*mm
+        song_col_w_each = (available_w - name_col_w) / max(len(song_order), 1)
+        song_col_w = [name_col_w] + [song_col_w_each] * len(song_order)
+        mtbl = Table(mat_rows_p, colWidths=song_col_w, repeatRows=1)
         mtbl.setStyle(TableStyle([
-            ("FONT",        (0,0), (-1,-1), font,   7),
-            ("FONT",        (0,0), (-1, 0), font_b, 7),
-            ("FONT",        (0,0), ( 0,-1), font_b, 7),
+            ("FONT",        (0,0), (-1,-1), font,   6.5),
+            ("FONT",        (0,0), (-1, 0), font_b, 6.5),
+            ("FONT",        (0,0), ( 0,-1), font_b, 6.5),
             ("BACKGROUND",  (0,0), (-1, 0), colors.HexColor("#F0EFF8")),
             ("BACKGROUND",  (0,0), ( 0,-1), colors.HexColor("#F8F8F8")),
             ("ALIGN",       (1,0), (-1,-1), "CENTER"),
-            ("VALIGN",      (0,0), (-1,-1), "MIDDLE"),
+            ("VALIGN",      (0,0), (-1,-1), "TOP"),
             ("GRID",        (0,0), (-1,-1), 0.3, colors.HexColor("#CCCCCC")),
             ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#FAFAF9")]),
             ("TOPPADDING",  (0,0), (-1,-1), 3),
             ("BOTTOMPADDING",(0,0),(-1,-1), 3),
+            ("LEFTPADDING", (0,0), (-1,-1), 3),
+            ("RIGHTPADDING",(0,0), (-1,-1), 3),
         ]))
         story.append(mtbl)
         story.append(Spacer(1, 4*mm))
@@ -254,17 +273,33 @@ def generate_assign_report(
                     f"{sc:.1f}",
                 ])
 
-            dtbl = Table(detail_rows, colWidths=[30*mm, 70*mm, 20*mm, 15*mm])
+            # 曲別一覧もParagraphで折り返し
+            dcell_s = ParagraphStyle("dc", fontName=font,   fontSize=8, leading=11)
+            dhdr_s  = ParagraphStyle("dh", fontName=font_b, fontSize=8, leading=11)
+            detail_rows_p = []
+            for ri, row in enumerate(detail_rows):
+                new_row = []
+                for ci, cell in enumerate(row):
+                    if isinstance(cell, str):
+                        s = dhdr_s if ri == 0 else dcell_s
+                        new_row.append(Paragraph(cell, s))
+                    else:
+                        new_row.append(cell)
+                detail_rows_p.append(new_row)
+
+            dtbl = Table(detail_rows_p, colWidths=[28*mm, 90*mm, 18*mm, 14*mm], repeatRows=1)
             dtbl.setStyle(TableStyle([
                 ("FONT",        (0,0), (-1,-1), font,   8),
                 ("FONT",        (0,0), (-1, 0), font_b, 8),
                 ("BACKGROUND",  (0,0), (-1, 0), colors.HexColor("#F0EFF8")),
                 ("ALIGN",       (2,0), (-1,-1), "CENTER"),
-                ("VALIGN",      (0,0), (-1,-1), "MIDDLE"),
+                ("VALIGN",      (0,0), (-1,-1), "TOP"),
                 ("GRID",        (0,0), (-1,-1), 0.3, colors.HexColor("#CCCCCC")),
                 ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#FAFAF9")]),
                 ("TOPPADDING",  (0,0), (-1,-1), 3),
                 ("BOTTOMPADDING",(0,0),(-1,-1), 3),
+                ("LEFTPADDING", (0,0), (-1,-1), 3),
+                ("RIGHTPADDING",(0,0), (-1,-1), 3),
             ]))
             story.append(dtbl)
             story.append(Spacer(1, 2*mm))
