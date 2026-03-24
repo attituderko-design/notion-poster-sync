@@ -40,6 +40,15 @@ PREF_INST_REL_KEYS = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"
 PREF_SONG_REL_KEYS = ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ"]
 PREF_PART_REL_KEYS = ["パート", "パート定義", "FKパート"]
 PREF_PRIORITY_KEYS = ["希望順位", "優先度", "希望", "希望区分"]
+
+# PLAYER_INSTRUMENT DB用キー（players.pyと共通）
+PI_RECORD_KEYS       = ["レコード名", "タイトル"]
+PI_PLAYER_REL_KEYS   = ["奏者", "出演者", "FK奏者"]
+PI_INST_REL_KEYS     = ["楽器種別", "楽器", "担当楽器", "FK楽器種別"]
+PI_ASSIGN_KEYS       = ["担当フラグ", "担当", "担当有無"]
+PI_NOTE_KEYS         = ["備考", "メモ"]
+PI_CONCERT_REL_KEYS  = ["演奏会", "出演", "FK演奏会"]
+PI_SONG_REL_KEYS     = ["楽曲", "演奏曲", "FK楽曲"]
 PARTICIPANT_CONCERT_REL_KEYS = ["出演", "演奏会", "FK演奏会", "演奏会参加者"]
 PARTICIPANT_PLAYER_REL_KEYS = ["出演者", "奏者", "FK奏者", "演奏会参加者"]
 PREFERENCE_KEY_KEYS = ["preference_key", "PreferenceKey", "希望キー", "PK希望キー"]
