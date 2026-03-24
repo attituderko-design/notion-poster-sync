@@ -915,40 +915,42 @@ def _render_assignment_html(items: list[dict], pref_map: dict) -> str:
 
         rows_html += f"""
         <tr style="{row_style}">
-          <td style="padding:7px 12px;border-bottom:0.5px solid rgba(0,0,0,0.07);
+          <td style="padding:7px 12px;border-bottom:1px solid rgba(0,0,0,0.12);
                      font-size:13px;color:var(--color-text-primary);">
             {a["player_name"]}{tied_badge}
           </td>
-          <td style="padding:7px 12px;border-bottom:0.5px solid rgba(0,0,0,0.07);
+          <td style="padding:7px 12px;border-bottom:1px solid rgba(0,0,0,0.12);
                      font-size:13px;color:var(--color-text-secondary);">{a["part_name"]}</td>
-          <td style="padding:7px 12px;border-bottom:0.5px solid rgba(0,0,0,0.07);">
+          <td style="padding:7px 12px;border-bottom:1px solid rgba(0,0,0,0.12);">
             <span style="font-size:11px;padding:2px 8px;border-radius:99px;
                          {badge_style}">{badge_text}</span>
           </td>
-          <td style="padding:7px 12px;border-bottom:0.5px solid rgba(0,0,0,0.07);
+          <td style="padding:7px 12px;border-bottom:1px solid rgba(0,0,0,0.12);
                      font-size:13px;font-weight:500;color:{sc_color};
                      text-align:right;">{sc:.1f}</td>
         </tr>"""
 
     return f"""
+<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:1rem;">
 <div style="background:var(--color-background-primary);
             border:0.5px solid rgba(0,0,0,0.1);
-            border-radius:10px;overflow:hidden;margin-bottom:1rem;">
+            border-radius:10px;overflow:hidden;min-width:380px;">
   <table style="width:100%;border-collapse:collapse;">
     <thead>
-      <tr style="background:var(--color-background-secondary);">
+      <tr style="background:rgba(100,90,180,0.10);">
         <th style="padding:6px 12px;font-size:11px;font-weight:500;
-                   color:var(--color-text-secondary);text-align:left;">奏者</th>
+                   color:var(--color-text-secondary);text-align:left;white-space:nowrap;">奏者</th>
         <th style="padding:6px 12px;font-size:11px;font-weight:500;
                    color:var(--color-text-secondary);text-align:left;">パート</th>
         <th style="padding:6px 12px;font-size:11px;font-weight:500;
-                   color:var(--color-text-secondary);text-align:left;">希望</th>
+                   color:var(--color-text-secondary);text-align:left;white-space:nowrap;">希望</th>
         <th style="padding:6px 12px;font-size:11px;font-weight:500;
                    color:var(--color-text-secondary);text-align:right;">点数</th>
       </tr>
     </thead>
     <tbody>{rows_html}</tbody>
   </table>
+</div>
 </div>"""
 
 
@@ -978,11 +980,11 @@ def _render_player_score_html(scores: dict, fb_counts: dict, names: dict,
                     if is_rest else "")
         rows_html += f"""
         <tr>
-          <td style="padding:7px 12px;border-bottom:0.5px solid rgba(0,0,0,0.07);
+          <td style="padding:7px 12px;border-bottom:1px solid rgba(0,0,0,0.12);
                      font-size:13px;color:var(--color-text-primary);white-space:nowrap;">
             {name}{fb_str}{ua_str}{rest_str}
           </td>
-          <td style="padding:7px 12px;border-bottom:0.5px solid rgba(0,0,0,0.07);">
+          <td style="padding:7px 12px;border-bottom:1px solid rgba(0,0,0,0.12);">
             <div style="display:flex;align-items:center;gap:8px;">
               <div style="flex:1;background:rgba(0,0,0,0.06);border-radius:4px;height:6px;">
                 <div style="width:{bar_w}%;background:{sc_color};
@@ -995,20 +997,22 @@ def _render_player_score_html(scores: dict, fb_counts: dict, names: dict,
         </tr>"""
 
     return f"""
+<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:1.5rem;">
 <div style="background:var(--color-background-primary);
             border:0.5px solid rgba(0,0,0,0.1);
-            border-radius:10px;overflow:hidden;margin-bottom:1.5rem;">
+            border-radius:10px;overflow:hidden;min-width:300px;">
   <table style="width:100%;border-collapse:collapse;">
     <thead>
-      <tr style="background:var(--color-background-secondary);">
+      <tr style="background:rgba(100,90,180,0.10);">
         <th style="padding:6px 12px;font-size:11px;font-weight:500;
-                   color:var(--color-text-secondary);text-align:left;">奏者</th>
+                   color:var(--color-text-secondary);text-align:left;white-space:nowrap;">奏者</th>
         <th style="padding:6px 12px;font-size:11px;font-weight:500;
                    color:var(--color-text-secondary);text-align:left;">スコア</th>
       </tr>
     </thead>
     <tbody>{rows_html}</tbody>
   </table>
+</div>
 </div>"""
 
 
