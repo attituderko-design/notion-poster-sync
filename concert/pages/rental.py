@@ -621,8 +621,9 @@ def _render_estimate_tab(ctx: dict):
             st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
         else:
             st.warning(f"⚠️ 成功 {ok_n} / 失敗 {fail_n} / スキップ {skip_n}")
+        st.write(f"FINAL: ok={ok_n} fail={fail_n} skip={skip_n}")
         _clear_rental_cache()
-        st.rerun()
+        # st.rerun()  # デバッグ中は無効
 
 
 # ============================================================
