@@ -578,7 +578,8 @@ def _render_estimate_tab(ctx: dict):
                     ok = _update_rental(
                         ctx, existing_id, practice_id, selected_practice,
                         inst_id_v, inst_sel_v, item_name_v,
-                        vendor, qty_v, price_v, confirmed_v, note_v,
+                        vendor_v, qty_v, price_v, confirmed_v, note_v,
+                        cost_type_v,
                     )
                     if ok:
                         ok_n += 1
@@ -589,7 +590,8 @@ def _render_estimate_tab(ctx: dict):
                     ok = _create_rental(
                         ctx, practice_id, selected_practice,
                         inst_id_v, inst_sel_v, item_name_v,
-                        vendor, qty_v, price_v, confirmed_v, note_v,
+                        vendor_v, qty_v, price_v, confirmed_v, note_v,
+                        cost_type_v,
                     )
                     if ok:
                         ok_n += 1
