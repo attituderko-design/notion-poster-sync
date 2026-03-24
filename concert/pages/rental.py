@@ -229,6 +229,36 @@ def _render_calc_tab(ctx: dict):
         st.session_state["rental_calc_results"] = results
         st.session_state.pop("rental_calc_concert_id", None)
 
+    # デバッグ
+    if st.session_state.get("rental_calc_results") and st.checkbox("🔍 デバッグ情報を表示", key="rental_debug"):
+        with st.expander("デバッグ", expanded=True):
+            # PART_DEFINITIONの件数確認
+            pd_rows = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"])
+            st.caption(f"PART_DEFINITION全件: {len(pd_rows)}件")
+            # 演奏会に紐づく楽曲
+            from concert.services.keys import SONG_CONCERT_REL_KEYS, PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS
+            song_rows = ctx["query_all"](ctx["CONCERT_DB_SONG"])
+            t_song = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
+            song_rel = ctx["find_prop_name"](t_song, SONG_CONCERT_REL_KEYS)
+            songs_in_concert = [s for s in song_rows
+                                 if concert_id in ctx["extract_relation_ids_any"](s, SONG_CONCERT_REL_KEYS)]
+            st.caption(f"この演奏会の楽曲: {len(songs_in_concert)}件 (song_rel={song_rel})")
+            song_ids = {s.get("id") for s in songs_in_concert}
+            # PART_DEFINITIONの楽曲リレーション
+            t_pd = ctx["get_prop_types"](ctx["CONCERT_DB_PART_DEFINITION"])
+            pd_song_rel = ctx["find_prop_name"](t_pd, PARTDEF_SONG_REL_KEYS)
+            pd_inst_rel = ctx["find_prop_name"](t_pd, PARTDEF_INST_REL_KEYS)
+            st.caption(f"PARTDEF props: {list(t_pd.keys())}")
+            st.caption(f"PARTDEF song_rel={pd_song_rel}, inst_rel={pd_inst_rel}")
+            matched = 0
+            for r in pd_rows:
+                s_ids = ctx["extract_relation_ids_any"](r, PARTDEF_SONG_REL_KEYS)
+                if s_ids and s_ids[0] in song_ids:
+                    matched += 1
+                    i_ids = ctx["extract_relation_ids_any"](r, PARTDEF_INST_REL_KEYS)
+                    st.caption(f"  パート定義マッチ: song={s_ids[0][:8]}, inst={i_ids}")
+            st.caption(f"この演奏会の楽曲に紐づくPARTDEF: {matched}件")
+
     results = st.session_state.get("rental_calc_results")
     if not results:
         return
