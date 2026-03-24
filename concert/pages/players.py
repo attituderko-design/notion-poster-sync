@@ -871,7 +871,11 @@ def _render_assign_tab(ctx: dict):
 
 
 def render(ctx: dict):
-    st.header("🎻 奏者・出欠・アサイン")
+    st.header("🎻 奏者・出欠・持参楽器")
+    global_concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+    if not global_concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
+        return
     t1, t2, t3 = st.tabs(["奏者管理", "出欠入力", "持参楽器整理"])
     with t1:
         _render_player_tab(ctx)

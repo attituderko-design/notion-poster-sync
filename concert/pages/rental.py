@@ -675,6 +675,10 @@ def _render_summary_tab(ctx: dict):
 
 def render(ctx: dict):
     st.header("📦 レンタル管理")
+    global_concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+    if not global_concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
+        return
 
     # 逆算タブの「見積に追加」「レンタルに振り替え」ボタンでタブを切り替える
     active_tab = st.session_state.pop("rental_active_tab", 0)

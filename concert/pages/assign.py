@@ -1187,6 +1187,10 @@ def _render_result_tab(ctx: dict):
 
 def render(ctx: dict):
     st.header("🎯 パート割当")
+    global_concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+    if not global_concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
+        return
 
     tab_pref, tab_solver, tab_result = st.tabs([
         "希望入力",

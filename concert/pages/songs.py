@@ -920,7 +920,10 @@ def _render_instrument_tab(ctx: dict):
 
 def render(ctx: dict):
     st.header("🎵 楽曲・楽器管理")
-
+    global_concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+    if not global_concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
+        return
     tab_song, tab_partdef, tab_instrument = st.tabs(["楽曲", "パート定義", "楽器種別"])
 
     with tab_song:
