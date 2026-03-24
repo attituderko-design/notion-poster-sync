@@ -118,8 +118,9 @@ def _concert_name(c: dict, ctx: dict) -> str:
 def _practice_name(p: dict, ctx: dict) -> str:
     n  = ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or ctx["extract_title"](p)
     dt = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
-    suffix = "　🎼【本番】" if ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS) == "True" else ""
-    return f"{n}（{dt[:10] if dt else ''}）{suffix}"
+    is_cd = ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS) == "True"
+    prefix = "🎼 " if is_cd else ""
+    return f"{prefix}{n}（{dt[:10] if dt else ''}）"
 
 
 def _instrument_name(i: dict, ctx: dict) -> str:
@@ -157,7 +158,16 @@ def _create_rental(ctx: dict, practice_id: str, practice_label: str,
     ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id or cost_type, item_name or instrument_name, vendor, prefix="rental")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
-    return res is not None and res.status_code == 200
+    if res is None or res.status_code != 200:
+        import streamlit as _st
+        err = ""
+        try:
+            err = res.json().get("message", "") if res else "no response"
+        except Exception:
+            pass
+        _st.error(f"RENTAL登録失敗: {err} / props_keys={list(props.keys())}")
+        return False
+    return True
 
 
 def _update_rental(ctx: dict, page_id: str, practice_id: str, practice_label: str,
