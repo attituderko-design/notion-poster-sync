@@ -413,6 +413,7 @@ def _upsert_player_bring_for_concert(
     can_bring: bool,
     note: str,
     existing_id: str = "",
+    bring_count: int = 1,
 ) -> bool:
     db_id = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
     t = ctx["get_prop_types"](db_id)
@@ -428,6 +429,7 @@ def _upsert_player_bring_for_concert(
     ctx["put_prop_any"](props, t, PI_INST_REL_KEYS, instrument_id)
     ctx["put_prop_any"](props, t, PI_ASSIGN_KEYS, False)
     ctx["put_prop_any"](props, t, PI_BRING_KEYS, can_bring)
+    ctx["put_prop_any"](props, t, PI_BRING_COUNT_KEYS, bring_count if can_bring else 0)
     ctx["put_prop_any"](props, t, PI_NOTE_KEYS, note)
     key_seed = participant_id or player_id
     ctx["put_key_any"](props, t, ASSIGN_KEY_KEYS, concert_id, key_seed, instrument_id, prefix="bring")
@@ -800,22 +802,29 @@ def _render_assign_tab(ctx: dict):
             iname = inst_names.get(iid, iid)
             ex = by_inst.get(iid)
             cur_b = (ctx["extract_prop_text_any"](ex, PI_BRING_KEYS) == "True") if ex else False
+            cur_cnt_str = ctx["extract_prop_text_any"](ex, PI_BRING_COUNT_KEYS) if ex else ""
+            try:
+                cur_cnt = int(float(cur_cnt_str)) if cur_cnt_str else 1
+            except ValueError:
+                cur_cnt = 1
             cur_n = ctx["extract_prop_text_any"](ex, PI_NOTE_KEYS) if ex else ""
-            c1, c2, c3 = st.columns([4, 1, 5])
+            c1, c2, c3, c4 = st.columns([4, 1, 1, 4])
             c1.markdown(f"**{iname}**")
             b = c2.checkbox("持参可", value=cur_b, key=f"bring_{c_id}_{p_id}_{iid}", label_visibility="collapsed")
-            n = c3.text_input("備考", value=cur_n, label_visibility="collapsed", key=f"bring_note_{c_id}_{p_id}_{iid}")
+            cnt = c3.number_input("台数", min_value=1, max_value=9, value=cur_cnt, step=1,
+                                  key=f"bring_cnt_{c_id}_{p_id}_{iid}", label_visibility="collapsed",
+                                  disabled=not b)
+            n = c4.text_input("備考", value=cur_n, label_visibility="collapsed", key=f"bring_note_{c_id}_{p_id}_{iid}")
             changes.append({
                 "iid": iid, "iname": iname,
-                "b": b, "n": n,
-                "cur_b": cur_b, "cur_n": cur_n,
+                "b": b, "cnt": cnt, "n": n,
+                "cur_b": cur_b, "cur_cnt": cur_cnt, "cur_n": cur_n,
                 "eid": ex.get("id", "") if ex else "",
             })
         if st.form_submit_button("💾 持参可を保存", use_container_width=True, type="primary"):
             ok_n = ng_n = skip_n = 0
             for ch in changes:
-                # 変更がない行はスキップ（差分保存）
-                no_change = (ch["b"] == ch["cur_b"]) and (ch["n"] == ch["cur_n"])
+                no_change = (ch["b"] == ch["cur_b"]) and (ch["cnt"] == ch["cur_cnt"]) and (ch["n"] == ch["cur_n"])
                 if no_change and not ch["eid"] and not ch["b"] and not ch["n"]:
                     skip_n += 1
                     continue
@@ -827,6 +836,7 @@ def _render_assign_tab(ctx: dict):
                     participant_id,
                     ch["iid"], ch["iname"],
                     ch["b"], ch["n"], ch["eid"],
+                    bring_count=ch["cnt"],
                 )
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
