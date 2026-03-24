@@ -259,7 +259,13 @@ def _render_calc_tab(ctx: dict):
         _reqs_for_calc  = [] if is_perc_off_pre else reqs
         rental_reqs  = [r for r in _reqs_for_calc if r.get("rental_needed", 0) > 0]
         bring_reqs   = [r for r in _reqs_for_calc if r.get("rental_needed", 0) <= 0 and r.get("bring_available", 0) > 0]
-        prac_label   = data.get("name") or pid
+        _name = data.get("name") or ""
+        _date = data.get("date") or ""
+        _is_cd = data.get("is_concert_day", False)
+        if _is_cd:
+            prac_label = f"🎼 本番当日（{_date}）" if _date else "🎼 本番当日"
+        else:
+            prac_label = f"{_name}（{_date}）" if _name and _date else (_name or pid)
         rented_ids   = _get_rented_inst_ids(ctx, pid)
 
         if rental_reqs:
