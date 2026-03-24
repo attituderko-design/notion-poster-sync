@@ -8319,6 +8319,14 @@ if system_mode == "HARMONIA":
         st.stop()
 
     # HARMONIA共通: 演奏会を先に1つ選び、各画面はその演奏会だけを対象にする
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _load_harmonia_concerts(_api_key: str, _db_id: str) -> list[dict]:
+        """Concert DB全件をキャッシュ付きで取得する（媒体フィルタなし）。"""
+        from concert.services.notion_client import query_concert_db_all, get_concert_headers
+        headers = get_concert_headers(_api_key)
+        return query_concert_db_all(_db_id, headers)
+
     def _harmony_concert_name(page: dict) -> str:
         name = (
             concert_ctx["extract_prop_text_any"](page, ["名称", "演奏会名", "タイトル", "PK名称"])
@@ -8327,16 +8335,11 @@ if system_mode == "HARMONIA":
         dt = concert_ctx["extract_prop_text_any"](page, ["日時", "日付", "出演日", "体験日", "リリース日"])
         return f"{name}（{dt[:10] if dt else '日時未設定'}）"
 
-    def _harmony_is_performance_media(page: dict) -> bool:
-        labels = []
-        for k in ["媒体", "MEDIA_TYPE", "メディア", "種類"]:
-            v = concert_ctx["extract_prop_text"](page, k)
-            if v:
-                labels.extend([x.strip() for x in str(v).replace("／", "/").split("/") if x.strip()])
-        return ("出演" in labels) or ("出演" in (_harmony_concert_name(page) or ""))
-
-    concert_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_CONCERT"])
-    concert_rows = [r for r in concert_rows if _harmony_is_performance_media(r)]
+    # Concert DB専用DBなので媒体フィルタは不要（全件対象）
+    concert_rows = _load_harmonia_concerts(
+        concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
+        concert_ctx["CONCERT_DB_CONCERT"],
+    )
     concert_opt_map = {_harmony_concert_name(r): r.get("id", "") for r in concert_rows if r.get("id")}
 
     st.sidebar.markdown("### 演奏会フィルタ")
@@ -8346,24 +8349,32 @@ if system_mode == "HARMONIA":
         key="harmonia_global_concert_query",
         placeholder="例: Happy Hour / 2026 / 定期",
     ).strip().lower()
-    if harmony_query:
-        concert_opt_map = {k: v for k, v in concert_opt_map.items() if harmony_query in k.lower()}
+
     if not concert_opt_map:
-        st.sidebar.warning("一致する出演演奏会がありません。")
+        st.sidebar.info("演奏会がまだ登録されていません。")
         concert_ctx["SELECTED_CONCERT_ID"] = ""
         concert_ctx["SELECTED_CONCERT_NAME"] = ""
     else:
-        previous_name = st.session_state.get("harmonia_global_concert_name", "")
-        if previous_name not in concert_opt_map:
-            previous_name = next(iter(concert_opt_map.keys()))
-        selected_name = st.sidebar.selectbox(
-            "対象演奏会",
-            list(concert_opt_map.keys()),
-            index=list(concert_opt_map.keys()).index(previous_name),
-            key="harmonia_global_concert_name",
-        )
-        concert_ctx["SELECTED_CONCERT_ID"] = concert_opt_map.get(selected_name, "")
-        concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
+        if harmony_query:
+            filtered_map = {k: v for k, v in concert_opt_map.items() if harmony_query in k.lower()}
+            if not filtered_map:
+                st.sidebar.warning(f"「{harmony_query}」に一致する演奏会がありません。")
+                concert_ctx["SELECTED_CONCERT_ID"] = ""
+                concert_ctx["SELECTED_CONCERT_NAME"] = ""
+            else:
+                concert_opt_map = filtered_map
+        if concert_opt_map:
+            previous_name = st.session_state.get("harmonia_global_concert_name", "")
+            if previous_name not in concert_opt_map:
+                previous_name = next(iter(concert_opt_map.keys()))
+            selected_name = st.sidebar.selectbox(
+                "対象演奏会",
+                list(concert_opt_map.keys()),
+                index=list(concert_opt_map.keys()).index(previous_name),
+                key="harmonia_global_concert_name",
+            )
+            concert_ctx["SELECTED_CONCERT_ID"] = concert_opt_map.get(selected_name, "")
+            concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
 
     if concert_page == "演奏会・練習管理":
         concert_mgmt.render(concert_ctx)
