@@ -825,10 +825,24 @@ def _render_assignment_html(items: list[dict], pref_map: dict) -> str:
         badge_style, badge_text = BADGE.get(hope, ("background:#F1EFE8;color:#5F5E5A", hope))
         sc_color = "#3C3489" if sc >= 3.0 else ("#085041" if sc >= 2.0 else
                    ("#633806" if sc >= 1.0 else "#A32D2D" if sc > 0 else "#888780"))
+
+        # 同点タイブレーク発生時のハイライト
+        is_tied = a.get("tied", False)
+        tied_candidates = a.get("tied_candidates", [])
+        row_style = "background:rgba(250,238,218,0.3);" if is_tied else ""
+        tied_badge = ""
+        if is_tied and tied_candidates:
+            others = " / ".join(tied_candidates)
+            tied_badge = (f'<span style="font-size:10px;padding:2px 6px;border-radius:99px;'
+                         f'background:#FAEEDA;color:#633806;margin-left:6px;" '
+                         f'title="同点候補: {others}">⚠️ 同点</span>')
+
         rows_html += f"""
-        <tr>
+        <tr style="{row_style}">
           <td style="padding:7px 12px;border-bottom:0.5px solid rgba(0,0,0,0.07);
-                     font-size:13px;color:var(--color-text-primary);">{a["player_name"]}</td>
+                     font-size:13px;color:var(--color-text-primary);">
+            {a["player_name"]}{tied_badge}
+          </td>
           <td style="padding:7px 12px;border-bottom:0.5px solid rgba(0,0,0,0.07);
                      font-size:13px;color:var(--color-text-secondary);">{a["part_name"]}</td>
           <td style="padding:7px 12px;border-bottom:0.5px solid rgba(0,0,0,0.07);">
