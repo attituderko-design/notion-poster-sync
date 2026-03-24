@@ -48,6 +48,8 @@ class Assignment:
     instrument_id: str
     instrument_name: str
     source: str  # "preference" / "fallback"
+    tied: bool = False  # 同点タイブレーク発生フラグ
+    tied_candidates: list = None  # 同点の候補者名リスト
 
 
 SCORE_MAP = {1: 3.0, 2: 2.0, 3: 1.0, 0: 0.0}
@@ -322,11 +324,33 @@ def greedy_solve(
     for req in requirements:
         slots = max(req.required_count, 1)
         cands = by_req_key.get((req.song_id, req.part_id), [])
+
+        # 実行可能な候補を順番に収集し、同点検出のために先読みする
+        feasible: list[Pref] = []
         for pref in cands:
-            if slots <= 0:
-                break
             if not is_feasible_assign(req, pref.player_id, absent_players, assigned_song_players, ng_map):
                 continue
+            feasible.append(pref)
+
+        slot_idx = 0
+        while slot_idx < slots and slot_idx < len(feasible):
+            pref = feasible[slot_idx]
+            # 次の候補と同点かどうか判定
+            # ソートキー：(スコア, -希望数) が同じなら同点
+            def sort_key(p):
+                return (SCORE_MAP.get(p.priority, 0), -pref_count[p.player_id])
+            tied = False
+            tied_names = []
+            next_idx = slot_idx + 1
+            # まだ割り当てられていない次の候補が同点かチェック
+            for ni in range(next_idx, len(feasible)):
+                np = feasible[ni]
+                if sort_key(np) == sort_key(pref) and pref.priority > 0:
+                    tied = True
+                    tied_names = [p.player_name for p in feasible[slot_idx:]
+                                  if sort_key(p) == sort_key(pref) and p.priority > 0]
+                    break
+
             assigned.append(
                 Assignment(
                     player_id=pref.player_id,
@@ -338,10 +362,13 @@ def greedy_solve(
                     instrument_id=req.instrument_id,
                     instrument_name=req.instrument_name,
                     source="preference",
+                    tied=tied,
+                    tied_candidates=tied_names if tied else [],
                 )
             )
             assigned_song_players.add((req.song_id, pref.player_id))
-            slots -= 1
+            slot_idx += 1
+        slots -= slot_idx
 
         # 希望不足分を補完
         if slots > 0:
