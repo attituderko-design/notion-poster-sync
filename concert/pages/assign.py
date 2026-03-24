@@ -49,6 +49,26 @@ def _norm_prop_key(s: str) -> str:
     return re.sub(r"\s+", "", str(s or "")).strip().lower()
 
 
+def _strip_song_prefix(part_name: str, song_name: str) -> str:
+    """パート名から曲名プレフィックスを除去する。
+    例: "Japanese Rhapsody / Tam-Tam / Tam-Tam" → "Tam-Tam"
+        "Timp. / Timpani" → "Timp. / Timpani"（曲名なし→そのまま）
+    同じ名前が重複している場合は1つに統一。
+    """
+    if not part_name:
+        return part_name
+    # 曲名プレフィックスを除去
+    if song_name and part_name.startswith(song_name):
+        part_name = part_name[len(song_name):].lstrip(" /").strip()
+    # "A / A" のような重複を除去
+    parts = [p.strip() for p in part_name.split("/")]
+    seen = []
+    for p in parts:
+        if p and p not in seen:
+            seen.append(p)
+    return " / ".join(seen) if seen else part_name
+
+
 def _find_prop_name_loose(ctx, type_map: dict, candidates: list[str]) -> str:
     key = ctx["find_prop_name"](type_map, candidates)
     if key:
@@ -321,6 +341,7 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
             note = ctx["extract_prop_text_any"](part, PARTDEF_NOTE_KEYS) or ""
             part_id   = part.get("id", "")
             pnm = ctx["extract_prop_text_any"](part, PARTDEF_NAME_KEYS) or iname or "Part"
+            pnm = _strip_song_prefix(pnm, sname)
             part_name = f"{pnm}（{note}）" if note else pnm
             requirements.append(Requirement(
                 song_id=sid, song_name=sname,
@@ -566,6 +587,7 @@ def _render_pref_tab(ctx: dict):
                     iname = inst_name_map.get(iid, iid) if iid else ""
                     note  = ctx["extract_prop_text_any"](si, PARTDEF_NOTE_KEYS) or ""
                     pname = ctx["extract_prop_text_any"](si, PARTDEF_NAME_KEYS) or iname or "Part"
+                    pname = _strip_song_prefix(pname, sname)
                     label = f"{pname}（{note}）" if note else pname
 
                     existing = pi_lookup.get((player_id, sid, part_id))
@@ -723,8 +745,39 @@ def _render_solver_tab(ctx: dict):
     song_name_map = {s.get("id"): _song_name(s, ctx) for s in songs}
     song_order    = [s.get("id") for s in sorted(songs, key=lambda x: _song_name(x, ctx))]
 
+    CANDIDATE_DESC = {
+        "候補A：第1希望率最大": (
+            "第1希望が叶う人数を最大化する案。"
+            "「絶対にこれがやりたい」という強い希望をできるだけ通す。"
+            "第2・第3希望は後回しになりやすい。"
+        ),
+        "候補B：総スコア最大": (
+            "全員の希望スコア合計を最大化する案。"
+            "第1希望×3点・第2希望×2点・第3希望×1点の総和を最大にする。"
+            "全体として最も「満足度の総量」が高い割当。"
+        ),
+        "候補C：公平性重視": (
+            "最も不満な人のスコアを底上げする案。"
+            "「誰か一人が割を食う」状況を避けることを優先する。"
+            "希望を出したのに乗れなかった曲数（希望不成立）も最小化しようとする。"
+        ),
+        "候補D：降り番均等": (
+            "降り番（割当なし）の偏りを最小化する案。"
+            "特定の人だけ多くの曲で降り番にならないよう、"
+            "割当件数の標準偏差を小さくすることを優先する。"
+        ),
+        "候補E：降り番均等": (
+            "降り番（割当なし）の偏りを最小化する案。"
+            "特定の人だけ多くの曲で降り番にならないよう、"
+            "割当件数の標準偏差を小さくすることを優先する。"
+        ),
+    }
+
     for tab, result in zip(tabs, results):
         with tab:
+            desc = CANDIDATE_DESC.get(result["label"], "")
+            if desc:
+                st.caption(desc)
             s = result["stats"]
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("総スコア",   f"{s['total_score']:.1f}点")
@@ -752,8 +805,8 @@ def _render_solver_tab(ctx: dict):
             player_names: dict[str, str]       = {}
             player_unassigned: dict[str, int]  = defaultdict(int)
 
-            # 割当済みのスコアを集計
-            assigned_keys_per_player: dict[str, set] = defaultdict(set)
+            # 割当済みスコアと曲セットを集計
+            assigned_songs_per_player: dict[str, set] = defaultdict(set)
             for a in result["assignments"]:
                 pk   = str((a["player_id"], a["song_id"], a["part_id"]))
                 pref = result["pref_map"].get(pk)
@@ -763,30 +816,27 @@ def _render_solver_tab(ctx: dict):
                 if a["source"] == "fallback":
                     player_fb[a["player_id"]] += 1
                 player_names[a["player_id"]] = a["player_name"]
-                assigned_keys_per_player[a["player_id"]].add(
-                    (a["player_id"], a["song_id"], a["part_id"])
-                )
+                assigned_songs_per_player[a["player_id"]].add(a["song_id"])
 
-            # 希望を出したが割り当てられなかった件数を集計
+            # 希望不成立：希望を出した曲のうち割り当てられなかった曲数（曲単位）
+            wanted_songs_per_player: dict[str, set] = defaultdict(set)
             for pk_str, pref in result["pref_map"].items():
                 if pref["priority"] <= 0:
                     continue
-                try:
-                    pk_tuple = eval(pk_str)
-                except Exception:
-                    continue
                 pid = pref["player_id"]
-                if pk_tuple not in assigned_keys_per_player.get(pid, set()):
-                    player_unassigned[pid] += 1
-                    if pid not in player_names:
-                        player_names[pid] = pref["player_name"]
+                wanted_songs_per_player[pid].add(pref["song_id"])
+                if pid not in player_names:
+                    player_names[pid] = pref["player_name"]
 
-            # 希望を出したが割当ゼロの奏者も追加（降り番希望のみの人は除く）
+            for pid, wanted in wanted_songs_per_player.items():
+                unmet = len(wanted - assigned_songs_per_player.get(pid, set()))
+                if unmet > 0:
+                    player_unassigned[pid] = unmet
+
+            # 希望を出した奏者全員を表示対象に
             for pk_str, pref in result["pref_map"].items():
-                if pref["priority"] > 0:
-                    pid = pref["player_id"]
-                    if pid not in player_names:
-                        player_names[pid] = pref["player_name"]
+                if pref["priority"] > 0 and pref["player_id"] not in player_names:
+                    player_names[pref["player_id"]] = pref["player_name"]
 
             st.markdown(_render_player_score_html(
                 player_scores, player_fb, player_names, player_unassigned),
@@ -891,7 +941,7 @@ def _render_player_score_html(scores: dict, fb_counts: dict, names: dict,
                   f'background:#FCEBEB;color:#A32D2D;margin-left:6px;">FB {fb}件</span>'
                   if fb > 0 else "")
         ua_str = (f'<span style="font-size:11px;padding:2px 7px;border-radius:99px;'
-                  f'background:#FAEEDA;color:#633806;margin-left:6px;">未割当希望 {ua}件</span>'
+                  f'background:#FAEEDA;color:#633806;margin-left:6px;">希望不成立 {ua}曲</span>'
                   if ua > 0 else "")
         bar_w  = int(sc / 9.0 * 100)
         sc_color = "#3C3489" if sc >= 7 else ("#085041" if sc >= 4 else "#888780")
