@@ -673,7 +673,7 @@ def _render_summary_tab(ctx: dict):
             rows_for_table.append({
                 "練習日":     prac_label,
                 "楽器":       inst_name,
-                "業者":       ext(row, "業者名") or "—",
+                "業者":       ctx["extract_prop_text_any"](row, RENTAL_VENDOR_KEYS) or "—",
                 "台数":       qty,
                 "単価":       price,
                 "小計":       subtotal,
