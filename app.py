@@ -8381,17 +8381,21 @@ if system_mode == "HARMONIA":
             else:
                 concert_opt_map = filtered_map
         if concert_opt_map:
-            previous_name = st.session_state.get("harmonia_global_concert_name", "")
-            if previous_name not in concert_opt_map:
-                previous_name = next(iter(concert_opt_map.keys()))
+            # 先頭に「未選択」を追加して、起動時は必ず未選択から始める
+            _UNSELECTED = "— 演奏会を選択してください —"
+            opts_with_empty = [_UNSELECTED] + list(concert_opt_map.keys())
             selected_name = st.sidebar.selectbox(
                 "対象演奏会",
-                list(concert_opt_map.keys()),
-                index=list(concert_opt_map.keys()).index(previous_name),
+                opts_with_empty,
+                index=0,  # 常に未選択から始まる
                 key="harmonia_global_concert_name",
             )
-            concert_ctx["SELECTED_CONCERT_ID"] = concert_opt_map.get(selected_name, "")
-            concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
+            if selected_name == _UNSELECTED:
+                concert_ctx["SELECTED_CONCERT_ID"] = ""
+                concert_ctx["SELECTED_CONCERT_NAME"] = ""
+            else:
+                concert_ctx["SELECTED_CONCERT_ID"] = concert_opt_map.get(selected_name, "")
+                concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
 
     # 演奏会が選択されていない場合はrender()を呼ばない
     selected_concert_id = concert_ctx.get("SELECTED_CONCERT_ID", "").strip()
