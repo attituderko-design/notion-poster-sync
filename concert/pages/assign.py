@@ -338,6 +338,7 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
             participant_to_player[row.get("id", "")] = pids[0]
 
     # Prefs: 希望入力DBの希望順位から構築（パート単位）
+    # PREFERENCEには演奏曲リレーションがないため、パート定義→演奏曲の逆引きマップを使う
     prefs: list[Pref] = []
     pi_rows = _load_player_instruments(ctx, concert_id)
 
@@ -345,19 +346,29 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
     song_name_map   = {s.get("id"): _song_name(s, ctx) for s in songs}
     song_id_set     = {s.get("id") for s in songs}
 
+    # パート定義→演奏曲の逆引きマップ（重複を避けるため再構築）
+    _partdef_to_song: dict[str, str] = {}
+    _partdef_to_inst: dict[str, str] = {}
+    for song in songs:
+        _sid = song.get("id", "")
+        for part in _load_song_instruments(ctx, _sid):
+            _pid = part.get("id", "")
+            _partdef_to_song[_pid] = _sid
+            iids = ctx["extract_relation_ids_any"](part, PARTDEF_INST_REL_KEYS)
+            if iids:
+                _partdef_to_inst[_pid] = iids[0]
+
     for pi in pi_rows:
         player_ids = ctx["extract_relation_ids_any"](pi, PREF_PLAYER_REL_KEYS)
-        song_ids   = ctx["extract_relation_ids_any"](pi, PREF_SONG_REL_KEYS)
         part_ids   = ctx["extract_relation_ids_any"](pi, PREF_PART_REL_KEYS)
-        inst_ids   = ctx["extract_relation_ids_any"](pi, PREF_INST_REL_KEYS)
-        if not (player_ids and song_ids and part_ids):
+        if not (player_ids and part_ids):
             continue
         pid_raw = player_ids[0]
-        pid = participant_to_player.get(pid_raw, pid_raw)
-        sid    = song_ids[0]
+        pid     = participant_to_player.get(pid_raw, pid_raw)
         part_id = part_ids[0]
-        iid    = inst_ids[0] if inst_ids else ""
-        if sid not in song_id_set:
+        sid     = _partdef_to_song.get(part_id, "")
+        iid     = _partdef_to_inst.get(part_id, "")
+        if not sid or sid not in song_id_set:
             continue
 
         priority_str = ctx["extract_prop_text_any"](pi, PREF_PRIORITY_KEYS)
@@ -437,17 +448,27 @@ def _render_pref_tab(ctx: dict):
     inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
     inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
 
-    # 既存の希望入力を取得（奏者×楽曲×パート → レコードIDと現在の希望順位）
+    # パート定義→演奏曲の逆引きマップを構築
+    # PREFERENCEには演奏曲リレーションがないため、パート定義IDから演奏曲IDを引く
+    partdef_to_song: dict[str, str] = {}
+    for song in songs:
+        sid = song.get("id", "")
+        for part in _load_song_instruments(ctx, sid):
+            partdef_to_song[part.get("id", "")] = sid
+
+    # 既存の希望入力を取得（奏者×パート定義 → レコード）
     pi_rows = _load_player_instruments(ctx, concert_id)
     pi_lookup: dict[tuple, dict] = {}  # (player_id, song_id, part_id) → row
     for pi in pi_rows:
-        pids = ctx["extract_relation_ids_any"](pi, PREF_PLAYER_REL_KEYS)
-        sids = ctx["extract_relation_ids_any"](pi, PREF_SONG_REL_KEYS)
+        pids     = ctx["extract_relation_ids_any"](pi, PREF_PLAYER_REL_KEYS)
         part_ids = ctx["extract_relation_ids_any"](pi, PREF_PART_REL_KEYS)
-        if pids and sids and part_ids:
+        if pids and part_ids:
             pid_raw = pids[0]
-            pid = participant_to_player.get(pid_raw, pid_raw)
-            pi_lookup[(pid, sids[0], part_ids[0])] = pi
+            pid     = participant_to_player.get(pid_raw, pid_raw)
+            part_id = part_ids[0]
+            sid     = partdef_to_song.get(part_id, "")
+            if sid:
+                pi_lookup[(pid, sid, part_id)] = pi
 
     # 入力状況サマリー（奏者 × 演奏曲）
     song_part_ids: dict[str, set[str]] = {}
