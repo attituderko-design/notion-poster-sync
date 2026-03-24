@@ -80,7 +80,7 @@ def calc_rental_requirements(
         is_percussion_off = flag in ("True", "true", "1", "✓", "はい", "yes")
 
     if is_percussion_off:
-        return []
+        return [{"percussion_off": True}]  # 打楽器休みフラグ
 
     # ── 3. この練習日に演奏する曲を取得 ──────────────────────
     # PRACTICEの「演奏曲」リレーションを優先、なければ演奏会の全曲
@@ -139,27 +139,60 @@ def calc_rental_requirements(
                 if qty > required_map[inst_id]:
                     required_map[inst_id] = qty
 
-    # ── 5. 参加奏者の持参可能楽器を集計 ──────────────────────
+    # ── 5. PLAYER_INSTRUMENTから担当・持参情報を取得 ──────────
     bring_map: dict[str, int] = defaultdict(int)
 
-    if attending_player_ids:
-        pi_rows = query_all(DB_PLAYER_INSTRUMENT, None)
-        for row in pi_rows:
-            # 演奏会フィルタ
-            if concert_id:
-                c_ids = ext_rel(row, PI_CONCERT_REL_KEYS)
-                if c_ids and concert_id not in c_ids:
-                    continue
+    # アサイン確定済みかどうかを確認
+    # 担当フラグTrueのレコードが1件でもあればアサイン確定済みと判断
+    pi_rows = query_all(DB_PLAYER_INSTRUMENT, None) if attending_player_ids else []
+    concert_pi_rows = []
+    for row in pi_rows:
+        if concert_id:
+            c_ids = ext_rel(row, PI_CONCERT_REL_KEYS)
+            if c_ids and concert_id not in c_ids:
+                continue
+        concert_pi_rows.append(row)
+
+    is_assigned = any(
+        ext_text(r, PI_ASSIGN_KEYS) == "True"
+        for r in concert_pi_rows
+    )
+
+    if is_assigned:
+        # アサイン確定後：担当フラグTrueの出席者がいない楽器はrequired_mapから除外
+        # ※持参可フラグはアサイン前後問わず出席者全員で計算（持参は担当と無関係）
+        assigned_attending: dict[str, int] = defaultdict(int)  # 担当かつ出席
+
+        for row in concert_pi_rows:
+            if ext_text(row, PI_ASSIGN_KEYS) != "True":
+                continue
             p_ids = ext_rel(row, PI_PLAYER_REL_KEYS)
             if not p_ids or p_ids[0] not in attending_player_ids:
-                continue
-            bring_flag = ext_text(row, PI_BRING_KEYS)
-            if bring_flag != "True":
-                continue
+                continue  # 担当者が欠席 → スキップ
             i_ids = ext_rel(row, PI_INST_REL_KEYS)
             if not i_ids:
                 continue
-            bring_map[i_ids[0]] += 1
+            inst_id = i_ids[0]
+            if inst_id not in required_map:
+                continue
+            assigned_attending[inst_id] += 1
+
+        # 担当出席者がいない楽器はrequired_mapから除外（演奏しない）
+        for inst_id in list(required_map.keys()):
+            if assigned_attending[inst_id] == 0:
+                del required_map[inst_id]
+
+    # 持参可能台数の集計（アサイン前後共通・出席者全員の持参可フラグで計算）
+    for row in concert_pi_rows:
+        p_ids = ext_rel(row, PI_PLAYER_REL_KEYS)
+        if not p_ids or p_ids[0] not in attending_player_ids:
+            continue
+        if ext_text(row, PI_BRING_KEYS) != "True":
+            continue
+        i_ids = ext_rel(row, PI_INST_REL_KEYS)
+        if not i_ids:
+            continue
+        bring_map[i_ids[0]] += 1
 
     # ── 6. 楽器名を取得 ──────────────────────────────────────
     all_inst_ids = set(required_map.keys()) | set(bring_map.keys())
