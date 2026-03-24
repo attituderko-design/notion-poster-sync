@@ -3,6 +3,7 @@ concert.pages.rental
 レンタル必要楽器の逆算・見積登録・費用集計画面。
 """
 import streamlit as st
+import pandas as pd
 from concert.services.rental_calc import calc_rental_requirements, calc_rental_for_all_practices
 
 CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
@@ -23,6 +24,7 @@ RENTAL_VENDOR_KEYS = ["業者名", "ベンダー", "vendor"]
 RENTAL_QTY_KEYS = ["台数", "数量", "qty"]
 RENTAL_UNIT_PRICE_KEYS = ["単価（円）", "単価", "unit_price"]
 RENTAL_CONFIRMED_KEYS = ["確定フラグ", "確定", "is_confirmed"]
+RENTAL_ITEM_NAME_KEYS = ["品目名", "item_name", "品目"]
 RENTAL_NOTE_KEYS = ["備考", "メモ"]
 RENTAL_KEY_KEYS = ["rental_key", "RentalKey", "見積キー", "PK見積キー"]
 
@@ -145,6 +147,7 @@ def _instrument_name(i: dict, ctx: dict) -> str:
 
 def _create_rental(ctx: dict, practice_id: str, practice_label: str,
                    instrument_id: str, instrument_name: str,
+                   item_name: str,
                    vendor: str, qty: int, unit_price: int,
                    confirmed: bool, note: str) -> bool:
     db_id    = ctx["CONCERT_DB_RENTAL"]
@@ -153,15 +156,17 @@ def _create_rental(ctx: dict, practice_id: str, practice_label: str,
         st.error("レンタル見積DBのプロパティ取得に失敗しました。")
         return False
     props: dict = {}
-    ctx["put_prop_any"](props, type_map, RENTAL_RECORD_KEYS, f"{instrument_name} × {practice_label} / {vendor}")
+    display_name = item_name.strip() if item_name.strip() else instrument_name
+    ctx["put_prop_any"](props, type_map, RENTAL_RECORD_KEYS, f"{display_name} × {practice_label} / {vendor}")
     ctx["put_prop_any"](props, type_map, RENTAL_INST_REL_KEYS, instrument_id)
     ctx["put_prop_any"](props, type_map, RENTAL_PRACTICE_REL_KEYS, practice_id)
+    ctx["put_prop_any"](props, type_map, RENTAL_ITEM_NAME_KEYS, item_name)
     ctx["put_prop_any"](props, type_map, RENTAL_VENDOR_KEYS, vendor)
     ctx["put_prop_any"](props, type_map, RENTAL_QTY_KEYS, qty)
     ctx["put_prop_any"](props, type_map, RENTAL_UNIT_PRICE_KEYS, unit_price)
     ctx["put_prop_any"](props, type_map, RENTAL_CONFIRMED_KEYS, confirmed)
     ctx["put_prop_any"](props, type_map, RENTAL_NOTE_KEYS, note)
-    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id, vendor, prefix="rental")
+    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id, item_name or instrument_name, vendor, prefix="rental")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
@@ -169,19 +174,22 @@ def _create_rental(ctx: dict, practice_id: str, practice_label: str,
 
 def _update_rental(ctx: dict, page_id: str, practice_id: str, practice_label: str,
                    instrument_id: str, instrument_name: str,
+                   item_name: str,
                    vendor: str, qty: int, unit_price: int,
                    confirmed: bool, note: str) -> bool:
     type_map = ctx["get_prop_types"](ctx["CONCERT_DB_RENTAL"])
     props: dict = {}
-    ctx["put_prop_any"](props, type_map, RENTAL_RECORD_KEYS, f"{instrument_name} × {practice_label} / {vendor}")
+    display_name = item_name.strip() if item_name.strip() else instrument_name
+    ctx["put_prop_any"](props, type_map, RENTAL_RECORD_KEYS, f"{display_name} × {practice_label} / {vendor}")
     ctx["put_prop_any"](props, type_map, RENTAL_INST_REL_KEYS, instrument_id)
     ctx["put_prop_any"](props, type_map, RENTAL_PRACTICE_REL_KEYS, practice_id)
+    ctx["put_prop_any"](props, type_map, RENTAL_ITEM_NAME_KEYS, item_name)
     ctx["put_prop_any"](props, type_map, RENTAL_VENDOR_KEYS, vendor)
     ctx["put_prop_any"](props, type_map, RENTAL_QTY_KEYS, qty)
     ctx["put_prop_any"](props, type_map, RENTAL_UNIT_PRICE_KEYS, unit_price)
     ctx["put_prop_any"](props, type_map, RENTAL_CONFIRMED_KEYS, confirmed)
     ctx["put_prop_any"](props, type_map, RENTAL_NOTE_KEYS, note)
-    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id, vendor, prefix="rental")
+    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id, item_name or instrument_name, vendor, prefix="rental")
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200
@@ -196,6 +204,17 @@ def _archive_page(ctx: dict, page_id: str) -> bool:
 # ============================================================
 # 逆算タブ
 # ============================================================
+
+def _get_rented_inst_ids(ctx: dict, practice_id: str) -> set[str]:
+    """この練習日に見積登録済みの楽器種別IDセットを返す。"""
+    rental_rows = _load_rentals(ctx, practice_id)
+    ids: set[str] = set()
+    for r in rental_rows:
+        iids = ctx["extract_relation_ids_any"](r, RENTAL_INST_REL_KEYS)
+        if iids:
+            ids.add(iids[0])
+    return ids
+
 
 def _render_calc_tab(ctx: dict):
     st.caption("奏者の出欠・持参可フラグをもとに、各練習日のレンタル必要台数を自動算出します。")
@@ -212,19 +231,17 @@ def _render_calc_tab(ctx: dict):
         return
     concert_id = global_concert_id
     st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
-    if not concert_id:
-        return
 
     if st.button("🔍 レンタル必要楽器を試算", type="primary", key="run_rental_calc"):
         with st.spinner("計算中..."):
             results = calc_rental_for_all_practices(ctx, concert_id)
         st.session_state["rental_calc_results"] = results
+        st.session_state.pop("rental_calc_concert_id", None)
 
     results = st.session_state.get("rental_calc_results")
     if not results:
         return
 
-    # 全練習分を日付順に表示
     practices = _load_practices(ctx, concert_id)
 
     def _prac_date(p):
@@ -238,9 +255,14 @@ def _render_calc_tab(ctx: dict):
         results.items(),
         key=lambda kv: _prac_date(prac_by_id.get(kv[0], {}))
     ):
-        reqs = data.get("requirements", [])
-        rental_reqs = [r for r in reqs if r["rental_needed"] > 0]
-        prac_label = data.get("name") or pid
+        reqs    = data.get("requirements", [])
+        rental_reqs  = [r for r in reqs if r["rental_needed"] > 0]
+        bring_reqs   = [r for r in reqs if r["rental_needed"] <= 0 and r["bring_available"] > 0]
+        prac_label   = data.get("name") or pid
+        rented_ids   = _get_rented_inst_ids(ctx, pid)
+
+        if rental_reqs:
+            has_any_rental = True
 
         with st.expander(
             f"{prac_label}　{'⚠️ レンタル必要' if rental_reqs else '✅ レンタル不要'}",
@@ -250,24 +272,59 @@ def _render_calc_tab(ctx: dict):
                 st.info("必要楽器の情報がありません（楽曲・楽器管理で登録してください）。")
                 continue
 
-            col_inst, col_req, col_bring, col_rent = st.columns([3, 2, 2, 2])
-            col_inst.markdown("**楽器**")
-            col_req.markdown("**必要台数**")
-            col_bring.markdown("**持参可能**")
-            col_rent.markdown("**レンタル必要**")
-            st.divider()
+            # ── レンタル必要 ──────────────────────────────────
+            if rental_reqs:
+                st.markdown("**レンタル必要**")
+                for r in rental_reqs:
+                    iid = r["instrument_id"]
+                    c1, c2, c3 = st.columns([4, 3, 3])
+                    c1.markdown(f"🔴 {r['instrument_name']}")
+                    c2.caption(f"必要 {r['required']}台 / 持参 {r['bring_available']}台")
+                    already = iid in rented_ids
+                    if already:
+                        c3.success("✅ 見積登録済み")
+                    else:
+                        if c3.button(
+                            "見積に追加",
+                            key=f"add_rental_{pid}_{iid}",
+                            use_container_width=True,
+                        ):
+                            st.session_state["est_prefill"] = {
+                                "practice_id":   pid,
+                                "practice_label": prac_label,
+                                "inst_name":     r["instrument_name"],
+                                "qty":           r["rental_needed"],
+                            }
+                            st.session_state["rental_active_tab"] = 1
+                            st.rerun()
 
-            for r in reqs:
-                c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
-                c1.write(r["instrument_name"])
-                c2.write(str(r["required"]))
-                c3.write(str(r["bring_available"]))
-                rent_val = r["rental_needed"]
-                if rent_val > 0:
-                    c4.markdown(f"**:red[{rent_val}]**")
-                    has_any_rental = True
-                else:
-                    c4.write("0")
+            # ── 持参可能 ──────────────────────────────────────
+            if bring_reqs:
+                if rental_reqs:
+                    st.divider()
+                st.markdown("**持参可能**")
+                for r in bring_reqs:
+                    iid = r["instrument_id"]
+                    c1, c2, c3 = st.columns([4, 3, 3])
+                    c1.markdown(f"🟢 {r['instrument_name']}")
+                    c2.caption(f"必要 {r['required']}台 / 持参 {r['bring_available']}台")
+                    already = iid in rented_ids
+                    if already:
+                        c3.warning("🔄 レンタルに振り替え済み")
+                    else:
+                        if c3.button(
+                            "レンタルに振り替え",
+                            key=f"switch_rental_{pid}_{iid}",
+                            use_container_width=True,
+                        ):
+                            st.session_state["est_prefill"] = {
+                                "practice_id":   pid,
+                                "practice_label": prac_label,
+                                "inst_name":     r["instrument_name"],
+                                "qty":           r["required"],
+                            }
+                            st.session_state["rental_active_tab"] = 1
+                            st.rerun()
 
     if not has_any_rental:
         st.success("すべての練習日でレンタルは不要です。")
@@ -278,7 +335,10 @@ def _render_calc_tab(ctx: dict):
 # ============================================================
 
 def _render_estimate_tab(ctx: dict):
-    st.caption("業者から取得した見積情報を登録します。")
+    st.caption("明細形式で見積を入力し、まとめて登録・更新できます。")
+
+    # 逆算タブからのプリフィル情報を受け取る
+    prefill = st.session_state.pop("est_prefill", None)
 
     concerts = _load_concerts(ctx)
     if not concerts:
@@ -291,11 +351,7 @@ def _render_estimate_tab(ctx: dict):
         st.info("サイドバーで演奏会を選択してください。")
         return
     concert_id = global_concert_id
-    selected_concert = global_concert_name or global_concert_id
-    st.caption(f"対象演奏会: {selected_concert}")
-    concert_id_tmp = concert_opts.get(selected_concert, "")
-    if not concert_id:
-        return
+    st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
 
     practices = _load_practices(ctx, concert_id)
     if not practices:
@@ -308,113 +364,202 @@ def _render_estimate_tab(ctx: dict):
 
     practice_opts = {_practice_name(p, ctx): p.get("id", "")
                      for p in sorted(practices, key=_prac_date)}
-    selected_practice = st.selectbox("練習日", list(practice_opts.keys()), key="est_practice")
+
+    # プリフィルがあれば対象の練習日を自動選択
+    prefill_practice_id = prefill.get("practice_id", "") if prefill else ""
+    default_practice = next(
+        (label for label, pid in practice_opts.items() if pid == prefill_practice_id),
+        list(practice_opts.keys())[0] if practice_opts else None,
+    )
+    selected_practice = st.selectbox(
+        "練習日", list(practice_opts.keys()),
+        index=list(practice_opts.keys()).index(default_practice) if default_practice in practice_opts else 0,
+        key="est_practice",
+    )
     practice_id = practice_opts.get(selected_practice, "")
     if not practice_id:
         return
 
+    # プリフィル通知
+    if prefill and prefill.get("inst_name"):
+        st.info(f"「{prefill['inst_name']}」を明細の先頭行にセットしました。業者名・単価を入力して保存してください。")
+
     instruments = _load_instruments(ctx)
+    inst_names  = [_instrument_name(i, ctx) for i in
+                   sorted(instruments, key=lambda x: _instrument_name(x, ctx))]
     inst_opts   = {_instrument_name(i, ctx): i.get("id", "")
                    for i in sorted(instruments, key=lambda x: _instrument_name(x, ctx))}
 
-    # この練習日の既存見積一覧
     rental_rows = _load_rentals(ctx, practice_id)
 
-    # ── 新規見積登録フォーム ──
-    with st.expander("➕ 見積を追加", expanded=(len(rental_rows) == 0)):
-        with st.form("rental_new_form", border=True):
-            inst_sel   = st.selectbox("楽器種別 *", list(inst_opts.keys()), key="rn_inst")
-            vendor     = st.text_input("業者名", placeholder="例：○○楽器レンタル", key="rn_vendor")
-            col1, col2 = st.columns(2)
-            qty        = col1.number_input("台数 *", min_value=1, value=1, step=1, key="rn_qty")
-            unit_price = col2.number_input("単価（円）*", min_value=0, value=0, step=100, key="rn_price")
-            confirmed  = st.checkbox("確定（見積→確定）", value=False, key="rn_confirmed")
-            note       = st.text_area("備考", height=60, placeholder="見積番号等", key="rn_note")
+    # ── 既存データをDataFrameに変換 ──
+    ext_any = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
 
-            if st.form_submit_button("💾 登録", use_container_width=True, type="primary"):
-                inst_id   = inst_opts.get(inst_sel, "")
-                if not inst_id:
-                    st.error("楽器種別を選択してください。")
-                else:
-                    with st.spinner("登録中..."):
-                        ok = _create_rental(
-                            ctx, practice_id, selected_practice,
-                            inst_id, inst_sel,
-                            vendor, int(qty), int(unit_price),
-                            confirmed, note,
-                        )
-                    if ok:
-                        st.success("✅ 見積を登録しました。")
-                        _clear_rental_cache()
-                        st.rerun()
-                    else:
-                        st.error("❌ 登録に失敗しました。")
-
-    st.divider()
-
-    if not rental_rows:
-        st.info("この練習日の見積がまだ登録されていません。")
-        return
-
-    st.subheader(f"登録済み見積（{len(rental_rows)}件）")
-
-    for row in rental_rows:
-        rid       = row.get("id", "")
-        ext_any   = ctx["extract_prop_text_any"]
-        ext_rel   = ctx["extract_relation_ids_any"]
-        inst_ids  = ext_rel(row, RENTAL_INST_REL_KEYS)
+    existing: list[dict] = []
+    row_ids: list[str] = []
+    for r in rental_rows:
+        inst_ids  = ext_rel(r, RENTAL_INST_REL_KEYS)
         inst_id   = inst_ids[0] if inst_ids else ""
-        inst_name = next((k for k, v in inst_opts.items() if v == inst_id), ext_any(row, INSTRUMENT_NAME_KEYS) or "不明")
-        vendor    = ext_any(row, RENTAL_VENDOR_KEYS)
-        qty_str   = ext_any(row, RENTAL_QTY_KEYS)
-        price_str = ext_any(row, RENTAL_UNIT_PRICE_KEYS)
-        qty       = int(float(qty_str)) if qty_str else 0
-        price     = int(float(price_str)) if price_str else 0
-        confirmed = ext_any(row, RENTAL_CONFIRMED_KEYS) == "True"
-        note      = ext_any(row, RENTAL_NOTE_KEYS)
+        inst_name = next((k for k, v in inst_opts.items() if v == inst_id), "")
+        existing.append({
+            "楽器種別":   inst_name,
+            "品目名":     ext_any(r, RENTAL_ITEM_NAME_KEYS) or "",
+            "台数":       int(float(ext_any(r, RENTAL_QTY_KEYS) or "1")),
+            "単価（円）": int(float(ext_any(r, RENTAL_UNIT_PRICE_KEYS) or "0")),
+            "確定":       ext_any(r, RENTAL_CONFIRMED_KEYS) == "True",
+            "備考":       ext_any(r, RENTAL_NOTE_KEYS) or "",
+        })
+        row_ids.append(r.get("id", ""))
 
-        status_badge = "✅ 確定" if confirmed else "📋 見積"
-        label = f"{status_badge}　{inst_name}　{vendor or '業者未設定'}　{qty}台　¥{price:,}/台　小計 ¥{qty * price:,}"
+    # プリフィル行を先頭に差し込む（逆算タブからの振り替え）
+    if prefill and prefill.get("inst_name"):
+        prefill_inst = prefill["inst_name"]
+        prefill_qty  = prefill.get("qty", 1)
+        existing.insert(0, {
+            "楽器種別": prefill_inst if prefill_inst in inst_names else (inst_names[0] if inst_names else ""),
+            "品目名":   prefill_inst,
+            "台数":     prefill_qty,
+            "単価（円）": 0,
+            "確定":     False,
+            "備考":     "",
+        })
+        row_ids.insert(0, "")  # 新規行
 
-        with st.expander(label, expanded=False):
-            cur_inst_name = next((k for k, v in inst_opts.items() if v == inst_id), list(inst_opts.keys())[0] if inst_opts else "")
-            with st.form(f"rental_edit_{rid}", border=True):
-                inst_sel_e  = st.selectbox("楽器種別", list(inst_opts.keys()),
-                                            index=list(inst_opts.keys()).index(cur_inst_name) if cur_inst_name in inst_opts else 0,
-                                            key=f"re_inst_{rid}")
-                vendor_e    = st.text_input("業者名", value=vendor, key=f"re_vendor_{rid}")
-                col1, col2  = st.columns(2)
-                qty_e       = col1.number_input("台数", min_value=1, value=max(qty, 1), step=1, key=f"re_qty_{rid}")
-                price_e     = col2.number_input("単価（円）", min_value=0, value=price, step=100, key=f"re_price_{rid}")
-                confirmed_e = st.checkbox("確定", value=confirmed, key=f"re_confirmed_{rid}")
-                note_e      = st.text_area("備考", value=note, height=60, key=f"re_note_{rid}")
+    # 新規行用の空行（既存0件のときは3行、あるときは1行）
+    empty_rows = 3 if not existing else 1
+    for _ in range(empty_rows):
+        existing.append({
+            "楽器種別": inst_names[0] if inst_names else "",
+            "品目名": "", "台数": 1, "単価（円）": 0,
+            "確定": False, "備考": "",
+        })
+        row_ids.append("")  # 空IDは新規行
 
-                col_upd, col_del = st.columns([3, 1])
-                if col_upd.form_submit_button("💾 更新", use_container_width=True):
-                    inst_id_e = inst_opts.get(inst_sel_e, inst_id)
-                    with st.spinner("更新中..."):
-                        ok = _update_rental(
-                            ctx, rid, practice_id, selected_practice,
-                            inst_id_e, inst_sel_e,
-                            vendor_e, int(qty_e), int(price_e),
-                            confirmed_e, note_e,
-                        )
+    df_init = pd.DataFrame(existing)
+
+    # ── 業者名（全行共通）──
+    vendor_default = ""
+    if rental_rows:
+        vendor_default = ext_any(rental_rows[0], RENTAL_VENDOR_KEYS) or ""
+    vendor = st.text_input(
+        "業者名（全明細共通）",
+        value=vendor_default,
+        placeholder="例：○○楽器レンタル",
+        key="est_vendor",
+    )
+
+    # ── data_editor ──
+    st.caption("行を追加・削除して「保存」を押してください。品目名が空の場合は楽器種別名を使用します。")
+    edited_df = st.data_editor(
+        df_init,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="rental_editor",
+        column_config={
+            "楽器種別": st.column_config.SelectboxColumn(
+                "楽器種別",
+                options=inst_names,
+                required=True,
+            ),
+            "品目名": st.column_config.TextColumn(
+                '品目名（例：32" Timpani）',
+                max_chars=100,
+            ),
+            "台数": st.column_config.NumberColumn(
+                "台数",
+                min_value=1,
+                max_value=99,
+                step=1,
+                default=1,
+            ),
+            "単価（円）": st.column_config.NumberColumn(
+                "単価（円）",
+                min_value=0,
+                step=100,
+                format="¥%d",
+                default=0,
+            ),
+            "確定": st.column_config.CheckboxColumn(
+                "確定",
+                default=False,
+            ),
+            "備考": st.column_config.TextColumn(
+                "備考",
+                max_chars=200,
+            ),
+        },
+        hide_index=True,
+    )
+
+    # 小計表示
+    if not edited_df.empty:
+        try:
+            subtotal = int((edited_df["台数"] * edited_df["単価（円）"]).sum())
+            st.caption(f"小計：¥{subtotal:,}")
+        except Exception:
+            pass
+
+    # ── 保存ボタン ──
+    if st.button("💾 まとめて保存", type="primary", use_container_width=True, key="est_save"):
+        ok_n = fail_n = skip_n = 0
+        with st.spinner("保存中..."):
+            # 保存後に削除すべき既存行を追跡
+            saved_existing_ids: set[str] = set()
+
+            for idx, row in edited_df.iterrows():
+                inst_sel_v  = str(row.get("楽器種別") or "").strip()
+                item_name_v = str(row.get("品目名") or "").strip()
+                qty_v       = int(row.get("台数") or 1)
+                price_v     = int(row.get("単価（円）") or 0)
+                confirmed_v = bool(row.get("確定") or False)
+                note_v      = str(row.get("備考") or "").strip()
+
+                if not inst_sel_v:
+                    skip_n += 1
+                    continue
+
+                inst_id_v = inst_opts.get(inst_sel_v, "")
+                if not inst_id_v:
+                    skip_n += 1
+                    continue
+
+                # 対応する既存レコードID（初期データの行番号で対応）
+                existing_id = row_ids[idx] if idx < len(row_ids) else ""
+
+                if existing_id:
+                    ok = _update_rental(
+                        ctx, existing_id, practice_id, selected_practice,
+                        inst_id_v, inst_sel_v, item_name_v,
+                        vendor, qty_v, price_v, confirmed_v, note_v,
+                    )
                     if ok:
-                        st.success("✅ 更新しました。")
-                        _clear_rental_cache()
-                        st.rerun()
+                        ok_n += 1
+                        saved_existing_ids.add(existing_id)
                     else:
-                        st.error("❌ 更新に失敗しました。")
-
-                if col_del.form_submit_button("🗑️ 削除", use_container_width=True):
-                    with st.spinner("削除中..."):
-                        ok = _archive_page(ctx, rid)
+                        fail_n += 1
+                else:
+                    ok = _create_rental(
+                        ctx, practice_id, selected_practice,
+                        inst_id_v, inst_sel_v, item_name_v,
+                        vendor, qty_v, price_v, confirmed_v, note_v,
+                    )
                     if ok:
-                        st.success("✅ 削除しました。")
-                        _clear_rental_cache()
-                        st.rerun()
+                        ok_n += 1
                     else:
-                        st.error("❌ 削除に失敗しました。")
+                        fail_n += 1
+
+            # 元の既存行のうち今回の編集後に消えた行をアーカイブ
+            for rid in row_ids:
+                if rid and rid not in saved_existing_ids:
+                    _archive_page(ctx, rid)
+
+        if fail_n == 0:
+            st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
+        else:
+            st.warning(f"⚠️ 成功 {ok_n} / 失敗 {fail_n} / スキップ {skip_n}")
+        _clear_rental_cache()
+        st.rerun()
 
 
 # ============================================================
@@ -431,11 +576,12 @@ def _render_summary_tab(ctx: dict):
 
     concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     global_concert_id, global_concert_name = _get_global_concert_filter(ctx, concert_opts)
-    if not global_concert_id:
-        st.info("サイドバーで演奏会を選択してください。")
-        return
-    concert_id = global_concert_id
-    st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
+    if global_concert_id:
+        concert_id = global_concert_id
+        st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
+    else:
+        selected = st.selectbox("演奏会を選択", list(concert_opts.keys()), key="summary_concert")
+        concert_id = concert_opts.get(selected, "")
     if not concert_id:
         return
 
@@ -530,13 +676,27 @@ def _render_summary_tab(ctx: dict):
 def render(ctx: dict):
     st.header("📦 レンタル管理")
 
+    # 逆算タブの「見積に追加」「レンタルに振り替え」ボタンでタブを切り替える
+    active_tab = st.session_state.pop("rental_active_tab", 0)
+
     tab_calc, tab_estimate, tab_summary = st.tabs(["レンタル試算", "見積登録", "費用集計"])
 
     with tab_calc:
         _render_calc_tab(ctx)
 
     with tab_estimate:
+        # プリフィル情報があれば見積登録タブに渡す
         _render_estimate_tab(ctx)
 
     with tab_summary:
         _render_summary_tab(ctx)
+
+    # タブ切り替えはJSで実現（streamlitのタブはindex指定不可のため）
+    if active_tab == 1:
+        st.markdown(
+            """<script>
+            const tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
+            if (tabs && tabs[1]) tabs[1].click();
+            </script>""",
+            unsafe_allow_html=True,
+        )
