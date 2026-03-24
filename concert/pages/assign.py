@@ -727,7 +727,23 @@ def _render_solver_tab(ctx: dict):
         return
 
     st.divider()
-    st.subheader("候補案比較")
+
+    # PDFダウンロードボタン
+    col_title, col_pdf = st.columns([6, 2])
+    col_title.subheader("候補案比較")
+    try:
+        from concert.services.report import generate_assign_report
+        concert_name = ctx.get("SELECTED_CONCERT_NAME", "演奏会")
+        pdf_bytes = generate_assign_report(concert_name, results, songs, players, ctx)
+        col_pdf.download_button(
+            "📄 PDF出力",
+            data=pdf_bytes,
+            file_name=f"アサイン候補案_{concert_name}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    except Exception as e:
+        col_pdf.caption(f"PDF生成エラー: {e}")
 
     # サマリーカード
     cols = st.columns(len(results))
