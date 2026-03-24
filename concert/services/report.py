@@ -186,14 +186,13 @@ def generate_assign_report(
             story.append(Paragraph(desc, st["desc"]))
 
         # 奏者×曲マトリクス
-        story.append(Paragraph("▸ 奏者×曲 割当マトリクス", st["h3"]))
+        story.append(Paragraph("[ 奏者 x 曲 割当マトリクス ]", st["h3"]))
         matrix: dict[tuple, list] = defaultdict(list)
         for a in r["assignments"]:
             matrix[(a["player_id"], a["song_id"])].append(a["part_name"])
 
-        # ヘッダー行：曲名
-        short_songs = [song_name_map.get(sid, sid)[:12] for sid in song_order]
-        mat_header = ["奏者"] + short_songs
+        # ヘッダー行：曲名（短縮せずParagraphで折り返し）
+        mat_header = ["奏者"] + [song_name_map.get(sid, sid) for sid in song_order]
         mat_rows = [mat_header]
         for pid in all_player_ids:
             pname = player_name_map.get(pid, pid)
@@ -241,7 +240,7 @@ def generate_assign_report(
         story.append(Spacer(1, 4*mm))
 
         # 曲別割当一覧
-        story.append(Paragraph("▸ 曲別 割当一覧", st["h3"]))
+        story.append(Paragraph("[ 曲別 割当一覧 ]", st["h3"]))
         by_song: dict[str, list] = defaultdict(list)
         for a in r["assignments"]:
             by_song[a["song_id"]].append(a)
