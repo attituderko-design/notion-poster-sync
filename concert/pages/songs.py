@@ -308,11 +308,42 @@ def _render_song_tab(ctx: dict):
     all_concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     global_concert_id, global_concert_name = _get_global_concert_filter(ctx, all_concert_opts)
 
-    if not global_concert_id:
-        st.info("サイドバーで演奏会を選択してください。")
-        return
-    filter_concert_id = global_concert_id
-    st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
+    if global_concert_id:
+        concert_opts = {global_concert_name or "（選択中）": global_concert_id}
+        st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
+    else:
+        concert_search = st.text_input(
+            "演奏会を検索",
+            value=st.session_state.get("songs_concert_search", ""),
+            key="songs_concert_search",
+            placeholder="例: 2026 / Osaka / 定期 / Happy Hour",
+        ).strip().lower()
+        if concert_search:
+            concert_opts = {
+                k: v for k, v in all_concert_opts.items()
+                if concert_search in k.lower()
+            }
+        else:
+            concert_opts = all_concert_opts
+    if not concert_opts:
+        st.warning("演奏会検索の条件に一致する候補がありません。絞り込みを緩めてください。")
+
+    st.info(
+        "🎼 楽曲の正式登録は ArtéMis MUSE（媒体=演奏曲）を推奨します。"
+        " MUSE経由だと MusicBrainz / 初演情報 / 肖像画 / 作品・楽章マスタ連動まで一括反映されます。"
+    )
+    st.caption(
+        "この画面の「新規楽曲を登録」は簡易手動登録です。"
+        "急ぎの追記や、MUSE未収載データの暫定入力に使ってください。"
+    )
+
+    # 絞り込み
+    if global_concert_id:
+        filter_concert_id = global_concert_id
+    else:
+        filter_opts = {"すべて": ""} | concert_opts
+        selected_filter = st.selectbox("絞り込み：演奏会", list(filter_opts.keys()), key="song_filter")
+        filter_concert_id = filter_opts.get(selected_filter, "")
 
     songs = _load_songs(ctx, filter_concert_id)
 
@@ -496,7 +527,6 @@ def _upsert_partdef(
         PARTDEF_KEY_KEYS,
         concert_id,
         song_id,
-        part_no,
         part_name,
         "|".join(clean_inst_ids),
         prefix="part",
