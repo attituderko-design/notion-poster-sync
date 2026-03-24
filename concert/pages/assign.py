@@ -6,6 +6,7 @@ concert.pages.assign
   タブ3：割当結果確認（マトリクス表示）
 """
 import streamlit as st
+from concert.services.keys import *  # noqa: F401,F403
 from collections import defaultdict
 import re
 
@@ -28,30 +29,8 @@ PRIORITY_TO_INT  = {
 INT_TO_PRIORITY  = {1: "第1希望", 2: "第2希望", 3: "第3希望", 0: "希望なし/降り番でも可", -1: "NG"}
 SCORE_LABEL      = {3.0: "第1希望", 2.0: "第2希望", 1.0: "第3希望", 0.5: "フォールバック", 0.0: "希望なし/降り番でも可", -9999.0: "NG"}
 
-CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE", "メディア", "種類"]
-CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
-SONG_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
-PARTDEF_SONG_REL_KEYS = ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ"]
-PARTDEF_INST_REL_KEYS = ["必要楽器", "楽器", "楽器種別", "FK楽器種別", "担当楽器"]
-PARTDEF_NAME_KEYS = ["パート名", "名称", "タイトル", "表示名"]
-PARTDEF_NOTE_KEYS = ["備考", "メモ", "注記"]
-PREF_PLAYER_REL_KEYS = ["演奏会参加者", "奏者", "出演者", "FK奏者"]
-PREF_INST_REL_KEYS = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
-PREF_SONG_REL_KEYS = ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ"]
-PREF_PART_REL_KEYS = ["パート", "パート定義", "FKパート"]
-PREF_PRIORITY_KEYS = ["希望順位", "優先度", "希望", "希望区分"]
 
 # PLAYER_INSTRUMENT DB用キー（players.pyと共通）
-PI_RECORD_KEYS       = ["レコード名", "タイトル"]
-PI_PLAYER_REL_KEYS   = ["奏者", "出演者", "FK奏者"]
-PI_INST_REL_KEYS     = ["楽器種別", "楽器", "担当楽器", "FK楽器種別"]
-PI_ASSIGN_KEYS       = ["担当フラグ", "担当", "担当有無"]
-PI_NOTE_KEYS         = ["備考", "メモ"]
-PI_CONCERT_REL_KEYS  = ["演奏会", "出演", "FK演奏会"]
-PI_SONG_REL_KEYS     = ["楽曲", "演奏曲", "FK楽曲"]
-PARTICIPANT_CONCERT_REL_KEYS = ["出演", "演奏会", "FK演奏会", "演奏会参加者"]
-PARTICIPANT_PLAYER_REL_KEYS = ["出演者", "奏者", "FK奏者", "演奏会参加者"]
-PREFERENCE_KEY_KEYS = ["preference_key", "PreferenceKey", "希望キー", "PK希望キー"]
 
 
 def _norm_prop_key(s: str) -> str:

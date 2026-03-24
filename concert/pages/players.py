@@ -4,52 +4,15 @@ concert.pages.players
 既存ArtéMis DBのプロパティ名ゆれに対応。
 """
 import streamlit as st
+from concert.services.keys import *  # noqa: F401,F403
 
-PLAYER_NAME_KEYS = ["氏名", "名前", "表示名", "タイトル"]
-PLAYER_EMAIL_KEYS = ["メールアドレス", "Email", "email"]
-PLAYER_MEMO_KEYS = ["メモ", "備考"]
 
-CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
-CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
-CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE", "メディア", "種類"]
 
-PRACTICE_NAME_KEYS = ["練習名", "タイトル", "PK練習名"]
-PRACTICE_DATE_KEYS = ["日時", "日付"]
-PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ"]
-PRACTICE_PERCUSSION_OFF_KEYS = ["打楽器休み", "打楽器お休み", "打楽器OFF", "休み"]
-PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 
-INSTRUMENT_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
-SONG_NAME_KEYS = ["曲名", "タイトル", "PK曲名", "作品名"]
-SONG_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
-PARTDEF_SONG_REL_KEYS = ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ"]
-PARTDEF_INST_REL_KEYS = ["必要楽器", "楽器種別", "楽器", "FK楽器種別", "担当楽器"]
 
-ATT_RECORD_KEYS = ["レコード名", "タイトル"]
-ATT_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者"]
-ATT_PRACTICE_REL_KEYS = ["練習", "演奏会", "出演", "FK練習"]
-ATT_STATUS_KEYS = ["参加可否", "出欠", "参加状況"]
-ATT_NOTE_KEYS = ["備考", "メモ"]
 
-PARTICIPANT_RECORD_KEYS = ["レコード名", "タイトル", "名称"]
-PARTICIPANT_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
-PARTICIPANT_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
-PARTICIPANT_INST_KEYS = ["担当楽器", "楽器", "楽器種別"]
-PARTICIPANT_NOTE_KEYS = ["備考", "メモ"]
 
-PI_RECORD_KEYS = ["レコード名", "タイトル"]
-PI_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者"]
-PI_INST_REL_KEYS = ["楽器種別", "楽器", "担当楽器", "FK楽器種別"]
-PI_ASSIGN_KEYS = ["担当フラグ", "担当", "担当有無"]
-PI_BRING_KEYS = ["持参可フラグ", "持参可", "持参"]
-PI_NOTE_KEYS = ["備考", "メモ"]
-PI_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
-PI_PARTICIPANT_REL_KEYS = ["演奏会参加者", "参加者", "FK参加者"]
 
-PLAYER_KEY_KEYS = ["player_key", "PlayerKey", "奏者キー", "PK奏者キー"]
-PARTICIPANT_KEY_KEYS = ["participant_key", "ParticipantKey", "参加者キー", "PK参加者キー"]
-ATTENDANCE_KEY_KEYS = ["attendance_key", "AttendanceKey", "出欠キー", "PK出欠キー"]
-ASSIGN_KEY_KEYS = ["assign_key", "assignment_key", "AssignmentKey", "割当キー", "PK割当キー"]
 
 
 def _first_prop_by_type(type_map: dict, ptype: str) -> str:

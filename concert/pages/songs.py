@@ -3,35 +3,12 @@ concert.pages.songs
 楽曲・楽器種別の登録、曲別必要楽器（SongInstrument）の設定画面。
 """
 import streamlit as st
+from concert.services.keys import *  # noqa: F401,F403
 
-SONG_NAME_KEYS = ["曲名", "タイトル"]
-SONG_COMPOSER_KEYS = ["作曲者", "クリエイター"]
-SONG_DURATION_KEYS = ["演奏時間（秒）", "演奏時間", "DurationSec"]
-SONG_NOTE_KEYS = ["難易度メモ", "メモ", "備考"]
-SONG_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
-CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
-CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE", "メディア", "種類"]
 
-INSTRUMENT_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
-INSTRUMENT_CATEGORY_KEYS = ["カテゴリ"]
-INSTRUMENT_MEMO_KEYS = ["メモ", "備考"]
 
-SONG_INSTR_RECORD_KEYS = ["レコード名", "タイトル"]
-SONG_INSTR_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲"]
-SONG_INSTR_INST_REL_KEYS = ["楽器種別", "楽器", "FK楽器種別"]
-SONG_INSTR_QTY_KEYS = ["必要台数", "台数"]
-SONG_INSTR_NOTE_KEYS = ["備考", "メモ"]
 
-PARTDEF_RECORD_KEYS = ["レコード名", "タイトル", "名称", "パート名"]
-PARTDEF_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
-PARTDEF_SONG_REL_KEYS = ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ"]
-PARTDEF_INST_REL_KEYS = ["必要楽器", "楽器種別", "楽器", "FK楽器種別", "担当楽器"]
-PARTDEF_COUNT_KEYS = ["必要人数", "必要台数", "台数", "人数"]
-PARTDEF_NOTE_KEYS = ["備考", "メモ"]
 
-SONG_KEY_KEYS = ["song_key", "SongKey", "PK曲キー", "曲キー"]
-INSTRUMENT_KEY_KEYS = ["instrument_key", "InstrumentKey", "PK楽器キー", "楽器キー"]
-PARTDEF_KEY_KEYS = ["part_key", "PartKey", "PKパートキー", "パートキー"]
 
 
 # ============================================================

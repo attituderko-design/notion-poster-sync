@@ -3,30 +3,13 @@ concert.pages.rental
 レンタル必要楽器の逆算・見積登録・費用集計画面。
 """
 import streamlit as st
+from concert.services.keys import *  # noqa: F401,F403
 import pandas as pd
 from concert.services.rental_calc import calc_rental_requirements, calc_rental_for_all_practices
 
-CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
-CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
-CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE", "メディア", "種類"]
 
-PRACTICE_NAME_KEYS = ["練習名", "タイトル", "PK練習名"]
-PRACTICE_DATE_KEYS = ["日時", "日付"]
-PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ"]
-PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 
-INSTRUMENT_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
 
-RENTAL_RECORD_KEYS = ["レコード名", "タイトル", "PKレコード名"]
-RENTAL_INST_REL_KEYS = ["楽器種別", "楽器", "担当楽器", "FK楽器種別"]
-RENTAL_PRACTICE_REL_KEYS = ["練習", "演奏会", "出演", "FK練習"]
-RENTAL_VENDOR_KEYS = ["業者名", "ベンダー", "vendor"]
-RENTAL_QTY_KEYS = ["台数", "数量", "qty"]
-RENTAL_UNIT_PRICE_KEYS = ["単価（円）", "単価", "unit_price"]
-RENTAL_CONFIRMED_KEYS = ["確定フラグ", "確定", "is_confirmed"]
-RENTAL_ITEM_NAME_KEYS = ["品目名", "item_name", "品目"]
-RENTAL_NOTE_KEYS = ["備考", "メモ"]
-RENTAL_KEY_KEYS = ["rental_key", "RentalKey", "見積キー", "PK見積キー"]
 
 
 # ============================================================

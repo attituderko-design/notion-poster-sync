@@ -3,37 +3,13 @@ concert.pages.concert_mgmt
 演奏会・練習情報の登録・一覧・編集画面。
 """
 import streamlit as st
+from concert.services.keys import *  # noqa: F401,F403
 from datetime import date, datetime, timezone, timedelta
 import re
 import requests
 
-CONCERT_NAME_KEYS = ["名称", "タイトル", "演奏会名", "PK名称"]
-CONCERT_DATE_KEYS = ["日時", "日付", "出演日", "体験日", "リリース日"]
-CONCERT_VENUE_KEYS = ["会場名", "ロケーション", "場所", "会場", "Location"]
-CONCERT_ADDRESS_KEYS = ["会場住所", "住所", "ロケーション", "場所", "Location"]
-CONCERT_MEMO_KEYS = ["メモ", "備考"]
-CONCERT_MEDIA_KEYS = ["媒体", "MEDIA_TYPE", "メディア", "種類"]
 
-PRACTICE_NAME_KEYS = ["練習名", "タイトル", "PK練習名"]
-PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
-PRACTICE_DATE_KEYS = ["日時", "日付"]
-PRACTICE_VENUE_KEYS = ["会場名", "ロケーション", "場所", "会場", "Location"]
-PRACTICE_ADDRESS_KEYS = ["会場住所", "住所", "ロケーション", "場所", "Location"]
-PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ", "本番日"]
-PRACTICE_REST_KEYS = ["打楽器休み", "休みフラグ", "休み", "Percussion休み"]
-PRACTICE_MEMO_KEYS = ["メモ", "備考"]
 
-CONCERT_KEY_KEYS = ["concert_key", "ConcertKey", "演奏会キー", "PK演奏会キー"]
-PRACTICE_KEY_KEYS = ["practice_key", "PracticeKey", "練習キー", "PK練習キー"]
-SONG_KEY_KEYS = ["song_key", "SongKey", "曲キー", "PK曲キー"]
-INSTRUMENT_KEY_KEYS = ["instrument_key", "InstrumentKey", "楽器キー", "PK楽器キー"]
-PARTDEF_KEY_KEYS = ["part_key", "PartKey", "パートキー", "PKパートキー"]
-PLAYER_KEY_KEYS = ["player_key", "PlayerKey", "奏者キー", "PK奏者キー"]
-PARTICIPANT_KEY_KEYS = ["participant_key", "ParticipantKey", "参加者キー", "PK参加者キー"]
-ATTENDANCE_KEY_KEYS = ["attendance_key", "AttendanceKey", "出欠キー", "PK出欠キー"]
-ASSIGN_KEY_KEYS = ["assign_key", "assignment_key", "AssignmentKey", "割当キー", "PK割当キー"]
-PREFERENCE_KEY_KEYS = ["preference_key", "PreferenceKey", "希望キー", "PK希望キー"]
-RENTAL_KEY_KEYS = ["rental_key", "RentalKey", "見積キー", "PK見積キー"]
 
 
 # ============================================================
