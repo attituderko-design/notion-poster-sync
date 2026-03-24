@@ -8292,7 +8292,19 @@ if st.session_state.get("system_mode") == "通常":
 elif st.session_state.get("system_mode") == "Concert":
     st.session_state["system_mode"] = "HARMONIA"
 
+_prev_mode = st.session_state.get("_prev_system_mode", "")
 system_mode = st.sidebar.radio("システム切替", ["MUSE", "HARMONIA"], key="system_mode")
+if system_mode != _prev_mode:
+    # モード切替時にHARMONIA関連のセッションキャッシュをクリア
+    for _k in list(st.session_state.keys()):
+        if any(_k.startswith(p) for p in (
+            "practice_list_", "concert_list", "rental_concert_list",
+            "rental_calc_results", "confirmed_rows_", "song_list_",
+            "partdef_list_", "pi_list_", "attendance_list_",
+            "participant_list_", "instrument_list",
+        )):
+            st.session_state.pop(_k, None)
+    st.session_state["_prev_system_mode"] = system_mode
 if system_mode == "HARMONIA":
     st.sidebar.caption("ArtéMis HARMONIA")
     st.sidebar.divider()
@@ -8380,6 +8392,12 @@ if system_mode == "HARMONIA":
             )
             concert_ctx["SELECTED_CONCERT_ID"] = concert_opt_map.get(selected_name, "")
             concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
+
+    # 演奏会が選択されていない場合はrender()を呼ばない
+    selected_concert_id = concert_ctx.get("SELECTED_CONCERT_ID", "").strip()
+    if not selected_concert_id:
+        st.info("サイドバーの「演奏会フィルタ」で演奏会を選択してください。")
+        st.stop()
 
     if concert_page == "練習管理":
         concert_mgmt.render(concert_ctx)
