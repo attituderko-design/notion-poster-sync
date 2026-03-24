@@ -80,20 +80,6 @@ def _load_instruments(ctx) -> list[dict]:
     return st.session_state.get("instrument_list", [])
 
 
-def _load_song_instruments(ctx, song_id: str) -> list[dict]:
-    key = f"si_list_{song_id}"
-    if key not in st.session_state:
-        type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG_INSTRUMENT"])
-        rel_prop = ctx["find_prop_name"](type_map, SONG_INSTR_SONG_REL_KEYS)
-        filter_payload = {"filter": {"property": rel_prop, "relation": {"contains": song_id}}} if rel_prop else None
-        rows = ctx["query_all"](
-            ctx["CONCERT_DB_SONG_INSTRUMENT"],
-            filter_payload,
-        )
-        st.session_state[key] = rows
-    return st.session_state.get(key, [])
-
-
 def _load_partdefs(ctx, concert_id: str = "", song_id: str = "") -> list[dict]:
     key = f"partdef_list_{concert_id}_{song_id}"
     if key not in st.session_state:
@@ -221,30 +207,6 @@ def _update_instrument(ctx: dict, page_id: str, name: str, category: str, memo: 
 # ============================================================
 # 曲別必要楽器 CRUD
 # ============================================================
-
-def _upsert_song_instrument(ctx: dict, song_id: str, song_name: str,
-                             instrument_id: str, instrument_name: str,
-                             qty: int, note: str,
-                             existing_id: str = "") -> bool:
-    db_id    = ctx["CONCERT_DB_SONG_INSTRUMENT"]
-    type_map = ctx["get_prop_types"](db_id)
-    if not type_map:
-        st.error("曲別必要楽器DBのプロパティ取得に失敗しました。")
-        return False
-    props: dict = {}
-    ctx["put_prop_any"](props, type_map, SONG_INSTR_RECORD_KEYS, f"{song_name} × {instrument_name}")
-    ctx["put_prop_any"](props, type_map, SONG_INSTR_SONG_REL_KEYS, song_id)
-    ctx["put_prop_any"](props, type_map, SONG_INSTR_INST_REL_KEYS, instrument_id)
-    ctx["put_prop_any"](props, type_map, SONG_INSTR_QTY_KEYS, qty)
-    ctx["put_prop_any"](props, type_map, SONG_INSTR_NOTE_KEYS, note)
-    if existing_id:
-        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}",
-                                 json={"properties": props})
-    else:
-        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
-                                 json={"parent": {"database_id": db_id}, "properties": props})
-    return res is not None and res.status_code == 200
-
 
 def _delete_page(ctx: dict, page_id: str) -> bool:
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
@@ -464,9 +426,6 @@ def _render_song_editor(ctx: dict, s: dict, all_concert_opts: dict[str, str]):
                     else:
                         st.error("❌ 更新に失敗しました。")
 
-        # 必要楽器サブセクション
-        st.caption("📋 この曲に必要な楽器")
-        _render_song_instrument_section(ctx, song_id, song_label)
 
 
 def _upsert_partdef(
@@ -496,7 +455,6 @@ def _upsert_partdef(
     ctx["put_prop_any"](props, t, PARTDEF_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS, song_id)
     ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS, clean_inst_ids)
-    ctx["put_prop_any"](props, t, PARTDEF_COUNT_KEYS, int(max(need_count, 1)))
     ctx["put_prop_any"](props, t, PARTDEF_NOTE_KEYS, note)
     ctx["put_key_any"](
         props,
@@ -653,11 +611,6 @@ def _render_partdef_tab(ctx: dict):
         p_name = ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS) or ctx["extract_title"](r)
         cur_inst_ids = ctx["extract_relation_ids_any"](r, PARTDEF_INST_REL_KEYS)
         cur_inst_names = [k for k, v in inst_opts_all.items() if v in set(cur_inst_ids)]
-        cur_need = ctx["extract_prop_text_any"](r, PARTDEF_COUNT_KEYS) or "1"
-        try:
-            cur_need_i = int(float(cur_need))
-        except Exception:
-            cur_need_i = 1
         cur_note = ctx["extract_prop_text_any"](r, PARTDEF_NOTE_KEYS)
         with st.expander(p_name, expanded=False):
             with st.form(f"partdef_edit_{rid}", border=True):
@@ -667,7 +620,7 @@ def _render_partdef_tab(ctx: dict):
                     list(inst_opts.keys()),
                     default=[x for x in cur_inst_names if x in inst_opts],
                 )
-                n_need = st.number_input("必要人数", min_value=1, max_value=20, value=max(cur_need_i, 1), step=1)
+                n_need = 1  # パートNoフィールド廃止のため固定
                 n_note = st.text_input("備考", value=cur_note)
                 c1, c2 = st.columns(2)
                 if c1.form_submit_button("💾 更新", use_container_width=True):
@@ -703,86 +656,6 @@ def _render_partdef_tab(ctx: dict):
                         st.error("❌ 削除に失敗しました。")
 
 
-def _render_song_instrument_section(ctx: dict, song_id: str, song_label: str):
-    """曲の下に展開する必要楽器設定UI。"""
-    instruments = _load_instruments(ctx)
-    if not instruments:
-        st.info("楽器種別を先に登録してください。")
-        return
-
-    si_rows = _load_song_instruments(ctx, song_id)
-    si_by_inst: dict[str, dict] = {}
-    for row in si_rows:
-        iids = ctx["extract_relation_ids_any"](row, SONG_INSTR_INST_REL_KEYS)
-        if iids:
-            si_by_inst[iids[0]] = row
-
-    inst_opts = {_instrument_name(i, ctx): i.get("id", "")
-                 for i in sorted(instruments, key=lambda x: _instrument_name(x, ctx))}
-
-    with st.form(f"si_form_{song_id}", border=True):
-        changes: list[dict] = []
-        for inst_name, inst_id in inst_opts.items():
-            existing = si_by_inst.get(inst_id)
-            cur_qty  = int(float(ctx["extract_prop_text_any"](existing, SONG_INSTR_QTY_KEYS) or "0")) if existing else 0
-            cur_note = ctx["extract_prop_text_any"](existing, SONG_INSTR_NOTE_KEYS) if existing else ""
-
-            col_inst, col_qty, col_note = st.columns([3, 1, 4])
-            col_inst.markdown(f"**{inst_name}**")
-            qty = col_qty.number_input(
-                "台数", min_value=0, max_value=20, value=cur_qty, step=1,
-                label_visibility="collapsed",
-                key=f"si_qty_{song_id}_{inst_id}",
-            )
-            note = col_note.text_input(
-                "備考", value=cur_note, placeholder="3oct可・アンプ必要等",
-                label_visibility="collapsed",
-                key=f"si_note_{song_id}_{inst_id}",
-            )
-            changes.append({
-                "inst_id":     inst_id,
-                "inst_name":   inst_name,
-                "qty":         qty,
-                "note":        note,
-                "existing_id": existing.get("id", "") if existing else "",
-            })
-
-        if st.form_submit_button("💾 必要楽器を保存", use_container_width=True):
-            success, fail = 0, 0
-            with st.spinner("保存中..."):
-                for ch in changes:
-                    if ch["qty"] == 0 and not ch["existing_id"]:
-                        continue  # 0台かつ未登録はスキップ
-                    if ch["qty"] == 0 and ch["existing_id"]:
-                        # 0台に変更 → アーカイブ（削除）
-                        ok = _delete_page(ctx, ch["existing_id"])
-                    else:
-                        ok = _upsert_song_instrument(
-                            ctx,
-                            song_id=song_id,
-                            song_name=song_label,
-                            instrument_id=ch["inst_id"],
-                            instrument_name=ch["inst_name"],
-                            qty=ch["qty"],
-                            note=ch["note"],
-                            existing_id=ch["existing_id"],
-                        )
-                    if ok:
-                        success += 1
-                    else:
-                        fail += 1
-
-            if fail == 0:
-                st.success(f"✅ {success}件を保存しました。")
-            else:
-                st.warning(f"⚠️ {success}件成功、{fail}件失敗。")
-            st.session_state.pop(f"si_list_{song_id}", None)
-            st.rerun()
-
-
-# ============================================================
-# 楽器種別タブ
-# ============================================================
 
 def _render_instrument_tab(ctx: dict):
     instruments = _load_instruments(ctx)

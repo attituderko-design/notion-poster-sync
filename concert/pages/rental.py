@@ -3,6 +3,7 @@ concert.pages.rental
 レンタル必要楽器の逆算・見積登録・費用集計画面。
 """
 import streamlit as st
+import uuid
 from concert.services.keys import *  # noqa: F401,F403
 
 COST_TYPE_OPTIONS = ["楽器レンタル", "運送費", "管理費", "その他"]
@@ -155,7 +156,8 @@ def _create_rental(ctx: dict, practice_id: str, practice_label: str,
     ctx["put_prop_any"](props, type_map, RENTAL_CONFIRMED_KEYS, confirmed)
     ctx["put_prop_any"](props, type_map, RENTAL_NOTE_KEYS, note)
     ctx["put_prop_any"](props, type_map, RENTAL_COST_TYPE_KEYS, cost_type)
-    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id or cost_type, item_name or instrument_name, vendor, prefix="rental")
+    unique_id = str(uuid.uuid4())[:8]
+    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id or cost_type, unique_id, prefix="rental")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
@@ -181,7 +183,7 @@ def _update_rental(ctx: dict, page_id: str, practice_id: str, practice_label: st
     ctx["put_prop_any"](props, type_map, RENTAL_CONFIRMED_KEYS, confirmed)
     ctx["put_prop_any"](props, type_map, RENTAL_NOTE_KEYS, note)
     ctx["put_prop_any"](props, type_map, RENTAL_COST_TYPE_KEYS, cost_type)
-    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id or cost_type, item_name or instrument_name, vendor, prefix="rental")
+    # 更新時はrental_keyを変えない（既存キーを維持）
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200

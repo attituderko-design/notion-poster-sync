@@ -556,7 +556,7 @@ def _create_practice(
             if t == "checkbox" and ("当日" in str(k) or "本番" in str(k)):
                 ctx["put_prop"](props, type_map, k, is_concert_day)
                 break
-    rest_written = ctx["put_prop_any"](props, type_map, PRACTICE_REST_KEYS, is_rest_day)
+    rest_written = ctx["put_prop_any"](props, type_map, PRACTICE_PERCUSSION_OFF_KEYS, is_rest_day)
     if not rest_written:
         for k, t in (type_map or {}).items():
             if t == "checkbox" and "休" in str(k):
@@ -625,7 +625,7 @@ def _update_practice(
             if t == "checkbox" and ("当日" in str(k) or "本番" in str(k)):
                 ctx["put_prop"](props, type_map, k, is_concert_day)
                 break
-    rest_written = ctx["put_prop_any"](props, type_map, PRACTICE_REST_KEYS, is_rest_day)
+    rest_written = ctx["put_prop_any"](props, type_map, PRACTICE_PERCUSSION_OFF_KEYS, is_rest_day)
     if not rest_written:
         for k, t in (type_map or {}).items():
             if t == "checkbox" and "休" in str(k):
@@ -801,7 +801,7 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
                 st.rerun()
 
     # 休みフラグはフォーム外に置いて、ON/OFF時に即座に入力可否へ反映
-    rest_default = _extract_bool_any(ctx, existing, PRACTICE_REST_KEYS, False) if is_edit else False
+    rest_default = _extract_bool_any(ctx, existing, PRACTICE_PERCUSSION_OFF_KEYS, False) if is_edit else False
     live_rest_key = f"{prefix}rest_day_live"
     if live_rest_key not in st.session_state:
         st.session_state[live_rest_key] = rest_default
@@ -1065,10 +1065,10 @@ def _auto_mark_concert_day_attendance(ctx: dict, practice_id: str, concert_id: s
         if not pid:
             continue
         props: dict = {}
-        ctx["put_prop"](props, type_map, "レコード名", f"{pname} × {practice_name}")
-        ctx["put_prop"](props, type_map, "奏者",   pid)
-        ctx["put_prop"](props, type_map, "練習",   practice_id)
-        ctx["put_prop"](props, type_map, "参加可否", "○")
+        ctx["put_prop_any"](props, type_map, ATT_RECORD_KEYS, f"{pname} × {practice_name}")
+        ctx["put_prop_any"](props, type_map, ATT_PLAYER_REL_KEYS, pid)
+        ctx["put_prop_any"](props, type_map, ATT_PRACTICE_REL_KEYS, practice_id)
+        ctx["put_prop_any"](props, type_map, ATT_STATUS_KEYS, "○")
         ctx["api_request"](
             "post",
             "https://api.notion.com/v1/pages",

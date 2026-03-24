@@ -230,15 +230,15 @@ def _concert_name(c, ctx) -> str:
 
 
 def _player_name(p, ctx) -> str:
-    return ctx["extract_prop_text"](p, "氏名") or ctx["extract_title"](p) or p.get("id", "")
+    return ctx["extract_prop_text_any"](p, PLAYER_NAME_KEYS) or ctx["extract_title"](p) or p.get("id", "")
 
 
 def _song_name(s, ctx) -> str:
-    return ctx["extract_prop_text"](s, "曲名") or ctx["extract_title"](s) or s.get("id", "")
+    return ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or ctx["extract_title"](s) or s.get("id", "")
 
 
 def _instrument_name(i, ctx) -> str:
-    return ctx["extract_prop_text"](i, "楽器名") or ctx["extract_title"](i) or i.get("id", "")
+    return ctx["extract_prop_text_any"](i, INSTRUMENT_NAME_KEYS) or ctx["extract_title"](i) or i.get("id", "")
 
 
 # ============================================================
@@ -258,30 +258,14 @@ def _save_preference(ctx, player_id: str, player_name: str,
     if not type_map:
         return False
     props: dict = {}
-    rec_key = ctx["find_prop_name"](type_map, ["レコード名", "タイトル", "名称"])
-    participant_key = _find_prop_name_loose(ctx, type_map, ["演奏会参加者"])
-    player_key = _find_prop_name_loose(ctx, type_map, ["出演者", "奏者", "FK奏者"])
-    inst_key = ctx["find_prop_name"](type_map, PREF_INST_REL_KEYS)
-    song_key = ctx["find_prop_name"](type_map, PREF_SONG_REL_KEYS)
-    part_key = ctx["find_prop_name"](type_map, PREF_PART_REL_KEYS)
-    pri_key = ctx["find_prop_name"](type_map, PREF_PRIORITY_KEYS)
-    if rec_key:
-        ctx["put_prop"](props, type_map, rec_key,
-                    f"{player_name} × {song_name} × {part_name}")
-    if participant_key and participant_id:
-        ctx["put_prop"](props, type_map, participant_key, participant_id)
-    if player_key and player_id:
-        ctx["put_prop"](props, type_map, player_key, player_id)
-    if inst_key:
-        # パート優先運用: 楽器relationが無いパートでも保存できるように任意扱い
-        if instrument_id:
-            ctx["put_prop"](props, type_map, inst_key, instrument_id)
-    if song_key:
-        ctx["put_prop"](props, type_map, song_key, song_id)
-    if part_key:
-        ctx["put_prop"](props, type_map, part_key, part_id)
-    if pri_key:
-        ctx["put_prop"](props, type_map, pri_key, INT_TO_PRIORITY.get(priority_int, "希望なし/降り番でも可"))
+    # PREFERENCEの構造: preference_key, 演奏会参加者, パート定義, 希望順位, 備考
+    ctx["put_prop_any"](props, type_map, PREFERENCE_KEY_KEYS,
+                        f"{player_name} × {song_name} × {part_name}")
+    if participant_id:
+        ctx["put_prop_any"](props, type_map, PREF_PLAYER_REL_KEYS, participant_id)
+    ctx["put_prop_any"](props, type_map, PREF_PART_REL_KEYS, part_id)
+    ctx["put_prop_any"](props, type_map, PREF_PRIORITY_KEYS,
+                        INT_TO_PRIORITY.get(priority_int, "希望なし/降り番でも可"))
     ctx["put_key_any"](
         props,
         type_map,
@@ -289,7 +273,6 @@ def _save_preference(ctx, player_id: str, player_name: str,
         player_id,
         song_id,
         part_id,
-        instrument_id,
         prefix="pref",
     )
 
@@ -1034,11 +1017,9 @@ def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: d
             # 奏者×楽器種別×演奏会でPlayerInstrumentレコードを特定
             t_player = ctx["find_prop_name"](type_map, PI_PLAYER_REL_KEYS)
             t_inst   = ctx["find_prop_name"](type_map, PI_INST_REL_KEYS)
-            t_song   = ctx["find_prop_name"](type_map, PI_SONG_REL_KEYS)
             filters  = []
             if t_player: filters.append({"property": t_player, "relation": {"contains": a["player_id"]}})
             if t_inst:   filters.append({"property": t_inst,   "relation": {"contains": a["instrument_id"]}})
-            if t_song:   filters.append({"property": t_song,   "relation": {"contains": a["song_id"]}})
 
             pi_rows = ctx["query_all"](db_id, {"filter": {"and": filters}} if filters else None)
 
@@ -1056,7 +1037,6 @@ def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: d
                 ctx["put_prop_any"](props, type_map, PI_RECORD_KEYS,
                                     f"{a['player_name']} × {a['song_name']} × {a['part_name']}")
                 ctx["put_prop_any"](props, type_map, PI_PLAYER_REL_KEYS, a["player_id"])
-                ctx["put_prop_any"](props, type_map, PI_SONG_REL_KEYS,   a["song_id"])
                 ctx["put_prop_any"](props, type_map, PI_INST_REL_KEYS,   a["instrument_id"])
                 ctx["put_prop_any"](props, type_map, PI_CONCERT_REL_KEYS,
                                     (ctx.get("SELECTED_CONCERT_ID") or ""))
@@ -1147,13 +1127,34 @@ def _render_result_tab(ctx: dict):
             st.rerun()
         return
 
+    # パート定義を先読みしてpart_id → song_idのマップを作る
+    pd_all = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
+    partdef_to_song: dict[str, str] = {}
+    for pd in pd_all:
+        pdid = pd.get("id", "")
+        s_ids = ctx["extract_relation_ids_any"](pd, PARTDEF_SONG_REL_KEYS)
+        if pdid and s_ids:
+            partdef_to_song[pdid] = s_ids[0]
+
     # 曲ごとにまとめて表示＋手動修正フォーム
     by_song: dict[str, list] = defaultdict(list)
     for r in assigned_rows:
-        s_ids = ext_rel(r, PI_SONG_REL_KEYS)
-        if not s_ids or s_ids[0] not in song_id_set:
-            continue
-        by_song[s_ids[0]].append(r)
+        # PLAYER_INSTRUMENTの楽器からPART_DEFINITIONを経由して曲を特定
+        # 楽曲フィールドが廃止されたのでパート定義経由で判断
+        i_ids = ext_rel(r, PI_INST_REL_KEYS)
+        # 楽器IDが演奏会の曲のどれかに属するか確認
+        matched_sid = ""
+        for sid in song_id_set:
+            for pd in pd_all:
+                pd_sids = ctx["extract_relation_ids_any"](pd, PARTDEF_SONG_REL_KEYS)
+                pd_iids = ctx["extract_relation_ids_any"](pd, PARTDEF_INST_REL_KEYS)
+                if sid in pd_sids and i_ids and i_ids[0] in pd_iids:
+                    matched_sid = sid
+                    break
+            if matched_sid:
+                break
+        if matched_sid:
+            by_song[matched_sid].append(r)
 
     for song in sorted(songs, key=lambda x: _song_name(x, ctx)):
         sid   = song.get("id","")
