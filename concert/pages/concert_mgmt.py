@@ -1005,8 +1005,8 @@ def _bulk_generate_practice_rows(ctx: dict, concert_page: dict, practice_count: 
             created += 1
             existing_names.add(name)
 
-    # N+1: 本番回（演奏会情報を自動反映）
-    final_name = f"第{practice_count + 1}回練習（本番）"
+    # N+1: 本番当日（演奏会情報を自動反映）
+    final_name = "本番当日"
     if final_name in existing_names:
         skipped += 1
     else:
@@ -1024,11 +1024,43 @@ def _bulk_generate_practice_rows(ctx: dict, concert_page: dict, practice_count: 
         )
         if created_id:
             _bind_practice_concert_relation(ctx, created_id, concert_id)
+            # 全参加者の出欠を○に設定
+            _auto_mark_concert_day_attendance(ctx, created_id, concert_id)
             created += 1
         else:
             skipped += 1
 
     return created, skipped
+
+
+def _auto_mark_concert_day_attendance(ctx: dict, practice_id: str, concert_id: str) -> None:
+    """本番当日の練習レコードに全参加者の出欠を○で一括登録する。"""
+    if not practice_id:
+        return
+    players = _load_players(ctx)
+    if not players:
+        return
+    att_db   = ctx["CONCERT_DB_ATTENDANCE"]
+    type_map = ctx["get_prop_types"](att_db)
+    if not type_map:
+        return
+    practice_name = "本番当日"
+    for pl in players:
+        pid   = pl.get("id", "")
+        pname = (ctx["extract_prop_text_any"](pl, ["氏名", "名前", "Name"]) or
+                 ctx["extract_title"](pl) or pid)
+        if not pid:
+            continue
+        props: dict = {}
+        ctx["put_prop"](props, type_map, "レコード名", f"{pname} × {practice_name}")
+        ctx["put_prop"](props, type_map, "奏者",   pid)
+        ctx["put_prop"](props, type_map, "練習",   practice_id)
+        ctx["put_prop"](props, type_map, "参加可否", "○")
+        ctx["api_request"](
+            "post",
+            "https://api.notion.com/v1/pages",
+            json={"parent": {"database_id": att_db}, "properties": props},
+        )
 
 
 # ============================================================
@@ -1039,21 +1071,6 @@ def render(ctx: dict):
     st.header("🎼 演奏会・練習管理")
     global_concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
     global_concert_name = (ctx.get("SELECTED_CONCERT_NAME") or "").strip()
-
-    with st.expander("🧩 キー整備（既存データ反映）", expanded=False):
-        st.caption("Concert System関連DBの `*_key` / `PK*` 列を既存レコードへ一括補完します。")
-        if st.button("🛠 既存データへキーを補完", key="concert_backfill_pk_btn"):
-            with st.spinner("キー補完を実行中..."):
-                stats = _backfill_all_concert_keys(ctx)
-            total_scanned = sum(v[0] for v in stats.values())
-            total_updated = sum(v[1] for v in stats.values())
-            total_skipped = sum(v[2] for v in stats.values())
-            st.success(
-                f"✅ キー補完完了: 走査 {total_scanned} / 更新 {total_updated} / スキップ {total_skipped}"
-            )
-            for name, (scanned, updated, skipped) in stats.items():
-                st.caption(f"- {name}: 走査 {scanned} / 更新 {updated} / スキップ {skipped}")
-            _clear_concert_cache(ctx)
 
     tab_concert, tab_practice = st.tabs(["演奏会", "練習"])
 
@@ -1073,20 +1090,15 @@ def render(ctx: dict):
         else:
             st.subheader(f"登録済み演奏会（{len(concerts)}件）")
             st.caption("ここは演奏会の参照・選択が主目的です。編集は必要なときだけ開いてください。")
+            col_info, col_refresh = st.columns([8, 1])
             if global_concert_id:
-                st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
-                concert_query = ""
+                col_info.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
             else:
-                col_search, col_refresh = st.columns([8, 1])
-                concert_query = col_search.text_input(
-                    "演奏会を検索",
-                    value=_ss("concert_mgmt_concert_query", ""),
-                    placeholder="例: Osaka / 2026 / Summer / 門真",
-                    key="concert_mgmt_concert_query",
-                )
-                if col_refresh.button("🔄", key="refresh_concerts", help="一覧を再読み込み"):
-                    st.session_state.pop("concert_list", None)
-                    st.rerun()
+                col_info.caption("サイドバーで演奏会を選択すると対象が絞り込まれます。")
+            concert_query = global_concert_name if global_concert_id else ""
+            if col_refresh.button("🔄", key="refresh_concerts", help="一覧を再読み込み"):
+                st.session_state.pop("concert_list", None)
+                st.rerun()
 
             filtered_concerts = []
             for c in concerts:
@@ -1125,21 +1137,12 @@ def render(ctx: dict):
         st.caption(f"Practice DB: `{ctx['CONCERT_DB_PRACTICE']}`")
         concerts = _load_concerts(ctx)
 
-        # 演奏会フィルタ
-        if global_concert_id:
-            filter_concert_id = global_concert_id
-            selected_filter = global_concert_name or global_concert_id
-            st.caption(f"絞り込み：演奏会 = {selected_filter}")
-        else:
-            concert_filter_opts = {"すべて": ""} | {
-                _concert_display_name(c, ctx): c.get("id", "") for c in concerts
-            }
-            selected_filter = st.selectbox(
-                "絞り込み：演奏会",
-                list(concert_filter_opts.keys()),
-                key="practice_filter_concert",
-            )
-            filter_concert_id = concert_filter_opts.get(selected_filter, "")
+        # 演奏会フィルタ（サイドバー選択を使用）
+        if not global_concert_id:
+            st.info("サイドバーで演奏会を選択してください。")
+            return
+        filter_concert_id = global_concert_id
+        st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
         selected_concert_page = next((c for c in concerts if c.get("id") == filter_concert_id), None)
 
         with st.expander("⚙️ 練習回を一括生成", expanded=False):
@@ -1171,26 +1174,9 @@ def render(ctx: dict):
                 practices = fallback_all
 
         if not practices:
-            st.info("練習がまだ登録されていません。")
-            with st.expander("🔍 練習読込デバッグ", expanded=False):
-                all_rows = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
-                st.caption(
-                    f"CONCERT_DB_CONCERT: `{ctx['CONCERT_DB_CONCERT']}` / "
-                    f"CONCERT_DB_PRACTICE: `{ctx['CONCERT_DB_PRACTICE']}`"
-                )
-                st.caption(f"選択演奏会ID: `{filter_concert_id or '(未選択)'}`")
-                st.caption(f"練習DB全件数: {len(all_rows)}")
-                if all_rows:
-                    tmap = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"])
-                    rel_props = _practice_rel_prop_candidates(tmap, ctx)
-                    st.caption(f"練習DB relation候補: {', '.join(rel_props) if rel_props else '(なし)'}")
-                    sample = all_rows[0]
-                    st.caption(f"サンプル練習ID: `{sample.get('id', '')}`")
-                    if rel_props:
-                        rel_dump = {rp: ctx["extract_relation_ids"](sample, rp) for rp in rel_props}
-                        st.json(rel_dump)
+            st.info("この演奏会に練習がまだ登録されていません。")
         else:
-            st.subheader(f"登録済み練習（{len(practices)}件）")
+            st.caption(f"登録済み練習（{len(practices)}件）")
             col_search, col_refresh = st.columns([8, 1])
             practice_query = col_search.text_input(
                 "練習を検索",
@@ -1241,6 +1227,6 @@ def render(ctx: dict):
                 label = _practice_display_name(p, ctx)
                 is_concert_day = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
                 if is_concert_day:
-                    label = "🎼 " + label + "  【本番】"
+                    label = "🎼 本番当日" + f"（{_prac_date(p)[:10]}）" if not label.startswith("🎼") else label
                 with st.expander(label, expanded=False):
                     _render_practice_form(ctx, concerts, existing=p)
