@@ -13,7 +13,9 @@ from concert.services.keys import (
     PRACTICE_CONCERT_REL_KEYS, PRACTICE_SONG_REL_KEYS,
     PRACTICE_PERCUSSION_OFF_KEYS,
     PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS,
-    PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_BRING_KEYS, PI_CONCERT_REL_KEYS,
+    PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_BRING_KEYS,
+    PI_CONCERT_REL_KEYS, PI_ASSIGN_KEYS,
+    PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
     INSTRUMENT_NAME_KEYS,
     SONG_CONCERT_REL_KEYS,
 )
@@ -48,12 +50,25 @@ def calc_rental_requirements(
         {"filter": {"property": att_practice_rel, "relation": {"contains": practice_id}}}
         if att_practice_rel else None,
     )
+    # ATTENDANCEの奏者リレーション先が演奏会参加者DBの場合は
+    # 演奏会参加者DB → 出演者DB のIDに変換して統一する
+    DB_PARTICIPANT = ctx["CONCERT_DB_PARTICIPANT"]
+    participant_rows = query_all(DB_PARTICIPANT, None)
+    # participant_id → player_id のマップ
+    participant_to_player: dict[str, str] = {}
+    for row in participant_rows:
+        p_ids = ext_rel(row, PARTICIPANT_PLAYER_REL_KEYS)
+        if p_ids:
+            participant_to_player[row.get("id", "")] = p_ids[0]
+
     attending_player_ids: set[str] = set()
     for row in attendance_rows:
         status = ext_text(row, ATT_STATUS_KEYS)
         if status in ("○", "△"):
-            for pid in ext_rel(row, ATT_PLAYER_REL_KEYS):
-                attending_player_ids.add(pid)
+            for raw_id in ext_rel(row, ATT_PLAYER_REL_KEYS):
+                # 演奏会参加者IDの場合は出演者IDに変換
+                player_id = participant_to_player.get(raw_id, raw_id)
+                attending_player_ids.add(player_id)
 
     # ── 2. この練習日の情報を取得（演奏曲・打楽器休みフラグ）──
     practice_type_map   = get_types(DB_PRACTICE)
