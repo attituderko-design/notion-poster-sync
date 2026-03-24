@@ -247,20 +247,29 @@ def _render_calc_tab(ctx: dict):
         key=lambda kv: _prac_date(prac_by_id.get(kv[0], {}))
     ):
         reqs    = data.get("requirements", [])
-        rental_reqs  = [r for r in reqs if r["rental_needed"] > 0]
-        bring_reqs   = [r for r in reqs if r["rental_needed"] <= 0 and r["bring_available"] > 0]
+        is_perc_off_pre = len(reqs) == 1 and reqs[0].get("percussion_off")
+        _reqs_for_calc  = [] if is_perc_off_pre else reqs
+        rental_reqs  = [r for r in _reqs_for_calc if r.get("rental_needed", 0) > 0]
+        bring_reqs   = [r for r in _reqs_for_calc if r.get("rental_needed", 0) <= 0 and r.get("bring_available", 0) > 0]
         prac_label   = data.get("name") or pid
         rented_ids   = _get_rented_inst_ids(ctx, pid)
 
         if rental_reqs:
             has_any_rental = True
 
+        # 打楽器休みフラグの検出
+        is_perc_off = len(reqs) == 1 and reqs[0].get("percussion_off")
+        actual_reqs = [] if is_perc_off else reqs
+
         with st.expander(
             f"{prac_label}　{'⚠️ レンタル必要' if rental_reqs else '✅ レンタル不要'}",
             expanded=bool(rental_reqs),
         ):
-            if not reqs:
-                st.info("必要楽器の情報がありません（楽曲・楽器管理で登録してください）。")
+            if is_perc_off:
+                st.info("打楽器休みのため、レンタル不要です。")
+                continue
+            if not actual_reqs:
+                st.info("必要楽器の情報がありません（楽曲・楽器管理でパート定義を登録してください）。")
                 continue
 
             # ── レンタル必要 ──────────────────────────────────
