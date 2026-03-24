@@ -96,6 +96,7 @@ PI_SONG_REL_KEYS          = ["楽曲", "演奏曲", "FK楽曲"]
 PI_PARTICIPANT_REL_KEYS   = ["演奏会参加者", "参加者", "FK参加者"]
 PI_ASSIGN_KEYS            = ["担当フラグ", "担当", "担当有無"]
 PI_BRING_KEYS             = ["持参可フラグ", "持参可", "持参"]
+PI_BRING_COUNT_KEYS       = ["持参台数", "持参数", "持参可能台数"]
 PI_NOTE_KEYS              = ["備考", "メモ"]
 ASSIGN_KEY_KEYS           = ["assign_key", "assignment_key", "AssignmentKey", "割当キー", "PK割当キー"]
 
