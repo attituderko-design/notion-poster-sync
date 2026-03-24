@@ -54,26 +54,9 @@ class Assignment:
 
 SCORE_MAP = {1: 3.0, 2: 2.0, 3: 1.0, 0: 0.0}
 
-PREF_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
-PREF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
-PREF_PART_REL_KEYS = ["パート", "パート定義", "FKパート"]
-PREF_INSTR_REL_KEYS = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
-PREF_PRIORITY_KEYS = ["希望順位", "優先度", "希望", "希望区分"]
-PREF_CAN_BRING_KEYS = ["持参可", "持参可フラグ", "持参"]
-PREF_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 
-PART_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
-PART_INST_REL_KEYS = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
-PART_NAME_KEYS = ["パート名", "名称", "タイトル", "表示名"]
-PART_COUNT_KEYS = ["必要人数", "必要台数", "台数", "人数"]
-PART_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 
-ATT_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
-ATT_STATUS_KEYS = ["参加可否", "出欠", "参加状況"]
-ATT_PRACTICE_REL_KEYS = ["練習", "FK練習", "演奏会"]
-PARTICIPANT_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
 
-PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 
 
 def _priority_to_int(v: str) -> int:
