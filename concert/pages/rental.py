@@ -158,16 +158,7 @@ def _create_rental(ctx: dict, practice_id: str, practice_label: str,
     ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id or cost_type, item_name or instrument_name, vendor, prefix="rental")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
-    if res is None or res.status_code != 200:
-        import streamlit as _st
-        err = ""
-        try:
-            err = res.json().get("message", "") if res else "no response"
-        except Exception:
-            pass
-        _st.error(f"RENTAL登録失敗: {err} / props_keys={list(props.keys())}")
-        return False
-    return True
+    return res is not None and res.status_code == 200
 
 
 def _update_rental(ctx: dict, page_id: str, practice_id: str, practice_label: str,
@@ -477,16 +468,16 @@ def _render_estimate_tab(ctx: dict):
         })
         row_ids.insert(0, "")  # 新規行
 
-    # 新規行用の空行（既存0件のときは3行、あるときは1行）
-    empty_rows = 3 if not existing else 1
-    for _ in range(empty_rows):
+    # 空行は追加しない（data_editorのnum_rows="dynamic"で行追加させる）
+    # 既存0件のときだけ1行だけ空行を追加してUIを分かりやすくする
+    if not existing:
         existing.append({
             "費用種別": "楽器レンタル",
             "楽器種別": inst_names[0] if inst_names else "",
             "品目名": "", "業者名": "", "台数": 1, "単価（円）": 0,
             "確定": False, "備考": "",
         })
-        row_ids.append("")  # 空IDは新規行
+        row_ids.append("")
 
     df_init = pd.DataFrame(existing)
 
@@ -554,16 +545,15 @@ def _render_estimate_tab(ctx: dict):
             pass
 
     # ── 保存ボタン ──
-    st.write(f"PRE-BUTTON: edited_df rows={len(edited_df) if edited_df is not None else 'None'}")
     if st.button("💾 まとめて保存", type="primary", use_container_width=True, key="est_save"):
-        st.write("BUTTON CLICKED")
         ok_n = fail_n = skip_n = 0
-        # with st.spinner("保存中..."):
-        if True:
-            # 保存後に削除すべき既存行を追跡
+        with st.spinner("保存中..."):
             saved_existing_ids: set[str] = set()
+            # インデックスをリセットして行番号とrow_idsを確実に対応させる
+            edited_df_reset = edited_df.reset_index(drop=True)
 
-            for idx, row in edited_df.iterrows():
+            for idx in range(len(edited_df_reset)):
+                row = edited_df_reset.iloc[idx]
                 cost_type_v = str(row.get("費用種別") or "楽器レンタル").strip()
                 inst_sel_v  = str(row.get("楽器種別") or "").strip()
                 item_name_v = str(row.get("品目名") or "").strip()
@@ -573,20 +563,16 @@ def _render_estimate_tab(ctx: dict):
                 confirmed_v = bool(row.get("確定") or False)
                 note_v      = str(row.get("備考") or "").strip()
 
-                # 楽器レンタル以外は楽器種別不要
                 is_instrument = (cost_type_v == "楽器レンタル")
                 if is_instrument and not inst_sel_v:
-                    st.write(f"DEBUG skip row{idx}: inst_sel_v empty")
                     skip_n += 1
                     continue
                 if not is_instrument and not item_name_v:
-                    st.write(f"DEBUG skip row{idx}: item_name_v empty")
                     skip_n += 1
                     continue
 
-                inst_id_v = inst_opts.get(inst_sel_v, "") if is_instrument else ""
+                inst_id_v   = inst_opts.get(inst_sel_v, "") if is_instrument else ""
                 existing_id = row_ids[idx] if idx < len(row_ids) else ""
-                st.write(f"DEBUG row{idx}: existing_id={existing_id!r} inst_id={inst_id_v[:8] if inst_id_v else 'empty'} cost={cost_type_v}")
 
                 if existing_id:
                     ok = _update_rental(
@@ -621,9 +607,8 @@ def _render_estimate_tab(ctx: dict):
             st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
         else:
             st.warning(f"⚠️ 成功 {ok_n} / 失敗 {fail_n} / スキップ {skip_n}")
-        st.write(f"FINAL: ok={ok_n} fail={fail_n} skip={skip_n}")
         _clear_rental_cache()
-        # st.rerun()  # デバッグ中は無効
+        st.rerun()
 
 
 # ============================================================
