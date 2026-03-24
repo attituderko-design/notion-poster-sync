@@ -83,16 +83,22 @@ def calc_rental_requirements(
             song_ids.add(row.get("id", ""))
 
     # ── 4. PART_DEFINITIONから必要楽器と台数を集計 ───────────
-    # instrument_id → 必要台数合計
+    # 考え方：同じ楽器が複数曲に登場しても、
+    #         曲をまたいで同時演奏はしないので1台で足りる。
+    #         1つの曲の中で同じ楽器が複数パートに登場する場合のみ複数台必要。
+    # → 楽器ごとに「1曲あたりの最大必要台数」を求め、全曲の最大値を取る。
+    #
+    # instrument_id → 必要台数（全曲を通じた最大同時使用台数）
     required_map: dict[str, int] = defaultdict(int)
     instrument_name_map: dict[str, str] = {}
 
     if song_ids:
-        pd_type_map  = get_types(DB_PART_DEFINITION)
-        pd_song_rel  = find_prop(pd_type_map, PARTDEF_SONG_REL_KEYS)
-        pd_inst_rel  = find_prop(pd_type_map, PARTDEF_INST_REL_KEYS)
-
         pd_rows = query_all(DB_PART_DEFINITION, None)
+
+        # 曲ごと×楽器ごとのパート定義件数を集計
+        # song_id → instrument_id → 台数
+        per_song_inst: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
         for row in pd_rows:
             s_ids = ext_rel(row, PARTDEF_SONG_REL_KEYS)
             if not s_ids or s_ids[0] not in song_ids:
@@ -100,14 +106,18 @@ def calc_rental_requirements(
             i_ids = ext_rel(row, PARTDEF_INST_REL_KEYS)
             if not i_ids:
                 continue
-            inst_id = i_ids[0]
-            # 必要台数：パート定義は1パート=1台として扱う（PARTDEF_COUNT_KEYSは参考）
-            qty_str = ext_text(row, PARTDEF_COUNT_KEYS)
-            try:
-                qty = int(float(qty_str)) if qty_str else 1
-            except ValueError:
-                qty = 1
-            required_map[inst_id] += qty
+            sid = s_ids[0]
+            # 1パート定義に複数楽器が紐づく場合は各楽器1台として扱う
+            for inst_id in i_ids:
+                per_song_inst[sid][inst_id] += 1
+
+        # 楽器ごとに全曲を通じた最大台数を取る
+        all_inst_ids_in_partdef: set[str] = set()
+        for sid, inst_map in per_song_inst.items():
+            for inst_id, qty in inst_map.items():
+                all_inst_ids_in_partdef.add(inst_id)
+                if qty > required_map[inst_id]:
+                    required_map[inst_id] = qty
 
     # ── 5. 参加奏者の持参可能楽器を集計 ──────────────────────
     bring_map: dict[str, int] = defaultdict(int)
