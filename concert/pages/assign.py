@@ -745,11 +745,15 @@ def _render_solver_tab(ctx: dict):
                 st.markdown(_render_assignment_html(items, result["pref_map"]),
                             unsafe_allow_html=True)
 
-            # 奏者別スコア
+            # 奏者別スコア（割り当てられなかった人も含めて表示）
             st.markdown("**奏者別スコア**")
-            player_scores: dict[str, float] = defaultdict(float)
-            player_fb: dict[str, int]        = defaultdict(int)
-            player_names: dict[str, str]     = {}
+            player_scores: dict[str, float]   = defaultdict(float)
+            player_fb: dict[str, int]          = defaultdict(int)
+            player_names: dict[str, str]       = {}
+            player_unassigned: dict[str, int]  = defaultdict(int)
+
+            # 割当済みのスコアを集計
+            assigned_keys_per_player: dict[str, set] = defaultdict(set)
             for a in result["assignments"]:
                 pk   = str((a["player_id"], a["song_id"], a["part_id"]))
                 pref = result["pref_map"].get(pk)
@@ -759,8 +763,34 @@ def _render_solver_tab(ctx: dict):
                 if a["source"] == "fallback":
                     player_fb[a["player_id"]] += 1
                 player_names[a["player_id"]] = a["player_name"]
-            st.markdown(_render_player_score_html(player_scores, player_fb, player_names),
-                        unsafe_allow_html=True)
+                assigned_keys_per_player[a["player_id"]].add(
+                    (a["player_id"], a["song_id"], a["part_id"])
+                )
+
+            # 希望を出したが割り当てられなかった件数を集計
+            for pk_str, pref in result["pref_map"].items():
+                if pref["priority"] <= 0:
+                    continue
+                try:
+                    pk_tuple = eval(pk_str)
+                except Exception:
+                    continue
+                pid = pref["player_id"]
+                if pk_tuple not in assigned_keys_per_player.get(pid, set()):
+                    player_unassigned[pid] += 1
+                    if pid not in player_names:
+                        player_names[pid] = pref["player_name"]
+
+            # 希望を出したが割当ゼロの奏者も追加（降り番希望のみの人は除く）
+            for pk_str, pref in result["pref_map"].items():
+                if pref["priority"] > 0:
+                    pid = pref["player_id"]
+                    if pid not in player_names:
+                        player_names[pid] = pref["player_name"]
+
+            st.markdown(_render_player_score_html(
+                player_scores, player_fb, player_names, player_unassigned),
+                unsafe_allow_html=True)
 
             # 採用ボタン
             st.divider()
@@ -832,23 +862,35 @@ def _render_assignment_html(items: list[dict], pref_map: dict) -> str:
 </div>"""
 
 
-def _render_player_score_html(scores: dict, fb_counts: dict, names: dict) -> str:
-    """奏者別スコアをHTMLカード形式で返す。"""
-    sorted_players = sorted(scores.items(), key=lambda x: -x[1])
+def _render_player_score_html(scores: dict, fb_counts: dict, names: dict,
+                              unassigned: dict | None = None) -> str:
+    """奏者別スコアをHTMLカード形式で返す。割当なしの人も含めて全員表示。"""
+    all_pids = set(scores.keys()) | set(names.keys())
+    sorted_players = sorted(all_pids, key=lambda pid: -scores.get(pid, 0))
     rows_html = ""
-    for pid, sc in sorted_players:
+    for pid in sorted_players:
+        sc     = scores.get(pid, 0.0)
         name   = names.get(pid, pid)
         fb     = fb_counts.get(pid, 0)
+        ua     = (unassigned or {}).get(pid, 0)
         fb_str = (f'<span style="font-size:11px;padding:2px 7px;border-radius:99px;'
                   f'background:#FCEBEB;color:#A32D2D;margin-left:6px;">FB {fb}件</span>'
                   if fb > 0 else "")
+        ua_str = (f'<span style="font-size:11px;padding:2px 7px;border-radius:99px;'
+                  f'background:#FAEEDA;color:#633806;margin-left:6px;">未割当希望 {ua}件</span>'
+                  if ua > 0 else "")
         bar_w  = int(sc / 9.0 * 100)
         sc_color = "#3C3489" if sc >= 7 else ("#085041" if sc >= 4 else "#888780")
+        # 全曲降り番（割当なし・希望なし）の場合は「降り番」バッジ
+        is_rest = sc == 0.0 and fb == 0 and pid not in scores
+        rest_str = ('<span style="font-size:11px;padding:2px 7px;border-radius:99px;'
+                    'background:#F1EFE8;color:#5F5E5A;margin-left:6px;">降り番</span>'
+                    if is_rest else "")
         rows_html += f"""
         <tr>
           <td style="padding:7px 12px;border-bottom:0.5px solid rgba(0,0,0,0.07);
                      font-size:13px;color:var(--color-text-primary);white-space:nowrap;">
-            {name}{fb_str}
+            {name}{fb_str}{ua_str}{rest_str}
           </td>
           <td style="padding:7px 12px;border-bottom:0.5px solid rgba(0,0,0,0.07);">
             <div style="display:flex;align-items:center;gap:8px;">
