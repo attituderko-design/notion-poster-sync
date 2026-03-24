@@ -3,11 +3,19 @@ concert.services.rental_calc
 レンタル必要楽器の逆算ロジック。
 
 算出式（練習日 or 演奏会当日ごと）:
-  必要楽器（SongInstrument の必要台数合計）
+  必要楽器（PART_DEFINITION の必要楽器 × 必要台数合計）
   - その日参加する奏者が持参可能な楽器台数
   = レンタル必要台数（0 以下は 0 扱い）
 """
 from collections import defaultdict
+from concert.services.keys import (
+    ATT_STATUS_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS,
+    PRACTICE_CONCERT_REL_KEYS,
+    PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS, PARTDEF_COUNT_KEYS,
+    PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_BRING_KEYS, PI_CONCERT_REL_KEYS,
+    INSTRUMENT_NAME_KEYS,
+    SONG_CONCERT_REL_KEYS,
+)
 
 
 def calc_rental_requirements(
@@ -17,103 +25,108 @@ def calc_rental_requirements(
     """
     1 つの練習日（または演奏会当日）について、
     レンタルが必要な楽器種別と台数を返す。
-
-    Returns:
-        [
-            {
-                "instrument_id":   str,
-                "instrument_name": str,
-                "required":        int,   # 曲別必要台数合計
-                "bring_available": int,   # 参加奏者が持参可能な台数
-                "rental_needed":   int,   # レンタル必要台数（>=0）
-            },
-            ...
-        ]
     """
-    query_all        = ctx["query_all"]
-    extract_rel_ids  = ctx["extract_relation_ids"]
-    extract_text     = ctx["extract_prop_text"]
+    query_all    = ctx["query_all"]
+    ext_rel      = ctx["extract_relation_ids_any"]
+    ext_text     = ctx["extract_prop_text_any"]
+    find_prop    = ctx["find_prop_name"]
+    get_types    = ctx["get_prop_types"]
 
-    DB_CONCERT           = ctx["CONCERT_DB_CONCERT"]
     DB_PRACTICE          = ctx["CONCERT_DB_PRACTICE"]
     DB_SONG              = ctx["CONCERT_DB_SONG"]
     DB_INSTRUMENT        = ctx["CONCERT_DB_INSTRUMENT"]
-    DB_SONG_INSTRUMENT   = ctx["CONCERT_DB_SONG_INSTRUMENT"]
-    DB_PLAYER            = ctx["CONCERT_DB_PLAYER"]
+    DB_PART_DEFINITION   = ctx["CONCERT_DB_PART_DEFINITION"]
     DB_ATTENDANCE        = ctx["CONCERT_DB_ATTENDANCE"]
     DB_PLAYER_INSTRUMENT = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
 
-    # ── 1. この練習日に参加する奏者 ID を取得 ──────────────
+    # ── 1. この練習日に参加する奏者IDを取得 ──────────────────
+    att_type_map = get_types(DB_ATTENDANCE)
+    att_practice_rel = find_prop(att_type_map, ATT_PRACTICE_REL_KEYS)
     attendance_rows = query_all(
         DB_ATTENDANCE,
-        {"filter": {"property": "練習", "relation": {"contains": practice_id}}},
+        {"filter": {"property": att_practice_rel, "relation": {"contains": practice_id}}}
+        if att_practice_rel else None,
     )
     attending_player_ids: set[str] = set()
     for row in attendance_rows:
-        # 参加可否が "○" または "△" の奏者のみカウント
-        status = extract_text(row, "参加可否")
+        status = ext_text(row, ATT_STATUS_KEYS)
         if status in ("○", "△"):
-            for pid in extract_rel_ids(row, "奏者"):
+            for pid in ext_rel(row, ATT_PLAYER_REL_KEYS):
                 attending_player_ids.add(pid)
 
     # ── 2. この練習日に関連する演奏会を特定 ──────────────────
+    practice_type_map = get_types(DB_PRACTICE)
+    prac_concert_rel  = find_prop(practice_type_map, PRACTICE_CONCERT_REL_KEYS)
     practice_rows = query_all(
         DB_PRACTICE,
-        {"filter": {"property": "練習名", "title": {"is_not_empty": True}}},
+        {"filter": {"property": prac_concert_rel, "relation": {"is_not_empty": True}}}
+        if prac_concert_rel else None,
     )
     concert_id = ""
     for row in practice_rows:
         if row.get("id") == practice_id:
-            ids = extract_rel_ids(row, "演奏会")
+            ids = ext_rel(row, PRACTICE_CONCERT_REL_KEYS)
             concert_id = ids[0] if ids else ""
             break
 
     # ── 3. 演奏会に紐づく楽曲一覧を取得 ──────────────────────
     song_ids: set[str] = set()
     if concert_id:
+        song_type_map  = get_types(DB_SONG)
+        song_conc_rel  = find_prop(song_type_map, SONG_CONCERT_REL_KEYS)
         song_rows = query_all(
             DB_SONG,
-            {"filter": {"property": "演奏会", "relation": {"contains": concert_id}}},
+            {"filter": {"property": song_conc_rel, "relation": {"contains": concert_id}}}
+            if song_conc_rel else None,
         )
         for row in song_rows:
             song_ids.add(row.get("id", ""))
 
-    # ── 4. SongInstrument から必要台数を集計 ─────────────────
+    # ── 4. PART_DEFINITIONから必要楽器と台数を集計 ───────────
     # instrument_id → 必要台数合計
     required_map: dict[str, int] = defaultdict(int)
     instrument_name_map: dict[str, str] = {}
 
-    si_rows = query_all(DB_SONG_INSTRUMENT, None)
-    for row in si_rows:
-        s_ids = extract_rel_ids(row, "楽曲")
-        if not s_ids or s_ids[0] not in song_ids:
-            continue
-        i_ids = extract_rel_ids(row, "楽器種別")
-        if not i_ids:
-            continue
-        inst_id = i_ids[0]
-        qty_str = extract_text(row, "必要台数")
-        try:
-            qty = int(float(qty_str)) if qty_str else 1
-        except ValueError:
-            qty = 1
-        required_map[inst_id] += qty
+    if song_ids:
+        pd_type_map  = get_types(DB_PART_DEFINITION)
+        pd_song_rel  = find_prop(pd_type_map, PARTDEF_SONG_REL_KEYS)
+        pd_inst_rel  = find_prop(pd_type_map, PARTDEF_INST_REL_KEYS)
+
+        pd_rows = query_all(DB_PART_DEFINITION, None)
+        for row in pd_rows:
+            s_ids = ext_rel(row, PARTDEF_SONG_REL_KEYS)
+            if not s_ids or s_ids[0] not in song_ids:
+                continue
+            i_ids = ext_rel(row, PARTDEF_INST_REL_KEYS)
+            if not i_ids:
+                continue
+            inst_id = i_ids[0]
+            # 必要台数：パート定義は1パート=1台として扱う（PARTDEF_COUNT_KEYSは参考）
+            qty_str = ext_text(row, PARTDEF_COUNT_KEYS)
+            try:
+                qty = int(float(qty_str)) if qty_str else 1
+            except ValueError:
+                qty = 1
+            required_map[inst_id] += qty
 
     # ── 5. 参加奏者の持参可能楽器を集計 ──────────────────────
-    # instrument_id → 持参可能人数（= 台数として扱う）
     bring_map: dict[str, int] = defaultdict(int)
 
     if attending_player_ids:
         pi_rows = query_all(DB_PLAYER_INSTRUMENT, None)
         for row in pi_rows:
-            p_ids = extract_rel_ids(row, "奏者")
+            # 演奏会フィルタ
+            if concert_id:
+                c_ids = ext_rel(row, PI_CONCERT_REL_KEYS)
+                if c_ids and concert_id not in c_ids:
+                    continue
+            p_ids = ext_rel(row, PI_PLAYER_REL_KEYS)
             if not p_ids or p_ids[0] not in attending_player_ids:
                 continue
-            # 持参可フラグが True のもののみ
-            bring_flag = extract_text(row, "持参可フラグ")
+            bring_flag = ext_text(row, PI_BRING_KEYS)
             if bring_flag != "True":
                 continue
-            i_ids = extract_rel_ids(row, "楽器種別")
+            i_ids = ext_rel(row, PI_INST_REL_KEYS)
             if not i_ids:
                 continue
             bring_map[i_ids[0]] += 1
@@ -125,12 +138,12 @@ def calc_rental_requirements(
         for row in inst_rows:
             rid = row.get("id", "")
             if rid in all_inst_ids:
-                instrument_name_map[rid] = extract_text(row, "楽器名") or rid
+                instrument_name_map[rid] = ext_text(row, INSTRUMENT_NAME_KEYS) or rid
 
     # ── 7. 差分を計算してリスト化 ─────────────────────────────
     results = []
     for inst_id, required in required_map.items():
-        bring = bring_map.get(inst_id, 0)
+        bring  = bring_map.get(inst_id, 0)
         rental = max(0, required - bring)
         results.append({
             "instrument_id":   inst_id,
@@ -140,35 +153,33 @@ def calc_rental_requirements(
             "rental_needed":   rental,
         })
 
-    # 楽器名でソート
     results.sort(key=lambda x: x["instrument_name"])
     return results
 
 
-def calc_rental_for_all_practices(ctx: dict, concert_id: str) -> dict[str, list[dict]]:
-    """
-    演奏会に紐づく全練習日のレンタル試算をまとめて返す。
-
-    Returns:
-        { practice_id: [rental_requirement, ...], ... }
-    """
-    query_all       = ctx["query_all"]
-    extract_rel_ids = ctx["extract_relation_ids"]
-    extract_text    = ctx["extract_prop_text"]
+def calc_rental_for_all_practices(ctx: dict, concert_id: str) -> dict:
+    """演奏会に紐づく全練習日のレンタル試算をまとめて返す。"""
+    query_all    = ctx["query_all"]
+    ext_text     = ctx["extract_prop_text_any"]
+    find_prop    = ctx["find_prop_name"]
+    get_types    = ctx["get_prop_types"]
 
     DB_PRACTICE = ctx["CONCERT_DB_PRACTICE"]
+    practice_type_map = get_types(DB_PRACTICE)
+    prac_concert_rel  = find_prop(practice_type_map, ["演奏会", "出演", "FK演奏会"])
 
     practice_rows = query_all(
         DB_PRACTICE,
-        {"filter": {"property": "演奏会", "relation": {"contains": concert_id}}},
+        {"filter": {"property": prac_concert_rel, "relation": {"contains": concert_id}}}
+        if prac_concert_rel else None,
     )
 
-    result: dict[str, list[dict]] = {}
+    result: dict = {}
     for row in practice_rows:
         pid = row.get("id", "")
         if not pid:
             continue
-        practice_name = extract_text(row, "練習名")
+        practice_name = ext_text(row, ["練習名", "タイトル", "PK練習名"])
         reqs = calc_rental_requirements(ctx, pid)
         result[pid] = {
             "name":         practice_name,

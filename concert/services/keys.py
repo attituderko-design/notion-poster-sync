@@ -108,6 +108,7 @@ RENTAL_QTY_KEYS           = ["台数", "数量", "Qty"]
 RENTAL_UNIT_PRICE_KEYS    = ["単価（円）", "単価", "UnitPrice"]
 RENTAL_CONFIRMED_KEYS     = ["確定フラグ", "確定", "Confirmed"]
 RENTAL_NOTE_KEYS          = ["備考", "メモ"]
+RENTAL_COST_TYPE_KEYS     = ["費用種別", "費用区分", "CostType"]
 RENTAL_KEY_KEYS           = ["rental_key", "RentalKey", "見積キー", "PK見積キー"]
 
 # ── PREFERENCE DB 追加キー ────────────────────────────────────
