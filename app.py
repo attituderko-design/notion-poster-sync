@@ -8322,10 +8322,15 @@ if system_mode == "HARMONIA":
 
     @st.cache_data(ttl=300, show_spinner=False)
     def _load_harmonia_concerts(_api_key: str, _db_id: str) -> list[dict]:
-        """Concert DB全件をキャッシュ付きで取得する（媒体フィルタなし）。"""
+        """ATLASから媒体=出演のみをAPI側フィルタで取得（キャッシュ付き）。"""
         from concert.services.notion_client import query_concert_db_all, get_concert_headers
         headers = get_concert_headers(_api_key)
-        return query_concert_db_all(_db_id, headers)
+        return query_concert_db_all(_db_id, headers, {
+            "filter": {
+                "property": "媒体",
+                "multi_select": {"contains": "出演"},
+            }
+        })
 
     def _harmony_concert_name(page: dict) -> str:
         name = (
