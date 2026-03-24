@@ -583,10 +583,8 @@ def _render_estimate_tab(ctx: dict):
                     continue
 
                 inst_id_v = inst_opts.get(inst_sel_v, "") if is_instrument else ""
-                st.write(f"DEBUG row{idx}: existing_id={existing_id!r} inst_id={inst_id_v[:8] if inst_id_v else 'empty'}")
-
-                # 対応する既存レコードID（初期データの行番号で対応）
                 existing_id = row_ids[idx] if idx < len(row_ids) else ""
+                st.write(f"DEBUG row{idx}: existing_id={existing_id!r} inst_id={inst_id_v[:8] if inst_id_v else 'empty'} cost={cost_type_v}")
 
                 if existing_id:
                     ok = _update_rental(
