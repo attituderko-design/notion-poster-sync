@@ -503,6 +503,7 @@ def _create_practice(
     memo: str,
     lat=None,
     lon=None,
+    song_ids: list | None = None,
 ) -> str:
     api   = ctx["api_request"]
     db_id = ctx["CONCERT_DB_PRACTICE"]
@@ -553,6 +554,8 @@ def _create_practice(
                 break
     ctx["put_prop_any"](props, type_map, PRACTICE_MEMO_KEYS, memo)
     ctx["put_key_any"](props, type_map, PRACTICE_KEY_KEYS, concert_id, name, dt_start, prefix="practice")
+    if song_ids:
+        ctx["put_prop_any"](props, type_map, PRACTICE_SONG_REL_KEYS, song_ids)
 
     res = api("post", "https://api.notion.com/v1/pages",
               json={"parent": {"database_id": db_id}, "properties": props})
@@ -575,6 +578,7 @@ def _update_practice(
     memo: str,
     lat=None,
     lon=None,
+    song_ids: list | None = None,
 ) -> bool:
     api   = ctx["api_request"]
     get_t = ctx["get_prop_types"]
@@ -619,6 +623,8 @@ def _update_practice(
                 break
     ctx["put_prop_any"](props, type_map, PRACTICE_MEMO_KEYS, memo)
     ctx["put_key_any"](props, type_map, PRACTICE_KEY_KEYS, concert_id, name, dt_start, prefix="practice")
+    if song_ids is not None:
+        ctx["put_prop_any"](props, type_map, PRACTICE_SONG_REL_KEYS, song_ids)
 
     res = api("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
     return res is not None and res.status_code == 200
@@ -877,6 +883,25 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
         memo = st.text_area("メモ", value=ext(existing, PRACTICE_MEMO_KEYS) if is_edit else "",
                             height=80, key=f"{prefix}memo", disabled=is_rest_day)
 
+        # 演奏曲選択（その練習日にやる曲）
+        song_opts: dict = {}
+        if selected_concert_id:
+            s_rows = _load_songs(ctx, selected_concert_id)
+            song_opts = {ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or s.get("id",""): s.get("id","")
+                         for s in s_rows}
+        cur_song_ids: list[str] = []
+        if is_edit:
+            cur_song_ids = ctx["extract_relation_ids_any"](existing, PRACTICE_SONG_REL_KEYS)
+        cur_song_names = [k for k, v in song_opts.items() if v in cur_song_ids]
+        selected_songs = st.multiselect(
+            "この日に練習する曲（未選択の場合は全曲対象）",
+            options=list(song_opts.keys()),
+            default=cur_song_names,
+            key=f"{prefix}songs",
+            disabled=is_rest_day,
+        )
+        selected_song_ids = [song_opts[s] for s in selected_songs if s in song_opts]
+
         label = "更新" if is_edit else "登録"
         submitted = st.form_submit_button(f"💾 {label}", use_container_width=True, type="primary")
 
@@ -904,10 +929,12 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
             chosen_lon = _ss(prefill_lon_key, None)
             if is_edit:
                 ok = _update_practice(ctx, existing["id"], name.strip(), concert_id,
-                                      dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo, chosen_lat, chosen_lon)
+                                      dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo,
+                                      chosen_lat, chosen_lon, selected_song_ids)
             else:
                 created_id = _create_practice(ctx, name.strip(), concert_id,
-                                              dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo, chosen_lat, chosen_lon)
+                                              dt_s, dt_e, venue, address, is_concert_day, is_rest_day, memo,
+                                              chosen_lat, chosen_lon, selected_song_ids)
                 ok = bool(created_id)
                 if ok and concert_id:
                     _bind_practice_concert_relation(ctx, created_id, concert_id)
