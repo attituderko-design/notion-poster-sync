@@ -842,29 +842,33 @@ def _render_assign_tab(ctx: dict):
             c1.markdown(f"**{iname}**")
             b = c2.checkbox("持参可", value=cur_b, key=f"bring_{c_id}_{p_id}_{iid}", label_visibility="collapsed")
             n = c3.text_input("備考", value=cur_n, label_visibility="collapsed", key=f"bring_note_{c_id}_{p_id}_{iid}")
-            changes.append({"iid": iid, "iname": iname, "b": b, "n": n, "eid": ex.get("id", "") if ex else ""})
+            changes.append({
+                "iid": iid, "iname": iname,
+                "b": b, "n": n,
+                "cur_b": cur_b, "cur_n": cur_n,
+                "eid": ex.get("id", "") if ex else "",
+            })
         if st.form_submit_button("💾 持参可を保存", use_container_width=True, type="primary"):
-            ok_n, ng_n = 0, 0
+            ok_n = ng_n = skip_n = 0
             for ch in changes:
-                if not ch["b"] and not ch["n"] and not ch["eid"]:
+                # 変更がない行はスキップ（差分保存）
+                no_change = (ch["b"] == ch["cur_b"]) and (ch["n"] == ch["cur_n"])
+                if no_change and not ch["eid"] and not ch["b"] and not ch["n"]:
+                    skip_n += 1
+                    continue
+                if no_change and ch["eid"]:
+                    skip_n += 1
                     continue
                 ok = _upsert_player_bring_for_concert(
-                    ctx,
-                    c_id,
-                    c_name,
-                    p_id,
-                    p_name,
+                    ctx, c_id, c_name, p_id, p_name,
                     participant_id,
-                    ch["iid"],
-                    ch["iname"],
-                    ch["b"],
-                    ch["n"],
-                    ch["eid"],
+                    ch["iid"], ch["iname"],
+                    ch["b"], ch["n"], ch["eid"],
                 )
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
             if ng_n == 0:
-                st.success(f"✅ {ok_n}件を保存しました。")
+                st.success(f"✅ {ok_n}件を保存しました。（変更なし {skip_n}件はスキップ）")
             else:
                 st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗しました。")
             _clear_player_cache()
