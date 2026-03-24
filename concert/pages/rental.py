@@ -554,7 +554,9 @@ def _render_estimate_tab(ctx: dict):
             pass
 
     # ── 保存ボタン ──
+    st.write(f"PRE-BUTTON: edited_df rows={len(edited_df) if edited_df is not None else 'None'}")
     if st.button("💾 まとめて保存", type="primary", use_container_width=True, key="est_save"):
+        st.write("BUTTON CLICKED")
         ok_n = fail_n = skip_n = 0
         # with st.spinner("保存中..."):
         if True:
