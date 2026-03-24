@@ -23,7 +23,7 @@ _DEFAULT_CONCERT_DB_IDS = {
     "practice": "32c4532d7d56804caac4cae1fd4ada4f",         # 練習 Practice
     "song": "3224532d7d56804a85dbd2eab6ac2050",             # ArtéMis APOLLO
     "instrument": "32c4532d7d56800cb34ac6d1b1c3ecdb",       # 楽器種別 Instrument
-    "song_instrument": "32c4532d7d56803ba3e1c8c87d1cd0dc",  # パート定義DB（曲別必要楽器の代替）
+    "song_instrument": "32c4532d7d56803ba3e1c8c87d1cd0dc",  # PART_DEFINITION DB（SONG_INSTRUMENTの代替）
     "player": "3224532d7d568072bbb0c2cea44d67d9",           # 出演者DB
     "participant": "3224532d7d56808e8dd0eb06c11f92db",      # 演奏会参加者DB（既存）
     "attendance": "32c4532d7d5680e6813fe67bae986c39",       # 練習出欠DB
@@ -95,7 +95,7 @@ def get_concert_secrets() -> dict:
         "練習DB": db_practice,
         "楽曲DB": db_song,
         "楽器種別DB": db_instrument,
-        "曲別必要楽器DB": db_song_instrument,
+        "パート定義DB(SONG_INSTRUMENT兼用)": db_song_instrument,
         "奏者DB": db_player,
         "演奏会参加者DB": db_participant,
         "出欠DB": db_attendance,
