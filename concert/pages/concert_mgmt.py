@@ -1068,165 +1068,102 @@ def _auto_mark_concert_day_attendance(ctx: dict, practice_id: str, concert_id: s
 # ============================================================
 
 def render(ctx: dict):
-    st.header("🎼 演奏会・練習管理")
-    global_concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+    st.header("🗓️ 練習管理")
+    global_concert_id   = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
     global_concert_name = (ctx.get("SELECTED_CONCERT_NAME") or "").strip()
 
-    tab_concert, tab_practice = st.tabs(["演奏会", "練習"])
+    if not global_concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
+        return
 
-    # ── 演奏会タブ ────────────────────────────────────────────
-    with tab_concert:
-        concerts = _load_concerts(ctx)
-        if global_concert_id:
-            concerts = [c for c in concerts if c.get("id", "") == global_concert_id]
+    st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
 
-        with st.expander("➕ 新規演奏会を登録", expanded=(len(concerts) == 0)):
-            _render_concert_form(ctx)
+    concerts = _load_concerts(ctx)
+    filter_concert_id    = global_concert_id
+    selected_concert_page = next((c for c in concerts if c.get("id") == filter_concert_id), None)
 
-        st.divider()
-
-        if not concerts:
-            st.info("演奏会がまだ登録されていません。")
-        else:
-            st.subheader(f"登録済み演奏会（{len(concerts)}件）")
-            st.caption("ここは演奏会の参照・選択が主目的です。編集は必要なときだけ開いてください。")
-            col_info, col_refresh = st.columns([8, 1])
-            if global_concert_id:
-                col_info.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
+    with st.expander("⚙️ 練習回を一括生成", expanded=False):
+        st.caption("演奏会を選択後、練習回数を入力すると「第1回練習〜第N回練習」と「第N+1回練習（本番）」を作成します。")
+        st.caption("生成後は、下の「登録済み練習」一覧を開いて各回の日時・会場を入力してください。")
+        bulk_count = int(st.number_input("練習回数", min_value=1, value=3, step=1, key="practice_bulk_count"))
+        if st.button("➕ 練習回を生成", key="practice_bulk_generate", type="primary", use_container_width=True):
+            if not filter_concert_id or not selected_concert_page:
+                st.error("先に「絞り込み：演奏会」で対象演奏会を選択してください。")
             else:
-                col_info.caption("サイドバーで演奏会を選択すると対象が絞り込まれます。")
-            concert_query = global_concert_name if global_concert_id else ""
-            if col_refresh.button("🔄", key="refresh_concerts", help="一覧を再読み込み"):
-                st.session_state.pop("concert_list", None)
-                st.rerun()
-
-            filtered_concerts = []
-            for c in concerts:
-                if not _contains_query(
-                    [
-                        _concert_display_name(c, ctx),
-                        ctx["extract_prop_text_any"](c, CONCERT_NAME_KEYS),
-                        ctx["extract_prop_text_any"](c, CONCERT_DATE_KEYS),
-                        ctx["extract_prop_text_any"](c, CONCERT_VENUE_KEYS),
-                        ctx["extract_prop_text_any"](c, CONCERT_ADDRESS_KEYS),
-                        ctx["extract_prop_text_any"](c, CONCERT_MEMO_KEYS),
-                    ],
-                    concert_query,
-                ):
-                    continue
-                filtered_concerts.append(c)
-
-            st.caption(f"表示件数: {len(filtered_concerts)} / {len(concerts)}")
-            if not filtered_concerts:
-                st.info("検索条件に一致する演奏会がありません。")
-            for c in filtered_concerts:
-                label = _concert_display_name(c, ctx)
-                with st.expander(label, expanded=False):
-                    cid = c.get("id", "")
-                    st.caption(f"ID: {cid}")
-                    sel_col, edit_col = st.columns([2, 3])
-                    if sel_col.button("✅ この演奏会を練習入力対象にする", key=f"use_concert_{cid}", use_container_width=True):
-                        st.session_state["practice_filter_concert"] = label
-                        st.success("練習タブでこの演奏会が選択されるように設定しました。")
-                    edit_open = edit_col.checkbox("この演奏会を編集する", key=f"open_edit_concert_{cid}", value=False)
-                    if edit_open:
-                        _render_concert_form(ctx, existing=c)
-
-    # ── 練習タブ ──────────────────────────────────────────────
-    with tab_practice:
-        st.caption(f"Practice DB: `{ctx['CONCERT_DB_PRACTICE']}`")
-        concerts = _load_concerts(ctx)
-
-        # 演奏会フィルタ（サイドバー選択を使用）
-        if not global_concert_id:
-            st.info("サイドバーで演奏会を選択してください。")
-            return
-        filter_concert_id = global_concert_id
-        st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
-        selected_concert_page = next((c for c in concerts if c.get("id") == filter_concert_id), None)
-
-        with st.expander("⚙️ 練習回を一括生成", expanded=False):
-            st.caption("演奏会を選択後、練習回数を入力すると「第1回練習〜第N回練習」と「第N+1回練習（本番）」を作成します。")
-            st.caption("生成後は、下の「登録済み練習」一覧を開いて各回の日時・会場を入力してください。")
-            bulk_count = int(st.number_input("練習回数", min_value=1, value=3, step=1, key="practice_bulk_count"))
-            if st.button("➕ 練習回を生成", key="practice_bulk_generate", type="primary", use_container_width=True):
-                if not filter_concert_id or not selected_concert_page:
-                    st.error("先に「絞り込み：演奏会」で対象演奏会を選択してください。")
-                else:
-                    with st.spinner("練習回を生成中..."):
-                        created, skipped = _bulk_generate_practice_rows(ctx, selected_concert_page, bulk_count)
-                    st.success(f"✅ 生成完了: 作成 {created} 件 / スキップ {skipped} 件")
-                    for k in list(st.session_state.keys()):
-                        if k.startswith("practice_list_"):
-                            st.session_state.pop(k, None)
-                    st.rerun()
-
-        with st.expander("➕ 新規練習を登録", expanded=False):
-            _render_practice_form(ctx, concerts)
-
-        st.divider()
-
-        practices = _load_practices(ctx, filter_concert_id)
-        if filter_concert_id and not practices:
-            fallback_all = _load_practices(ctx, "")
-            if fallback_all:
-                st.warning("選択演奏会へのリレーション未設定の可能性があります。未絞り込みの練習を表示します。")
-                practices = fallback_all
-
-        if not practices:
-            st.info("この演奏会に練習がまだ登録されていません。")
-        else:
-            st.caption(f"登録済み練習（{len(practices)}件）")
-            col_search, col_refresh = st.columns([8, 1])
-            practice_query = col_search.text_input(
-                "練習を検索",
-                value=_ss("concert_mgmt_practice_query", ""),
-                placeholder="例: 第3回 / 2026-07 / 本番 / スタジオ",
-                key="concert_mgmt_practice_query",
-            )
-            if col_refresh.button("🔄", key="refresh_practices", help="一覧を再読み込み"):
+                with st.spinner("練習回を生成中..."):
+                    created, skipped = _bulk_generate_practice_rows(ctx, selected_concert_page, bulk_count)
+                st.success(f"✅ 生成完了: 作成 {created} 件 / スキップ {skipped} 件")
                 for k in list(st.session_state.keys()):
                     if k.startswith("practice_list_"):
                         st.session_state.pop(k, None)
                 st.rerun()
 
-            # 練習回（第N回練習）を優先して降順表示（未設定日時でも入力しやすくする）
-            def _practice_round_no(p: dict) -> int:
-                nm = ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or ""
-                m = re.search(r"第\s*(\d+)\s*回練習", nm)
-                return int(m.group(1)) if m else 0
+    with st.expander("➕ 新規練習を登録", expanded=False):
+        _render_practice_form(ctx, concerts)
 
-            def _prac_date(p: dict) -> str:
-                d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
-                return d[:10] if d else ""
+    st.divider()
 
-            sorted_practices = sorted(
-                practices,
-                key=lambda p: (_practice_round_no(p), _prac_date(p)),
-            )
-            filtered_practices = []
-            for p in sorted_practices:
-                if not _contains_query(
-                    [
-                        _practice_display_name(p, ctx),
-                        ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS),
-                        ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS),
-                        ctx["extract_prop_text_any"](p, PRACTICE_VENUE_KEYS),
-                        ctx["extract_prop_text_any"](p, PRACTICE_ADDRESS_KEYS),
-                        ctx["extract_prop_text_any"](p, PRACTICE_MEMO_KEYS),
-                    ],
-                    practice_query,
-                ):
-                    continue
-                filtered_practices.append(p)
+    practices = _load_practices(ctx, filter_concert_id)
+    if filter_concert_id and not practices:
+        fallback_all = _load_practices(ctx, "")
+        if fallback_all:
+            st.warning("選択演奏会へのリレーション未設定の可能性があります。未絞り込みの練習を表示します。")
+            practices = fallback_all
 
-            st.caption(f"表示件数: {len(filtered_practices)} / {len(practices)}")
-            if not filtered_practices:
-                st.info("検索条件に一致する練習がありません。")
-            for p in filtered_practices:
-                label = _practice_display_name(p, ctx)
-                is_concert_day = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
-                if is_concert_day:
-                    label = "🎼 本番当日" + f"（{_prac_date(p)[:10]}）" if not label.startswith("🎼") else label
-                with st.expander(label, expanded=False):
-                    _render_practice_form(ctx, concerts, existing=p)
+    if not practices:
+        st.info("この演奏会に練習がまだ登録されていません。")
+    else:
+        st.caption(f"登録済み練習（{len(practices)}件）")
+        col_search, col_refresh = st.columns([8, 1])
+        practice_query = col_search.text_input(
+            "練習を検索",
+            value=_ss("concert_mgmt_practice_query", ""),
+            placeholder="例: 第3回 / 2026-07 / 本番 / スタジオ",
+            key="concert_mgmt_practice_query",
+        )
+        if col_refresh.button("🔄", key="refresh_practices", help="一覧を再読み込み"):
+            for k in list(st.session_state.keys()):
+                if k.startswith("practice_list_"):
+                    st.session_state.pop(k, None)
+            st.rerun()
+
+        # 練習回（第N回練習）を優先して降順表示（未設定日時でも入力しやすくする）
+        def _practice_round_no(p: dict) -> int:
+            nm = ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or ""
+            m = re.search(r"第\s*(\d+)\s*回練習", nm)
+            return int(m.group(1)) if m else 0
+
+        def _prac_date(p: dict) -> str:
+            d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
+            return d[:10] if d else ""
+
+        sorted_practices = sorted(
+            practices,
+            key=lambda p: (_practice_round_no(p), _prac_date(p)),
+        )
+        filtered_practices = []
+        for p in sorted_practices:
+            if not _contains_query(
+                [
+                    _practice_display_name(p, ctx),
+                    ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS),
+                    ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS),
+                    ctx["extract_prop_text_any"](p, PRACTICE_VENUE_KEYS),
+                    ctx["extract_prop_text_any"](p, PRACTICE_ADDRESS_KEYS),
+                    ctx["extract_prop_text_any"](p, PRACTICE_MEMO_KEYS),
+                ],
+                practice_query,
+            ):
+                continue
+            filtered_practices.append(p)
+
+        st.caption(f"表示件数: {len(filtered_practices)} / {len(practices)}")
+        if not filtered_practices:
+            st.info("検索条件に一致する練習がありません。")
+        for p in filtered_practices:
+            label = _practice_display_name(p, ctx)
+            is_concert_day = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
+            if is_concert_day:
+                label = "🎼 本番当日" + f"（{_prac_date(p)[:10]}）" if not label.startswith("🎼") else label
+            with st.expander(label, expanded=False):
+                _render_practice_form(ctx, concerts, existing=p)
