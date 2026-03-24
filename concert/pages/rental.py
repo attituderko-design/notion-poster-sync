@@ -555,6 +555,11 @@ def _render_estimate_tab(ctx: dict):
 
     # ── 保存ボタン ──
     if st.button("💾 まとめて保存", type="primary", use_container_width=True, key="est_save"):
+        st.write(f"DEBUG rows={len(edited_df)}, inst_opts_count={len(inst_opts)}")
+        for idx, row in edited_df.iterrows():
+            inst_sel = str(row.get("楽器種別") or "").strip()
+            inst_id  = inst_opts.get(inst_sel, "NOT_FOUND")
+            st.write(f"  row{idx}: 楽器={inst_sel!r} → id={inst_id[:8] if inst_id != 'NOT_FOUND' else 'NOT_FOUND'}")
         ok_n = fail_n = skip_n = 0
         with st.spinner("保存中..."):
             # 保存後に削除すべき既存行を追跡
