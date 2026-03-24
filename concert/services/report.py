@@ -15,14 +15,14 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-FONT_PATH_REGULAR = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-FONT_PATH_MEDIUM  = "/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc"
+FONT_PATH_REGULAR = "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf"
+FONT_PATH_BOLD    = "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf"  # IPAゴシック（プロポーショナル）をBold代用
 
 def _register_fonts():
     try:
-        pdfmetrics.registerFont(TTFont("NotoSans",   FONT_PATH_REGULAR, subfontIndex=0))
-        pdfmetrics.registerFont(TTFont("NotoSansB",  FONT_PATH_MEDIUM,  subfontIndex=0))
-        return "NotoSans", "NotoSansB"
+        pdfmetrics.registerFont(TTFont("IPAGothic",  FONT_PATH_REGULAR))
+        pdfmetrics.registerFont(TTFont("IPAGothicB", FONT_PATH_BOLD))
+        return "IPAGothic", "IPAGothicB"
     except Exception:
         return "Helvetica", "Helvetica-Bold"
 
