@@ -23,7 +23,7 @@ INSTRUMENT_NAME_KEYS = ["楽器名", "タイトル", "PK楽器名"]
 SONG_NAME_KEYS = ["曲名", "タイトル", "PK曲名", "作品名"]
 SONG_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
 PARTDEF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
-PARTDEF_INST_REL_KEYS = ["必要楽器", "楽器", "楽器種別", "FK楽器種別", "担当楽器"]
+PARTDEF_INST_REL_KEYS = ["楽器種別", "楽器", "FK楽器種別", "担当楽器", "必要楽器"]
 
 ATT_RECORD_KEYS = ["レコード名", "タイトル"]
 ATT_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者"]
@@ -523,17 +523,59 @@ def _render_player_tab(ctx: dict):
 
 def _render_attendance_tab(ctx: dict):
     concerts = [c for c in _load_concerts(ctx) if _is_performance_media_concert(c)]
+    if not concerts:
+        st.info("媒体=出演 の演奏会が見つかりません。ATLASで媒体設定を確認してください。")
+        return
     all_c_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     global_concert_id, global_concert_name = _get_global_concert_filter(ctx, all_c_opts)
-    if not global_concert_id:
-        st.info("サイドバーで演奏会を選択してください。")
+    if global_concert_id:
+        c_id = global_concert_id
+        c_name = global_concert_name or global_concert_id
+        st.caption(f"対象演奏会: {c_name}")
+    else:
+        c_query = st.text_input(
+            "演奏会を検索",
+            value=st.session_state.get("players_concert_search", ""),
+            key="players_concert_search",
+            placeholder="例: 2026 / 定期 / Happy Hour / Osaka",
+        ).strip().lower()
+        c_opts = {k: v for k, v in all_c_opts.items() if (not c_query) or (c_query in k.lower())}
+        if not c_opts:
+            st.warning("検索条件に一致する演奏会がありません。絞り込みを緩めてください。")
+            return
+        c_name = st.selectbox("演奏会を選択", list(c_opts.keys()), key="att_concert_sel")
+        c_id = c_opts.get(c_name, "")
+    if not c_id:
         return
-    c_id = global_concert_id
-    c_name = global_concert_name or global_concert_id
-    st.caption(f"対象演奏会: {c_name}")
+    with st.expander("🔍 出欠DBデバッグ", expanded=False):
+        st.caption(
+            f"CONCERT_DB_CONCERT: `{ctx['CONCERT_DB_CONCERT']}` / "
+            f"CONCERT_DB_PRACTICE: `{ctx['CONCERT_DB_PRACTICE']}` / "
+            f"CONCERT_DB_ATTENDANCE: `{ctx['CONCERT_DB_ATTENDANCE']}`"
+        )
+        t_att = ctx["get_prop_types"](ctx["CONCERT_DB_ATTENDANCE"])
+        rels = [k for k, v in (t_att or {}).items() if v == "relation"]
+        st.caption(f"出欠DB relation候補: {', '.join(rels) if rels else '(なし)'}")
     practices = _load_practices(ctx, c_id)
     if not practices:
         st.info("この演奏会に練習が登録されていません。")
+        with st.expander("🔍 練習読込デバッグ", expanded=False):
+            all_rows = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])
+            st.caption(
+                f"CONCERT_DB_CONCERT: `{ctx['CONCERT_DB_CONCERT']}` / "
+                f"CONCERT_DB_PRACTICE: `{ctx['CONCERT_DB_PRACTICE']}`"
+            )
+            st.caption(f"選択演奏会ID: `{c_id or '(未選択)'}`")
+            st.caption(f"練習DB全件数: {len(all_rows)}")
+            if all_rows:
+                t = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"])
+                rel_props = _practice_rel_prop_candidates(t, ctx)
+                st.caption(f"練習DB relation候補: {', '.join(rel_props) if rel_props else '(なし)'}")
+                sample = all_rows[0]
+                st.caption(f"サンプル練習ID: `{sample.get('id', '')}`")
+                if rel_props:
+                    rel_dump = {rp: ctx["extract_relation_ids"](sample, rp) for rp in rel_props}
+                    st.json(rel_dump)
         return
 
     all_players = _load_players(ctx)
@@ -711,14 +753,31 @@ def _render_assign_tab(ctx: dict):
     st.caption("パート希望・アサイン確定は『アサイン検討』画面で行います。")
 
     concerts = [c for c in _load_concerts(ctx) if _is_performance_media_concert(c)]
+    if not concerts:
+        st.info("媒体=出演 の演奏会が見つかりません。")
+        return
+
     all_c_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     global_concert_id, global_concert_name = _get_global_concert_filter(ctx, all_c_opts)
-    if not global_concert_id:
-        st.info("サイドバーで演奏会を選択してください。")
+    if global_concert_id:
+        c_id = global_concert_id
+        c_name = global_concert_name or global_concert_id
+        st.caption(f"対象演奏会: {c_name}")
+    else:
+        c_query = st.text_input(
+            "演奏会を検索",
+            value=st.session_state.get("bring_concert_search", ""),
+            key="bring_concert_search",
+            placeholder="例: Happy Hour / 2026 / 定期",
+        ).strip().lower()
+        c_opts = {k: v for k, v in all_c_opts.items() if (not c_query) or (c_query in k.lower())}
+        if not c_opts:
+            st.warning("検索条件に一致する演奏会がありません。")
+            return
+        c_name = st.selectbox("演奏会を選択", list(c_opts.keys()), key="bring_concert_sel")
+        c_id = c_opts.get(c_name, "")
+    if not c_id:
         return
-    c_id = global_concert_id
-    c_name = global_concert_name or global_concert_id
-    st.caption(f"対象演奏会: {c_name}")
 
     participants = _load_participants(ctx, c_id)
     if not participants:
