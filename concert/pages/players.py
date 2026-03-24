@@ -802,25 +802,6 @@ def _render_assign_tab(ctx: dict):
     songs = _load_concert_songs(ctx, c_id)
     required_inst_ids = set()
 
-    # デバッグ情報
-    with st.expander("🔍 デバッグ情報（解決後に削除）", expanded=True):
-        st.caption(f"演奏会ID: {c_id}")
-        st.caption(f"楽曲数: {len(songs)}")
-        t_partdef = ctx["get_prop_types"](ctx["CONCERT_DB_PART_DEFINITION"])
-        st.caption(f"パート定義DBプロパティ: {list(t_partdef.keys())}")
-        rel_song = ctx["find_prop_name"](t_partdef, PARTDEF_SONG_REL_KEYS)
-        rel_inst = ctx["find_prop_name"](t_partdef, PARTDEF_INST_REL_KEYS)
-        st.caption(f"楽曲リレーション検出: 「{rel_song}」 (候補: {PARTDEF_SONG_REL_KEYS})")
-        st.caption(f"楽器リレーション検出: 「{rel_inst}」 (候補: {PARTDEF_INST_REL_KEYS})")
-        for s in songs:
-            sid = s.get("id", "")
-            sname = ctx["extract_prop_text_any"](s, ["曲名", "タイトル"]) or sid
-            parts = _load_partdefs_for_song(ctx, sid)
-            st.caption(f"曲「{sname}」: パート定義 {len(parts)}件")
-            for p in parts[:3]:
-                iids = ctx["extract_relation_ids_any"](p, PARTDEF_INST_REL_KEYS)
-                st.caption(f"  → 楽器IDs: {iids}")
-
     for s in songs:
         sid = s.get("id", "")
         for part in _load_partdefs_for_song(ctx, sid):
