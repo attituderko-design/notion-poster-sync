@@ -555,13 +555,9 @@ def _render_estimate_tab(ctx: dict):
 
     # ── 保存ボタン ──
     if st.button("💾 まとめて保存", type="primary", use_container_width=True, key="est_save"):
-        st.write(f"DEBUG rows={len(edited_df)}, inst_opts_count={len(inst_opts)}")
-        for idx, row in edited_df.iterrows():
-            inst_sel = str(row.get("楽器種別") or "").strip()
-            inst_id  = inst_opts.get(inst_sel, "NOT_FOUND")
-            st.write(f"  row{idx}: 楽器={inst_sel!r} → id={inst_id[:8] if inst_id != 'NOT_FOUND' else 'NOT_FOUND'}")
         ok_n = fail_n = skip_n = 0
-        with st.spinner("保存中..."):
+        # with st.spinner("保存中..."):
+        if True:
             # 保存後に削除すべき既存行を追跡
             saved_existing_ids: set[str] = set()
 
@@ -578,13 +574,16 @@ def _render_estimate_tab(ctx: dict):
                 # 楽器レンタル以外は楽器種別不要
                 is_instrument = (cost_type_v == "楽器レンタル")
                 if is_instrument and not inst_sel_v:
+                    st.write(f"DEBUG skip row{idx}: inst_sel_v empty")
                     skip_n += 1
                     continue
                 if not is_instrument and not item_name_v:
+                    st.write(f"DEBUG skip row{idx}: item_name_v empty")
                     skip_n += 1
                     continue
 
                 inst_id_v = inst_opts.get(inst_sel_v, "") if is_instrument else ""
+                st.write(f"DEBUG row{idx}: existing_id={existing_id!r} inst_id={inst_id_v[:8] if inst_id_v else 'empty'}")
 
                 # 対応する既存レコードID（初期データの行番号で対応）
                 existing_id = row_ids[idx] if idx < len(row_ids) else ""
