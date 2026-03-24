@@ -400,6 +400,28 @@ def _bring_count(solution: list[Assignment], pref_map: dict[tuple[str, str, str]
     return n
 
 
+def _unassigned_penalty(
+    solution: list[Assignment],
+    pref_map: dict[tuple[str, str, str], Pref],
+    all_player_ids: list[str],
+) -> float:
+    """
+    希望を出した（priority > 0）のに割り当てられなかったパートにペナルティを付与。
+    乗りたかったのに乗れなかった人が不公平にならないよう公平性重視の候補Cで使用。
+    ペナルティ = 未割当の希望数 × 1.0点（奏者のスコアから差し引く概念）
+    """
+    assigned_keys: set[tuple[str, str, str]] = {
+        (a.player_id, a.song_id, a.part_id) for a in solution
+    }
+    # 希望を出したが割り当てられなかった件数を奏者ごとに集計
+    unassigned: dict[str, int] = {pid: 0 for pid in all_player_ids}
+    for (pid, sid, part_id), p in pref_map.items():
+        if p.priority > 0 and (pid, sid, part_id) not in assigned_keys:
+            unassigned[pid] = unassigned.get(pid, 0) + 1
+    # ペナルティ合計（全奏者の未割当希望数の合計）
+    return float(sum(unassigned.values()))
+
+
 def _rest_std(solution: list[Assignment], all_player_ids: list[str]) -> float:
     # 簡易版: 割当件数の標準偏差を逆指標として利用
     c = {pid: 0 for pid in all_player_ids}
@@ -489,14 +511,14 @@ def _calc_stats(solution: list[Assignment], pref_map: dict[tuple[str, str, str],
         "min_score": _min_player_score(solution, pref_map),
         "rental_count": max(len(solution) - _bring_count(solution, pref_map), 0),
         "rest_std": round(_rest_std(solution, all_player_ids), 4),
+        "unassigned_penalty": _unassigned_penalty(solution, pref_map, all_player_ids),
     }
 
 
 def solve_all(ctx: dict, concert_id: str) -> list[dict]:
     prefs = _load_preferences(ctx, concert_id)
     reqs = _load_requirements(ctx, concert_id)
-    # 本番欠席は運用上存在しないため、Attendanceはパート割当に使わない
-    absent: set[str] = set()
+    absent = _build_absent_set(ctx, concert_id)
 
     if not prefs or not reqs:
         return []
@@ -511,8 +533,9 @@ def solve_all(ctx: dict, concert_id: str) -> list[dict]:
     def obj_b(sol):  # 総スコア最大
         return _total_score(sol, pref_map)
 
-    def obj_c(sol):  # 公平性
-        return _min_player_score(sol, pref_map) * 1000 + _total_score(sol, pref_map)
+    def obj_c(sol):  # 公平性（未割当ペナルティ込み）
+        penalty = _unassigned_penalty(sol, pref_map, all_player_ids)
+        return _min_player_score(sol, pref_map) * 1000 + _total_score(sol, pref_map) - penalty * 10
 
     def obj_d(sol):  # レンタル最小
         return _bring_count(sol, pref_map) * 1000 + _total_score(sol, pref_map)
