@@ -73,14 +73,13 @@ def calc_rental_requirements(
         ids = ext_rel(practice_row, PRACTICE_CONCERT_REL_KEYS)
         concert_id = ids[0] if ids else ""
 
-    # 打楽器休みフラグ確認
+    # 打楽器休みフラグ確認（Trueなら問答無用で必要台数0）
     is_percussion_off = False
-    if practice_row and prac_perc_off_rel:
+    if practice_row:
         flag = ext_text(practice_row, PRACTICE_PERCUSSION_OFF_KEYS)
         is_percussion_off = flag in ("True", "true", "1", "✓", "はい", "yes")
 
-    # 打楽器休みかつ全員欠席なら必要台数0
-    if is_percussion_off and not attending_player_ids:
+    if is_percussion_off:
         return []
 
     # ── 3. この練習日に演奏する曲を取得 ──────────────────────

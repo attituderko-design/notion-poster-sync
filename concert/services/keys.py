@@ -24,7 +24,7 @@ PRACTICE_MEMO_KEYS        = ["メモ", "備考"]
 PRACTICE_REST_KEYS        = ["休憩フラグ", "休憩"]
 PRACTICE_KEY_KEYS         = ["practice_key", "PracticeKey", "練習キー", "PK練習キー"]
 PRACTICE_SONG_REL_KEYS    = ["演奏曲", "楽曲", "FK楽曲"]
-PRACTICE_PERCUSSION_OFF_KEYS = ["打楽器不要フラグ", "打楽器不要"]
+PRACTICE_PERCUSSION_OFF_KEYS = ["打楽器休み", "打楽器不要フラグ", "打楽器不要", "打楽器休みフラグ"]
 
 # ── PERFORMER（出演者）DB ────────────────────────────────────
 PLAYER_NAME_KEYS          = ["氏名", "名前", "表示名", "タイトル"]
