@@ -252,7 +252,7 @@ def _backfill_all_concert_keys(ctx: dict) -> dict:
     out["participant"] = _backfill_pk_for_db(
         ctx,
         ctx["CONCERT_DB_PARTICIPANT"],
-        PARTICIPANT_KEY_KEYS,
+        PARTICIPANT_RECORD_KEYS,
         "participant",
         lambda r: [
             ",".join(ctx["extract_relation_ids_any"](r, participant_concert_rel)),

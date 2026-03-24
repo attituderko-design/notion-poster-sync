@@ -367,7 +367,7 @@ def _upsert_participant(
     ctx["put_prop_any"](props, t, PARTICIPANT_RECORD_KEYS, f"{player_name} × {concert_name}")
     ctx["put_prop_any"](props, t, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PARTICIPANT_PLAYER_REL_KEYS, player_id)
-    ctx["put_key_any"](props, t, PARTICIPANT_KEY_KEYS, concert_id, player_id, prefix="participant")
+    ctx["put_key_any"](props, t, PARTICIPANT_RECORD_KEYS, concert_id, player_id, prefix="participant")
     if existing_id:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
     else:
