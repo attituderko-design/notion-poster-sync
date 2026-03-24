@@ -362,6 +362,16 @@ def _load_concerts(ctx) -> list[dict]:
     return st.session_state.get("concertmgmt_concert_list", [])
 
 
+def _load_songs(ctx, concert_id: str) -> list[dict]:
+    key = f"song_list_{concert_id}"
+    if key not in st.session_state:
+        t = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
+        rel = ctx["find_prop_name"](t, SONG_CONCERT_REL_KEYS)
+        f = {"filter": {"property": rel, "relation": {"contains": concert_id}}} if rel else None
+        st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_SONG"], f)
+    return st.session_state.get(key, [])
+
+
 def _load_practices(ctx, concert_id: str = "") -> list[dict]:
     # 練習データは手入力→即確認の運用が多いため毎回最新を取得する
     rows = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"])

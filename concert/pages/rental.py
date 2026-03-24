@@ -233,6 +233,14 @@ def _render_calc_tab(ctx: dict):
     if not results:
         return
 
+    if st.checkbox("🔍 デバッグ（持参可フラグ）", key="debug_bring_chk"):
+        debug_bring = ctx.get("_debug_bring", [])
+        debug_att   = ctx.get("_debug_attending", [])
+        st.caption(f"出席者IDs（{len(debug_att)}件）: {[x[:8] for x in debug_att]}")
+        st.caption(f"PLAYER_INSTRUMENT件数: {len(debug_bring)}件")
+        for d in debug_bring[:10]:
+            st.caption(f"  player={d['player_id'][:8]} in_attending={d['in_attending']} bring={d['bring_flag']} inst={d['inst_id']}")
+
     practices = _load_practices(ctx, concert_id)
 
     def _prac_date(p):
