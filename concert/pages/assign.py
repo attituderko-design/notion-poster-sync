@@ -889,26 +889,141 @@ def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: d
 
 
 # ============================================================
-# タブ3：割当結果確認
+# タブ3：アサイン確定
 # ============================================================
 
+def _load_confirmed_rows(ctx: dict, concert_id: str) -> list[dict]:
+    """担当フラグ=Trueのレコードを取得（演奏会の楽曲に絞る）。"""
+    key = f"confirmed_rows_{concert_id}"
+    if key not in st.session_state:
+        pi_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"])
+        song_rows = ctx["query_all"](
+            ctx["CONCERT_DB_SONG"],
+            {"filter": {"property": "演奏会", "relation": {"contains": concert_id}}},
+        )
+        song_id_set = {r.get("id") for r in song_rows}
+        confirmed = []
+        for r in pi_rows:
+            if ctx["extract_prop_text"](r, "担当フラグ") != "True":
+                continue
+            sids = ctx["extract_relation_ids"](r, "楽曲")
+            if sids and sids[0] in song_id_set:
+                confirmed.append(r)
+        st.session_state[key] = confirmed
+    return st.session_state.get(key, [])
+
+
+def _render_matrix(ctx: dict, confirmed_rows: list[dict],
+                   players: list, songs: list) -> None:
+    """奕者×曲のマトリクス表示。"""
+    if not confirmed_rows:
+        return
+
+    inst_rows     = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
+    inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
+    player_name_map = {p.get("id"): _player_name(p, ctx) for p in players}
+    song_name_map   = {s.get("id"): _song_name(s, ctx) for s in songs}
+
+    # (player_id, song_id) → パート名リスト
+    matrix: dict[tuple, list[str]] = defaultdict(list)
+    for r in confirmed_rows:
+        pids = ctx["extract_relation_ids"](r, "奏者")
+        sids = ctx["extract_relation_ids"](r, "楽曲")
+        iids = ctx["extract_relation_ids"](r, "楽器種別")
+        if not (pids and sids):
+            continue
+        part_name = inst_name_map.get(iids[0], "?") if iids else "?"
+        matrix[(pids[0], sids[0])].append(part_name)
+
+    sorted_players = sorted(players, key=lambda x: _player_name(x, ctx))
+    sorted_songs   = sorted(songs,   key=lambda x: _song_name(x, ctx))
+
+    # HTMLマトリクス生成
+    th_style = (
+        "padding:6px 10px;font-size:11px;font-weight:500;"
+        "color:var(--color-text-secondary);border-bottom:0.5px solid rgba(0,0,0,0.1);"
+        "text-align:left;white-space:nowrap;"
+    )
+    td_style = (
+        "padding:6px 10px;font-size:12px;border-bottom:0.5px solid rgba(0,0,0,0.07);"
+        "vertical-align:top;"
+    )
+    td_name_style = td_style + "font-weight:500;color:var(--color-text-primary);white-space:nowrap;"
+    td_part_style = td_style + "color:var(--color-text-secondary);"
+    td_none_style = td_style + "color:var(--color-text-tertiary);"
+
+    header_cols = "".join(
+        f'<th style="{th_style}">{_song_name(s, ctx)}</th>'
+        for s in sorted_songs
+    )
+    rows_html = ""
+    for pl in sorted_players:
+        pid   = pl.get("id", "")
+        pname = _player_name(pl, ctx)
+        cells = f'<td style="{td_name_style}">{pname}</td>'
+        for s in sorted_songs:
+            sid   = s.get("id", "")
+            parts = matrix.get((pid, sid), [])
+            if parts:
+                cells += f'<td style="{td_part_style}">{"<br>".join(parts)}</td>'
+            else:
+                cells += f'<td style="{td_none_style}">—</td>'
+        rows_html += f"<tr>{cells}</tr>"
+
+    html = f"""
+<div style="overflow-x:auto;margin-bottom:1.5rem;">
+<table style="width:100%;border-collapse:collapse;font-size:13px;
+              background:var(--color-background-primary);
+              border:0.5px solid rgba(0,0,0,0.1);border-radius:10px;overflow:hidden;">
+  <thead>
+    <tr style="background:var(--color-background-secondary);">
+      <th style="{th_style}">奏者</th>{header_cols}
+    </tr>
+  </thead>
+  <tbody>{rows_html}</tbody>
+</table>
+</div>"""
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def _reset_assignments(ctx: dict, concert_id: str) -> tuple[int, int]:
+    """この演奏会の全PlayerInstrumentレコードの担当フラグをFalseにクリアする。"""
+    pi_rows   = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"])
+    type_map  = ctx["get_prop_types"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"])
+    song_rows = ctx["query_all"](
+        ctx["CONCERT_DB_SONG"],
+        {"filter": {"property": "演奏会", "relation": {"contains": concert_id}}},
+    )
+    song_id_set = {r.get("id") for r in song_rows}
+
+    ok = fail = 0
+    for r in pi_rows:
+        if ctx["extract_prop_text"](r, "担当フラグ") != "True":
+            continue
+        sids = ctx["extract_relation_ids"](r, "楽曲")
+        if not sids or sids[0] not in song_id_set:
+            continue
+        props: dict = {}
+        ctx["put_prop"](props, type_map, "担当フラグ", False)
+        res = ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{r.get('id')}",
+            json={"properties": props},
+        )
+        if res and res.status_code == 200:
+            ok += 1
+        else:
+            fail += 1
+    return ok, fail
+
+
 def _render_result_tab(ctx: dict):
-    st.caption("採用済み割当のマトリクス表示。担当フラグが立っているレコードを表示します。")
-
-    concerts = _load_concerts(ctx)
-    if not concerts:
-        st.info("演奏会を先に登録してください。")
+    global_concert_id   = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+    global_concert_name = (ctx.get("SELECTED_CONCERT_NAME") or "").strip()
+    if not global_concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
         return
-
-    selected_concert, concert_id = _select_concert_with_search(ctx, concerts, "result")
-    if not concert_id:
-        return
-
-    col_h, col_r = st.columns([8, 1])
-    col_h.subheader("担当パート一覧")
-    if col_r.button("🔄", key="refresh_result", help="再読み込み"):
-        _clear_assign_cache()
-        st.rerun()
+    concert_id = global_concert_id
 
     players = _load_players(ctx)
     songs   = _load_songs(ctx, concert_id)
@@ -916,48 +1031,154 @@ def _render_result_tab(ctx: dict):
         st.info("奏者・楽曲が登録されていません。")
         return
 
-    # 担当フラグ=Trueのレコードを取得
-    pi_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"])
-    assigned_rows = [r for r in pi_rows
-                     if ctx["extract_prop_text"](r, "担当フラグ") == "True"]
+    col_h, col_r = st.columns([8, 1])
+    col_h.subheader("アサイン確定")
+    if col_r.button("🔄", key="refresh_result", help="再読み込み"):
+        st.session_state.pop(f"confirmed_rows_{concert_id}", None)
+        st.rerun()
 
-    if not assigned_rows:
-        st.info("まだ担当が確定していません。「アルゴリズム実行」タブから割当を実行してください。")
+    confirmed_rows = _load_confirmed_rows(ctx, concert_id)
+
+    # ── 確定済みなし ──────────────────────────────────────────
+    if not confirmed_rows:
+        st.info("まだ担当が確定していません。「アルゴリズム実行」タブから候補案を選んで確定してください。")
         return
 
-    # 楽器マスタ
-    inst_rows     = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
-    inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
+    # ── マトリクス表示 ────────────────────────────────────────
+    st.caption(f"確定済み割当：{len(confirmed_rows)}件")
+    _render_matrix(ctx, confirmed_rows, players, songs)
 
-    # 曲ごとにまとめて表示
-    player_name_map = {p.get("id"): _player_name(p, ctx) for p in players}
-    song_name_map   = {s.get("id"): _song_name(s, ctx) for s in songs}
-    song_id_set     = {s.get("id") for s in songs}
+    st.divider()
 
-    by_song: dict[str, list] = defaultdict(list)
-    for r in assigned_rows:
-        sids = ctx["extract_relation_ids"](r, "楽曲")
-        if not sids or sids[0] not in song_id_set:
-            continue
-        pids = ctx["extract_relation_ids"](r, "奏者")
-        iids = ctx["extract_relation_ids"](r, "楽器種別")
-        sid  = sids[0]
-        by_song[sid].append({
-            "奏者":   player_name_map.get(pids[0], "不明") if pids else "不明",
-            "楽器":   inst_name_map.get(iids[0], "不明") if iids else "不明",
-            "備考":   ctx["extract_prop_text"](r, "備考") or "",
-        })
+    # ── 手動修正 ──────────────────────────────────────────────
+    with st.expander("✏️ 手動修正", expanded=False):
+        st.caption("特定の奏者・曲のパートを変更します。")
 
-    for song in sorted(songs, key=lambda x: _song_name(x, ctx)):
-        sid   = song.get("id", "")
-        sname = _song_name(song, ctx)
-        items = by_song.get(sid, [])
-        if not items:
-            st.markdown(f"**{sname}**　—　割当なし")
-            continue
-        st.markdown(f"**{sname}**（{len(items)}パート）")
-        st.dataframe(items, use_container_width=True, hide_index=True)
-        st.write("")
+        inst_rows     = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
+        inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
+        player_opts   = {_player_name(p, ctx): p.get("id", "") for p in
+                         sorted(players, key=lambda x: _player_name(x, ctx))}
+        song_opts     = {_song_name(s, ctx): s.get("id", "") for s in
+                         sorted(songs, key=lambda x: _song_name(x, ctx))}
+
+        sel_player = st.selectbox("奏者", list(player_opts.keys()), key="fix_player")
+        sel_song   = st.selectbox("曲",   list(song_opts.keys()),   key="fix_song")
+        pid = player_opts.get(sel_player, "")
+        sid = song_opts.get(sel_song, "")
+
+        # この奏者×曲の現在の担当レコードを取得
+        current_rows = [
+            r for r in confirmed_rows
+            if pid in ctx["extract_relation_ids"](r, "奏者")
+            and sid in ctx["extract_relation_ids"](r, "楽曲")
+        ]
+        if current_rows:
+            cur_iids  = ctx["extract_relation_ids"](current_rows[0], "楽器種別")
+            cur_iname = inst_name_map.get(cur_iids[0], "不明") if cur_iids else "不明"
+            st.caption(f"現在の担当パート：{cur_iname}")
+        else:
+            st.caption("この奏者×曲の担当はまだありません。")
+
+        # パート定義から選択肢を生成
+        partdef_rows = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"])
+        part_opts_for_song: dict[str, str] = {}
+        for pd in partdef_rows:
+            psids = ctx["extract_relation_ids_any"](pd, ["楽曲", "演奏曲", "FK楽曲"])
+            if sid not in psids:
+                continue
+            piids = ctx["extract_relation_ids_any"](pd, ["必要楽器", "楽器", "楽器種別"])
+            if not piids:
+                continue
+            pname = inst_name_map.get(piids[0], piids[0])
+            part_opts_for_song[pname] = piids[0]
+
+        if not part_opts_for_song:
+            st.warning("この曲のパート定義が見つかりません。")
+        else:
+            new_part = st.selectbox("新しいパート", list(part_opts_for_song.keys()), key="fix_part")
+            new_iid  = part_opts_for_song.get(new_part, "")
+
+            if st.button("💾 パートを変更", key="fix_apply", type="primary"):
+                type_map = ctx["get_prop_types"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"])
+                ok = fail = 0
+                with st.spinner("変更中..."):
+                    # 既存の担当フラグをクリア
+                    for r in current_rows:
+                        props: dict = {}
+                        ctx["put_prop"](props, type_map, "担当フラグ", False)
+                        res = ctx["api_request"](
+                            "patch",
+                            f"https://api.notion.com/v1/pages/{r.get('id')}",
+                            json={"properties": props},
+                        )
+                        if res and res.status_code == 200:
+                            ok += 1
+                        else:
+                            fail += 1
+                    # 新パートのレコードを検索して担当フラグをTrue
+                    pi_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"])
+                    target = next((
+                        r for r in pi_rows
+                        if pid in ctx["extract_relation_ids"](r, "奏者")
+                        and sid in ctx["extract_relation_ids"](r, "楽曲")
+                        and new_iid in ctx["extract_relation_ids"](r, "楽器種別")
+                    ), None)
+                    if target:
+                        props = {}
+                        ctx["put_prop"](props, type_map, "担当フラグ", True)
+                        res = ctx["api_request"](
+                            "patch",
+                            f"https://api.notion.com/v1/pages/{target.get('id')}",
+                            json={"properties": props},
+                        )
+                        if res and res.status_code == 200:
+                            ok += 1
+                        else:
+                            fail += 1
+                    else:
+                        # レコードなければ新規作成
+                        props = {}
+                        ctx["put_prop"](props, type_map, "レコード名",
+                                        f"{sel_player} × {sel_song} × {new_part}")
+                        ctx["put_prop"](props, type_map, "奏者",     pid)
+                        ctx["put_prop"](props, type_map, "楽曲",     sid)
+                        ctx["put_prop"](props, type_map, "楽器種別", new_iid)
+                        ctx["put_prop"](props, type_map, "担当フラグ", True)
+                        res = ctx["api_request"](
+                            "post",
+                            "https://api.notion.com/v1/pages",
+                            json={"parent": {"database_id": ctx["CONCERT_DB_PLAYER_INSTRUMENT"]},
+                                  "properties": props},
+                        )
+                        if res and res.status_code == 200:
+                            ok += 1
+                        else:
+                            fail += 1
+
+                if fail == 0:
+                    st.success(f"✅ パートを「{new_part}」に変更しました。")
+                else:
+                    st.warning(f"⚠️ 一部失敗しました（成功 {ok} / 失敗 {fail}）")
+                st.session_state.pop(f"confirmed_rows_{concert_id}", None)
+                st.rerun()
+
+    st.divider()
+
+    # ── リセット ──────────────────────────────────────────────
+    with st.expander("🗑️ アサインをリセット", expanded=False):
+        st.warning("この演奏会の全担当フラグをクリアします。希望データは残ります。")
+        st.caption("リセット後はアルゴリズム実行タブから再度候補案を選んでください。")
+        confirm = st.checkbox("リセットを実行する", value=False, key="reset_confirm")
+        if confirm:
+            if st.button("🗑️ 担当フラグをクリア", key="reset_exec", type="primary"):
+                with st.spinner("リセット中..."):
+                    ok, fail = _reset_assignments(ctx, concert_id)
+                if fail == 0:
+                    st.success(f"✅ {ok}件の担当フラグをクリアしました。")
+                else:
+                    st.warning(f"⚠️ 成功 {ok} / 失敗 {fail}")
+                st.session_state.pop(f"confirmed_rows_{concert_id}", None)
+                st.rerun()
 
 
 # ============================================================
@@ -970,7 +1191,7 @@ def render(ctx: dict):
     tab_pref, tab_solver, tab_result = st.tabs([
         "希望入力",
         "アルゴリズム実行",
-        "割当結果確認",
+        "アサイン確定",
     ])
 
     with tab_pref:
