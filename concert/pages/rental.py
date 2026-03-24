@@ -291,23 +291,35 @@ def _render_calc_tab(ctx: dict):
                 st.markdown("**レンタル必要**")
                 for r in rental_reqs:
                     iid = r["instrument_id"]
-                    c1, c2, c3 = st.columns([4, 3, 3])
-                    c1.markdown(f"🔴 {r['instrument_name']}")
-                    c2.caption(f"必要 {r['required']}台 / 持参 {r['bring_available']}台")
                     already = iid in rented_ids
+                    c1, c2, c3, c4 = st.columns([4, 2, 2, 3])
+                    c1.markdown(f"🔴 {r['instrument_name']}")
+                    c2.caption(f"必要 {r['required']}台")
+                    c3.caption(f"持参 {r['bring_available']}台")
                     if already:
-                        c3.success("✅ 見積登録済み")
+                        c4.success("✅ 見積登録済み")
                     else:
-                        if c3.button(
+                        rental_qty = max(r["rental_needed"], 1)
+                        qty_key = f"add_qty_{pid}_{iid}"
+                        if qty_key not in st.session_state:
+                            st.session_state[qty_key] = rental_qty
+                        col_qty, col_btn = c4.columns([2, 3])
+                        qty_input = col_qty.number_input(
+                            "台数", min_value=1, max_value=99,
+                            value=st.session_state[qty_key],
+                            step=1, key=qty_key,
+                            label_visibility="collapsed",
+                        )
+                        if col_btn.button(
                             "見積に追加",
                             key=f"add_rental_{pid}_{iid}",
                             use_container_width=True,
                         ):
                             st.session_state["est_prefill"] = {
-                                "practice_id":   pid,
+                                "practice_id":    pid,
                                 "practice_label": prac_label,
-                                "inst_name":     r["instrument_name"],
-                                "qty":           r["rental_needed"],
+                                "inst_name":      r["instrument_name"],
+                                "qty":            qty_input,
                             }
                             st.session_state["rental_active_tab"] = 1
                             st.rerun()
@@ -319,23 +331,34 @@ def _render_calc_tab(ctx: dict):
                 st.markdown("**持参可能**")
                 for r in bring_reqs:
                     iid = r["instrument_id"]
-                    c1, c2, c3 = st.columns([4, 3, 3])
-                    c1.markdown(f"🟢 {r['instrument_name']}")
-                    c2.caption(f"必要 {r['required']}台 / 持参 {r['bring_available']}台")
                     already = iid in rented_ids
+                    c1, c2, c3, c4 = st.columns([4, 2, 2, 3])
+                    c1.markdown(f"🟢 {r['instrument_name']}")
+                    c2.caption(f"必要 {r['required']}台")
+                    c3.caption(f"持参 {r['bring_available']}台")
                     if already:
-                        c3.warning("🔄 レンタルに振り替え済み")
+                        c4.warning("🔄 レンタルに振り替え済み")
                     else:
-                        if c3.button(
+                        switch_qty_key = f"switch_qty_{pid}_{iid}"
+                        if switch_qty_key not in st.session_state:
+                            st.session_state[switch_qty_key] = max(r["required"], 1)
+                        col_qty, col_btn = c4.columns([2, 3])
+                        switch_qty = col_qty.number_input(
+                            "台数", min_value=1, max_value=99,
+                            value=st.session_state[switch_qty_key],
+                            step=1, key=switch_qty_key,
+                            label_visibility="collapsed",
+                        )
+                        if col_btn.button(
                             "レンタルに振り替え",
                             key=f"switch_rental_{pid}_{iid}",
                             use_container_width=True,
                         ):
                             st.session_state["est_prefill"] = {
-                                "practice_id":   pid,
+                                "practice_id":    pid,
                                 "practice_label": prac_label,
-                                "inst_name":     r["instrument_name"],
-                                "qty":           r["required"],
+                                "inst_name":      r["instrument_name"],
+                                "qty":            switch_qty,
                             }
                             st.session_state["rental_active_tab"] = 1
                             st.rerun()
