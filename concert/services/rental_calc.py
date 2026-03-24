@@ -269,9 +269,13 @@ def calc_rental_for_all_practices(ctx: dict, concert_id: str) -> dict:
         if not pid:
             continue
         practice_name = ext_text(row, ["練習名", "タイトル", "PK練習名"])
+        practice_date = ext_text(row, ["日時", "日付"])[:10] if ext_text(row, ["日時", "日付"]) else ""
+        is_concert_day = ext_text(row, ["演奏会当日フラグ", "本番フラグ", "本番日"]) in ("True", "true", "1")
         reqs = calc_rental_requirements(ctx, pid)
         result[pid] = {
-            "name":         practice_name,
-            "requirements": reqs,
+            "name":           practice_name,
+            "date":           practice_date,
+            "is_concert_day": is_concert_day,
+            "requirements":   reqs,
         }
     return result
