@@ -9,7 +9,7 @@ from reportlab.lib import colors
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak, HRFlowable
+    PageBreak, HRFlowable, KeepTogether
 )
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
@@ -249,7 +249,7 @@ def generate_assign_report(
             items = by_song.get(sid, [])
             if not items:
                 continue
-            story.append(Paragraph(song_name_map.get(sid, sid), st["h3"]))
+            _song_title = Paragraph(song_name_map.get(sid, sid), st["h3"])
             detail_header = ["奏者", "パート", "希望", "点数"]
             detail_rows = [detail_header]
             for a in items:
@@ -300,8 +300,11 @@ def generate_assign_report(
                 ("LEFTPADDING", (0,0), (-1,-1), 3),
                 ("RIGHTPADDING",(0,0), (-1,-1), 3),
             ]))
-            story.append(dtbl)
-            story.append(Spacer(1, 2*mm))
+            story.append(KeepTogether([
+                _song_title,
+                dtbl,
+                Spacer(1, 2*mm),
+            ]))
 
     doc.build(story)
     buf.seek(0)
