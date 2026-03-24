@@ -24,8 +24,8 @@ SONG_INSTR_NOTE_KEYS = ["備考", "メモ"]
 
 PARTDEF_RECORD_KEYS = ["レコード名", "タイトル", "名称", "パート名"]
 PARTDEF_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
-PARTDEF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
-PARTDEF_INST_REL_KEYS = ["楽器種別", "楽器", "FK楽器種別", "担当楽器"]
+PARTDEF_SONG_REL_KEYS = ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ"]
+PARTDEF_INST_REL_KEYS = ["必要楽器", "楽器種別", "楽器", "FK楽器種別", "担当楽器"]
 PARTDEF_COUNT_KEYS = ["必要人数", "必要台数", "台数", "人数"]
 PARTDEF_NOTE_KEYS = ["備考", "メモ"]
 
