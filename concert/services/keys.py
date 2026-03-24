@@ -1,0 +1,123 @@
+"""
+concert/services/keys.py
+HARMONIA 全ページ共通のプロパティキー定数。
+このファイルを唯一の真実源とし、各ページはここからインポートする。
+"""
+
+# ── ATLAS（演奏会）DB ────────────────────────────────────────
+CONCERT_NAME_KEYS         = ["名称", "タイトル", "演奏会名", "PK名称"]
+CONCERT_DATE_KEYS         = ["日時", "日付", "出演日", "体験日", "リリース日"]
+CONCERT_MEDIA_KEYS        = ["媒体", "MEDIA_TYPE", "メディア", "種類"]
+CONCERT_VENUE_KEYS        = ["会場", "場所", "会場名", "Venue"]
+CONCERT_ADDRESS_KEYS      = ["住所", "Address"]
+CONCERT_MEMO_KEYS         = ["メモ", "備考", "Memo"]
+CONCERT_KEY_KEYS          = ["concert_key", "ConcertKey", "演奏会キー", "PK演奏会キー"]
+
+# ── PRACTICE（練習）DB ───────────────────────────────────────
+PRACTICE_NAME_KEYS        = ["練習名", "タイトル", "PK練習名"]
+PRACTICE_DATE_KEYS        = ["日時", "日付"]
+PRACTICE_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会"]
+PRACTICE_CONCERT_DAY_KEYS = ["演奏会当日フラグ", "本番フラグ", "本番日"]
+PRACTICE_VENUE_KEYS       = ["会場", "場所", "Venue"]
+PRACTICE_ADDRESS_KEYS     = ["住所", "Address"]
+PRACTICE_MEMO_KEYS        = ["メモ", "備考"]
+PRACTICE_REST_KEYS        = ["休憩フラグ", "休憩"]
+PRACTICE_KEY_KEYS         = ["practice_key", "PracticeKey", "練習キー", "PK練習キー"]
+PRACTICE_PERCUSSION_OFF_KEYS = ["打楽器不要フラグ", "打楽器不要"]
+
+# ── PERFORMER（出演者）DB ────────────────────────────────────
+PLAYER_NAME_KEYS          = ["氏名", "名前", "表示名", "タイトル"]
+PLAYER_EMAIL_KEYS         = ["メールアドレス", "Email", "email"]
+PLAYER_MEMO_KEYS          = ["メモ", "備考"]
+PLAYER_KEY_KEYS           = ["player_key", "PlayerKey", "奏者キー", "PK奏者キー"]
+
+# ── CONCERT_CAST（演奏会参加者）DB ───────────────────────────
+PARTICIPANT_RECORD_KEYS      = ["participant_key", "タイトル", "PK参加者"]
+PARTICIPANT_PLAYER_REL_KEYS  = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
+PARTICIPANT_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会", "演奏会参加者"]
+PARTICIPANT_INST_KEYS        = ["担当楽器", "楽器"]
+PARTICIPANT_NOTE_KEYS        = ["メモ", "備考"]
+PARTICIPANT_KEY_KEYS         = ["participant_key", "ParticipantKey", "参加者キー", "PK参加者キー"]
+
+# ── ATTENDANCE（出欠）DB ─────────────────────────────────────
+ATT_RECORD_KEYS           = ["attendance_key", "タイトル", "PK出欠"]
+ATT_PLAYER_REL_KEYS       = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
+ATT_PRACTICE_REL_KEYS     = ["練習", "FK練習"]
+ATT_STATUS_KEYS           = ["出欠", "ステータス", "Status"]
+ATT_NOTE_KEYS             = ["メモ", "備考"]
+ATTENDANCE_KEY_KEYS       = ["attendance_key", "AttendanceKey", "出欠キー", "PK出欠キー"]
+
+# ── APOLLO（演奏曲）DB ───────────────────────────────────────
+SONG_NAME_KEYS            = ["曲名", "タイトル", "PK曲名", "作品名"]
+SONG_COMPOSER_KEYS        = ["作曲者", "Composer"]
+SONG_DURATION_KEYS        = ["演奏時間", "Duration"]
+SONG_NOTE_KEYS            = ["メモ", "備考"]
+SONG_KEY_KEYS             = ["song_key", "SongKey", "PK曲キー", "曲キー"]
+SONG_CONCERT_REL_KEYS     = ["演奏会", "出演", "FK演奏会"]
+
+# ── INSTRUMENT（楽器種別）DB ─────────────────────────────────
+INSTRUMENT_NAME_KEYS      = ["楽器名", "タイトル", "PK楽器名"]
+INSTRUMENT_CATEGORY_KEYS  = ["カテゴリ", "分類", "Category"]
+INSTRUMENT_MEMO_KEYS      = ["メモ", "備考"]
+INSTRUMENT_KEY_KEYS       = ["instrument_key", "InstrumentKey", "PK楽器キー", "楽器キー"]
+
+# ── SONG_INSTRUMENT（曲別必要楽器）DB ───────────────────────
+SONG_INSTR_RECORD_KEYS    = ["song_instrument_key", "タイトル"]
+SONG_INSTR_SONG_REL_KEYS  = ["演奏曲", "楽曲", "FK楽曲"]
+SONG_INSTR_INST_REL_KEYS  = ["楽器種別", "楽器", "FK楽器種別"]
+SONG_INSTR_QTY_KEYS       = ["台数", "必要台数", "Qty"]
+SONG_INSTR_NOTE_KEYS      = ["メモ", "備考"]
+
+# ── PART_DEFINITION（パート定義）DB ─────────────────────────
+PARTDEF_RECORD_KEYS       = ["part_key", "タイトル"]
+PARTDEF_CONCERT_REL_KEYS  = ["演奏会", "出演", "FK演奏会"]
+PARTDEF_SONG_REL_KEYS     = ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ"]
+PARTDEF_INST_REL_KEYS     = ["必要楽器", "楽器種別", "楽器", "FK楽器種別", "担当楽器"]
+PARTDEF_NAME_KEYS         = ["パート名", "名称", "タイトル", "表示名"]
+PARTDEF_COUNT_KEYS        = ["パートNo", "表示順", "No"]
+PARTDEF_NOTE_KEYS         = ["備考", "メモ", "注記"]
+PARTDEF_KEY_KEYS          = ["part_key", "PartKey", "PKパートキー", "パートキー"]
+
+# ── PREFERENCE（希望入力）DB ─────────────────────────────────
+PREF_PLAYER_REL_KEYS      = ["演奏会参加者", "奏者", "出演者", "FK奏者"]
+PREF_PART_REL_KEYS        = ["パート定義", "パート", "FKパート"]
+PREF_SONG_REL_KEYS        = ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ"]
+PREF_INST_REL_KEYS        = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
+PREF_PRIORITY_KEYS        = ["希望順位", "優先度", "希望", "希望区分"]
+PREFERENCE_KEY_KEYS       = ["preference_key", "PreferenceKey", "希望キー", "PK希望キー"]
+
+# ── PLAYER_INSTRUMENT（楽器アサイン）DB ─────────────────────
+PI_RECORD_KEYS            = ["assign_key", "レコード名", "タイトル"]
+PI_PLAYER_REL_KEYS        = ["奏者", "出演者", "FK奏者"]
+PI_INST_REL_KEYS          = ["楽器種別", "楽器", "担当楽器", "FK楽器種別"]
+PI_CONCERT_REL_KEYS       = ["演奏会", "出演", "FK演奏会"]
+PI_SONG_REL_KEYS          = ["楽曲", "演奏曲", "FK楽曲"]
+PI_PARTICIPANT_REL_KEYS   = ["演奏会参加者", "参加者", "FK参加者"]
+PI_ASSIGN_KEYS            = ["担当フラグ", "担当", "担当有無"]
+PI_BRING_KEYS             = ["持参可フラグ", "持参可", "持参"]
+PI_NOTE_KEYS              = ["備考", "メモ"]
+ASSIGN_KEY_KEYS           = ["assign_key", "assignment_key", "AssignmentKey", "割当キー", "PK割当キー"]
+
+# ── RENTAL（レンタル見積）DB ─────────────────────────────────
+RENTAL_RECORD_KEYS        = ["rental_key", "レコード名", "タイトル"]
+RENTAL_PRACTICE_REL_KEYS  = ["練習", "FK練習"]
+RENTAL_INST_REL_KEYS      = ["楽器種別", "楽器", "FK楽器種別"]
+RENTAL_ITEM_NAME_KEYS     = ["品目名", "item_name", "品目"]
+RENTAL_VENDOR_KEYS        = ["業者名", "業者", "Vendor"]
+RENTAL_QTY_KEYS           = ["台数", "数量", "Qty"]
+RENTAL_UNIT_PRICE_KEYS    = ["単価（円）", "単価", "UnitPrice"]
+RENTAL_CONFIRMED_KEYS     = ["確定フラグ", "確定", "Confirmed"]
+RENTAL_NOTE_KEYS          = ["備考", "メモ"]
+RENTAL_KEY_KEYS           = ["rental_key", "RentalKey", "見積キー", "PK見積キー"]
+
+# ── PREFERENCE DB 追加キー ────────────────────────────────────
+PREF_INSTR_REL_KEYS       = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
+PREF_CAN_BRING_KEYS       = ["持参可", "持参可フラグ", "持参"]
+PREF_CONCERT_REL_KEYS     = ["演奏会", "出演", "FK演奏会"]
+
+# ── PART_DEFINITION 別名キー（assign_solver用）────────────────
+PART_SONG_REL_KEYS        = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
+PART_INST_REL_KEYS        = ["楽器", "楽器種別", "FK楽器種別", "担当楽器"]
+PART_NAME_KEYS            = ["パート名", "名称", "タイトル", "表示名"]
+PART_COUNT_KEYS           = ["必要人数", "必要台数", "台数", "人数"]
+PART_CONCERT_REL_KEYS     = ["演奏会", "出演", "FK演奏会"]
