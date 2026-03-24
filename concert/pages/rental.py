@@ -596,7 +596,7 @@ def _render_summary_tab(ctx: dict):
     rows_for_table: list[dict] = []
 
     def _prac_date(p):
-        d = ctx["extract_prop_text"](p, "日時")
+        d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
         return d[:10] if d else "9999"
 
     for prac in sorted(practices, key=_prac_date):
@@ -606,16 +606,14 @@ def _render_summary_tab(ctx: dict):
         prac_total = 0
 
         for row in rentals:
-            ext       = ctx["extract_prop_text"]
-            ext_rel   = ctx["extract_relation_ids"]
-            qty_str   = ext(row, "台数")
-            price_str = ext(row, "単価（円）")
+            qty_str   = ctx["extract_prop_text_any"](row, RENTAL_QTY_KEYS)
+            price_str = ctx["extract_prop_text_any"](row, RENTAL_UNIT_PRICE_KEYS)
             qty       = int(float(qty_str)) if qty_str else 0
             price     = int(float(price_str)) if price_str else 0
             subtotal  = qty * price
-            confirmed = ext(row, "確定フラグ") == "True"
+            confirmed = ctx["extract_prop_text_any"](row, RENTAL_CONFIRMED_KEYS) == "True"
 
-            inst_ids  = ext_rel(row, "楽器種別")
+            inst_ids  = ctx["extract_relation_ids_any"](row, RENTAL_INST_REL_KEYS)
             inst_id   = inst_ids[0] if inst_ids else ""
             inst_rows = _load_instruments(ctx)
             inst_name = next(
