@@ -4,6 +4,8 @@ concert.pages.rental
 """
 import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
+
+COST_TYPE_OPTIONS = ["楽器レンタル", "運送費", "管理費", "その他"]
 import pandas as pd
 from concert.services.rental_calc import calc_rental_requirements, calc_rental_for_all_practices
 
@@ -132,7 +134,8 @@ def _create_rental(ctx: dict, practice_id: str, practice_label: str,
                    instrument_id: str, instrument_name: str,
                    item_name: str,
                    vendor: str, qty: int, unit_price: int,
-                   confirmed: bool, note: str) -> bool:
+                   confirmed: bool, note: str,
+                   cost_type: str = "楽器レンタル") -> bool:
     db_id    = ctx["CONCERT_DB_RENTAL"]
     type_map = ctx["get_prop_types"](db_id)
     if not type_map:
@@ -141,7 +144,8 @@ def _create_rental(ctx: dict, practice_id: str, practice_label: str,
     props: dict = {}
     display_name = item_name.strip() if item_name.strip() else instrument_name
     ctx["put_prop_any"](props, type_map, RENTAL_RECORD_KEYS, f"{display_name} × {practice_label} / {vendor}")
-    ctx["put_prop_any"](props, type_map, RENTAL_INST_REL_KEYS, instrument_id)
+    if instrument_id:
+        ctx["put_prop_any"](props, type_map, RENTAL_INST_REL_KEYS, instrument_id)
     ctx["put_prop_any"](props, type_map, RENTAL_PRACTICE_REL_KEYS, practice_id)
     ctx["put_prop_any"](props, type_map, RENTAL_ITEM_NAME_KEYS, item_name)
     ctx["put_prop_any"](props, type_map, RENTAL_VENDOR_KEYS, vendor)
@@ -149,7 +153,8 @@ def _create_rental(ctx: dict, practice_id: str, practice_label: str,
     ctx["put_prop_any"](props, type_map, RENTAL_UNIT_PRICE_KEYS, unit_price)
     ctx["put_prop_any"](props, type_map, RENTAL_CONFIRMED_KEYS, confirmed)
     ctx["put_prop_any"](props, type_map, RENTAL_NOTE_KEYS, note)
-    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id, item_name or instrument_name, vendor, prefix="rental")
+    ctx["put_prop_any"](props, type_map, RENTAL_COST_TYPE_KEYS, cost_type)
+    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id or cost_type, item_name or instrument_name, vendor, prefix="rental")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
@@ -159,12 +164,14 @@ def _update_rental(ctx: dict, page_id: str, practice_id: str, practice_label: st
                    instrument_id: str, instrument_name: str,
                    item_name: str,
                    vendor: str, qty: int, unit_price: int,
-                   confirmed: bool, note: str) -> bool:
+                   confirmed: bool, note: str,
+                   cost_type: str = "楽器レンタル") -> bool:
     type_map = ctx["get_prop_types"](ctx["CONCERT_DB_RENTAL"])
     props: dict = {}
     display_name = item_name.strip() if item_name.strip() else instrument_name
     ctx["put_prop_any"](props, type_map, RENTAL_RECORD_KEYS, f"{display_name} × {practice_label} / {vendor}")
-    ctx["put_prop_any"](props, type_map, RENTAL_INST_REL_KEYS, instrument_id)
+    if instrument_id:
+        ctx["put_prop_any"](props, type_map, RENTAL_INST_REL_KEYS, instrument_id)
     ctx["put_prop_any"](props, type_map, RENTAL_PRACTICE_REL_KEYS, practice_id)
     ctx["put_prop_any"](props, type_map, RENTAL_ITEM_NAME_KEYS, item_name)
     ctx["put_prop_any"](props, type_map, RENTAL_VENDOR_KEYS, vendor)
@@ -172,7 +179,8 @@ def _update_rental(ctx: dict, page_id: str, practice_id: str, practice_label: st
     ctx["put_prop_any"](props, type_map, RENTAL_UNIT_PRICE_KEYS, unit_price)
     ctx["put_prop_any"](props, type_map, RENTAL_CONFIRMED_KEYS, confirmed)
     ctx["put_prop_any"](props, type_map, RENTAL_NOTE_KEYS, note)
-    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id, item_name or instrument_name, vendor, prefix="rental")
+    ctx["put_prop_any"](props, type_map, RENTAL_COST_TYPE_KEYS, cost_type)
+    ctx["put_key_any"](props, type_map, RENTAL_KEY_KEYS, practice_id, instrument_id or cost_type, item_name or instrument_name, vendor, prefix="rental")
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200
@@ -386,8 +394,10 @@ def _render_estimate_tab(ctx: dict):
         inst_id   = inst_ids[0] if inst_ids else ""
         inst_name = next((k for k, v in inst_opts.items() if v == inst_id), "")
         existing.append({
+            "費用種別":   ext_any(r, RENTAL_COST_TYPE_KEYS) or "楽器レンタル",
             "楽器種別":   inst_name,
             "品目名":     ext_any(r, RENTAL_ITEM_NAME_KEYS) or "",
+            "業者名":     ext_any(r, RENTAL_VENDOR_KEYS) or "",
             "台数":       int(float(ext_any(r, RENTAL_QTY_KEYS) or "1")),
             "単価（円）": int(float(ext_any(r, RENTAL_UNIT_PRICE_KEYS) or "0")),
             "確定":       ext_any(r, RENTAL_CONFIRMED_KEYS) == "True",
@@ -400,8 +410,10 @@ def _render_estimate_tab(ctx: dict):
         prefill_inst = prefill["inst_name"]
         prefill_qty  = prefill.get("qty", 1)
         existing.insert(0, {
+            "費用種別": "楽器レンタル",
             "楽器種別": prefill_inst if prefill_inst in inst_names else (inst_names[0] if inst_names else ""),
             "品目名":   prefill_inst,
+            "業者名":   "",
             "台数":     prefill_qty,
             "単価（円）": 0,
             "確定":     False,
@@ -413,24 +425,16 @@ def _render_estimate_tab(ctx: dict):
     empty_rows = 3 if not existing else 1
     for _ in range(empty_rows):
         existing.append({
+            "費用種別": "楽器レンタル",
             "楽器種別": inst_names[0] if inst_names else "",
-            "品目名": "", "台数": 1, "単価（円）": 0,
+            "品目名": "", "業者名": "", "台数": 1, "単価（円）": 0,
             "確定": False, "備考": "",
         })
         row_ids.append("")  # 空IDは新規行
 
     df_init = pd.DataFrame(existing)
 
-    # ── 業者名（全行共通）──
-    vendor_default = ""
-    if rental_rows:
-        vendor_default = ext_any(rental_rows[0], RENTAL_VENDOR_KEYS) or ""
-    vendor = st.text_input(
-        "業者名（全明細共通）",
-        value=vendor_default,
-        placeholder="例：○○楽器レンタル",
-        key="est_vendor",
-    )
+    st.caption("費用種別が「楽器レンタル」以外の場合、楽器種別は空白のままにしてください。")
 
     # ── data_editor ──
     st.caption("行を追加・削除して「保存」を押してください。品目名が空の場合は楽器種別名を使用します。")
@@ -440,13 +444,23 @@ def _render_estimate_tab(ctx: dict):
         use_container_width=True,
         key="rental_editor",
         column_config={
-            "楽器種別": st.column_config.SelectboxColumn(
-                "楽器種別",
-                options=inst_names,
+            "費用種別": st.column_config.SelectboxColumn(
+                "費用種別",
+                options=COST_TYPE_OPTIONS,
                 required=True,
+                default="楽器レンタル",
+            ),
+            "楽器種別": st.column_config.SelectboxColumn(
+                "楽器種別（楽器レンタルのみ）",
+                options=[""] + inst_names,
+                required=False,
             ),
             "品目名": st.column_config.TextColumn(
-                '品目名（例：32" Timpani）',
+                '品目名（例：32" Timpani / 運送費）',
+                max_chars=100,
+            ),
+            "業者名": st.column_config.TextColumn(
+                "業者名",
                 max_chars=100,
             ),
             "台数": st.column_config.NumberColumn(
@@ -491,21 +505,25 @@ def _render_estimate_tab(ctx: dict):
             saved_existing_ids: set[str] = set()
 
             for idx, row in edited_df.iterrows():
+                cost_type_v = str(row.get("費用種別") or "楽器レンタル").strip()
                 inst_sel_v  = str(row.get("楽器種別") or "").strip()
                 item_name_v = str(row.get("品目名") or "").strip()
+                vendor_v    = str(row.get("業者名") or "").strip()
                 qty_v       = int(row.get("台数") or 1)
                 price_v     = int(row.get("単価（円）") or 0)
                 confirmed_v = bool(row.get("確定") or False)
                 note_v      = str(row.get("備考") or "").strip()
 
-                if not inst_sel_v:
+                # 楽器レンタル以外は楽器種別不要
+                is_instrument = (cost_type_v == "楽器レンタル")
+                if is_instrument and not inst_sel_v:
+                    skip_n += 1
+                    continue
+                if not is_instrument and not item_name_v:
                     skip_n += 1
                     continue
 
-                inst_id_v = inst_opts.get(inst_sel_v, "")
-                if not inst_id_v:
-                    skip_n += 1
-                    continue
+                inst_id_v = inst_opts.get(inst_sel_v, "") if is_instrument else ""
 
                 # 対応する既存レコードID（初期データの行番号で対応）
                 existing_id = row_ids[idx] if idx < len(row_ids) else ""
