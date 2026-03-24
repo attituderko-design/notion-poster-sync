@@ -10,8 +10,9 @@ concert.services.rental_calc
 from collections import defaultdict
 from concert.services.keys import (
     ATT_STATUS_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS,
-    PRACTICE_CONCERT_REL_KEYS,
-    PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS, PARTDEF_COUNT_KEYS,
+    PRACTICE_CONCERT_REL_KEYS, PRACTICE_SONG_REL_KEYS,
+    PRACTICE_PERCUSSION_OFF_KEYS,
+    PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS,
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_BRING_KEYS, PI_CONCERT_REL_KEYS,
     INSTRUMENT_NAME_KEYS,
     SONG_CONCERT_REL_KEYS,
@@ -54,26 +55,46 @@ def calc_rental_requirements(
             for pid in ext_rel(row, ATT_PLAYER_REL_KEYS):
                 attending_player_ids.add(pid)
 
-    # ── 2. この練習日に関連する演奏会を特定 ──────────────────
-    practice_type_map = get_types(DB_PRACTICE)
-    prac_concert_rel  = find_prop(practice_type_map, PRACTICE_CONCERT_REL_KEYS)
-    practice_rows = query_all(
-        DB_PRACTICE,
-        {"filter": {"property": prac_concert_rel, "relation": {"is_not_empty": True}}}
-        if prac_concert_rel else None,
-    )
-    concert_id = ""
+    # ── 2. この練習日の情報を取得（演奏曲・打楽器休みフラグ）──
+    practice_type_map   = get_types(DB_PRACTICE)
+    prac_concert_rel    = find_prop(practice_type_map, PRACTICE_CONCERT_REL_KEYS)
+    prac_song_rel       = find_prop(practice_type_map, PRACTICE_SONG_REL_KEYS)
+    prac_perc_off_rel   = find_prop(practice_type_map, PRACTICE_PERCUSSION_OFF_KEYS)
+
+    practice_row = None
+    practice_rows = query_all(DB_PRACTICE, None)
     for row in practice_rows:
         if row.get("id") == practice_id:
-            ids = ext_rel(row, PRACTICE_CONCERT_REL_KEYS)
-            concert_id = ids[0] if ids else ""
+            practice_row = row
             break
 
-    # ── 3. 演奏会に紐づく楽曲一覧を取得 ──────────────────────
+    concert_id = ""
+    if practice_row:
+        ids = ext_rel(practice_row, PRACTICE_CONCERT_REL_KEYS)
+        concert_id = ids[0] if ids else ""
+
+    # 打楽器休みフラグ確認
+    is_percussion_off = False
+    if practice_row and prac_perc_off_rel:
+        flag = ext_text(practice_row, PRACTICE_PERCUSSION_OFF_KEYS)
+        is_percussion_off = flag in ("True", "true", "1", "✓", "はい", "yes")
+
+    # 打楽器休みかつ全員欠席なら必要台数0
+    if is_percussion_off and not attending_player_ids:
+        return []
+
+    # ── 3. この練習日に演奏する曲を取得 ──────────────────────
+    # PRACTICEの「演奏曲」リレーションを優先、なければ演奏会の全曲
     song_ids: set[str] = set()
-    if concert_id:
-        song_type_map  = get_types(DB_SONG)
-        song_conc_rel  = find_prop(song_type_map, SONG_CONCERT_REL_KEYS)
+    if practice_row and prac_song_rel:
+        # 練習日に紐づく演奏曲が設定されている場合はそれを使う
+        practice_song_ids = ext_rel(practice_row, PRACTICE_SONG_REL_KEYS)
+        song_ids = set(practice_song_ids)
+
+    if not song_ids and concert_id:
+        # 未設定の場合は演奏会の全曲にフォールバック
+        song_type_map = get_types(DB_SONG)
+        song_conc_rel = find_prop(song_type_map, SONG_CONCERT_REL_KEYS)
         song_rows = query_all(
             DB_SONG,
             {"filter": {"property": song_conc_rel, "relation": {"contains": concert_id}}}
