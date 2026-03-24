@@ -198,16 +198,27 @@ def calc_rental_requirements(
                 del required_map[inst_id]
 
     # 持参可能台数の集計（アサイン前後共通・出席者全員の持参可フラグで計算）
+    # デバッグ情報をコンテキストに保存
+    _debug_bring = []
     for row in concert_pi_rows:
         p_ids = ext_rel(row, PI_PLAYER_REL_KEYS)
+        bring_flag = ext_text(row, PI_BRING_KEYS)
+        i_ids = ext_rel(row, PI_INST_REL_KEYS)
+        _debug_bring.append({
+            "player_id": p_ids[0] if p_ids else "none",
+            "in_attending": (p_ids[0] if p_ids else "") in attending_player_ids,
+            "bring_flag": bring_flag,
+            "inst_id": i_ids[0][:8] if i_ids else "none",
+        })
         if not p_ids or p_ids[0] not in attending_player_ids:
             continue
-        if ext_text(row, PI_BRING_KEYS) != "True":
+        if bring_flag != "True":
             continue
-        i_ids = ext_rel(row, PI_INST_REL_KEYS)
         if not i_ids:
             continue
         bring_map[i_ids[0]] += 1
+    ctx["_debug_bring"] = _debug_bring
+    ctx["_debug_attending"] = list(attending_player_ids)
 
     # ── 6. 楽器名を取得 ──────────────────────────────────────
     all_inst_ids = set(required_map.keys()) | set(bring_map.keys())
