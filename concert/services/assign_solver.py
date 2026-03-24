@@ -495,7 +495,8 @@ def _calc_stats(solution: list[Assignment], pref_map: dict[tuple[str, str, str],
 def solve_all(ctx: dict, concert_id: str) -> list[dict]:
     prefs = _load_preferences(ctx, concert_id)
     reqs = _load_requirements(ctx, concert_id)
-    absent = _build_absent_set(ctx, concert_id)
+    # 本番欠席は運用上存在しないため、Attendanceはパート割当に使わない
+    absent: set[str] = set()
 
     if not prefs or not reqs:
         return []
