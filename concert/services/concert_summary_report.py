@@ -289,7 +289,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     story.append(Spacer(1, 5*mm))
 
     # ── 出欠マトリクス ───────────────────────────────────────
-    story.append(Paragraph("■ 出欠マトリクス（全奏者×全練習日）", st_map["h2"]))
+    _mat_title = Paragraph("■ 出欠マトリクス（全奏者×全練習日）", st_map["h2"])
 
     # ヘッダー行：練習日略称
     prac_labels_short = []
@@ -333,7 +333,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         bg = STATUS_COLORS.get(status, colors.white)
         mat_sty.add("BACKGROUND", (col_i, row_i), (col_i, row_i), bg)
     mat_tbl.setStyle(mat_sty)
-    story.append(KeepTogether([mat_tbl, Spacer(1, 5*mm)]))
+    story.append(KeepTogether([_mat_title, mat_tbl, Spacer(1, 5*mm)]))
 
     # ── レンタル費用小計 ─────────────────────────────────────
     rent_summary_data = [["練習日", "業者名", "品目", "台数", "単価", "小計", "確定"]]
