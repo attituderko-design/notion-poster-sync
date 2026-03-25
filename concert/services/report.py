@@ -203,8 +203,8 @@ def generate_assign_report(
             mat_rows.append(row)
 
         # マトリクスのセル内容をParagraphで折り返し対応
-        cell_style = ParagraphStyle("cell", fontName=font, fontSize=6.5, leading=9)
-        hdr_style  = ParagraphStyle("hdr",  fontName=font_b, fontSize=6.5, leading=9)
+        cell_style = ParagraphStyle("cell", fontName=font, fontSize=6.5, leading=9, alignment=0)
+        hdr_style  = ParagraphStyle("hdr",  fontName=font_b, fontSize=6.5, leading=9, alignment=0)
         mat_rows_p = []
         for ri, row in enumerate(mat_rows):
             new_row = []
@@ -273,8 +273,8 @@ def generate_assign_report(
                 ])
 
             # 曲別一覧もParagraphで折り返し
-            dcell_s = ParagraphStyle("dc", fontName=font,   fontSize=8, leading=11)
-            dhdr_s  = ParagraphStyle("dh", fontName=font_b, fontSize=8, leading=11)
+            dcell_s = ParagraphStyle("dc", fontName=font,   fontSize=8, leading=11, alignment=0)
+            dhdr_s  = ParagraphStyle("dh", fontName=font_b, fontSize=8, leading=11, alignment=0)
             detail_rows_p = []
             for ri, row in enumerate(detail_rows):
                 new_row = []

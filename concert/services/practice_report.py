@@ -78,10 +78,10 @@ def _venue_qr_block(address: str, venue: str, font, font_b, W):
     maps_url = _make_maps_url(address)
     qr_buf   = _make_qr_image(maps_url)
 
-    cap_sty = ParagraphStyle("qrcap", fontName=font_b, fontSize=8, leading=11)
+    cap_sty = ParagraphStyle("qrcap", fontName=font_b, fontSize=8, leading=11, alignment=0)
     url_sty = ParagraphStyle("qrurl", fontName=font,   fontSize=6, leading=9,
-                              textColor=colors.HexColor("#1a73e8"))
-    addr_sty= ParagraphStyle("qradr", fontName=font,   fontSize=8, leading=11)
+                              textColor=colors.HexColor("#1a73e8"), alignment=0)
+    addr_sty= ParagraphStyle("qradr", fontName=font,   fontSize=8, leading=11, alignment=0)
 
     info = [
         Paragraph(venue or address, cap_sty),
