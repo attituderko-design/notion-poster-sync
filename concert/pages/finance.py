@@ -360,8 +360,8 @@ def _render_payment_tab(ctx, concert_id: str):
         key=f"payment_editor_{concert_id}_{editor_version}",
         column_config={
             "氏名":   st.column_config.TextColumn("氏名", disabled=True),
-            "パート": st.column_config.TextColumn("パート", max_chars=30),
-            "役職":   st.column_config.TextColumn("役職",  max_chars=30),
+            "パート": st.column_config.TextColumn("パート", disabled=True),
+            "役職":   st.column_config.TextColumn("役職",  disabled=True),
             "参加費": st.column_config.NumberColumn("参加費（円）", min_value=0, step=100),
             "入金済": st.column_config.CheckboxColumn("入金済", default=False),
         },
@@ -374,16 +374,14 @@ def _render_payment_tab(ctx, concert_id: str):
             for idx, meta in enumerate(df_meta):
                 if idx >= len(df_reset): break
                 row      = df_reset.iloc[idx]
-                new_part = str(row.get("パート") or "").strip()
-                new_role = str(row.get("役職")   or "").strip()
                 new_fee  = int(row.get("参加費")  or 0)
                 new_paid = bool(row.get("入金済") or False)
-                if (new_part == meta["cur_part"] and new_role == meta["cur_role"] and
-                        new_fee == meta["cur_fee"] and new_paid == meta["cur_paid"]):
+                if new_fee == meta["cur_fee"] and new_paid == meta["cur_paid"]:
                     skip_n += 1
                     continue
                 ok = _update_cast_finance(ctx, meta["rid"],
-                                          new_part, new_role, new_fee, new_paid)
+                                          meta["cur_part"], meta["cur_role"],
+                                          new_fee, new_paid)
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
         if ng_n == 0:
