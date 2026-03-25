@@ -391,7 +391,6 @@ def _upsert_player_instrument(ctx: dict, player_id: str, player_name: str, instr
     ctx["put_prop_any"](props, t, PI_PLAYER_REL_KEYS, player_id)
     ctx["put_prop_any"](props, t, PI_INST_REL_KEYS, instrument_id)
     ctx["put_prop_any"](props, t, PI_ASSIGN_KEYS, is_assign)
-    ctx["put_prop_any"](props, t, PI_BRING_KEYS, can_bring)
     ctx["put_prop_any"](props, t, PI_NOTE_KEYS, note)
     if practice_id:
         ctx["put_prop_any"](props, t, PI_PRACTICE_REL_KEYS, practice_id)
@@ -434,7 +433,6 @@ def _upsert_player_bring_for_concert(
     ctx["put_prop_any"](props, t, PI_INST_REL_KEYS, instrument_id)
     ctx["put_prop_any"](props, t, PI_ASSIGN_KEYS, False)
     ctx["put_prop_any"](props, t, PI_OWN_COUNT_KEYS, own_count)
-    ctx["put_prop_any"](props, t, PI_BRING_KEYS, own_count >= 1)  # 所有台数≥1で持参可
     ctx["put_prop_any"](props, t, PI_BRING_ASSIGN_KEYS, bring_assign)
     ctx["put_prop_any"](props, t, PI_BRING_COUNT_KEYS, bring_count if bring_assign else 0)
     ctx["put_prop_any"](props, t, PI_NOTE_KEYS, note)
@@ -833,7 +831,6 @@ def _render_assign_tab(ctx: dict):
     for iid in ordered_inst_ids:
         iname = inst_names.get(iid, iid)
         ex    = by_inst.get(iid)
-        cur_b  = (ctx["extract_prop_text_any"](ex, PI_BRING_KEYS) == "True") if ex else False
         cur_ba = (ctx["extract_prop_text_any"](ex, PI_BRING_ASSIGN_KEYS) == "True") if ex else False
         cur_own_str = ctx["extract_prop_text_any"](ex, PI_OWN_COUNT_KEYS) if ex else ""
         cur_cnt_str = ctx["extract_prop_text_any"](ex, PI_BRING_COUNT_KEYS) if ex else ""
