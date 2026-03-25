@@ -433,8 +433,8 @@ def _upsert_player_bring_for_concert(
     ctx["put_prop_any"](props, t, PI_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PI_INST_REL_KEYS, instrument_id)
     ctx["put_prop_any"](props, t, PI_ASSIGN_KEYS, False)
-    ctx["put_prop_any"](props, t, PI_BRING_KEYS, can_bring)
     ctx["put_prop_any"](props, t, PI_OWN_COUNT_KEYS, own_count)
+    ctx["put_prop_any"](props, t, PI_BRING_KEYS, own_count >= 1)  # 所有台数≥1で持参可
     ctx["put_prop_any"](props, t, PI_BRING_ASSIGN_KEYS, bring_assign)
     ctx["put_prop_any"](props, t, PI_BRING_COUNT_KEYS, bring_count if bring_assign else 0)
     ctx["put_prop_any"](props, t, PI_NOTE_KEYS, note)
@@ -848,7 +848,6 @@ def _render_assign_tab(ctx: dict):
         cur_n = ctx["extract_prop_text_any"](ex, PI_NOTE_KEYS) if ex else ""
         bring_rows_data.append({
             "楽器":     iname,
-            "持参可":   cur_b,
             "所有台数": cur_own,
             "備考":     cur_n,
         })
@@ -856,7 +855,6 @@ def _render_assign_tab(ctx: dict):
             "iid":     iid,
             "iname":   iname,
             "eid":     ex.get("id", "") if ex else "",
-            "cur_b":   cur_b,
             "cur_own": cur_own,
             "cur_n":   cur_n,
         })
@@ -869,8 +867,7 @@ def _render_assign_tab(ctx: dict):
         key=f"bring_editor_{c_id}_{p_id}",
         column_config={
             "楽器":     st.column_config.TextColumn("楽器", disabled=True),
-            "持参可":   st.column_config.CheckboxColumn("持参可", default=False),
-            "所有台数": st.column_config.NumberColumn("所有台数", min_value=0, max_value=20, step=1, default=1),
+            "所有台数": st.column_config.NumberColumn("所有台数", min_value=0, max_value=20, step=1, default=0),
             "備考":     st.column_config.TextColumn("備考", max_chars=100),
         },
     )
@@ -883,13 +880,10 @@ def _render_assign_tab(ctx: dict):
             for idx, meta in enumerate(bring_row_meta):
                 if idx >= len(df_reset): break
                 row     = df_reset.iloc[idx]
-                new_b   = bool(row.get("持参可") or False)
-                new_own = int(row.get("所有台数") or 1)
+                new_own = int(row.get("所有台数") or 0)
                 new_n   = str(row.get("備考") or "").strip()
-                no_change = (new_b   == meta["cur_b"]   and
-                             new_own == meta["cur_own"] and
-                             new_n   == meta["cur_n"])
-                if no_change and not meta["eid"] and not new_b:
+                no_change = (new_own == meta["cur_own"] and new_n == meta["cur_n"])
+                if no_change and not meta["eid"] and new_own == 0:
                     skip_n += 1
                     continue
                 if no_change and meta["eid"]:
@@ -899,7 +893,7 @@ def _render_assign_tab(ctx: dict):
                     ctx, c_id, c_name, p_id, p_name,
                     participant_id,
                     meta["iid"], meta["iname"],
-                    new_b, new_n, meta["eid"],
+                    new_own >= 1, new_n, meta["eid"],
                     own_count=new_own,
                 )
                 ok_n += 1 if ok else 0
@@ -1029,7 +1023,7 @@ def _render_practice_bring_tab(ctx: dict):
         iid = iids[0]; pid = pids[0]
         pi_by_inst.setdefault(iid, {})[pid] = {
             "assign":    ctx["extract_prop_text_any"](r, PI_ASSIGN_KEYS) == "True",
-            "can_bring": ctx["extract_prop_text_any"](r, PI_BRING_KEYS) == "True",
+            "can_bring": int(float(ctx["extract_prop_text_any"](r, PI_OWN_COUNT_KEYS) or "0")) >= 1,
             "own_count": ctx["extract_prop_text_any"](r, PI_OWN_COUNT_KEYS) or "0",
         }
 
@@ -1079,7 +1073,7 @@ def _render_practice_bring_tab(ctx: dict):
         # 持参可能な奏者（アサイン済み × 出席○ × 持参可フラグTrue）
         bringable_pids = [
             pid for pid in assigned_pids
-            if pid in attending_pids and pi_for_inst.get(pid, {}).get("can_bring", False)
+            if pid in attending_pids and pi_for_inst.get(pid, {}).get("can_bring", False)  # 所有台数≥1
         ]
         bringable_names = [player_name_map.get(pid, pid) for pid in bringable_pids]
         player_name_to_id = {player_name_map.get(pid, pid): pid for pid in bringable_pids}
