@@ -24,6 +24,20 @@ from concert.services.keys import (
 TEST_PREFIX = "[TEST]"
 
 
+def _clear_cache():
+    """HARMONIAの全セッションキャッシュをクリアする。"""
+    cache_prefixes = (
+        "practice_list_", "concert_list", "song_list_", "partdef_list_",
+        "pi_list_", "attendance_list_", "participant_list_", "instrument_list",
+        "schedule_list_", "expense_list_", "cast_list_", "pi_master_",
+        "si_list_", "pi_practice_",
+    )
+    for k in list(st.session_state.keys()):
+        if any(k.startswith(p) for p in cache_prefixes):
+            st.session_state.pop(k, None)
+    st.cache_data.clear()
+
+
 def _archive(ctx, page_id: str) -> bool:
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"archived": True})
@@ -251,6 +265,10 @@ def _seed_all(ctx) -> dict:
     existing = st.session_state.get("test_created_ids", [])
     st.session_state["test_created_ids"] = existing + created_ids
     summary["作成総件数"] = len(created_ids)
+
+    # 全キャッシュをクリアして即時反映
+    _clear_cache()
+
     return summary
 
 
@@ -267,6 +285,7 @@ def _delete_all_test_data(ctx) -> dict:
         count = sum(1 for pid in created_ids if _archive(ctx, pid))
         st.session_state.pop("test_created_ids", None)
         summary["削除件数（ID直接指定）"] = count
+        _clear_cache()
         return summary
 
     # 方法2: フォールバック（session_stateが消えた場合）[TEST]プレフィックスで全DB検索
