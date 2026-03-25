@@ -1045,6 +1045,9 @@ def _render_practice_bring_tab(ctx: dict):
         # この練習日に出席可能な奏者（×以外）
         att_for_prac    = att_map.get(pr_id, {})
         available_pids  = [pid for pid in player_ids if att_for_prac.get(pid, "△") != "×"]
+        # 出席可能者が誰もいない日はスキップ（打楽器休み等）
+        if not available_pids:
+            continue
         player_name_to_id = {player_name_map.get(pid, pid): pid for pid in available_pids}
 
         # 既存レコードから担当者と台数を取得
