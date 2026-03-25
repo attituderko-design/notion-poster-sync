@@ -73,7 +73,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.51"
+APP_VERSION = "11.60"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -8302,6 +8302,8 @@ if system_mode != _prev_mode:
             "rental_calc_results", "confirmed_rows_", "song_list_",
             "partdef_list_", "pi_list_", "attendance_list_",
             "participant_list_", "instrument_list",
+            "schedule_list_", "practice_editor_version",
+            "rental_list_",
         )):
             st.session_state.pop(_k, None)
     st.session_state["_prev_system_mode"] = system_mode
@@ -8402,6 +8404,9 @@ if system_mode == "HARMONIA":
     if not selected_concert_id:
         st.info("サイドバーの「演奏会フィルタ」で演奏会を選択してください。")
         st.stop()
+
+    # サイドバー：演奏会サマリPDF出力
+    concert_mgmt.render_sidebar_summary_pdf(concert_ctx)
 
     if concert_page == "練習管理":
         concert_mgmt.render(concert_ctx)
