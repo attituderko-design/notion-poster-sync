@@ -1238,6 +1238,26 @@ def _render_schedule_tab(ctx: dict):
                         _clear_schedule_cache(p_id)
                         st.rerun()
 
+    # PDF出力ボタン
+    st.divider()
+    col_pdf, _ = st.columns([3, 5])
+    if col_pdf.button("📄 前日共有PDFを出力", key="sched_pdf_btn", type="primary", use_container_width=True):
+        with st.spinner("PDF生成中..."):
+            try:
+                from concert.services.practice_report import generate_practice_report
+                pdf_bytes = generate_practice_report(ctx, p_id)
+                import datetime
+                fname = f"練習前日共有_{p_label.replace('/', '-').replace(' ', '_')}.pdf"
+                st.download_button(
+                    label="⬇️ ダウンロード",
+                    data=pdf_bytes,
+                    file_name=fname,
+                    mime="application/pdf",
+                    key="sched_pdf_dl",
+                )
+            except Exception as e:
+                st.error(f"PDF生成に失敗しました: {e}")
+
     st.divider()
     st.markdown("**＋ 新規追加**")
     with st.form("sched_new", border=True):
@@ -1274,6 +1294,25 @@ def render(ctx: dict):
         return
 
     st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
+
+    # 演奏会サマリPDF出力
+    col_summary_pdf, _ = st.columns([3, 5])
+    if col_summary_pdf.button("📊 演奏会サマリPDFを出力", key="concert_summary_pdf_btn",
+                               use_container_width=True):
+        with st.spinner("PDF生成中..."):
+            try:
+                from concert.services.concert_summary_report import generate_concert_summary
+                pdf_bytes = generate_concert_summary(ctx, global_concert_id)
+                fname = f"演奏会サマリ_{global_concert_name or global_concert_id}.pdf"
+                st.download_button(
+                    label="⬇️ ダウンロード",
+                    data=pdf_bytes,
+                    file_name=fname,
+                    mime="application/pdf",
+                    key="concert_summary_pdf_dl",
+                )
+            except Exception as e:
+                st.error(f"PDF生成に失敗しました: {e}")
 
     concerts = _load_concerts(ctx)
     filter_concert_id    = global_concert_id
