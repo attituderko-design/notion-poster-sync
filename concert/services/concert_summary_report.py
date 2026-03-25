@@ -144,6 +144,7 @@ def _base_style():
         ("BOTTOMPADDING",(0,0), (-1,-1), 2),
         ("LEFTPADDING",  (0,0), (-1,-1), 2),
         ("RIGHTPADDING", (0,0), (-1,-1), 2),
+        ("ALIGN",        (0,0), (-1,-1), "LEFT"),
         ("ROWBACKGROUNDS",(0,1),(-1,-1), [colors.white, colors.HexColor("#F7F6FA")]),
     ])
 

@@ -156,6 +156,7 @@ def _tbl_style(header_bg="#E8E6F0"):
         ("BOTTOMPADDING",(0,0), (-1,-1), 3),
         ("LEFTPADDING",  (0,0), (-1,-1), 4),
         ("RIGHTPADDING", (0,0), (-1,-1), 4),
+        ("ALIGN",        (0,0), (-1,-1), "LEFT"),
         ("ROWBACKGROUNDS",(0,1),(-1,-1), [colors.white, colors.HexColor("#F7F6FA")]),
     ])
 
