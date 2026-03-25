@@ -1434,11 +1434,13 @@ def render(ctx: dict):
             prac_meta.append({"pid": pid, "pname": pname, "pdate": pdate})
 
         df_prac = pd.DataFrame(prac_df_rows)
+        # keyにリロードカウンタを含めてrerun後にdata_editorをリセット
+        editor_version = st.session_state.get("practice_editor_version", 0)
         edited_prac = st.data_editor(
             df_prac,
             num_rows="fixed",
             use_container_width=True,
-            key=f"practice_list_editor_{filter_concert_id}",
+            key=f"practice_list_editor_{filter_concert_id}_{editor_version}",
             column_config={
                 "練習名":     st.column_config.TextColumn("練習名", disabled=True),
                 "日時":       st.column_config.TextColumn("日時", help="例: 2026-04-25 19:00"),
@@ -1452,7 +1454,7 @@ def render(ctx: dict):
 
         if st.button("💾 まとめて保存", type="primary", use_container_width=True,
                      key="practice_list_save"):
-            ok_n = ng_n = skip_n = 0
+            ok_n = ng_n = 0
             with st.spinner("保存中..."):
                 df_reset = edited_prac.reset_index(drop=True)
                 for idx, meta in enumerate(prac_meta):
@@ -1465,16 +1467,6 @@ def render(ctx: dict):
                     new_po   = bool(row.get("打楽器休み") or False)
                     new_memo = str(row.get("メモ") or "").strip()
 
-                    # 変更チェック（日時・会場・フラグ）
-                    orig = prac_df_rows[idx]
-                    if (new_date == orig["日時"] and new_venue == orig["会場名"]
-                            and new_addr == orig["会場住所"]
-                            and new_cd == orig["本番日"]
-                            and new_po == orig["打楽器休み"]
-                            and new_memo == orig["メモ"]):
-                        skip_n += 1
-                        continue
-
                     # 日時のパース（"2026-04-25 19:00" → Notion date format）
                     dt_s = ""
                     if new_date:
@@ -1485,7 +1477,7 @@ def render(ctx: dict):
                                 "",
                             )
                         except Exception:
-                            dt_s = meta["pdate"]  # パース失敗時は元の値を維持
+                            dt_s = meta["pdate"]
 
                     ok = _update_practice(
                         ctx, meta["pid"], meta["pname"], filter_concert_id,
@@ -1497,9 +1489,11 @@ def render(ctx: dict):
                     ng_n += 0 if ok else 1
 
             if ng_n == 0:
-                st.success(f"✅ {ok_n}件を保存しました。（変更なし {skip_n}件はスキップ）")
+                st.success(f"✅ {ok_n}件を保存しました。")
             else:
                 st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+            # バージョンを上げてdata_editorをリセット
+            st.session_state["practice_editor_version"] = editor_version + 1
             _clear_concert_cache(ctx)
             st.rerun()
 
