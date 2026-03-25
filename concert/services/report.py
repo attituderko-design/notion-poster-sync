@@ -113,6 +113,7 @@ def generate_assign_report(
         ])
 
     tbl = Table(rows, colWidths=[18*mm, 75*mm, 20*mm, 20*mm, 20*mm, 16*mm])
+    tbl.hAlign = "LEFT"
     tbl.setStyle(TableStyle([
         ("FONT",        (0,0), (-1,-1), font,   8),
         ("FONT",        (0,0), (-1, 0), font_b, 8),
@@ -164,6 +165,7 @@ def generate_assign_report(
 
     col_w = [25*mm] + [18*mm] * len(results) * 2
     stbl = Table(score_rows, colWidths=col_w)
+    stbl.hAlign = "LEFT"
     stbl.setStyle(TableStyle([
         ("FONT",        (0,0), (-1,-1), font,   7.5),
         ("FONT",        (0,0), (-1, 0), font_b, 7.5),
@@ -222,6 +224,7 @@ def generate_assign_report(
         song_col_w_each = (available_w - name_col_w) / max(len(song_order), 1)
         song_col_w = [name_col_w] + [song_col_w_each] * len(song_order)
         mtbl = Table(mat_rows_p, colWidths=song_col_w, repeatRows=1)
+        mtbl.hAlign = "LEFT"
         mtbl.setStyle(TableStyle([
             ("FONT",        (0,0), (-1,-1), font,   6.5),
             ("FONT",        (0,0), (-1, 0), font_b, 6.5),
@@ -288,6 +291,7 @@ def generate_assign_report(
                 detail_rows_p.append(new_row)
 
             dtbl = Table(detail_rows_p, colWidths=[28*mm, 90*mm, 18*mm, 14*mm], repeatRows=1)
+            dtbl.hAlign = "LEFT"
             dtbl.setStyle(TableStyle([
                 ("FONT",        (0,0), (-1,-1), font,   8),
                 ("FONT",        (0,0), (-1, 0), font_b, 8),

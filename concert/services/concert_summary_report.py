@@ -83,6 +83,7 @@ def _venue_qr_block(address: str, venue: str, font, font_b, W):
         from reportlab.platypus import Image as RLImage
         qr_img = RLImage(qr_buf, width=24*mm, height=24*mm)
         tbl = Table([[qr_img, info]], colWidths=[27*mm, W-27*mm])
+        tbl.hAlign = "LEFT"
         tbl.setStyle(TableStyle([
             ("VALIGN",(0,0),(-1,-1),"TOP"),
             ("LEFTPADDING",(0,0),(-1,-1),0),
@@ -251,6 +252,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
          for k, v in info_data],
         colWidths=[22*mm, W-22*mm],
     )
+    info_tbl.hAlign = "LEFT"
     info_tbl.setStyle(TableStyle([
         ("FONT",        (0,0),(-1,-1), font,   8),
         ("FONT",        (0,0),(0,-1),  font_b, 8),
@@ -289,6 +291,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         colWidths=[35*mm, 22*mm, 55*mm, W-112*mm],
         repeatRows=1,
     )
+    pl_tbl.hAlign = "LEFT"
     pl_tbl.setStyle(_base_style())
     story.append(pl_tbl)
     story.append(Spacer(1, 5*mm))
@@ -337,6 +340,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     for row_i, col_i, status in cell_styles:
         bg = STATUS_COLORS.get(status, colors.white)
         mat_sty.add("BACKGROUND", (col_i, row_i), (col_i, row_i), bg)
+    mat_tbl.hAlign = "LEFT"
     mat_tbl.setStyle(mat_sty)
     story.append(KeepTogether([_mat_title, mat_tbl, Spacer(1, 5*mm)]))
 
@@ -383,6 +387,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
             colWidths=[38*mm, 30*mm, 40*mm, 10*mm, 18*mm, 20*mm, 12*mm],
             repeatRows=1,
         )
+        rent_tbl.hAlign = "LEFT"
         rent_tbl.setStyle(_base_style())
         total_para = Paragraph(
             f"合計（全見積）: ¥{total_all:,}　／　確定済み: ¥{total_confirmed:,}",
@@ -419,6 +424,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         repeatRows=1,
     )
     ph_sty = _base_style()
+    ph_tbl.hAlign = "LEFT"
     ph_tbl.setStyle(ph_sty)
     story.append(ph_tbl)
     story.append(Spacer(1, 3*mm))

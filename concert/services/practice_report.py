@@ -95,6 +95,7 @@ def _venue_qr_block(address: str, venue: str, font, font_b, W):
         from reportlab.platypus import Image as RLImage
         qr_img = RLImage(qr_buf, width=24*mm, height=24*mm)
         tbl = Table([[qr_img, info]], colWidths=[27*mm, W - 27*mm])
+        tbl.hAlign = "LEFT"
         tbl.setStyle(TableStyle([
             ("VALIGN",       (0,0),(-1,-1), "TOP"),
             ("LEFTPADDING",  (0,0),(-1,-1), 0),
@@ -302,6 +303,7 @@ def generate_practice_report(
     info_tbl = Table([[Paragraph(k, st_map["cellb"]), Paragraph(v, st_map["cell"])]
                        for k, v in info_data],
                       colWidths=[20*mm, W-20*mm])
+    info_tbl.hAlign = "LEFT"
     info_tbl.setStyle(TableStyle([
         ("FONT",        (0,0), (-1,-1), font,  8),
         ("FONT",        (0,0), (0,-1),  font_b,8),
@@ -355,6 +357,7 @@ def generate_practice_report(
         sched_style = _tbl_style()
         for i, bg in enumerate(sched_row_colors):
             sched_style.add("BACKGROUND", (0,i), (-1,i), bg)
+        sched_tbl.hAlign = "LEFT"
         sched_tbl.setStyle(sched_style)
         story.append(sched_tbl)
         story.append(Spacer(1, 3*mm))
@@ -384,6 +387,7 @@ def generate_practice_report(
                 sty.add("BACKGROUND", (1,i), (1,i), colors.HexColor("#FDEDEC"))
             elif status == "△":
                 sty.add("BACKGROUND", (1,i), (1,i), colors.HexColor("#FEF9E7"))
+        att_tbl.hAlign = "LEFT"
         att_tbl.setStyle(sty)
         story.append(att_tbl)
     else:
@@ -421,6 +425,7 @@ def generate_practice_report(
             colWidths=[50*mm, 60*mm, 15*mm],
             repeatRows=1,
         )
+        bring_tbl.hAlign = "LEFT"
         bring_tbl.setStyle(_tbl_style())
         story.append(bring_tbl)
     else:
@@ -449,6 +454,7 @@ def generate_practice_report(
             colWidths=[40*mm, 55*mm, 12*mm, 22*mm, 12*mm],
             repeatRows=1,
         )
+        rent_tbl.hAlign = "LEFT"
         rent_tbl.setStyle(_tbl_style())
         story.append(rent_tbl)
     else:
