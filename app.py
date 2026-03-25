@@ -33,6 +33,7 @@ try:
     from concert.pages import (
         concert_mgmt,
         finance,
+        test_data,
         songs,
         players,
         rental,
@@ -8320,6 +8321,7 @@ if system_mode == "HARMONIA":
             "アサイン検討",
             "レンタル管理",
             "収支・振込管理",
+            "🧪 テストデータ管理",
         ],
         key="concert_page_radio",
     )
@@ -8422,6 +8424,8 @@ if system_mode == "HARMONIA":
         rental.render(concert_ctx)
     elif concert_page == "収支・振込管理":
         finance.render(concert_ctx)
+    elif concert_page == "🧪 テストデータ管理":
+        test_data.render(concert_ctx)
 
     st.stop()
 
