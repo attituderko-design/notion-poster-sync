@@ -744,8 +744,7 @@ def _render_attendance_tab(ctx: dict):
 
 
 def _render_assign_tab(ctx: dict):
-    st.caption("このタブは、選択演奏会で必要な楽器に対して『各奏者が持参可能か』のみを整理します。")
-    st.caption("パート希望・アサイン確定は『アサイン検討』画面で行います。")
+    st.caption("奏者ごとに所有楽器・台数・持参可否を登録します。持参担当の設定は『練習日別持参担当』タブで行います。")
 
     concerts = [c for c in _load_concerts(ctx) if _is_performance_media_concert(c)]
     if not concerts:
@@ -851,8 +850,6 @@ def _render_assign_tab(ctx: dict):
             "楽器":     iname,
             "持参可":   cur_b,
             "所有台数": cur_own,
-            "持参担当": cur_ba,
-            "持参台数": cur_cnt,
             "備考":     cur_n,
         })
         bring_row_meta.append({
@@ -860,9 +857,7 @@ def _render_assign_tab(ctx: dict):
             "iname":   iname,
             "eid":     ex.get("id", "") if ex else "",
             "cur_b":   cur_b,
-            "cur_ba":  cur_ba,
             "cur_own": cur_own,
-            "cur_cnt": cur_cnt,
             "cur_n":   cur_n,
         })
 
@@ -874,15 +869,13 @@ def _render_assign_tab(ctx: dict):
         key=f"bring_editor_{c_id}_{p_id}",
         column_config={
             "楽器":     st.column_config.TextColumn("楽器", disabled=True),
-            "持参可":   st.column_config.CheckboxColumn("持参可",   default=False),
+            "持参可":   st.column_config.CheckboxColumn("持参可", default=False),
             "所有台数": st.column_config.NumberColumn("所有台数", min_value=0, max_value=20, step=1, default=1),
-            "持参担当": st.column_config.CheckboxColumn("持参担当", default=False),
-            "持参台数": st.column_config.NumberColumn("持参台数", min_value=0, max_value=20, step=1, default=0),
             "備考":     st.column_config.TextColumn("備考", max_chars=100),
         },
     )
 
-    if st.button("💾 持参可を保存", use_container_width=True, type="primary",
+    if st.button("💾 所有楽器を保存", use_container_width=True, type="primary",
                  key=f"bring_save_{c_id}_{p_id}"):
         ok_n = ng_n = skip_n = 0
         with st.spinner("保存中..."):
@@ -890,15 +883,11 @@ def _render_assign_tab(ctx: dict):
             for idx, meta in enumerate(bring_row_meta):
                 if idx >= len(df_reset): break
                 row     = df_reset.iloc[idx]
-                new_b   = bool(row.get("持参可")   or False)
-                new_ba  = bool(row.get("持参担当") or False)
+                new_b   = bool(row.get("持参可") or False)
                 new_own = int(row.get("所有台数") or 1)
-                new_cnt = int(row.get("持参台数") or 0)
                 new_n   = str(row.get("備考") or "").strip()
                 no_change = (new_b   == meta["cur_b"]   and
-                             new_ba  == meta["cur_ba"]  and
                              new_own == meta["cur_own"] and
-                             new_cnt == meta["cur_cnt"] and
                              new_n   == meta["cur_n"])
                 if no_change and not meta["eid"] and not new_b:
                     skip_n += 1
@@ -912,8 +901,6 @@ def _render_assign_tab(ctx: dict):
                     meta["iid"], meta["iname"],
                     new_b, new_n, meta["eid"],
                     own_count=new_own,
-                    bring_assign=new_ba,
-                    bring_count=new_cnt,
                 )
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
@@ -1229,7 +1216,7 @@ def render(ctx: dict):
     if not global_concert_id:
         st.info("サイドバーで演奏会を選択してください。")
         return
-    t1, t2, t3, t4 = st.tabs(["奏者管理", "出欠入力", "持参楽器整理", "練習日別持参担当"])
+    t1, t2, t3, t4 = st.tabs(["奏者管理", "出欠入力", "所有楽器整理", "練習日別持参担当"])
     with t1:
         _render_player_tab(ctx)
     with t2:
