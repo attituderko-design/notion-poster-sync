@@ -1042,10 +1042,10 @@ def _render_practice_bring_tab(ctx: dict):
         pr_date  = (ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS) or "")[:10]
         pr_label = f"{pr_name}（{pr_date}）"
 
-        # この練習日に出席可能な奏者（×以外）
+        # この練習日に出席確定（○）の奏者のみ担当候補
         att_for_prac    = att_map.get(pr_id, {})
-        available_pids  = [pid for pid in player_ids if att_for_prac.get(pid, "△") != "×"]
-        # 出席可能者が誰もいない日はスキップ（打楽器休み等）
+        available_pids  = [pid for pid in player_ids if att_for_prac.get(pid, "△") == "○"]
+        # 出席確定者が誰もいない日はスキップ
         if not available_pids:
             continue
         player_name_to_id = {player_name_map.get(pid, pid): pid for pid in available_pids}
