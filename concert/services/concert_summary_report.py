@@ -65,8 +65,8 @@ def _styles(font, font_b):
         "body":    ParagraphStyle("body",   fontName=font,   fontSize=9),
         "cell":    ParagraphStyle("cell",   fontName=font,   fontSize=8,  leading=11),
         "cellb":   ParagraphStyle("cellb",  fontName=font_b, fontSize=8,  leading=11),
-        "cellsm":  ParagraphStyle("cellsm", fontName=font,   fontSize=7,  leading=10),
-        "cellbsm": ParagraphStyle("cellbsm",fontName=font_b, fontSize=7,  leading=10),
+        "cellsm":  ParagraphStyle("cellsm", fontName=font,   fontSize=6,  leading=9),
+        "cellbsm": ParagraphStyle("cellbsm",fontName=font_b, fontSize=6,  leading=9),
         "small":   ParagraphStyle("small",  fontName=font,   fontSize=7,
                                   textColor=colors.HexColor("#666666")),
         "placeholder": ParagraphStyle("ph", fontName=font,   fontSize=9,
@@ -81,10 +81,10 @@ def _base_style():
         ("BACKGROUND",   (0,0), (-1, 0), colors.HexColor("#E8E6F0")),
         ("GRID",         (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
         ("VALIGN",       (0,0), (-1,-1), "MIDDLE"),
-        ("TOPPADDING",   (0,0), (-1,-1), 3),
-        ("BOTTOMPADDING",(0,0), (-1,-1), 3),
-        ("LEFTPADDING",  (0,0), (-1,-1), 3),
-        ("RIGHTPADDING", (0,0), (-1,-1), 3),
+        ("TOPPADDING",   (0,0), (-1,-1), 2),
+        ("BOTTOMPADDING",(0,0), (-1,-1), 2),
+        ("LEFTPADDING",  (0,0), (-1,-1), 2),
+        ("RIGHTPADDING", (0,0), (-1,-1), 2),
         ("ROWBACKGROUNDS",(0,1),(-1,-1), [colors.white, colors.HexColor("#F7F6FA")]),
     ])
 
@@ -270,8 +270,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         bg = STATUS_COLORS.get(status, colors.white)
         mat_sty.add("BACKGROUND", (col_i, row_i), (col_i, row_i), bg)
     mat_tbl.setStyle(mat_sty)
-    story.append(mat_tbl)
-    story.append(Spacer(1, 5*mm))
+    story.append(KeepTogether([mat_tbl, Spacer(1, 5*mm)]))
 
     # ── レンタル費用小計 ─────────────────────────────────────
     story.append(Paragraph("■ レンタル費用小計", st_map["h2"]))
