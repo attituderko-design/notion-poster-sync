@@ -32,7 +32,7 @@ from concert.services.keys import (
     SCHEDULE_CONTENT_KEYS, SCHEDULE_SONG_REL_KEYS, SCHEDULE_ORDER_KEYS,
     ATT_PLAYER_REL_KEYS, ATT_STATUS_KEYS,
     PARTICIPANT_PLAYER_REL_KEYS,
-    PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_BRING_KEYS, PI_BRING_ASSIGN_KEYS,
+    PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_BRING_ASSIGN_KEYS,
     PI_OWN_COUNT_KEYS, PI_BRING_COUNT_KEYS, PI_CONCERT_REL_KEYS,
     RENTAL_INST_REL_KEYS, RENTAL_ITEM_NAME_KEYS, RENTAL_VENDOR_KEYS,
     RENTAL_QTY_KEYS, RENTAL_CONFIRMED_KEYS, RENTAL_COST_TYPE_KEYS,
@@ -265,8 +265,7 @@ def generate_practice_report(
     pi_rows = [r for r in pi_rows
                if not concert_id or concert_id in ext_rel(r, PI_CONCERT_REL_KEYS)]
     # 持参担当フラグTrueのみ（担当が未設定の場合は持参可フラグにフォールバック）
-    bring_rows = [r for r in pi_rows if ext(r, PI_BRING_ASSIGN_KEYS) == "True"
-                  or (ext(r, PI_BRING_KEYS) == "True" and ext(r, PI_BRING_ASSIGN_KEYS) != "False")]
+    bring_rows = [r for r in pi_rows if ext(r, PI_BRING_ASSIGN_KEYS) == "True"]
 
     # レンタル
     from concert.services.keys import RENTAL_PRACTICE_REL_KEYS
