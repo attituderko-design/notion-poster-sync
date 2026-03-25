@@ -1295,39 +1295,16 @@ def render(ctx: dict):
 
     st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
 
-    # 演奏会サマリPDF出力
-    col_summary_pdf, _ = st.columns([3, 5])
-    if col_summary_pdf.button("📊 演奏会サマリPDFを出力", key="concert_summary_pdf_btn",
-                               use_container_width=True):
-        with st.spinner("PDF生成中..."):
-            try:
-                from concert.services.concert_summary_report import generate_concert_summary
-                pdf_bytes = generate_concert_summary(ctx, global_concert_id)
-                fname = f"演奏会サマリ_{global_concert_name or global_concert_id}.pdf"
-                st.download_button(
-                    label="⬇️ ダウンロード",
-                    data=pdf_bytes,
-                    file_name=fname,
-                    mime="application/pdf",
-                    key="concert_summary_pdf_dl",
-                )
-            except Exception as e:
-                st.error(f"PDF生成に失敗しました: {e}")
-
     concerts = _load_concerts(ctx)
     filter_concert_id    = global_concert_id
     selected_concert_page = next((c for c in concerts if c.get("id") == filter_concert_id), None)
 
-    with st.expander("📅 スケジュール管理", expanded=False):
-        _render_schedule_tab(ctx)
-
     with st.expander("⚙️ 練習回を一括生成", expanded=False):
-        st.caption("演奏会を選択後、練習回数を入力すると「第1回練習〜第N回練習」と「第N+1回練習（本番）」を作成します。")
-        st.caption("生成後は、下の「登録済み練習」一覧を開いて各回の日時・会場を入力してください。")
+        st.caption("練習回数を入力すると「第1回練習〜第N回練習」と「本番当日」を作成します。")
         bulk_count = int(st.number_input("練習回数", min_value=1, value=3, step=1, key="practice_bulk_count"))
         if st.button("➕ 練習回を生成", key="practice_bulk_generate", type="primary", use_container_width=True):
             if not filter_concert_id or not selected_concert_page:
-                st.error("先に「絞り込み：演奏会」で対象演奏会を選択してください。")
+                st.error("先にサイドバーで演奏会を選択してください。")
             else:
                 with st.spinner("練習回を生成中..."):
                     created, skipped = _bulk_generate_practice_rows(ctx, selected_concert_page, bulk_count)
@@ -1421,7 +1398,7 @@ def render(ctx: dict):
             pmemo  = ctx["extract_prop_text_any"](p, PRACTICE_MEMO_KEYS) or ""
             is_cd  = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
             is_po  = _extract_bool_any(ctx, p, PRACTICE_PERCUSSION_OFF_KEYS, False)
-            disp_name = f"【本番当日】{pname}" if is_cd else pname
+            disp_name = "【本番当日】" if is_cd else pname
             prac_df_rows.append({
                 "練習名":     disp_name,
                 "日時":       pdate_disp,
@@ -1498,16 +1475,49 @@ def render(ctx: dict):
             st.rerun()
 
         st.divider()
-        st.caption("詳細編集・演奏曲設定・前日共有PDF出力は各練習を展開してください。")
+        st.caption("演奏曲設定・前日共有PDFは各練習を展開してください。")
         for p in filtered_practices:
             label = _practice_display_name(p, ctx)
             is_concert_day = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
             if is_concert_day:
                 label = "【本番当日】" + label
             with st.expander(label, expanded=False):
-                _render_practice_form(ctx, concerts, existing=p)
-                st.divider()
                 p_id_pdf = p.get("id", "")
+                # 演奏曲設定（multiselect必須のためexpander内に残す）
+                song_opts_e: dict = {}
+                if filter_concert_id:
+                    s_rows_e = _load_songs(ctx, filter_concert_id)
+                    song_opts_e = {ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or s.get("id",""): s.get("id","")
+                                   for s in s_rows_e}
+                cur_song_ids_e = ctx["extract_relation_ids_any"](p, PRACTICE_SONG_REL_KEYS)
+                cur_song_names_e = [k for k, v in song_opts_e.items() if v in cur_song_ids_e]
+                selected_songs_e = st.multiselect(
+                    "この日に練習する曲（未選択の場合は全曲対象）",
+                    options=list(song_opts_e.keys()),
+                    default=cur_song_names_e,
+                    key=f"prac_songs_{p_id_pdf}",
+                )
+                if st.button("💾 演奏曲を保存", key=f"prac_songs_save_{p_id_pdf}", use_container_width=True):
+                    new_song_ids_e = [song_opts_e[s] for s in selected_songs_e if s in song_opts_e]
+                    ok = _update_practice(
+                        ctx, p_id_pdf,
+                        ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or "",
+                        filter_concert_id,
+                        ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS) or "", "",
+                        ctx["extract_prop_text_any"](p, PRACTICE_VENUE_KEYS) or "",
+                        ctx["extract_prop_text_any"](p, PRACTICE_ADDRESS_KEYS) or "",
+                        _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False),
+                        _extract_bool_any(ctx, p, PRACTICE_PERCUSSION_OFF_KEYS, False),
+                        ctx["extract_prop_text_any"](p, PRACTICE_MEMO_KEYS) or "",
+                        song_ids=new_song_ids_e,
+                    )
+                    if ok:
+                        st.success("✅ 演奏曲を保存しました。")
+                        _clear_concert_cache(ctx)
+                        st.rerun()
+                    else:
+                        st.error("❌ 保存に失敗しました。")
+                st.divider()
                 col_pdf, _ = st.columns([3, 5])
                 if col_pdf.button("📄 前日共有PDFを出力",
                                   key=f"practice_pdf_{p_id_pdf}",
@@ -1526,3 +1536,31 @@ def render(ctx: dict):
                             )
                         except Exception as e:
                             st.error(f"PDF生成に失敗しました: {e}")
+
+    st.divider()
+    with st.expander("📅 スケジュール管理", expanded=False):
+        _render_schedule_tab(ctx)
+
+
+def render_sidebar_summary_pdf(ctx: dict):
+    """サイドバーに演奏会サマリPDF出力ボタンを描画する。app.pyから呼ぶ。"""
+    concert_id   = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+    concert_name = (ctx.get("SELECTED_CONCERT_NAME") or "").strip()
+    if not concert_id:
+        return
+    if st.sidebar.button("📊 演奏会サマリPDFを出力", key="sidebar_summary_pdf_btn",
+                          use_container_width=True):
+        with st.spinner("PDF生成中..."):
+            try:
+                from concert.services.concert_summary_report import generate_concert_summary
+                pdf_bytes = generate_concert_summary(ctx, concert_id)
+                fname = f"演奏会サマリ_{concert_name or concert_id}.pdf"
+                st.sidebar.download_button(
+                    label="⬇️ ダウンロード",
+                    data=pdf_bytes,
+                    file_name=fname,
+                    mime="application/pdf",
+                    key="sidebar_summary_pdf_dl",
+                )
+            except Exception as e:
+                st.sidebar.error(f"PDF生成に失敗しました: {e}")
