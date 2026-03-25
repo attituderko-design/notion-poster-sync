@@ -92,6 +92,7 @@ def get_concert_secrets() -> dict:
     db_rental = st.secrets.get("CONCERT_DB_RENTAL", "") or _DEFAULT_CONCERT_DB_IDS["rental"]
     db_schedule = st.secrets.get("CONCERT_DB_SCHEDULE", "") or _DEFAULT_CONCERT_DB_IDS.get("schedule", "")
     db_pi_master = st.secrets.get("CONCERT_DB_PLAYER_INSTRUMENT_MASTER", "") or _DEFAULT_CONCERT_DB_IDS.get("pi_master", "")
+    db_expense   = st.secrets.get("CONCERT_DB_CONCERT_EXPENSE", "") or _DEFAULT_CONCERT_DB_IDS.get("expense", "")
     required_db = {
         "演奏会DB": db_concert,
         "練習DB": db_practice,
@@ -126,7 +127,7 @@ def get_concert_secrets() -> dict:
         "db_preference":       db_preference,
         "db_schedule":         db_schedule,
         "db_pi_master":        db_pi_master,
-            "db_expense":          db_expense,
+        "db_expense":          db_expense,
     }
 
 
