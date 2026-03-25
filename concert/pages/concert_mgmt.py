@@ -1675,12 +1675,16 @@ def _render_data_check_tab(ctx: dict, concert_id: str):
             ok("希望入力", f"Perc奏者 {len(perc_pids)}名 全員希望入力済み")
 
     # ── 4. 持参担当 ───────────────────────────────────────────
-    songs = _load_concert_songs(ctx, concert_id)
+    songs = _load_songs(ctx, concert_id)
     required_insts: set[str] = set()
-    for s in songs:
-        for part in _load_partdefs_for_song(ctx, s.get("id", "")):
-            iids = ext_rel(part, PARTDEF_INST_REL_KEYS)
-            required_insts.update(iids)
+    all_partdefs = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
+    song_ids_set = {s.get("id","") for s in songs}
+    for part in all_partdefs:
+        song_rel = ext_rel(part, PARTDEF_SONG_REL_KEYS)
+        if not any(sid in song_ids_set for sid in song_rel):
+            continue
+        iids = ext_rel(part, PARTDEF_INST_REL_KEYS)
+        required_insts.update(iids)
 
     if not required_insts:
         warn("持参担当", "パート定義が登録されていません（必要楽器不明）")
