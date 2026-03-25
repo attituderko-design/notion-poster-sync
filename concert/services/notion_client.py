@@ -90,6 +90,7 @@ def get_concert_secrets() -> dict:
     db_instrument = st.secrets.get("CONCERT_DB_INSTRUMENT", "") or _DEFAULT_CONCERT_DB_IDS["instrument"]
     db_song_instrument = st.secrets.get("CONCERT_DB_SONG_INSTRUMENT", "") or _DEFAULT_CONCERT_DB_IDS["song_instrument"]
     db_rental = st.secrets.get("CONCERT_DB_RENTAL", "") or _DEFAULT_CONCERT_DB_IDS["rental"]
+    db_schedule = st.secrets.get("CONCERT_DB_SCHEDULE", "") or _DEFAULT_CONCERT_DB_IDS.get("schedule", "")
     required_db = {
         "演奏会DB": db_concert,
         "練習DB": db_practice,
@@ -500,7 +501,7 @@ def build_concert_ctx() -> dict:
         "CONCERT_DB_RENTAL":           secrets["db_rental"],
         "CONCERT_DB_PART_DEFINITION":  secrets["db_part_definition"],
         "CONCERT_DB_PREFERENCE":       secrets["db_preference"],
-        # ユーティリティ
+        "CONCERT_DB_SCHEDULE":         secrets["db_schedule"],
         "query_all":                   _query_all,
         "get_prop_types":              _get_prop_types,
         "put_prop":                    _put_prop,
