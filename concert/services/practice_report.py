@@ -35,7 +35,7 @@ from concert.services.keys import (
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_BRING_ASSIGN_KEYS,
     PI_OWN_COUNT_KEYS, PI_BRING_COUNT_KEYS, PI_CONCERT_REL_KEYS,
     RENTAL_INST_REL_KEYS, RENTAL_ITEM_NAME_KEYS, RENTAL_VENDOR_KEYS,
-    RENTAL_QTY_KEYS, RENTAL_CONFIRMED_KEYS, RENTAL_COST_TYPE_KEYS,
+    RENTAL_QTY_KEYS, RENTAL_UNIT_PRICE_KEYS, RENTAL_CONFIRMED_KEYS, RENTAL_COST_TYPE_KEYS,
     PLAYER_NAME_KEYS, INSTRUMENT_NAME_KEYS, SONG_NAME_KEYS,
 )
 
@@ -434,27 +434,43 @@ def generate_practice_report(
     # レンタル一覧
     story.append(Paragraph("■ レンタル一覧", st_map["h2"]))
     if rent_rows:
-        rent_data = [["業者名", "品目", "台数", "費用種別", "確定"]]
+        rent_data = [["業者名", "品目", "台数", "単価", "小計", "確定"]]
+        rent_total = rent_confirmed = 0
         for r in rent_rows:
-            i_ids    = ext_rel(r, RENTAL_INST_REL_KEYS)
-            inst_n   = inst_name_map.get(i_ids[0], "") if i_ids else ""
-            item_n   = ext(r, RENTAL_ITEM_NAME_KEYS) or inst_n
-            vendor   = ext(r, RENTAL_VENDOR_KEYS) or "—"
-            qty_str  = ext(r, RENTAL_QTY_KEYS) or "0"
-            cost_t   = ext(r, RENTAL_COST_TYPE_KEYS) or ""
-            confirmed = "確定" if ext(r, RENTAL_CONFIRMED_KEYS) == "True" else "見積"
-            try: qty = int(float(qty_str))
+            i_ids     = ext_rel(r, RENTAL_INST_REL_KEYS)
+            inst_n    = inst_name_map.get(i_ids[0], "") if i_ids else ""
+            item_n    = ext(r, RENTAL_ITEM_NAME_KEYS) or inst_n
+            vendor    = ext(r, RENTAL_VENDOR_KEYS) or "—"
+            qty_str   = ext(r, RENTAL_QTY_KEYS)        or "0"
+            price_str = ext(r, RENTAL_UNIT_PRICE_KEYS) or "0"
+            confirmed = ext(r, RENTAL_CONFIRMED_KEYS) == "True"
+            try: qty   = int(float(qty_str))
             except: qty = 0
-            rent_data.append([vendor, item_n, str(qty), cost_t, confirmed])
+            try: price = int(float(price_str))
+            except: price = 0
+            subtotal = qty * price
+            rent_total += subtotal
+            if confirmed:
+                rent_confirmed += subtotal
+            rent_data.append([
+                vendor, item_n, str(qty),
+                f"¥{price:,}", f"¥{subtotal:,}",
+                "確定" if confirmed else "見積"
+            ])
+        rent_data.append(["合計（確定）", "", "", "", f"¥{rent_confirmed:,}", ""])
+        rent_data.append(["合計（全見積）", "", "", "", f"¥{rent_total:,}", ""])
         rent_tbl = Table(
-            [[Paragraph(str(c), st_map["cellb"] if i == 0 else st_map["cell"])
-              for c in row]
+            [[Paragraph(str(c), st_map["cellb"] if (i == 0 or (i >= len(rent_data)-2 and j==0)) else st_map["cell"])
+              for j, c in enumerate(row)]
              for i, row in enumerate(rent_data)],
-            colWidths=[40*mm, 55*mm, 12*mm, 22*mm, 12*mm],
+            colWidths=[35*mm, 45*mm, 12*mm, 20*mm, 22*mm, 12*mm],
             repeatRows=1,
         )
+        rent_sty = _tbl_style()
+        for i in range(len(rent_data)-2, len(rent_data)):
+            rent_sty.add("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F0EEF8"))
         rent_tbl.hAlign = "LEFT"
-        rent_tbl.setStyle(_tbl_style())
+        rent_tbl.setStyle(rent_sty)
         story.append(rent_tbl)
     else:
         story.append(Paragraph("レンタル登録がありません。", st_map["small"]))

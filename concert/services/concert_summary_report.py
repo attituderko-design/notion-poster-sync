@@ -35,6 +35,9 @@ from concert.services.keys import (
     RENTAL_CONFIRMED_KEYS, RENTAL_VENDOR_KEYS, RENTAL_ITEM_NAME_KEYS,
     RENTAL_INST_REL_KEYS, RENTAL_COST_TYPE_KEYS,
     PLAYER_NAME_KEYS, INSTRUMENT_NAME_KEYS,
+    PARTICIPANT_CONCERT_REL_KEYS, PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS,
+    EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS, EXPENSE_AMOUNT_KEYS,
+    EXPENSE_CONFIRMED_KEYS,
 )
 
 
@@ -403,32 +406,64 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         story.append(Paragraph("レンタル登録がありません。", st_map["small"]))
     story.append(Spacer(1, 5*mm))
 
-    # ── 入金・活動資金のまとめ（枠のみ） ─────────────────────
-    # 入金セクション（KeepTogether）
+    # ── 入金・活動資金のまとめ ─────────────────────────────────
     story.append(Spacer(1, 5*mm))
     story.append(Paragraph("■ 入金・活動資金のまとめ", st_map["h2"]))
-    placeholder_data = [
-        ["項目", "金額", "備考"],
-        ["参加費合計（予定）", "—", ""],
-        ["参加費合計（入金済）", "—", ""],
-        ["レンタル費用（確定）", f"¥{total_confirmed:,}", ""],
-        ["レンタル費用（全見積）", f"¥{total_all:,}", ""],
-        ["その他経費", "—", ""],
-        ["収支合計", "—", ""],
+
+    # 参加費集計
+    participant_rows_s = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+    cast_s = [r for r in participant_rows_s
+              if concert_id in ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)]
+    fee_total_s = fee_paid_s = 0
+    for r in cast_s:
+        fee_s = ext(r, PARTICIPANT_FEE_KEYS) or "0"
+        try: fee = int(float(fee_s))
+        except: fee = 0
+        fee_total_s += fee
+        if ext(r, PARTICIPANT_PAID_KEYS) == "True":
+            fee_paid_s += fee
+
+    # 経費集計（CONCERT_EXPENSE）
+    exp_db_s = ctx.get("CONCERT_DB_CONCERT_EXPENSE", "")
+    exp_total_s = exp_conf_s = 0
+    if exp_db_s:
+        all_exp_s = ctx["query_all"](exp_db_s, None)
+        for r in all_exp_s:
+            if concert_id not in ext_rel(r, EXPENSE_CONCERT_REL_KEYS):
+                continue
+            amt_s2 = ext(r, EXPENSE_AMOUNT_KEYS) or "0"
+            try: amt2 = int(float(amt_s2))
+            except: amt2 = 0
+            exp_total_s += amt2
+            if ext(r, EXPENSE_CONFIRMED_KEYS) == "True":
+                exp_conf_s += amt2
+
+    total_exp_s  = exp_conf_s + total_confirmed   # EXPENSE確定 + レンタル確定
+    balance_s    = fee_paid_s - total_exp_s
+
+    ph_data = [
+        ["項目", "金額"],
+        ["参加費合計（予定）",   f"¥{fee_total_s:,}"],
+        ["参加費合計（入金済）", f"¥{fee_paid_s:,}"],
+        ["レンタル費用（確定）", f"¥{total_confirmed:,}"],
+        ["レンタル費用（全見積）",f"¥{total_all:,}"],
+        ["その他経費（確定）",   f"¥{exp_conf_s:,}"],
+        ["その他経費（全見積）", f"¥{exp_total_s:,}"],
+        ["収支（入金済 - 確定支出）", f"¥{balance_s:,}"],
     ]
     ph_tbl = Table(
-        [[Paragraph(str(c), st_map["cellb"] if (i==0 or j==0) else st_map["cell"])
+        [[Paragraph(str(c), st_map["cellb"] if (i==0 or j==0 or i==len(ph_data)-1) else st_map["cell"])
           for j, c in enumerate(row)]
-         for i, row in enumerate(placeholder_data)],
-        colWidths=[55*mm, 30*mm, W-85*mm],
+         for i, row in enumerate(ph_data)],
+        colWidths=[70*mm, 40*mm],
         repeatRows=1,
     )
     ph_sty = _base_style()
+    ph_sty.add("BACKGROUND", (0, len(ph_data)-1), (-1, len(ph_data)-1),
+               colors.HexColor("#E8F5E9") if balance_s >= 0 else colors.HexColor("#FFEBEE"))
     ph_tbl.hAlign = "LEFT"
     ph_tbl.setStyle(ph_sty)
     story.append(ph_tbl)
-    story.append(Spacer(1, 3*mm))
-    story.append(Paragraph("※ 入金データの入力機能は今後実装予定です。", st_map["small"]))
 
     doc.build(story)
     buf.seek(0)
