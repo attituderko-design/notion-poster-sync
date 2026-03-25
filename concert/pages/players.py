@@ -741,8 +741,154 @@ def _render_attendance_tab(ctx: dict):
         st.rerun()
 
 
+# ============================================================
+# 所有楽器マスタ
+# ============================================================
+
+def _load_pi_master(ctx, player_id: str) -> list[dict]:
+    """奏者の所有楽器マスタを取得。"""
+    db_id = ctx.get("CONCERT_DB_PI_MASTER", "")
+    if not db_id:
+        return []
+    key = f"pi_master_{player_id}"
+    if key not in st.session_state:
+        t = ctx["get_prop_types"](db_id)
+        rel = ctx["find_prop_name"](t, MASTER_PLAYER_REL_KEYS) if t else None
+        f = {"filter": {"property": rel, "relation": {"contains": player_id}}} if rel else None
+        st.session_state[key] = ctx["query_all"](db_id, f)
+    return st.session_state.get(key, [])
+
+
+def _upsert_pi_master(ctx, player_id: str, player_name: str,
+                      instrument_id: str, instrument_name: str,
+                      own_count: int, note: str,
+                      existing_id: str = "") -> bool:
+    db_id = ctx.get("CONCERT_DB_PI_MASTER", "")
+    if not db_id:
+        st.error("所有楽器マスタDBのIDが未設定です。secrets.tomlに CONCERT_DB_PI_MASTER を追加してください。")
+        return False
+    t = ctx["get_prop_types"](db_id)
+    if not t:
+        return False
+    props: dict = {}
+    ctx["put_prop_any"](props, t, MASTER_KEY_KEYS, f"{player_name} × {instrument_name}")
+    ctx["put_prop_any"](props, t, MASTER_PLAYER_REL_KEYS, player_id)
+    ctx["put_prop_any"](props, t, MASTER_INST_REL_KEYS, instrument_id)
+    ctx["put_prop_any"](props, t, MASTER_OWN_COUNT_KEYS, own_count)
+    ctx["put_prop_any"](props, t, MASTER_NOTE_KEYS, note)
+    if existing_id:
+        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}",
+                                 json={"properties": props})
+    else:
+        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
+                                 json={"parent": {"database_id": db_id}, "properties": props})
+    return res is not None and res.status_code == 200
+
+
+def _render_pi_master_tab(ctx: dict):
+    """所有楽器マスタ管理タブ。"""
+    db_id = ctx.get("CONCERT_DB_PI_MASTER", "")
+    if not db_id:
+        st.warning("所有楽器マスタDBが未設定です。secrets.tomlに `CONCERT_DB_PI_MASTER` を追加してください。")
+        return
+
+    st.caption("奏者ごとの所有楽器・台数を管理するマスタです。演奏会をまたいで流用できます。")
+
+    all_players = _load_players(ctx)
+    if not all_players:
+        st.info("奏者が登録されていません。")
+        return
+
+    player_name_map = {p.get("id", ""): _player_name(p, ctx) for p in all_players}
+    p_opts = {_player_name(p, ctx): p.get("id", "") for p in sorted(all_players, key=lambda x: _player_name(x, ctx))}
+
+    col_sel, col_r = st.columns([8, 1])
+    p_name = col_sel.selectbox("奏者を選択", list(p_opts.keys()), key="master_player_sel")
+    if col_r.button("🔄", key="master_refresh"):
+        for k in list(st.session_state.keys()):
+            if k.startswith("pi_master_"):
+                st.session_state.pop(k, None)
+        st.rerun()
+
+    p_id = p_opts.get(p_name, "")
+    if not p_id:
+        return
+
+    # 全楽器一覧
+    inst_rows  = _load_instruments(ctx)
+    inst_map   = {i.get("id", ""): i for i in inst_rows}
+    inst_names = {i.get("id", ""): _instrument_name(i, ctx) for i in inst_rows}
+    ordered_inst_ids = sorted(inst_map.keys(), key=lambda x: inst_names.get(x, x))
+
+    # 既存マスタ
+    master_rows = _load_pi_master(ctx, p_id)
+    by_inst: dict[str, dict] = {}
+    for r in master_rows:
+        iids = ctx["extract_relation_ids_any"](r, MASTER_INST_REL_KEYS)
+        if iids:
+            by_inst[iids[0]] = r
+
+    import pandas as pd
+    df_rows: list[dict] = []
+    df_meta: list[dict] = []
+
+    for iid in ordered_inst_ids:
+        iname = inst_names.get(iid, iid)
+        ex    = by_inst.get(iid)
+        cur_own_str = ctx["extract_prop_text_any"](ex, MASTER_OWN_COUNT_KEYS) if ex else "0"
+        try: cur_own = int(float(cur_own_str))
+        except: cur_own = 0
+        cur_n = ctx["extract_prop_text_any"](ex, MASTER_NOTE_KEYS) if ex else ""
+        df_rows.append({"楽器": iname, "所有台数": cur_own, "備考": cur_n})
+        df_meta.append({
+            "iid": iid, "iname": iname,
+            "eid": ex.get("id", "") if ex else "",
+            "cur_own": cur_own, "cur_n": cur_n,
+        })
+
+    df = pd.DataFrame(df_rows)
+    edited = st.data_editor(
+        df, num_rows="fixed", use_container_width=True,
+        key=f"master_editor_{p_id}",
+        column_config={
+            "楽器":     st.column_config.TextColumn("楽器", disabled=True),
+            "所有台数": st.column_config.NumberColumn("所有台数", min_value=0, max_value=20, step=1, default=0),
+            "備考":     st.column_config.TextColumn("備考", max_chars=100),
+        },
+    )
+
+    if st.button("💾 マスタを保存", type="primary", use_container_width=True, key=f"master_save_{p_id}"):
+        ok_n = ng_n = skip_n = 0
+        with st.spinner("保存中..."):
+            df_reset = edited.reset_index(drop=True)
+            for idx, meta in enumerate(df_meta):
+                if idx >= len(df_reset): break
+                row     = df_reset.iloc[idx]
+                new_own = int(row.get("所有台数") or 0)
+                new_n   = str(row.get("備考") or "").strip()
+                if new_own == meta["cur_own"] and new_n == meta["cur_n"]:
+                    skip_n += 1
+                    continue
+                if new_own == 0 and not meta["eid"]:
+                    skip_n += 1
+                    continue
+                ok = _upsert_pi_master(ctx, p_id, p_name,
+                                       meta["iid"], meta["iname"],
+                                       new_own, new_n, meta["eid"])
+                ok_n += 1 if ok else 0
+                ng_n += 0 if ok else 1
+        if ng_n == 0:
+            st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
+        else:
+            st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+        for k in list(st.session_state.keys()):
+            if k.startswith("pi_master_"):
+                st.session_state.pop(k, None)
+        st.rerun()
+
+
 def _render_assign_tab(ctx: dict):
-    st.caption("奏者ごとに所有楽器・台数・持参可否を登録します。持参担当の設定は『練習日別持参担当』タブで行います。")
+    st.caption("奏者ごとに所有楽器・台数を登録します。持参担当の設定は『練習日別持参担当』タブで行います。")
 
     concerts = [c for c in _load_concerts(ctx) if _is_performance_media_concert(c)]
     if not concerts:
@@ -810,11 +956,53 @@ def _render_assign_tab(ctx: dict):
     ordered_inst_ids = sorted(required_inst_ids, key=lambda x: inst_names.get(x, x))
 
     p_opts = {player_name_map.get(pid, pid): pid for pid in player_ids}
-    p_name = st.selectbox("奏者を選択", list(p_opts.keys()), key="bring_player_sel")
+    col_ps, col_copy = st.columns([6, 2])
+    p_name = col_ps.selectbox("奏者を選択", list(p_opts.keys()), key="bring_player_sel")
     p_id = p_opts.get(p_name, "")
     if not p_id:
         return
     participant_id = participant_id_by_player_id.get(p_id, "")
+
+    # マスタからコピー
+    if col_copy.button("📋 マスタからコピー", key=f"copy_from_master_{p_id}",
+                       use_container_width=True, help="所有楽器マスタの台数をこの演奏会にコピーします"):
+        master_rows = _load_pi_master(ctx, p_id)
+        if not master_rows:
+            st.warning("所有楽器マスタにデータがありません。先に『所有楽器マスタ』タブで登録してください。")
+        else:
+            ok_n = ng_n = 0
+            rows_current = _load_player_instruments_for_concert(ctx, c_id, p_id, participant_id)
+            by_inst_cur = {}
+            for r in rows_current:
+                iids = ctx["extract_relation_ids_any"](r, PI_INST_REL_KEYS)
+                if iids: by_inst_cur[iids[0]] = r
+            with st.spinner("コピー中..."):
+                for mr in master_rows:
+                    iids = ctx["extract_relation_ids_any"](mr, MASTER_INST_REL_KEYS)
+                    if not iids: continue
+                    iid   = iids[0]
+                    iname = inst_names.get(iid, iid)
+                    own_str = ctx["extract_prop_text_any"](mr, MASTER_OWN_COUNT_KEYS) or "0"
+                    try: own = int(float(own_str))
+                    except: own = 0
+                    note  = ctx["extract_prop_text_any"](mr, MASTER_NOTE_KEYS) or ""
+                    ex    = by_inst_cur.get(iid)
+                    ok = _upsert_player_bring_for_concert(
+                        ctx, c_id, c_name, p_id, p_name, participant_id,
+                        iid, iname, own >= 1, note,
+                        ex.get("id", "") if ex else "",
+                        own_count=own,
+                    )
+                    ok_n += 1 if ok else 0
+                    ng_n += 0 if ok else 1
+            if ng_n == 0:
+                st.success(f"✅ {ok_n}件をコピーしました。")
+            else:
+                st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+            for k in list(st.session_state.keys()):
+                if k.startswith(f"pi_list_"):
+                    st.session_state.pop(k, None)
+            st.rerun()
 
     rows = _load_player_instruments_for_concert(ctx, c_id, p_id, participant_id)
     by_inst = {}
@@ -1207,7 +1395,7 @@ def render(ctx: dict):
     if not global_concert_id:
         st.info("サイドバーで演奏会を選択してください。")
         return
-    t1, t2, t3, t4 = st.tabs(["奏者管理", "出欠入力", "所有楽器整理", "練習日別持参担当"])
+    t1, t2, t3, t4, t5 = st.tabs(["奏者管理", "出欠入力", "所有楽器整理", "練習日別持参担当", "所有楽器マスタ"])
     with t1:
         _render_player_tab(ctx)
     with t2:
@@ -1216,3 +1404,5 @@ def render(ctx: dict):
         _render_assign_tab(ctx)
     with t4:
         _render_practice_bring_tab(ctx)
+    with t5:
+        _render_pi_master_tab(ctx)
