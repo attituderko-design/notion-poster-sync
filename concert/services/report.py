@@ -6,6 +6,7 @@ import io
 from collections import defaultdict
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
@@ -28,14 +29,14 @@ def _register_fonts():
 
 def _styles(font, font_b):
     return {
-        "title":    ParagraphStyle("title", alignment=0,   fontName=font_b, fontSize=16, spaceAfter=4),
-        "subtitle": ParagraphStyle("sub", alignment=0,     fontName=font,   fontSize=10, spaceAfter=2, textColor=colors.HexColor("#555555")),
-        "h2":       ParagraphStyle("h2", alignment=0,      fontName=font_b, fontSize=12, spaceBefore=8, spaceAfter=4),
-        "h3":       ParagraphStyle("h3", alignment=0,      fontName=font_b, fontSize=10, spaceBefore=6, spaceAfter=2),
-        "body":     ParagraphStyle("body", alignment=0,    fontName=font,   fontSize=9),
-        "small":    ParagraphStyle("small", alignment=0,   fontName=font,   fontSize=8,  textColor=colors.HexColor("#666666")),
-        "caption":  ParagraphStyle("caption", alignment=0, fontName=font,   fontSize=7,  textColor=colors.HexColor("#888888")),
-        "desc":     ParagraphStyle("desc", alignment=0,    fontName=font,   fontSize=8,  textColor=colors.HexColor("#444444"),
+        "title":    ParagraphStyle("title", alignment=TA_LEFT,   fontName=font_b, fontSize=16, spaceAfter=4),
+        "subtitle": ParagraphStyle("sub", alignment=TA_LEFT,     fontName=font,   fontSize=10, spaceAfter=2, textColor=colors.HexColor("#555555")),
+        "h2":       ParagraphStyle("h2", alignment=TA_LEFT,      fontName=font_b, fontSize=12, spaceBefore=8, spaceAfter=4),
+        "h3":       ParagraphStyle("h3", alignment=TA_LEFT,      fontName=font_b, fontSize=10, spaceBefore=6, spaceAfter=2),
+        "body":     ParagraphStyle("body", alignment=TA_LEFT,    fontName=font,   fontSize=9),
+        "small":    ParagraphStyle("small", alignment=TA_LEFT,   fontName=font,   fontSize=8,  textColor=colors.HexColor("#666666")),
+        "caption":  ParagraphStyle("caption", alignment=TA_LEFT, fontName=font,   fontSize=7,  textColor=colors.HexColor("#888888")),
+        "desc":     ParagraphStyle("desc", alignment=TA_LEFT,    fontName=font,   fontSize=8,  textColor=colors.HexColor("#444444"),
                                    spaceAfter=4, leading=12),
     }
 
@@ -203,8 +204,8 @@ def generate_assign_report(
             mat_rows.append(row)
 
         # マトリクスのセル内容をParagraphで折り返し対応
-        cell_style = ParagraphStyle("cell", fontName=font, fontSize=6.5, leading=9, alignment=0)
-        hdr_style  = ParagraphStyle("hdr",  fontName=font_b, fontSize=6.5, leading=9, alignment=0)
+        cell_style = ParagraphStyle("cell", fontName=font, fontSize=6.5, leading=9, alignment=TA_LEFT)
+        hdr_style  = ParagraphStyle("hdr",  fontName=font_b, fontSize=6.5, leading=9, alignment=TA_LEFT)
         mat_rows_p = []
         for ri, row in enumerate(mat_rows):
             new_row = []
@@ -273,8 +274,8 @@ def generate_assign_report(
                 ])
 
             # 曲別一覧もParagraphで折り返し
-            dcell_s = ParagraphStyle("dc", fontName=font,   fontSize=8, leading=11, alignment=0)
-            dhdr_s  = ParagraphStyle("dh", fontName=font_b, fontSize=8, leading=11, alignment=0)
+            dcell_s = ParagraphStyle("dc", fontName=font,   fontSize=8, leading=11, alignment=TA_LEFT)
+            dhdr_s  = ParagraphStyle("dh", fontName=font_b, fontSize=8, leading=11, alignment=TA_LEFT)
             detail_rows_p = []
             for ri, row in enumerate(detail_rows):
                 new_row = []

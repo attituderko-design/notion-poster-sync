@@ -13,6 +13,8 @@ import io
 from collections import defaultdict
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
@@ -64,14 +66,15 @@ def _venue_qr_block(address: str, venue: str, font, font_b, W):
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
     if not address or address == "—":
         return []
     maps_url = _make_maps_url(address)
     qr_buf   = _make_qr_image(maps_url)
-    cap_sty  = ParagraphStyle("qrcap2", fontName=font_b, fontSize=8, leading=11, alignment=0)
+    cap_sty  = ParagraphStyle("qrcap2", fontName=font_b, fontSize=8, leading=11, alignment=TA_LEFT)
     url_sty  = ParagraphStyle("qrurl2", fontName=font,   fontSize=6, leading=9,
-                               textColor=colors.HexColor("#1a73e8"), alignment=0)
-    addr_sty = ParagraphStyle("qradr2", fontName=font,   fontSize=8, leading=11, alignment=0)
+                               textColor=colors.HexColor("#1a73e8"), alignment=TA_LEFT)
+    addr_sty = ParagraphStyle("qradr2", fontName=font,   fontSize=8, leading=11, alignment=TA_LEFT)
     info = [Paragraph(venue or address, cap_sty),
             Paragraph(address, addr_sty),
             Spacer(1, 1*mm),
@@ -112,19 +115,19 @@ def _register_fonts():
 
 def _styles(font, font_b):
     return {
-        "title":   ParagraphStyle("title", alignment=0,  fontName=font_b, fontSize=15, spaceAfter=2),
-        "subtitle":ParagraphStyle("sub", alignment=0,    fontName=font,   fontSize=9,  spaceAfter=6,
+        "title":   ParagraphStyle("title", alignment=TA_LEFT,  fontName=font_b, fontSize=15, spaceAfter=2),
+        "subtitle":ParagraphStyle("sub", alignment=TA_LEFT,    fontName=font,   fontSize=9,  spaceAfter=6,
                                   textColor=colors.HexColor("#555555")),
-        "h2":      ParagraphStyle("h2", alignment=0,     fontName=font_b, fontSize=11, spaceBefore=8, spaceAfter=3,
+        "h2":      ParagraphStyle("h2", alignment=TA_LEFT,     fontName=font_b, fontSize=11, spaceBefore=8, spaceAfter=3,
                                   textColor=colors.HexColor("#2C2C6C")),
-        "body":    ParagraphStyle("body", alignment=0,   fontName=font,   fontSize=9),
-        "cell":    ParagraphStyle("cell", alignment=0,   fontName=font,   fontSize=8,  leading=11),
-        "cellb":   ParagraphStyle("cellb", alignment=0,  fontName=font_b, fontSize=8,  leading=11),
-        "cellsm":  ParagraphStyle("cellsm", alignment=0, fontName=font,   fontSize=6,  leading=9),
-        "cellbsm": ParagraphStyle("cellbsm", alignment=0,fontName=font_b, fontSize=6,  leading=9),
-        "small":   ParagraphStyle("small", alignment=0,  fontName=font,   fontSize=7,
+        "body":    ParagraphStyle("body", alignment=TA_LEFT,   fontName=font,   fontSize=9),
+        "cell":    ParagraphStyle("cell", alignment=TA_LEFT,   fontName=font,   fontSize=8,  leading=11),
+        "cellb":   ParagraphStyle("cellb", alignment=TA_LEFT,  fontName=font_b, fontSize=8,  leading=11),
+        "cellsm":  ParagraphStyle("cellsm", alignment=TA_LEFT, fontName=font,   fontSize=6,  leading=9),
+        "cellbsm": ParagraphStyle("cellbsm", alignment=TA_LEFT,fontName=font_b, fontSize=6,  leading=9),
+        "small":   ParagraphStyle("small", alignment=TA_LEFT,  fontName=font,   fontSize=7,
                                   textColor=colors.HexColor("#666666")),
-        "placeholder": ParagraphStyle("ph", alignment=0, fontName=font,   fontSize=9,
+        "placeholder": ParagraphStyle("ph", alignment=TA_LEFT, fontName=font,   fontSize=9,
                                       textColor=colors.HexColor("#AAAAAA")),
     }
 
@@ -369,7 +372,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
             rent_summary_data.append([
                 p_label, vendor, item_n,
                 str(qty), f"¥{price:,}", f"¥{subtotal:,}",
-                "✅" if conf else "📋",
+                "確定" if conf else "見積",
             ])
 
     if len(rent_summary_data) > 1:

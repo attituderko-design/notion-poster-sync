@@ -14,6 +14,7 @@ import io
 from collections import defaultdict
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
@@ -78,10 +79,10 @@ def _venue_qr_block(address: str, venue: str, font, font_b, W):
     maps_url = _make_maps_url(address)
     qr_buf   = _make_qr_image(maps_url)
 
-    cap_sty = ParagraphStyle("qrcap", fontName=font_b, fontSize=8, leading=11, alignment=0)
+    cap_sty = ParagraphStyle("qrcap", fontName=font_b, fontSize=8, leading=11, alignment=TA_LEFT)
     url_sty = ParagraphStyle("qrurl", fontName=font,   fontSize=6, leading=9,
-                              textColor=colors.HexColor("#1a73e8"), alignment=0)
-    addr_sty= ParagraphStyle("qradr", fontName=font,   fontSize=8, leading=11, alignment=0)
+                              textColor=colors.HexColor("#1a73e8"), alignment=TA_LEFT)
+    addr_sty= ParagraphStyle("qradr", fontName=font,   fontSize=8, leading=11, alignment=TA_LEFT)
 
     info = [
         Paragraph(venue or address, cap_sty),
@@ -129,16 +130,16 @@ def _register_fonts():
 
 def _styles(font, font_b):
     return {
-        "title":   ParagraphStyle("title", alignment=0,   fontName=font_b, fontSize=15, spaceAfter=2),
-        "subtitle":ParagraphStyle("sub", alignment=0,     fontName=font,   fontSize=9,  spaceAfter=6,
+        "title":   ParagraphStyle("title", alignment=TA_LEFT,   fontName=font_b, fontSize=15, spaceAfter=2),
+        "subtitle":ParagraphStyle("sub", alignment=TA_LEFT,     fontName=font,   fontSize=9,  spaceAfter=6,
                                   textColor=colors.HexColor("#555555")),
-        "h2":      ParagraphStyle("h2", alignment=0,      fontName=font_b, fontSize=11, spaceBefore=8, spaceAfter=3,
+        "h2":      ParagraphStyle("h2", alignment=TA_LEFT,      fontName=font_b, fontSize=11, spaceBefore=8, spaceAfter=3,
                                   textColor=colors.HexColor("#2C2C6C")),
-        "h3":      ParagraphStyle("h3", alignment=0,      fontName=font_b, fontSize=9,  spaceBefore=4, spaceAfter=2),
-        "body":    ParagraphStyle("body", alignment=0,    fontName=font,   fontSize=9),
-        "cell":    ParagraphStyle("cell", alignment=0,    fontName=font,   fontSize=8,  leading=11),
-        "cellb":   ParagraphStyle("cellb", alignment=0,   fontName=font_b, fontSize=8,  leading=11),
-        "small":   ParagraphStyle("small", alignment=0,   fontName=font,   fontSize=7,
+        "h3":      ParagraphStyle("h3", alignment=TA_LEFT,      fontName=font_b, fontSize=9,  spaceBefore=4, spaceAfter=2),
+        "body":    ParagraphStyle("body", alignment=TA_LEFT,    fontName=font,   fontSize=9),
+        "cell":    ParagraphStyle("cell", alignment=TA_LEFT,    fontName=font,   fontSize=8,  leading=11),
+        "cellb":   ParagraphStyle("cellb", alignment=TA_LEFT,   fontName=font_b, fontSize=8,  leading=11),
+        "small":   ParagraphStyle("small", alignment=TA_LEFT,   fontName=font,   fontSize=7,
                                   textColor=colors.HexColor("#666666")),
     }
 
@@ -436,7 +437,7 @@ def generate_practice_report(
             vendor   = ext(r, RENTAL_VENDOR_KEYS) or "—"
             qty_str  = ext(r, RENTAL_QTY_KEYS) or "0"
             cost_t   = ext(r, RENTAL_COST_TYPE_KEYS) or ""
-            confirmed = "✅" if ext(r, RENTAL_CONFIRMED_KEYS) == "True" else "📋"
+            confirmed = "確定" if ext(r, RENTAL_CONFIRMED_KEYS) == "True" else "見積"
             try: qty = int(float(qty_str))
             except: qty = 0
             rent_data.append([vendor, item_n, str(qty), cost_t, confirmed])
