@@ -135,3 +135,23 @@ MASTER_PLAYER_REL_KEYS    = ["奏者", "FK奏者", "Player"]
 MASTER_INST_REL_KEYS      = ["楽器種別", "楽器", "FK楽器種別"]
 MASTER_OWN_COUNT_KEYS     = ["所有台数", "台数", "Count"]
 MASTER_NOTE_KEYS          = ["備考", "メモ", "Note"]
+
+# ── CONCERT_EXPENSE（経費明細）DB ────────────────────────────
+EXPENSE_KEY_KEYS          = ["expense_key", "タイトル"]
+EXPENSE_CONCERT_REL_KEYS  = ["演奏会", "FK演奏会"]
+EXPENSE_TYPE_KEYS         = ["種別", "Type"]
+EXPENSE_CONTENT_KEYS      = ["内容", "Content"]
+EXPENSE_AMOUNT_KEYS       = ["金額", "Amount"]
+EXPENSE_CONFIRMED_KEYS    = ["確定", "Confirmed"]
+EXPENSE_NOTE_KEYS         = ["備考", "Note"]
+
+EXPENSE_TYPE_OPTIONS = [
+    "会場費", "楽器レンタル", "楽譜レンタル",
+    "印刷物・プログラム", "フライヤー", "謝礼", "その他"
+]
+
+# ── CONCERT_CAST 追加フィールド ───────────────────────────────
+PARTICIPANT_PART_KEYS     = ["パート", "Part"]
+PARTICIPANT_ROLE_KEYS     = ["役職", "Role"]
+PARTICIPANT_FEE_KEYS      = ["参加費", "Fee"]
+PARTICIPANT_PAID_KEYS     = ["入金済", "Paid"]
