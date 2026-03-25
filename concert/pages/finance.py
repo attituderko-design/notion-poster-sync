@@ -437,6 +437,34 @@ def _render_payment_tab(ctx, concert_id: str):
 # メイン
 # ============================================================
 
+def _render_finance_pdf_tab(ctx: dict, concert_id: str, concert_name: str):
+    st.caption("経費・参加費・振込状況をまとめた収支報告PDFを出力します。")
+
+    col1, col2 = st.columns(2)
+    col1.metric("経費登録",   f"{len(_load_expenses(ctx, concert_id))}件")
+    cast = _load_cast(ctx, concert_id)
+    paid = sum(1 for r in cast
+               if ctx["extract_prop_text_any"](r, PARTICIPANT_PAID_KEYS) == "True")
+    col2.metric("入金済",     f"{paid} / {len(cast)}人")
+
+    if st.button("📊 収支報告PDFを出力", type="primary",
+                 use_container_width=True, key="finance_pdf_btn"):
+        with st.spinner("PDF生成中..."):
+            try:
+                from concert.services.finance_report import generate_finance_report
+                pdf_bytes = generate_finance_report(ctx, concert_id)
+                fname = f"収支報告_{concert_name or concert_id}.pdf"
+                st.download_button(
+                    label="⬇️ ダウンロード",
+                    data=pdf_bytes,
+                    file_name=fname,
+                    mime="application/pdf",
+                    key="finance_pdf_dl",
+                )
+            except Exception as e:
+                st.error(f"PDF生成に失敗しました: {e}")
+
+
 def render(ctx: dict):
     st.header("💰 収支・振込管理")
 
@@ -447,7 +475,7 @@ def render(ctx: dict):
         return
     st.caption(f"対象演奏会: {concert_name or concert_id}")
 
-    tab_expense, tab_budget, tab_payment = st.tabs(["経費管理", "予算計算機", "振込管理"])
+    tab_expense, tab_budget, tab_payment, tab_pdf = st.tabs(["経費管理", "予算計算機", "振込管理", "収支報告PDF"])
 
     with tab_expense:
         _render_expense_tab(ctx, concert_id, concert_name)
@@ -455,3 +483,5 @@ def render(ctx: dict):
         _render_budget_tab(ctx, concert_id)
     with tab_payment:
         _render_payment_tab(ctx, concert_id)
+    with tab_pdf:
+        _render_finance_pdf_tab(ctx, concert_id, concert_name)

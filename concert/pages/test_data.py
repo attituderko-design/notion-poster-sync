@@ -19,6 +19,13 @@ from concert.services.keys import (
     PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     EXPENSE_KEY_KEYS, EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS,
     EXPENSE_CONTENT_KEYS, EXPENSE_AMOUNT_KEYS, EXPENSE_CONFIRMED_KEYS,
+    PRACTICE_CONCERT_DAY_KEYS,
+    PI_BRING_ASSIGN_KEYS, PI_BRING_COUNT_KEYS, PI_PRACTICE_REL_KEYS,
+    RENTAL_RECORD_KEYS, RENTAL_PRACTICE_REL_KEYS, RENTAL_INST_REL_KEYS,
+    RENTAL_ITEM_NAME_KEYS, RENTAL_VENDOR_KEYS, RENTAL_QTY_KEYS,
+    RENTAL_UNIT_PRICE_KEYS, RENTAL_CONFIRMED_KEYS, RENTAL_NOTE_KEYS,
+    SCHEDULE_KEY_KEYS, SCHEDULE_PRACTICE_REL_KEYS, SCHEDULE_START_KEYS,
+    SCHEDULE_END_KEYS, SCHEDULE_TYPE_KEYS, SCHEDULE_CONTENT_KEYS,
 )
 
 TEST_PREFIX = "[TEST]"
@@ -261,6 +268,88 @@ def _seed_all(ctx) -> dict:
                 exp_count += 1
     summary["CONCERT_EXPENSE"] = exp_count
 
+    # ── 12. 本番日練習（PRACTICE追加）────────────────────────
+    props = {}
+    _put(ctx, props, tpr, PRACTICE_NAME_KEYS,        f"{TEST_PREFIX} 本番当日")
+    _put(ctx, props, tpr, PRACTICE_CONCERT_REL_KEYS, concert_id)
+    _put(ctx, props, tpr, PRACTICE_CONCERT_DAY_KEYS, True)
+    dt_key3 = ctx["find_prop_name"](tpr, PRACTICE_DATE_KEYS)
+    if dt_key3:
+        props[dt_key3] = {"date": {"start": "2099-12-31"}}
+    concert_day_id = track(_create(ctx, practice_db, props))
+    if concert_day_id:
+        practice_ids.append(concert_day_id)
+    summary["PRACTICE（本番日）"] = 1 if concert_day_id else 0
+
+    # ── 13. 持参担当（PLAYER_INSTRUMENT追加）─────────────────
+    bring_count = 0
+    if practice_ids and player_ids and instrument_ids:
+        for pr_id in practice_ids[:2]:  # 最初の2練習日
+            pid = player_ids[0]
+            iid = instrument_ids[0]
+            props = {}
+            _put(ctx, props, tpi, ["record_key", "タイトル", "PK名称"],
+                 f"{TEST_PREFIX} bring_{pr_id[:6]}_{pid[:6]}")
+            _put(ctx, props, tpi, PI_CONCERT_REL_KEYS,   concert_id)
+            _put(ctx, props, tpi, PI_PLAYER_REL_KEYS,    pid)
+            _put(ctx, props, tpi, PI_INST_REL_KEYS,      iid)
+            _put(ctx, props, tpi, PI_BRING_ASSIGN_KEYS,  True)
+            _put(ctx, props, tpi, PI_BRING_COUNT_KEYS,   1)
+            _put(ctx, props, tpi, PI_PRACTICE_REL_KEYS,  pr_id)
+            bid = track(_create(ctx, pi_db, props))
+            if bid:
+                bring_count += 1
+    summary["持参担当"] = bring_count
+
+    # ── 14. RENTAL（レンタル見積）─────────────────────────────
+    rental_db = ctx.get("CONCERT_DB_RENTAL", "")
+    rental_count = 0
+    if rental_db and practice_ids and instrument_ids:
+        trent = _p(ctx, rental_db)
+        rental_items = [
+            ("楽器レンタル", "テスト楽器店", instrument_ids[0], "Timpani 23inch", 1, 15000, True),
+            ("楽器レンタル", "テスト楽器店", instrument_ids[1], "Snare Drum", 2, 5000, False),
+        ]
+        for cost_type, vendor, iid, item_name, qty, unit_price, confirmed in rental_items:
+            props = {}
+            _put(ctx, props, trent, RENTAL_RECORD_KEYS,       f"{TEST_PREFIX} rental_{iid[:6]}")
+            _put(ctx, props, trent, RENTAL_PRACTICE_REL_KEYS, practice_ids[0])
+            _put(ctx, props, trent, RENTAL_INST_REL_KEYS,     iid)
+            _put(ctx, props, trent, RENTAL_ITEM_NAME_KEYS,    item_name)
+            _put(ctx, props, trent, RENTAL_VENDOR_KEYS,       vendor)
+            _put(ctx, props, trent, RENTAL_QTY_KEYS,          qty)
+            _put(ctx, props, trent, RENTAL_UNIT_PRICE_KEYS,   unit_price)
+            _put(ctx, props, trent, RENTAL_CONFIRMED_KEYS,    confirmed)
+            rid2 = track(_create(ctx, rental_db, props))
+            if rid2:
+                rental_count += 1
+    summary["RENTAL"] = rental_count
+
+    # ── 15. SCHEDULE（タイムスケジュール）────────────────────
+    sched_db = ctx.get("CONCERT_DB_SCHEDULE", "")
+    sched_count = 0
+    if sched_db and practice_ids:
+        tsched = _p(ctx, sched_db)
+        sched_items = [
+            ("搬入",   "09:00", "10:00", "楽器搬入"),
+            ("練習",   "10:00", "12:00", "午前練習"),
+            ("休憩",   "12:00", "13:00", "昼休憩"),
+            ("練習",   "13:00", "17:00", "午後練習"),
+            ("搬出",   "17:00", "18:00", "楽器搬出"),
+        ]
+        for stype, start, end, content in sched_items:
+            props = {}
+            _put(ctx, props, tsched, SCHEDULE_KEY_KEYS,         f"{TEST_PREFIX} sched_{start}")
+            _put(ctx, props, tsched, SCHEDULE_PRACTICE_REL_KEYS, practice_ids[0])
+            _put(ctx, props, tsched, SCHEDULE_TYPE_KEYS,         stype)
+            _put(ctx, props, tsched, SCHEDULE_START_KEYS,        start)
+            _put(ctx, props, tsched, SCHEDULE_END_KEYS,          end)
+            _put(ctx, props, tsched, SCHEDULE_CONTENT_KEYS,      content)
+            sid2 = track(_create(ctx, sched_db, props))
+            if sid2:
+                sched_count += 1
+    summary["SCHEDULE"] = sched_count
+
     # 作成IDをsession_stateに保存（削除時に使用）
     existing = st.session_state.get("test_created_ids", [])
     st.session_state["test_created_ids"] = existing + created_ids
@@ -345,9 +434,12 @@ def render(ctx: dict):
 | PART_DEFINITION | 6件 |
 | CONCERT_CAST | 5件 |
 | ATTENDANCE | 15件 |
-| PLAYER_INSTRUMENT | 6件 |
+| PLAYER_INSTRUMENT | 6件（所有）+ 2件（持参担当） |
 | PREFERENCE | 6件 |
 | CONCERT_EXPENSE | 3件 |
+| RENTAL | 2件 |
+| SCHEDULE | 5件（第1回練習のタイムスケジュール） |
+| PRACTICE（本番日） | 1件 |
 """)
 
     st.divider()
