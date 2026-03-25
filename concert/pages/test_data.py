@@ -92,7 +92,14 @@ def _seed_all(ctx) -> dict:
     props = {}
     tc = t("CONCERT_DB_CONCERT")
     ctx["put_prop_any"](props, tc, ["名称", "演奏会名", "タイトル", "PK名称"], f"{TEST_PREFIX} テスト演奏会")
-    ctx["put_prop_any"](props, tc, ["媒体", "Media"], "出演")
+    # 媒体フィールドはselect/multi_select両対応
+    media_key = ctx["find_prop_name"](tc, ["媒体", "Media"])
+    if media_key:
+        media_type = tc.get(media_key, "")
+        if media_type == "multi_select":
+            props[media_key] = {"multi_select": [{"name": "出演"}]}
+        elif media_type == "select":
+            props[media_key] = {"select": {"name": "出演"}}
     dt_key = ctx["find_prop_name"](tc, ["日時", "日付", "出演日"])
     if dt_key:
         props[dt_key] = {"date": {"start": "2099-12-31"}}
