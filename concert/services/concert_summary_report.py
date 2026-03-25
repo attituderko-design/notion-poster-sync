@@ -157,15 +157,22 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     concert = next((r for r in concert_rows if r.get("id") == concert_id), {})
     c_name    = ext(concert, CONCERT_NAME_KEYS) or ""
     c_date    = ext(concert, CONCERT_DATE_KEYS) or ""
-    c_venue   = ext(concert, CONCERT_VENUE_KEYS) or ""
-    c_address = ext(concert, CONCERT_ADDRESS_KEYS) or ""
     c_memo    = ext(concert, CONCERT_MEMO_KEYS) or ""
 
-    # 練習一覧（この演奏会に紐づく）
+    # 練習一覧（この演奏会に紐づく）- 会場取得のため先に取得
     all_practices = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"], None)
     practices = [p for p in all_practices
                  if concert_id in ext_rel(p, PRACTICE_CONCERT_REL_KEYS)]
     practices.sort(key=lambda p: ext(p, PRACTICE_DATE_KEYS) or "9999")
+
+    # 会場・住所はPRACTICEの本番日レコードから取得（ATLASのロケーションは場所型で取れないため）
+    c_venue   = ""
+    c_address = ""
+    for p in practices:
+        if ext(p, PRACTICE_CONCERT_DAY_KEYS) == "True":
+            c_venue   = ext(p, PRACTICE_VENUE_KEYS) or ""
+            c_address = ext(p, PRACTICE_ADDRESS_KEYS) or ""
+            break
 
     # 奏者一覧（演奏会参加者経由）
     participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
@@ -262,7 +269,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         pdate = (ext(p, PRACTICE_DATE_KEYS) or "")[:10]
         pvenue= ext(p, PRACTICE_VENUE_KEYS) or "—"
         is_cd = ext(p, PRACTICE_CONCERT_DAY_KEYS) == "True"
-        disp  = f"{'🎼 ' if is_cd else ''}{pname}"
+        disp  = "【本番当日】" if is_cd else pname
         att   = att_matrix.get(pid, {})
         o = sum(1 for v in att.values() if v == "○")
         t = sum(1 for v in att.values() if v == "△")
