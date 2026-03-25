@@ -542,7 +542,13 @@ def _render_pref_tab(ctx: dict):
 
     player_opts = {_player_name(p, ctx): p.get("id", "") for p in
                    sorted(players, key=lambda x: _player_name(x, ctx))}
-    selected_player_name = st.selectbox("奏者を選択", list(player_opts.keys()), key="pref_player_sel")
+    col_sel, col_r = st.columns([8, 1])
+    selected_player_name = col_sel.selectbox("奏者を選択", list(player_opts.keys()), key="pref_player_sel")
+    if col_r.button("🔄", key="pref_refresh", help="パート定義・希望データを再読み込み"):
+        for k in list(st.session_state.keys()):
+            if k.startswith("si_list_") or k.startswith("pi_list_"):
+                st.session_state.pop(k, None)
+        st.rerun()
     player_id = player_opts.get(selected_player_name, "")
     if not player_id:
         return
@@ -572,11 +578,13 @@ def _render_pref_tab(ctx: dict):
             label = f"{pname}（{note}）" if note else pname
 
             existing = pi_lookup.get((player_id, sid, part_id))
+            has_record = existing is not None
             cur_p = ctx["extract_prop_text_any"](existing, PREF_PRIORITY_KEYS) if existing else "希望なし/降り番でも可"
             if cur_p not in PRIORITY_OPTIONS:
                 cur_p = "希望なし/降り番でも可"
+            status = "" if has_record else "🔴 未回答"
 
-            all_pref_rows.append({"曲": sname, "パート": label, "希望": cur_p})
+            all_pref_rows.append({"状態": status, "曲": sname, "パート": label, "希望": cur_p})
             all_pref_meta.append({
                 "sid": sid, "sname": sname,
                 "part_id": part_id, "part_name": pname,
@@ -596,6 +604,7 @@ def _render_pref_tab(ctx: dict):
         use_container_width=True,
         key=f"pref_editor_{player_id}_{concert_id}",
         column_config={
+            "状態": st.column_config.TextColumn("状態", disabled=True, width="small"),
             "曲":   st.column_config.TextColumn("曲", disabled=True),
             "パート": st.column_config.TextColumn("パート", disabled=True),
             "希望": st.column_config.SelectboxColumn(
@@ -604,6 +613,9 @@ def _render_pref_tab(ctx: dict):
             ),
         },
     )
+    unanswered = sum(1 for r in all_pref_meta if not r["existing_id"])
+    if unanswered:
+        st.caption(f"🔴 未回答 {unanswered}件")
 
     if st.button("💾 まとめて保存", use_container_width=True, type="primary",
                  key=f"pref_save_{player_id}"):
