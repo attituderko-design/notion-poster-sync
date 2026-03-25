@@ -28,14 +28,14 @@ def _register_fonts():
 
 def _styles(font, font_b):
     return {
-        "title":    ParagraphStyle("title",   fontName=font_b, fontSize=16, spaceAfter=4),
-        "subtitle": ParagraphStyle("sub",     fontName=font,   fontSize=10, spaceAfter=2, textColor=colors.HexColor("#555555")),
-        "h2":       ParagraphStyle("h2",      fontName=font_b, fontSize=12, spaceBefore=8, spaceAfter=4),
-        "h3":       ParagraphStyle("h3",      fontName=font_b, fontSize=10, spaceBefore=6, spaceAfter=2),
-        "body":     ParagraphStyle("body",    fontName=font,   fontSize=9),
-        "small":    ParagraphStyle("small",   fontName=font,   fontSize=8,  textColor=colors.HexColor("#666666")),
-        "caption":  ParagraphStyle("caption", fontName=font,   fontSize=7,  textColor=colors.HexColor("#888888")),
-        "desc":     ParagraphStyle("desc",    fontName=font,   fontSize=8,  textColor=colors.HexColor("#444444"),
+        "title":    ParagraphStyle("title", alignment=0,   fontName=font_b, fontSize=16, spaceAfter=4),
+        "subtitle": ParagraphStyle("sub", alignment=0,     fontName=font,   fontSize=10, spaceAfter=2, textColor=colors.HexColor("#555555")),
+        "h2":       ParagraphStyle("h2", alignment=0,      fontName=font_b, fontSize=12, spaceBefore=8, spaceAfter=4),
+        "h3":       ParagraphStyle("h3", alignment=0,      fontName=font_b, fontSize=10, spaceBefore=6, spaceAfter=2),
+        "body":     ParagraphStyle("body", alignment=0,    fontName=font,   fontSize=9),
+        "small":    ParagraphStyle("small", alignment=0,   fontName=font,   fontSize=8,  textColor=colors.HexColor("#666666")),
+        "caption":  ParagraphStyle("caption", alignment=0, fontName=font,   fontSize=7,  textColor=colors.HexColor("#888888")),
+        "desc":     ParagraphStyle("desc", alignment=0,    fontName=font,   fontSize=8,  textColor=colors.HexColor("#444444"),
                                    spaceAfter=4, leading=12),
     }
 
@@ -167,7 +167,7 @@ def generate_assign_report(
         ("FONT",        (0,0), (-1,-1), font,   7.5),
         ("FONT",        (0,0), (-1, 0), font_b, 7.5),
         ("BACKGROUND",  (0,0), (-1, 0), colors.HexColor("#E4E2F0")),
-        ("ALIGN",       (1,0), (-1,-1), "CENTER"),
+        ("ALIGN",       (1,0), (-1,-1), "LEFT"),
         ("VALIGN",      (0,0), (-1,-1), "MIDDLE"),
         ("GRID",        (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
         ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#F3F2F0")]),
@@ -227,7 +227,7 @@ def generate_assign_report(
             ("FONT",        (0,0), ( 0,-1), font_b, 6.5),
             ("BACKGROUND",  (0,0), (-1, 0), colors.HexColor("#E4E2F0")),
             ("BACKGROUND",  (0,0), ( 0,-1), colors.HexColor("#F8F8F8")),
-            ("ALIGN",       (1,0), (-1,-1), "CENTER"),
+            ("ALIGN",       (1,0), (-1,-1), "LEFT"),
             ("VALIGN",      (0,0), (-1,-1), "TOP"),
             ("GRID",        (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
             ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#F3F2F0")]),

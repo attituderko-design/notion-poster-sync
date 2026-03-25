@@ -112,19 +112,19 @@ def _register_fonts():
 
 def _styles(font, font_b):
     return {
-        "title":   ParagraphStyle("title",  fontName=font_b, fontSize=15, spaceAfter=2),
-        "subtitle":ParagraphStyle("sub",    fontName=font,   fontSize=9,  spaceAfter=6,
+        "title":   ParagraphStyle("title", alignment=0,  fontName=font_b, fontSize=15, spaceAfter=2),
+        "subtitle":ParagraphStyle("sub", alignment=0,    fontName=font,   fontSize=9,  spaceAfter=6,
                                   textColor=colors.HexColor("#555555")),
-        "h2":      ParagraphStyle("h2",     fontName=font_b, fontSize=11, spaceBefore=8, spaceAfter=3,
+        "h2":      ParagraphStyle("h2", alignment=0,     fontName=font_b, fontSize=11, spaceBefore=8, spaceAfter=3,
                                   textColor=colors.HexColor("#2C2C6C")),
-        "body":    ParagraphStyle("body",   fontName=font,   fontSize=9),
-        "cell":    ParagraphStyle("cell",   fontName=font,   fontSize=8,  leading=11),
-        "cellb":   ParagraphStyle("cellb",  fontName=font_b, fontSize=8,  leading=11),
-        "cellsm":  ParagraphStyle("cellsm", fontName=font,   fontSize=6,  leading=9),
-        "cellbsm": ParagraphStyle("cellbsm",fontName=font_b, fontSize=6,  leading=9),
-        "small":   ParagraphStyle("small",  fontName=font,   fontSize=7,
+        "body":    ParagraphStyle("body", alignment=0,   fontName=font,   fontSize=9),
+        "cell":    ParagraphStyle("cell", alignment=0,   fontName=font,   fontSize=8,  leading=11),
+        "cellb":   ParagraphStyle("cellb", alignment=0,  fontName=font_b, fontSize=8,  leading=11),
+        "cellsm":  ParagraphStyle("cellsm", alignment=0, fontName=font,   fontSize=6,  leading=9),
+        "cellbsm": ParagraphStyle("cellbsm", alignment=0,fontName=font_b, fontSize=6,  leading=9),
+        "small":   ParagraphStyle("small", alignment=0,  fontName=font,   fontSize=7,
                                   textColor=colors.HexColor("#666666")),
-        "placeholder": ParagraphStyle("ph", fontName=font,   fontSize=9,
+        "placeholder": ParagraphStyle("ph", alignment=0, fontName=font,   fontSize=9,
                                       textColor=colors.HexColor("#AAAAAA")),
     }
 

@@ -31,8 +31,8 @@ from concert.services.keys import (
     SCHEDULE_CONTENT_KEYS, SCHEDULE_SONG_REL_KEYS, SCHEDULE_ORDER_KEYS,
     ATT_PLAYER_REL_KEYS, ATT_STATUS_KEYS,
     PARTICIPANT_PLAYER_REL_KEYS,
-    PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_BRING_KEYS, PI_BRING_COUNT_KEYS,
-    PI_CONCERT_REL_KEYS,
+    PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_BRING_KEYS, PI_BRING_ASSIGN_KEYS,
+    PI_OWN_COUNT_KEYS, PI_BRING_COUNT_KEYS, PI_CONCERT_REL_KEYS,
     RENTAL_INST_REL_KEYS, RENTAL_ITEM_NAME_KEYS, RENTAL_VENDOR_KEYS,
     RENTAL_QTY_KEYS, RENTAL_CONFIRMED_KEYS, RENTAL_COST_TYPE_KEYS,
     PLAYER_NAME_KEYS, INSTRUMENT_NAME_KEYS, SONG_NAME_KEYS,
@@ -129,16 +129,16 @@ def _register_fonts():
 
 def _styles(font, font_b):
     return {
-        "title":   ParagraphStyle("title",   fontName=font_b, fontSize=15, spaceAfter=2),
-        "subtitle":ParagraphStyle("sub",     fontName=font,   fontSize=9,  spaceAfter=6,
+        "title":   ParagraphStyle("title", alignment=0,   fontName=font_b, fontSize=15, spaceAfter=2),
+        "subtitle":ParagraphStyle("sub", alignment=0,     fontName=font,   fontSize=9,  spaceAfter=6,
                                   textColor=colors.HexColor("#555555")),
-        "h2":      ParagraphStyle("h2",      fontName=font_b, fontSize=11, spaceBefore=8, spaceAfter=3,
+        "h2":      ParagraphStyle("h2", alignment=0,      fontName=font_b, fontSize=11, spaceBefore=8, spaceAfter=3,
                                   textColor=colors.HexColor("#2C2C6C")),
-        "h3":      ParagraphStyle("h3",      fontName=font_b, fontSize=9,  spaceBefore=4, spaceAfter=2),
-        "body":    ParagraphStyle("body",    fontName=font,   fontSize=9),
-        "cell":    ParagraphStyle("cell",    fontName=font,   fontSize=8,  leading=11),
-        "cellb":   ParagraphStyle("cellb",   fontName=font_b, fontSize=8,  leading=11),
-        "small":   ParagraphStyle("small",   fontName=font,   fontSize=7,
+        "h3":      ParagraphStyle("h3", alignment=0,      fontName=font_b, fontSize=9,  spaceBefore=4, spaceAfter=2),
+        "body":    ParagraphStyle("body", alignment=0,    fontName=font,   fontSize=9),
+        "cell":    ParagraphStyle("cell", alignment=0,    fontName=font,   fontSize=8,  leading=11),
+        "cellb":   ParagraphStyle("cellb", alignment=0,   fontName=font_b, fontSize=8,  leading=11),
+        "small":   ParagraphStyle("small", alignment=0,   fontName=font,   fontSize=7,
                                   textColor=colors.HexColor("#666666")),
     }
 
@@ -261,8 +261,9 @@ def generate_practice_report(
     # 演奏会フィルタ
     pi_rows = [r for r in pi_rows
                if not concert_id or concert_id in ext_rel(r, PI_CONCERT_REL_KEYS)]
-    # 持参可フラグTrueのみ
-    bring_rows = [r for r in pi_rows if ext(r, PI_BRING_KEYS) == "True"]
+    # 持参担当フラグTrueのみ（担当が未設定の場合は持参可フラグにフォールバック）
+    bring_rows = [r for r in pi_rows if ext(r, PI_BRING_ASSIGN_KEYS) == "True"
+                  or (ext(r, PI_BRING_KEYS) == "True" and ext(r, PI_BRING_ASSIGN_KEYS) != "False")]
 
     # レンタル
     from concert.services.keys import RENTAL_PRACTICE_REL_KEYS
@@ -396,7 +397,8 @@ def generate_practice_report(
             continue
         i_ids = ext_rel(r, PI_INST_REL_KEYS)
         if not i_ids: continue
-        cnt_str = ext(r, PI_BRING_COUNT_KEYS)
+        # 持参台数（担当者が実際に持ってくる台数）
+        cnt_str = ext(r, PI_BRING_COUNT_KEYS) or ext(r, PI_OWN_COUNT_KEYS)
         try: cnt = int(float(cnt_str)) if cnt_str else 1
         except: cnt = 1
         bring_items.append({
