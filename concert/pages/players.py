@@ -378,7 +378,7 @@ def _upsert_participant(
                 t_c = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT"])
                 res_c = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{concert_id}")
                 if res_c and res_c.status_code == 200:
-                    fee_key = ctx["find_prop_name"](t_c, CONCERT_FEE_KEYS) if t_c else None
+                    fee_key = ctx["find_prop_name"](t_c, CONCERT_CONFIRMED_FEE_KEYS) if t_c else None
                     if fee_key:
                         num = res_c.json().get("properties", {}).get(fee_key, {}).get("number")
                         confirmed_fee = int(num) if num else 0

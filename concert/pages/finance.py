@@ -5,7 +5,7 @@ concert/pages/finance.py
 import streamlit as st
 import pandas as pd
 from concert.services.keys import (
-    CONCERT_NAME_KEYS, CONCERT_FEE_KEYS,
+    CONCERT_NAME_KEYS, CONCERT_CONFIRMED_FEE_KEYS,
     PARTICIPANT_RECORD_KEYS, PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
     PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS,
     PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS,
@@ -34,7 +34,7 @@ def _write_concert_fee(ctx, concert_id: str, fee: int) -> bool:
     if not t:
         return False
     props: dict = {}
-    ctx["put_prop_any"](props, t, CONCERT_FEE_KEYS, fee)
+    ctx["put_prop_any"](props, t, CONCERT_CONFIRMED_FEE_KEYS, fee)
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{concert_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200
@@ -48,7 +48,7 @@ def _read_concert_fee(ctx, concert_id: str) -> int:
         return 0
     props = res.json().get("properties", {})
     t = ctx["get_prop_types"](db_id)
-    fee_key = ctx["find_prop_name"](t, CONCERT_FEE_KEYS) if t else None
+    fee_key = ctx["find_prop_name"](t, CONCERT_CONFIRMED_FEE_KEYS) if t else None
     if not fee_key or fee_key not in props:
         return 0
     num = props[fee_key].get("number")
