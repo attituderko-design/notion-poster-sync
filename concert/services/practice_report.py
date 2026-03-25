@@ -398,7 +398,7 @@ def generate_practice_report(
         i_ids = ext_rel(r, PI_INST_REL_KEYS)
         if not i_ids: continue
         # 持参台数（担当者が実際に持ってくる台数）
-        cnt_str = ext(r, PI_BRING_COUNT_KEYS) or ext(r, PI_OWN_COUNT_KEYS)
+        cnt_str = ext(r, PI_BRING_COUNT_KEYS)
         try: cnt = int(float(cnt_str)) if cnt_str else 1
         except: cnt = 1
         bring_items.append({
