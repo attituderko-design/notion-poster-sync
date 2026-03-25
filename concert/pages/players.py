@@ -604,6 +604,75 @@ def _render_attendance_tab(ctx: dict):
                 st.session_state.pop(f"participant_list_{c_id}", None)
                 st.rerun()
 
+    # ── 参加者別パート・役職設定 ──────────────────────────────
+    if part_player_ids:
+        st.markdown("### パート・役職設定")
+        st.caption("Notionに登録済みの選択肢が表示されます。新しい値はNotionに追加後、🔄で反映されます。")
+        part_opts = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_PART_KEYS)
+        role_opts = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_ROLE_KEYS)
+
+        import pandas as pd
+        pr_rows: list[dict] = []
+        pr_meta: list[dict] = []
+        for pid in part_player_ids:
+            pname = player_name_map.get(pid, pid)
+            row   = part_row_by_pid.get(pid, {})
+            rid   = row.get("id", "") if row else ""
+            cur_part = ctx["extract_prop_text_any"](row, PARTICIPANT_PART_KEYS) if row else ""
+            cur_role = ctx["extract_prop_text_any"](row, PARTICIPANT_ROLE_KEYS) if row else ""
+            pr_rows.append({"氏名": pname, "パート": cur_part, "役職": cur_role})
+            pr_meta.append({"rid": rid, "pid": pid, "cur_part": cur_part, "cur_role": cur_role})
+
+        df_pr = pd.DataFrame(pr_rows)
+        col_config_pr = {
+            "氏名":   st.column_config.TextColumn("氏名", disabled=True),
+            "パート": st.column_config.SelectboxColumn("パート", options=part_opts) if part_opts
+                       else st.column_config.TextColumn("パート", max_chars=30),
+            "役職":   st.column_config.SelectboxColumn("役職",  options=role_opts) if role_opts
+                       else st.column_config.TextColumn("役職",  max_chars=30),
+        }
+        pr_version = st.session_state.get(f"pr_editor_version_{c_id}", 0)
+        edited_pr = st.data_editor(
+            df_pr, num_rows="fixed", use_container_width=True,
+            key=f"pr_editor_{c_id}_{pr_version}",
+            column_config=col_config_pr,
+        )
+        if st.button("💾 パート・役職を保存", type="primary", use_container_width=True,
+                     key=f"pr_save_{c_id}"):
+            ok_n = ng_n = skip_n = 0
+            with st.spinner("保存中..."):
+                df_reset = edited_pr.reset_index(drop=True)
+                for idx, meta in enumerate(pr_meta):
+                    if idx >= len(df_reset): break
+                    row      = df_reset.iloc[idx]
+                    new_part = str(row.get("パート") or "").strip()
+                    new_role = str(row.get("役職")   or "").strip()
+                    if new_part == meta["cur_part"] and new_role == meta["cur_role"]:
+                        skip_n += 1
+                        continue
+                    if not meta["rid"]:
+                        skip_n += 1
+                        continue
+                    t_p  = ctx["get_prop_types"](ctx["CONCERT_DB_PARTICIPANT"])
+                    props: dict = {}
+                    ctx["put_prop_any"](props, t_p, PARTICIPANT_PART_KEYS, new_part)
+                    ctx["put_prop_any"](props, t_p, PARTICIPANT_ROLE_KEYS, new_role)
+                    res = ctx["api_request"]("patch",
+                        f"https://api.notion.com/v1/pages/{meta['rid']}",
+                        json={"properties": props})
+                    ok = res is not None and res.status_code == 200
+                    ok_n += 1 if ok else 0
+                    ng_n += 0 if ok else 1
+            if ng_n == 0:
+                st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
+            else:
+                st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+            st.session_state[f"pr_editor_version_{c_id}"] = pr_version + 1
+            st.session_state.pop(f"participant_list_{c_id}", None)
+            st.rerun()
+
+        st.divider()
+
     def _d(p):
         x = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
         return x[:10] if x else "9999"
@@ -739,6 +808,26 @@ def _render_attendance_tab(ctx: dict):
             st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗しました。")
         st.session_state.pop(f"attendance_list_{p_id}", None)
         st.rerun()
+
+
+def _get_select_options(ctx, db_id: str, field_keys: list) -> list[str]:
+    """NotionのselectフィールドのオプションをAPIから取得する。"""
+    try:
+        t = ctx["get_prop_types"](db_id)
+        if not t:
+            return []
+        field_name = ctx["find_prop_name"](t, field_keys)
+        if not field_name:
+            return []
+        res = ctx["api_request"]("get", f"https://api.notion.com/v1/databases/{db_id}")
+        if not res or res.status_code != 200:
+            return []
+        props = res.json().get("properties", {})
+        prop  = props.get(field_name, {})
+        opts  = prop.get("select", {}).get("options", [])
+        return [o["name"] for o in opts if o.get("name")]
+    except Exception:
+        return []
 
 
 # ============================================================
