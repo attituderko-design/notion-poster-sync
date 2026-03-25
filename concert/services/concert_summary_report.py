@@ -35,6 +35,61 @@ from concert.services.keys import (
     PLAYER_NAME_KEYS, INSTRUMENT_NAME_KEYS,
 )
 
+
+def _make_maps_url(address: str) -> str:
+    import urllib.parse
+    return f"https://maps.google.com/?q={urllib.parse.quote(address)}"
+
+
+def _make_qr_image(url: str):
+    try:
+        import qrcode
+        import io as _io
+        qr = qrcode.QRCode(version=None,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=4, border=2)
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = _io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        return buf
+    except Exception:
+        return None
+
+
+def _venue_qr_block(address: str, venue: str, font, font_b, W):
+    from reportlab.platypus import Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    if not address or address == "—":
+        return []
+    maps_url = _make_maps_url(address)
+    qr_buf   = _make_qr_image(maps_url)
+    cap_sty  = ParagraphStyle("qrcap2", fontName=font_b, fontSize=8, leading=11)
+    url_sty  = ParagraphStyle("qrurl2", fontName=font,   fontSize=6, leading=9,
+                               textColor=colors.HexColor("#1a73e8"))
+    addr_sty = ParagraphStyle("qradr2", fontName=font,   fontSize=8, leading=11)
+    info = [Paragraph(venue or address, cap_sty),
+            Paragraph(address, addr_sty),
+            Spacer(1, 1*mm),
+            Paragraph(maps_url, url_sty)]
+    if qr_buf:
+        from reportlab.platypus import Image as RLImage
+        qr_img = RLImage(qr_buf, width=24*mm, height=24*mm)
+        tbl = Table([[qr_img, info]], colWidths=[27*mm, W-27*mm])
+        tbl.setStyle(TableStyle([
+            ("VALIGN",(0,0),(-1,-1),"TOP"),
+            ("LEFTPADDING",(0,0),(-1,-1),0),
+            ("RIGHTPADDING",(0,0),(-1,-1),2),
+            ("TOPPADDING",(0,0),(-1,-1),0),
+            ("BOTTOMPADDING",(0,0),(-1,-1),0),
+        ]))
+        return [tbl, Spacer(1, 3*mm)]
+    return info + [Spacer(1, 3*mm)]
+
 FONT_PATH_REGULAR = "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf"
 FONT_PATH_BOLD    = "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf"
 
@@ -195,7 +250,8 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         ("RIGHTPADDING",(0,0),(-1,-1), 4),
     ]))
     story.append(info_tbl)
-    story.append(Spacer(1, 5*mm))
+    story.append(Spacer(1, 3*mm))
+    story.extend(_venue_qr_block(c_address, c_venue, font, font_b, W))
 
     # ── 全練習日一覧 ─────────────────────────────────────────
     story.append(Paragraph("■ 練習日一覧", st_map["h2"]))
