@@ -357,6 +357,7 @@ def _upsert_participant(
     player_id: str,
     player_name: str,
     existing_id: str = "",
+    is_extra: bool = False,
 ) -> bool:
     db_id = ctx["CONCERT_DB_PARTICIPANT"]
     t = ctx["get_prop_types"](db_id)
@@ -597,27 +598,40 @@ def _render_attendance_tab(ctx: dict):
                 default=default_names,
                 key=f"participant_select_{c_id}",
             )
+            extra_names = st.multiselect(
+                "エキストラ（参加費0円）",
+                list(selectable.keys()),
+                default=[name for name, pid in selectable.items()
+                         if pid in part_player_ids and
+                         ctx["extract_prop_text_any"](part_row_by_pid.get(pid, {}), PARTICIPANT_FEE_KEYS) == "0"],
+                key=f"participant_extra_{c_id}",
+                help="エキストラの方は参加費が0円で登録されます",
+            )
             remove_unselected = st.checkbox("未選択の既存参加者をアーカイブ", value=False, key=f"participant_remove_{c_id}")
             if st.form_submit_button("💾 参加者を保存", type="primary", use_container_width=True):
                 selected_ids = {selectable[n] for n in sel_names if selectable.get(n)}
+                extra_ids    = {selectable[n] for n in extra_names if selectable.get(n)}
                 ok_n, ng_n = 0, 0
                 # ATLASの確定参加費をsession_stateにキャッシュ
                 try:
-                    t_c = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT"])
+                    t_c   = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT"])
                     res_c = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{c_id}")
                     if res_c and res_c.status_code == 200:
-                        fee_key = ctx["find_prop_name"](t_c, CONCERT_FEE_KEYS) if t_c else None
+                        fee_key = ctx["find_prop_name"](t_c, CONCERT_CONFIRMED_FEE_KEYS) if t_c else None
                         if fee_key:
                             num = res_c.json().get("properties", {}).get(fee_key, {}).get("number")
-                            confirmed_fee = int(num) if num else 0
-                            st.session_state[f"confirmed_fee_{c_id}"] = confirmed_fee
+                            if num is not None:
+                                st.session_state[f"confirmed_fee_{c_id}"] = int(num)
                 except Exception:
                     pass
 
                 for pid in selected_ids:
                     pname = player_name_map.get(pid, pid)
-                    ex = part_row_by_pid.get(pid)
-                    ok = _upsert_participant(ctx, c_id, c_name, pid, pname, ex.get("id", "") if ex else "")
+                    ex    = part_row_by_pid.get(pid)
+                    is_extra = pid in extra_ids
+                    ok = _upsert_participant(ctx, c_id, c_name, pid, pname,
+                                            ex.get("id", "") if ex else "",
+                                            is_extra=is_extra)
                     ok_n += 1 if ok else 0
                     ng_n += 0 if ok else 1
                 if remove_unselected:
