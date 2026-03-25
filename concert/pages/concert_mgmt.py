@@ -1080,6 +1080,190 @@ def _auto_mark_concert_day_attendance(ctx: dict, practice_id: str, concert_id: s
 # メイン描画
 # ============================================================
 
+
+# ============================================================
+# スケジュール管理
+# ============================================================
+
+def _load_schedules(ctx, practice_id: str) -> list[dict]:
+    key = f"schedule_list_{practice_id}"
+    if key not in st.session_state:
+        t = ctx["get_prop_types"](ctx["CONCERT_DB_SCHEDULE"])
+        rel = ctx["find_prop_name"](t, SCHEDULE_PRACTICE_REL_KEYS)
+        f = {"filter": {"property": rel, "relation": {"contains": practice_id}}} if rel else None
+        rows = ctx["query_all"](ctx["CONCERT_DB_SCHEDULE"], f)
+        # 表示順でソート
+        def _sort_key(r):
+            v = ctx["extract_prop_text_any"](r, SCHEDULE_ORDER_KEYS)
+            try: return int(float(v)) if v else 9999
+            except: return 9999
+        st.session_state[key] = sorted(rows, key=_sort_key)
+    return st.session_state.get(key, [])
+
+
+def _clear_schedule_cache(practice_id: str = ""):
+    for k in list(st.session_state.keys()):
+        if k.startswith("schedule_list_") and (not practice_id or practice_id in k):
+            st.session_state.pop(k, None)
+
+
+def _upsert_schedule(ctx, practice_id: str, practice_name: str,
+                     start: str, end: str, type_: str, content: str,
+                     song_id: str, order: int,
+                     existing_id: str = "") -> bool:
+    db_id    = ctx["CONCERT_DB_SCHEDULE"]
+    type_map = ctx["get_prop_types"](db_id)
+    if not type_map:
+        st.error("スケジュールDBのプロパティ取得に失敗しました。")
+        return False
+    props: dict = {}
+    label = f"{start}〜{end} {type_} {content}".strip()
+    ctx["put_prop_any"](props, type_map, SCHEDULE_KEY_KEYS, label)
+    ctx["put_prop_any"](props, type_map, SCHEDULE_PRACTICE_REL_KEYS, practice_id)
+    ctx["put_prop_any"](props, type_map, SCHEDULE_START_KEYS, start)
+    ctx["put_prop_any"](props, type_map, SCHEDULE_END_KEYS, end)
+    ctx["put_prop_any"](props, type_map, SCHEDULE_TYPE_KEYS, type_)
+    ctx["put_prop_any"](props, type_map, SCHEDULE_CONTENT_KEYS, content)
+    if song_id:
+        ctx["put_prop_any"](props, type_map, SCHEDULE_SONG_REL_KEYS, song_id)
+    ctx["put_prop_any"](props, type_map, SCHEDULE_ORDER_KEYS, order)
+
+    if existing_id:
+        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}",
+                                 json={"properties": props})
+    else:
+        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
+                                 json={"parent": {"database_id": db_id}, "properties": props})
+    return res is not None and res.status_code == 200
+
+
+def _delete_schedule(ctx, page_id: str) -> bool:
+    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
+                             json={"archived": True})
+    return res is not None and res.status_code == 200
+
+
+def _render_schedule_tab(ctx: dict):
+    st.caption("練習日ごとのタイムスケジュールを管理します。")
+
+    concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+    if not concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
+        return
+
+    practices = _load_practices(ctx, concert_id)
+    if not practices:
+        st.info("練習が登録されていません。")
+        return
+
+    def _prac_date_sort(p):
+        d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
+        return d[:10] if d else "9999"
+
+    practice_opts = {_practice_display_name(p, ctx): p.get("id", "")
+                     for p in sorted(practices, key=_prac_date_sort)}
+
+    p_label = st.selectbox("練習日", list(practice_opts.keys()), key="sched_practice_sel")
+    p_id    = practice_opts.get(p_label, "")
+    if not p_id:
+        return
+
+    # 演奏曲一覧（練習日に設定されている曲、なければ演奏会の全曲）
+    practice_row = next((p for p in practices if p.get("id") == p_id), None)
+    song_ids_for_practice = []
+    if practice_row:
+        song_ids_for_practice = ctx["extract_relation_ids_any"](practice_row, PRACTICE_SONG_REL_KEYS)
+    if not song_ids_for_practice:
+        all_songs = _load_songs(ctx, concert_id)
+        song_ids_for_practice = [s.get("id", "") for s in all_songs]
+    all_songs_rows = _load_songs(ctx, concert_id)
+    song_opts = {"（なし）": ""}
+    for s in sorted(all_songs_rows, key=lambda x: ctx["extract_prop_text_any"](x, SONG_NAME_KEYS) or ""):
+        name = ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or s.get("id", "")
+        song_opts[name] = s.get("id", "")
+
+    col_h, col_r = st.columns([8, 1])
+    col_h.subheader("スケジュール一覧")
+    if col_r.button("🔄", key="sched_refresh", help="再読み込み"):
+        _clear_schedule_cache(p_id)
+        st.rerun()
+
+    schedules = _load_schedules(ctx, p_id)
+
+    # 既存スケジュール一覧＋編集
+    for r in schedules:
+        rid      = r.get("id", "")
+        cur_start   = ctx["extract_prop_text_any"](r, SCHEDULE_START_KEYS) or ""
+        cur_end     = ctx["extract_prop_text_any"](r, SCHEDULE_END_KEYS) or ""
+        cur_type    = ctx["extract_prop_text_any"](r, SCHEDULE_TYPE_KEYS) or "練習"
+        cur_content = ctx["extract_prop_text_any"](r, SCHEDULE_CONTENT_KEYS) or ""
+        cur_song_ids = ctx["extract_relation_ids_any"](r, SCHEDULE_SONG_REL_KEYS)
+        cur_song_id  = cur_song_ids[0] if cur_song_ids else ""
+        cur_song_name = next((k for k, v in song_opts.items() if v == cur_song_id), "（なし）")
+        cur_order_str = ctx["extract_prop_text_any"](r, SCHEDULE_ORDER_KEYS) or "0"
+        try:
+            cur_order = int(float(cur_order_str))
+        except Exception:
+            cur_order = 0
+
+        label = f"{cur_start}〜{cur_end}　{cur_type}　{cur_content or cur_song_name}"
+        with st.expander(label, expanded=False):
+            with st.form(f"sched_edit_{rid}", border=False):
+                c1, c2, c3 = st.columns([2, 2, 3])
+                new_start = c1.text_input("開始", value=cur_start, placeholder="19:00", key=f"se_s_{rid}")
+                new_end   = c2.text_input("終了", value=cur_end,   placeholder="19:30", key=f"se_e_{rid}")
+                new_type  = c3.selectbox("種別", SCHEDULE_TYPE_OPTIONS,
+                                          index=SCHEDULE_TYPE_OPTIONS.index(cur_type) if cur_type in SCHEDULE_TYPE_OPTIONS else 0,
+                                          key=f"se_t_{rid}")
+                new_content = st.text_input("内容（業者名など）", value=cur_content, key=f"se_c_{rid}")
+                new_song_name = st.selectbox("演奏曲", list(song_opts.keys()),
+                                              index=list(song_opts.keys()).index(cur_song_name) if cur_song_name in song_opts else 0,
+                                              key=f"se_song_{rid}")
+                new_order = st.number_input("表示順", min_value=1, max_value=99, value=max(cur_order, 1), step=1,
+                                             key=f"se_ord_{rid}")
+                ca, cb = st.columns(2)
+                if ca.form_submit_button("💾 更新", use_container_width=True):
+                    new_song_id = song_opts.get(new_song_name, "")
+                    ok = _upsert_schedule(ctx, p_id, p_label,
+                                          new_start, new_end, new_type, new_content,
+                                          new_song_id, int(new_order), existing_id=rid)
+                    if ok:
+                        st.success("✅ 更新しました。")
+                        _clear_schedule_cache(p_id)
+                        st.rerun()
+                    else:
+                        st.error("❌ 更新に失敗しました。")
+                if cb.form_submit_button("🗑️ 削除", use_container_width=True):
+                    if _delete_schedule(ctx, rid):
+                        _clear_schedule_cache(p_id)
+                        st.rerun()
+
+    st.divider()
+    st.markdown("**＋ 新規追加**")
+    with st.form("sched_new", border=True):
+        c1, c2, c3 = st.columns([2, 2, 3])
+        new_start   = c1.text_input("開始", placeholder="19:00", key="sn_s")
+        new_end     = c2.text_input("終了", placeholder="19:30", key="sn_e")
+        new_type    = c3.selectbox("種別", SCHEDULE_TYPE_OPTIONS, key="sn_t")
+        new_content = st.text_input("内容（業者名など）", key="sn_c")
+        new_song_name = st.selectbox("演奏曲（練習の場合）", list(song_opts.keys()), key="sn_song")
+        new_order = st.number_input("表示順", min_value=1, max_value=99,
+                                     value=len(schedules) + 1, step=1, key="sn_ord")
+        if st.form_submit_button("➕ 追加", use_container_width=True, type="primary"):
+            if not new_start:
+                st.error("開始時刻は必須です。")
+            else:
+                new_song_id = song_opts.get(new_song_name, "")
+                ok = _upsert_schedule(ctx, p_id, p_label,
+                                      new_start, new_end, new_type, new_content,
+                                      new_song_id, int(new_order))
+                if ok:
+                    st.success("✅ 追加しました。")
+                    _clear_schedule_cache(p_id)
+                    st.rerun()
+                else:
+                    st.error("❌ 追加に失敗しました。")
+
 def render(ctx: dict):
     st.header("🗓️ 練習管理")
     global_concert_id   = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
@@ -1094,6 +1278,9 @@ def render(ctx: dict):
     concerts = _load_concerts(ctx)
     filter_concert_id    = global_concert_id
     selected_concert_page = next((c for c in concerts if c.get("id") == filter_concert_id), None)
+
+    with st.expander("📅 スケジュール管理", expanded=False):
+        _render_schedule_tab(ctx)
 
     with st.expander("⚙️ 練習回を一括生成", expanded=False):
         st.caption("演奏会を選択後、練習回数を入力すると「第1回練習〜第N回練習」と「第N+1回練習（本番）」を作成します。")
