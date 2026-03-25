@@ -15,7 +15,7 @@ import re
 # 定数
 # ============================================================
 
-PRIORITY_OPTIONS = ["第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
+PRIORITY_OPTIONS = ["未回答", "第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
 PRIORITY_TO_INT  = {
     "第1希望": 1,
     "第2希望": 2,
@@ -579,10 +579,10 @@ def _render_pref_tab(ctx: dict):
 
             existing = pi_lookup.get((player_id, sid, part_id))
             has_record = existing is not None
-            cur_p = ctx["extract_prop_text_any"](existing, PREF_PRIORITY_KEYS) if existing else "希望なし/降り番でも可"
+            cur_p = ctx["extract_prop_text_any"](existing, PREF_PRIORITY_KEYS) if existing else "未回答"
             if cur_p not in PRIORITY_OPTIONS:
-                cur_p = "希望なし/降り番でも可"
-            status = "" if has_record else "🔴 未回答"
+                cur_p = "未回答"
+            status = "" if has_record else "🔴"
 
             all_pref_rows.append({"状態": status, "曲": sname, "パート": label, "希望": cur_p})
             all_pref_meta.append({
@@ -609,7 +609,7 @@ def _render_pref_tab(ctx: dict):
             "パート": st.column_config.TextColumn("パート", disabled=True),
             "希望": st.column_config.SelectboxColumn(
                 "希望", options=PRIORITY_OPTIONS,
-                required=True, default="希望なし/降り番でも可",
+                required=True, default="未回答",
             ),
         },
     )
@@ -632,6 +632,17 @@ def _render_pref_tab(ctx: dict):
                 if new_p == meta["cur_p"]:
                     continue
 
+                # 「未回答」はスキップ（既存レコードがあればアーカイブ）
+                if new_p == "未回答":
+                    if meta["existing_id"]:
+                        res = ctx["api_request"](
+                            "patch",
+                            f"https://api.notion.com/v1/pages/{meta['existing_id']}",
+                            json={"archived": True},
+                        )
+                        ok_count += 1 if (res and res.status_code == 200) else 0
+                        fail_count += 0 if (res and res.status_code == 200) else 1
+                    continue
                 if pri_int is None and meta["existing_id"]:
                     # 「なし」に変更 → アーカイブ
                     res = ctx["api_request"](
@@ -643,7 +654,7 @@ def _render_pref_tab(ctx: dict):
                     fail_count += 0 if (res and res.status_code == 200) else 1
                     continue
                 if pri_int is None:
-                    continue  # 「なし」かつ未登録はスキップ
+                    continue
 
                 ok = _save_preference(
                     ctx, player_id, selected_player_name,
