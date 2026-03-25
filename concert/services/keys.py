@@ -152,7 +152,8 @@ EXPENSE_TYPE_OPTIONS = [
 
 # ── CONCERT_CAST 追加フィールド ───────────────────────────────
 PARTICIPANT_PART_KEYS     = ["パート", "Part"]
-PARTICIPANT_ROLE_KEYS     = ["役職", "Role"]
+PARTICIPANT_ROLE_KEYS     = ["役職_音楽", "役職", "Role"]
+PARTICIPANT_ROLE_OPS_KEYS = ["役職_運営", "RoleOps"]
 PARTICIPANT_FEE_KEYS      = ["参加費", "Fee"]
 PARTICIPANT_PAID_KEYS     = ["入金済", "Paid"]
 
