@@ -103,7 +103,7 @@ def generate_practice_report(
     ext     = ctx["extract_prop_text_any"]
     ext_rel = ctx["extract_relation_ids_any"]
 
-    W = A4[0] - 30*mm  # 有効幅
+    W = A4[0] - 20*mm  # 有効幅
 
     # ── データ取得 ────────────────────────────────────────────
 
@@ -209,15 +209,15 @@ def generate_practice_report(
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
-        leftMargin=15*mm, rightMargin=15*mm,
-        topMargin=15*mm, bottomMargin=15*mm,
+        leftMargin=10*mm, rightMargin=10*mm,
+        topMargin=10*mm, bottomMargin=10*mm,
     )
     story = []
 
     # タイトル
-    prefix = "🎼 本番当日" if is_concert_day else "練習前日共有"
+    prefix = "本番当日" if is_concert_day else "練習前日共有"
     story.append(Paragraph(f"ArtéMis HARMONIA　{prefix}", st_map["subtitle"]))
-    title_str = f"{'🎼 本番当日' if is_concert_day else ''}{prac_name}"
+    title_str = ("【本番当日】" if is_concert_day else "") + prac_name
     story.append(Paragraph(title_str, st_map["title"]))
     if concert_name:
         story.append(Paragraph(concert_name, st_map["subtitle"]))
@@ -255,9 +255,12 @@ def generate_practice_report(
         story.append(Paragraph(songs_str, st_map["body"]))
         story.append(Spacer(1, 3*mm))
 
-    # タイムスケジュール
+    # タイムスケジュール（データなしでも表示）
+    story.append(Paragraph("■ タイムスケジュール", st_map["h2"]))
+    if not sched_rows:
+        story.append(Paragraph("スケジュールが登録されていません。", st_map["small"]))
+        story.append(Spacer(1, 3*mm))
     if sched_rows:
-        story.append(Paragraph("■ タイムスケジュール", st_map["h2"]))
         sched_data = [["開始", "終了", "種別", "内容"]]
         sched_row_colors = [colors.HexColor("#E8E6F0")]
         for r in sched_rows:

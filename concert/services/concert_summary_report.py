@@ -155,13 +155,13 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     # ── PDF構築 ──────────────────────────────────────────────
     buf = io.BytesIO()
     # 出欠マトリクスは横長なのでlandscapeを使う
-    page_size = landscape(A4) if len(practices) > 6 else A4
-    W = page_size[0] - 30*mm
+    page_size = landscape(A4)  # 出欠マトリクスのため常に横向き
+    W = page_size[0] - 16*mm
 
     doc = SimpleDocTemplate(
         buf, pagesize=page_size,
-        leftMargin=15*mm, rightMargin=15*mm,
-        topMargin=15*mm, bottomMargin=15*mm,
+        leftMargin=8*mm, rightMargin=8*mm,
+        topMargin=10*mm, bottomMargin=10*mm,
     )
     story = []
 
@@ -233,7 +233,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     for p in practices:
         d = ext(p, PRACTICE_DATE_KEYS) or ""
         is_cd = ext(p, PRACTICE_CONCERT_DAY_KEYS) == "True"
-        label = "🎼本番" if is_cd else (d[5:10] if d else "?")
+        label = "本番" if is_cd else (d[5:10] if d else "?")
         prac_labels_short.append(label)
 
     matrix_data = [["奏者"] + prac_labels_short]
