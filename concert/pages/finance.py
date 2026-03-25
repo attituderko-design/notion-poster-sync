@@ -5,7 +5,7 @@ concert/pages/finance.py
 import streamlit as st
 import pandas as pd
 from concert.services.keys import (
-    CONCERT_NAME_KEYS,
+    CONCERT_NAME_KEYS, CONCERT_FEE_KEYS,
     PARTICIPANT_RECORD_KEYS, PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
     PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS,
     PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS,
@@ -25,6 +25,37 @@ def _clear_finance_cache(concert_id: str = ""):
         if k.startswith("expense_list_") or k.startswith("cast_list_"):
             if not concert_id or concert_id in k:
                 st.session_state.pop(k, None)
+
+
+def _write_concert_fee(ctx, concert_id: str, fee: int) -> bool:
+    """ATLASの演奏会レコードに確定参加費を書き込む。"""
+    db_id = ctx["CONCERT_DB_CONCERT"]
+    t = ctx["get_prop_types"](db_id)
+    if not t:
+        return False
+    props: dict = {}
+    ctx["put_prop_any"](props, t, CONCERT_FEE_KEYS, fee)
+    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{concert_id}",
+                             json={"properties": props})
+    return res is not None and res.status_code == 200
+
+
+def _read_concert_fee(ctx, concert_id: str) -> int:
+    """ATLASの演奏会レコードから確定参加費を読み込む。"""
+    db_id = ctx["CONCERT_DB_CONCERT"]
+    res = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{concert_id}")
+    if not res or res.status_code != 200:
+        return 0
+    props = res.json().get("properties", {})
+    t = ctx["get_prop_types"](db_id)
+    fee_key = ctx["find_prop_name"](t, CONCERT_FEE_KEYS) if t else None
+    if not fee_key or fee_key not in props:
+        return 0
+    num = props[fee_key].get("number")
+    try:
+        return int(num) if num is not None else 0
+    except Exception:
+        return 0
 
 
 def _load_expenses(ctx, concert_id: str) -> list[dict]:
@@ -212,6 +243,11 @@ def _render_expense_tab(ctx, concert_id: str, concert_name: str):
 def _render_budget_tab(ctx, concert_id: str):
     st.caption("経費の積み上げから1人あたり参加費を試算します。")
 
+    # ATLASの確定参加費を表示
+    current_fee = _read_concert_fee(ctx, concert_id)
+    if current_fee > 0:
+        st.info(f"現在の確定参加費：**¥{current_fee:,}**　※一括設定ボタンで上書きされます")
+
     expenses  = _load_expenses(ctx, concert_id)
     cast_rows = _load_cast(ctx, concert_id)
     ext = ctx["extract_prop_text_any"]
@@ -286,7 +322,9 @@ def _render_budget_tab(ctx, concert_id: str):
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
         if ng_n == 0:
-            # 確定参加費をsession_stateに保存（新規参加者登録時に自動セット用）
+            # ATLASの確定参加費フィールドに書き込む
+            _write_concert_fee(ctx, concert_id, per_person)
+            # session_stateにも保存（新規参加者登録時の自動セット用）
             st.session_state[f"confirmed_fee_{concert_id}"] = per_person
             st.success(f"✅ {ok_n}人の参加費を ¥{per_person:,} に設定しました。新規参加者登録時も自動で ¥{per_person:,} が入力されます。")
         else:

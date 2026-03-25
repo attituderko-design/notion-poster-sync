@@ -368,9 +368,21 @@ def _upsert_participant(
     ctx["put_prop_any"](props, t, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PARTICIPANT_PLAYER_REL_KEYS, player_id)
     ctx["put_key_any"](props, t, PARTICIPANT_RECORD_KEYS, concert_id, player_id, prefix="participant")
-    # 新規登録時は確定参加費を自動セット
+    # 新規登録時のみ：ATLASの確定参加費を参照してセット（既存レコードは絶対に上書きしない）
     if not existing_id:
         confirmed_fee = st.session_state.get(f"confirmed_fee_{concert_id}", 0)
+        if confirmed_fee == 0:
+            # session_stateにない場合はATLASから取得
+            try:
+                t_c = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT"])
+                res_c = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{concert_id}")
+                if res_c and res_c.status_code == 200:
+                    fee_key = ctx["find_prop_name"](t_c, CONCERT_FEE_KEYS) if t_c else None
+                    if fee_key:
+                        num = res_c.json().get("properties", {}).get(fee_key, {}).get("number")
+                        confirmed_fee = int(num) if num else 0
+            except Exception:
+                confirmed_fee = 0
         if confirmed_fee > 0:
             ctx["put_prop_any"](props, t, PARTICIPANT_FEE_KEYS, confirmed_fee)
     if existing_id:
@@ -589,6 +601,19 @@ def _render_attendance_tab(ctx: dict):
             if st.form_submit_button("💾 参加者を保存", type="primary", use_container_width=True):
                 selected_ids = {selectable[n] for n in sel_names if selectable.get(n)}
                 ok_n, ng_n = 0, 0
+                # ATLASの確定参加費をsession_stateにキャッシュ
+                try:
+                    t_c = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT"])
+                    res_c = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{c_id}")
+                    if res_c and res_c.status_code == 200:
+                        fee_key = ctx["find_prop_name"](t_c, CONCERT_FEE_KEYS) if t_c else None
+                        if fee_key:
+                            num = res_c.json().get("properties", {}).get(fee_key, {}).get("number")
+                            confirmed_fee = int(num) if num else 0
+                            st.session_state[f"confirmed_fee_{c_id}"] = confirmed_fee
+                except Exception:
+                    pass
+
                 for pid in selected_ids:
                     pname = player_name_map.get(pid, pid)
                     ex = part_row_by_pid.get(pid)
