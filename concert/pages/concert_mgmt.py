@@ -1544,6 +1544,208 @@ def render(ctx: dict):
     st.divider()
     with st.expander("📅 スケジュール管理", expanded=False):
         _render_schedule_tab(ctx)
+    st.divider()
+    with st.expander("📋 データチェック", expanded=False):
+        _render_data_check_tab(ctx, filter_concert_id)
+
+
+
+def _render_data_check_tab(ctx: dict, concert_id: str):
+    """データ完全性チェックタブ。未入力・未設定項目を一覧表示する。"""
+    ext     = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
+
+    col_h, col_r = st.columns([8, 1])
+    col_h.caption("登録済みデータの未入力・未設定項目を検出します。")
+    if col_r.button("🔄", key="data_check_refresh"):
+        _clear_concert_cache(ctx)
+        st.rerun()
+
+    issues: list[dict] = []  # {"category": str, "severity": str, "message": str}
+
+    def warn(category, message):
+        issues.append({"category": category, "severity": "⚠️", "message": message})
+    def error(category, message):
+        issues.append({"category": category, "severity": "🔴", "message": message})
+    def ok(category, message):
+        issues.append({"category": category, "severity": "✅", "message": message})
+
+    # ── 1. 奏者・参加者 ──────────────────────────────────────
+    all_players    = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+    cast = [r for r in participant_rows
+            if concert_id in ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)]
+    player_name_map = {r.get("id",""): ext(r, PLAYER_NAME_KEYS) or r.get("id","")
+                       for r in all_players}
+    cast_player_ids = set()
+    for r in cast:
+        pids = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
+        if pids:
+            cast_player_ids.add(pids[0])
+
+    if not all_players:
+        error("奏者", "奏者が1人も登録されていません。")
+    elif not cast:
+        error("参加者", "この演奏会の参加者が登録されていません。")
+    else:
+        ok("参加者", f"参加者 {len(cast)}名 登録済み")
+
+    # パート・役職未入力
+    no_part = [player_name_map.get((ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0], "?")
+               for r in cast if not ext(r, PARTICIPANT_PART_KEYS)]
+    if no_part:
+        warn("パート・役職", f"パート未入力: {', '.join(no_part)}")
+    else:
+        ok("パート・役職", "全員パート入力済み")
+
+    no_role = [player_name_map.get((ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0], "?")
+               for r in cast if not ext(r, PARTICIPANT_ROLE_KEYS)]
+    if no_role:
+        warn("パート・役職", f"役職未入力: {', '.join(no_role)}")
+    else:
+        ok("パート・役職", "全員役職入力済み")
+
+    # 参加費未入力（Nullのみ。0円は入力済み扱い）
+    no_fee = []
+    for r in cast:
+        fee_s = ext(r, PARTICIPANT_FEE_KEYS)
+        if fee_s is None or fee_s == "":
+            pids = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
+            no_fee.append(player_name_map.get(pids[0] if pids else "", "?"))
+    if no_fee:
+        warn("参加費", f"参加費未入力（Null）: {', '.join(no_fee)}")
+    else:
+        ok("参加費", "全員参加費入力済み（0円含む）")
+
+    # ── 2. 出欠 ──────────────────────────────────────────────
+    practices = _load_practices(ctx, concert_id)
+    if not practices:
+        error("出欠", "練習日が登録されていません。")
+    else:
+        all_att = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], None)
+        # practice_id → player_id set
+        att_map: dict[str, set] = {}
+        for r in all_att:
+            pr_ids = ext_rel(r, ATT_PRACTICE_REL_KEYS)
+            pl_ids = ext_rel(r, ATT_PLAYER_REL_KEYS)
+            if not pr_ids or not pl_ids:
+                continue
+            att_map.setdefault(pr_ids[0], set()).add(pl_ids[0])
+
+        missing_att = []
+        for p in practices:
+            pr_id   = p.get("id", "")
+            pr_name = ext(p, PRACTICE_NAME_KEYS) or pr_id
+            is_cd   = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
+            recorded = att_map.get(pr_id, set())
+            # 出欠レコードがない参加者を特定
+            missing = [player_name_map.get(pid, pid)
+                       for pid in cast_player_ids if pid not in recorded]
+            if missing:
+                missing_att.append(f"{pr_name}：{', '.join(missing)}")
+        if missing_att:
+            for m in missing_att:
+                warn("出欠", f"出欠未入力 → {m}")
+        else:
+            ok("出欠", "全練習日・全参加者の出欠入力済み")
+
+    # ── 3. 希望入力（Percパートのみ） ────────────────────────
+    perc_pids = [
+        (ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0]
+        for r in cast
+        if (ext(r, PARTICIPANT_PART_KEYS) or "").lower() in ("perc", "percussion", "打楽器")
+    ]
+    if not perc_pids:
+        warn("希望入力", "Percパートの参加者がいません（パート未入力の可能性あり）")
+    else:
+        all_pref = ctx["query_all"](ctx["CONCERT_DB_PREFERENCE"], None)
+        pref_player_ids = set()
+        for r in all_pref:
+            pl_ids = ext_rel(r, PREF_PLAYER_REL_KEYS)
+            if pl_ids:
+                pref_player_ids.add(pl_ids[0])
+        no_pref = [player_name_map.get(pid, pid)
+                   for pid in perc_pids if pid not in pref_player_ids]
+        if no_pref:
+            warn("希望入力", f"希望未入力（Perc）: {', '.join(no_pref)}")
+        else:
+            ok("希望入力", f"Perc奏者 {len(perc_pids)}名 全員希望入力済み")
+
+    # ── 4. 持参担当 ───────────────────────────────────────────
+    songs = _load_concert_songs(ctx, concert_id)
+    required_insts: set[str] = set()
+    for s in songs:
+        for part in _load_partdefs_for_song(ctx, s.get("id", "")):
+            iids = ext_rel(part, PARTDEF_INST_REL_KEYS)
+            required_insts.update(iids)
+
+    if not required_insts:
+        warn("持参担当", "パート定義が登録されていません（必要楽器不明）")
+    elif not practices:
+        pass  # 既にエラー済み
+    else:
+        all_pi = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"], None)
+        # practice_id → instrument_id → True/False（担当あり）
+        bring_map: dict[str, set] = {}
+        for r in all_pi:
+            if ext(r, PI_BRING_ASSIGN_KEYS) != "True":
+                continue
+            pr_ids = ext_rel(r, PI_PRACTICE_REL_KEYS)
+            i_ids  = ext_rel(r, PI_INST_REL_KEYS)
+            if not pr_ids or not i_ids:
+                continue
+            bring_map.setdefault(pr_ids[0], set()).add(i_ids[0])
+
+        inst_name_map2 = {r.get("id",""): ext(r, INSTRUMENT_NAME_KEYS) or r.get("id","")
+                          for r in ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"], None)}
+
+        missing_bring = []
+        for p in practices:
+            if _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False):
+                continue
+            if _extract_bool_any(ctx, p, PRACTICE_PERCUSSION_OFF_KEYS, False):
+                continue
+            pr_id   = p.get("id", "")
+            pr_name = ext(p, PRACTICE_NAME_KEYS) or pr_id
+            assigned = bring_map.get(pr_id, set())
+            missing  = [inst_name_map2.get(iid, iid)
+                        for iid in required_insts if iid not in assigned]
+            if missing:
+                missing_bring.append(f"{pr_name}：{', '.join(missing)}")
+
+        if missing_bring:
+            for m in missing_bring:
+                warn("持参担当", f"担当未設定 → {m}")
+        else:
+            ok("持参担当", "全練習日・全必要楽器の持参担当設定済み")
+
+    # ── 5. 表示 ───────────────────────────────────────────────
+    st.divider()
+    if not issues:
+        st.success("チェック項目なし")
+        return
+
+    categories = list(dict.fromkeys(i["category"] for i in issues))
+    for cat in categories:
+        cat_issues = [i for i in issues if i["category"] == cat]
+        has_error = any(i["severity"] == "🔴" for i in cat_issues)
+        has_warn  = any(i["severity"] == "⚠️" for i in cat_issues)
+        icon = "🔴" if has_error else ("⚠️" if has_warn else "✅")
+        with st.expander(f"{icon} {cat}（{len(cat_issues)}件）",
+                         expanded=(has_error or has_warn)):
+            for i in cat_issues:
+                if i["severity"] == "🔴":
+                    st.error(i["message"])
+                elif i["severity"] == "⚠️":
+                    st.warning(i["message"])
+                else:
+                    st.success(i["message"])
+
+    # サマリ
+    n_error = sum(1 for i in issues if i["severity"] == "🔴")
+    n_warn  = sum(1 for i in issues if i["severity"] == "⚠️")
+    n_ok    = sum(1 for i in issues if i["severity"] == "✅")
+    st.caption(f"🔴 {n_error}件  ⚠️ {n_warn}件  ✅ {n_ok}件")
 
 
 def render_sidebar_summary_pdf(ctx: dict):
