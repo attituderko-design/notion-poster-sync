@@ -925,6 +925,234 @@ def _render_assign_tab(ctx: dict):
             st.rerun()
 
 
+def _render_practice_bring_tab(ctx: dict):
+    """練習日別・楽器別の持参担当をマトリクスで管理するタブ。"""
+    st.caption("楽器を選んで、各練習日の持参担当者と持参台数を設定します。出欠×の奏者は選択肢に表示されません。")
+
+    concerts = [c for c in _load_concerts(ctx) if _is_performance_media_concert(c)]
+    if not concerts:
+        st.info("媒体=出演 の演奏会が見つかりません。")
+        return
+
+    all_c_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
+    global_concert_id, global_concert_name = _get_global_concert_filter(ctx, all_c_opts)
+    if global_concert_id:
+        c_id   = global_concert_id
+        c_name = global_concert_name or global_concert_id
+        st.caption(f"対象演奏会: {c_name}")
+    else:
+        c_name = st.selectbox("演奏会を選択", list(all_c_opts.keys()), key="pb_concert_sel")
+        c_id = all_c_opts.get(c_name, "")
+    if not c_id:
+        return
+
+    # 練習一覧（本番当日除く、日付順）
+    all_practices = _load_practices(ctx, c_id)
+    practices = [p for p in all_practices
+                 if not _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)]
+    practices = sorted(practices, key=lambda p: ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS) or "9999")
+    if not practices:
+        st.info("練習が登録されていません。")
+        return
+
+    # 参加者一覧
+    participants = _load_participants(ctx, c_id)
+    all_players  = _load_players(ctx)
+    player_name_map = {p.get("id", ""): _player_name(p, ctx) for p in all_players}
+    participant_id_by_player_id: dict[str, str] = {}
+    player_ids: list[str] = []
+    for row in participants:
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if not pids: continue
+        pid = pids[0]
+        player_ids.append(pid)
+        participant_id_by_player_id[pid] = row.get("id", "")
+    player_ids = sorted(set(player_ids), key=lambda x: player_name_map.get(x, x))
+
+    # 出欠マップ: practice_id → player_id → status
+    att_map: dict[str, dict[str, str]] = {}
+    for p in practices:
+        pid_ = p.get("id", "")
+        att_rows = _load_attendance(ctx, pid_)
+        att_map[pid_] = {}
+        part_to_player = {
+            row.get("id", ""): (ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0]
+            for row in participants
+        }
+        for r in att_rows:
+            raw  = (ctx["extract_relation_ids_any"](r, ATT_PLAYER_REL_KEYS) or [""])[0]
+            plid = part_to_player.get(raw, raw)
+            att_map[pid_][plid] = ctx["extract_prop_text_any"](r, ATT_STATUS_KEYS) or "△"
+
+    # 必要楽器一覧
+    songs = _load_concert_songs(ctx, c_id)
+    required_inst_ids: set[str] = set()
+    for s in songs:
+        for part in _load_partdefs_for_song(ctx, s.get("id", "")):
+            iids = ctx["extract_relation_ids_any"](part, PARTDEF_INST_REL_KEYS)
+            required_inst_ids.update([x for x in iids if x])
+    if not required_inst_ids:
+        st.info("パート定義が登録されていません。先に楽曲・楽器管理でパート定義を行ってください。")
+        return
+
+    inst_rows  = _load_instruments(ctx)
+    inst_map   = {i.get("id", ""): i for i in inst_rows}
+    inst_names = {iid: _instrument_name(inst_map.get(iid, {}), ctx) for iid in required_inst_ids}
+    ordered_inst_ids = sorted(required_inst_ids, key=lambda x: inst_names.get(x, x))
+
+    # 楽器選択
+    inst_opts = {inst_names[iid]: iid for iid in ordered_inst_ids}
+    selected_inst_name = st.selectbox("楽器を選択", list(inst_opts.keys()), key="pb_inst_sel")
+    selected_iid = inst_opts.get(selected_inst_name, "")
+    if not selected_iid:
+        return
+
+    col_h, col_r = st.columns([8, 1])
+    col_h.caption(f"**{selected_inst_name}** の練習日別持参担当")
+    if col_r.button("🔄", key="pb_refresh", help="再読み込み"):
+        for k in list(st.session_state.keys()):
+            if k.startswith("pi_practice_") or k.startswith("attendance_list_"):
+                st.session_state.pop(k, None)
+        st.rerun()
+
+    # 既存の持参担当レコードを取得（この楽器 × 練習日あり）
+    all_pi_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"], None)
+    # practice_id → player_id → record
+    existing_by_practice: dict[str, dict[str, dict]] = {}
+    for r in all_pi_rows:
+        iids   = ctx["extract_relation_ids_any"](r, PI_INST_REL_KEYS)
+        if selected_iid not in iids: continue
+        pids   = ctx["extract_relation_ids_any"](r, PI_PLAYER_REL_KEYS)
+        pr_ids = ctx["extract_relation_ids_any"](r, PI_PRACTICE_REL_KEYS)
+        if not pids or not pr_ids: continue
+        pr_id = pr_ids[0]
+        pl_id = pids[0]
+        existing_by_practice.setdefault(pr_id, {})[pl_id] = r
+
+    # 練習日ごとの行を構築
+    import pandas as pd
+    NONE_LABEL = "（なし）"
+    df_rows: list[dict] = []
+    df_meta: list[dict] = []
+    all_player_names = [NONE_LABEL] + [player_name_map.get(pid, pid) for pid in player_ids]
+
+    for p in practices:
+        pr_id    = p.get("id", "")
+        pr_name  = ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or ""
+        pr_date  = (ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS) or "")[:10]
+        pr_label = f"{pr_name}（{pr_date}）"
+
+        # この練習日に出席可能な奏者（×以外）
+        att_for_prac    = att_map.get(pr_id, {})
+        available_pids  = [pid for pid in player_ids if att_for_prac.get(pid, "△") != "×"]
+        player_name_to_id = {player_name_map.get(pid, pid): pid for pid in available_pids}
+
+        # 既存レコードから担当者と台数を取得
+        ex_by_pl     = existing_by_practice.get(pr_id, {})
+        assigned_pid = ""
+        assigned_cnt = 0
+        existing_id  = ""
+        for pl_id, r in ex_by_pl.items():
+            if ctx["extract_prop_text_any"](r, PI_BRING_ASSIGN_KEYS) == "True":
+                assigned_pid = pl_id
+                cnt_str = ctx["extract_prop_text_any"](r, PI_BRING_COUNT_KEYS)
+                try: assigned_cnt = int(float(cnt_str)) if cnt_str else 1
+                except: assigned_cnt = 1
+                existing_id = r.get("id", "")
+                break
+
+        assigned_name = player_name_map.get(assigned_pid, "") if assigned_pid else ""
+        disp_name = assigned_name if assigned_name in [player_name_map.get(p, p) for p in available_pids] else NONE_LABEL
+
+        df_rows.append({
+            "練習日":   pr_label,
+            "担当者":   disp_name,
+            "持参台数": assigned_cnt if assigned_pid else 0,
+        })
+        df_meta.append({
+            "practice_id":       pr_id,
+            "practice_name":     pr_name,
+            "available_pids":    available_pids,
+            "player_name_to_id": player_name_to_id,
+            "existing_id":       existing_id,
+            "assigned_pid":      assigned_pid,
+            "assigned_cnt":      assigned_cnt,
+        })
+
+    df = pd.DataFrame(df_rows)
+    edited = st.data_editor(
+        df,
+        num_rows="fixed",
+        use_container_width=True,
+        key=f"pb_editor_{c_id}_{selected_iid}",
+        column_config={
+            "練習日":   st.column_config.TextColumn("練習日", disabled=True),
+            "担当者":   st.column_config.SelectboxColumn("担当者", options=all_player_names, default=NONE_LABEL),
+            "持参台数": st.column_config.NumberColumn("持参台数", min_value=0, max_value=20, step=1, default=1),
+        },
+    )
+
+    # 欠席者が担当になっていれば警告
+    df_reset = edited.reset_index(drop=True)
+    for idx, meta in enumerate(df_meta):
+        if idx >= len(df_reset): break
+        sel_name = str(df_reset.iloc[idx].get("担当者") or NONE_LABEL).strip()
+        sel_pid  = meta["player_name_to_id"].get(sel_name, "")
+        if sel_name != NONE_LABEL and not sel_pid:
+            st.warning(f"⚠️ {meta['practice_name']}：{sel_name} はその日欠席のため持参不可")
+
+    if st.button("💾 まとめて保存", type="primary", use_container_width=True,
+                 key=f"pb_save_{c_id}_{selected_iid}"):
+        ok_n = ng_n = skip_n = 0
+        with st.spinner("保存中..."):
+            df_reset = edited.reset_index(drop=True)
+            for idx, meta in enumerate(df_meta):
+                if idx >= len(df_reset): break
+                row      = df_reset.iloc[idx]
+                sel_name = str(row.get("担当者") or NONE_LABEL).strip()
+                new_cnt  = int(row.get("持参台数") or 0)
+                new_pid  = meta["player_name_to_id"].get(sel_name, "")
+
+                no_change = (new_pid == meta["assigned_pid"] and new_cnt == meta["assigned_cnt"])
+                if no_change:
+                    skip_n += 1
+                    continue
+
+                # 担当なし → 既存レコードをアーカイブ
+                if not new_pid:
+                    if meta["existing_id"]:
+                        res = ctx["api_request"]("patch",
+                            f"https://api.notion.com/v1/pages/{meta['existing_id']}",
+                            json={"archived": True})
+                        ok_n += 1 if (res and res.status_code == 200) else 0
+                        ng_n += 0 if (res and res.status_code == 200) else 1
+                    else:
+                        skip_n += 1
+                    continue
+
+                new_pname = player_name_map.get(new_pid, "")
+                ok = _upsert_player_bring_for_concert(
+                    ctx, c_id, c_name, new_pid, new_pname,
+                    participant_id_by_player_id.get(new_pid, ""),
+                    selected_iid, selected_inst_name,
+                    True, "", meta["existing_id"],
+                    own_count=0, bring_assign=True,
+                    bring_count=new_cnt,
+                    practice_id=meta["practice_id"],
+                )
+                ok_n += 1 if ok else 0
+                ng_n += 0 if ok else 1
+
+        if ng_n == 0:
+            st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
+        else:
+            st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+        for k in list(st.session_state.keys()):
+            if k.startswith("pi_practice_"):
+                st.session_state.pop(k, None)
+        st.rerun()
+
+
 def render(ctx: dict):
     st.header("🎻 奏者・出欠・持参楽器")
     global_concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
