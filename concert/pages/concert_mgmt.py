@@ -1546,7 +1546,10 @@ def render(ctx: dict):
         _render_schedule_tab(ctx)
     st.divider()
     with st.expander("📋 データチェック", expanded=False):
-        _render_data_check_tab(ctx, filter_concert_id)
+        try:
+            _render_data_check_tab(ctx, filter_concert_id)
+        except Exception as e:
+            st.error(f"データチェックでエラーが発生しました: {e}")
 
 
 
