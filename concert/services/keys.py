@@ -113,3 +113,15 @@ PART_INST_REL_KEYS        = ["楽器", "楽器種別", "FK楽器種別", "担当
 PART_NAME_KEYS            = ["パート名", "名称", "タイトル", "表示名"]
 PART_COUNT_KEYS           = ["必要人数", "必要台数", "台数", "人数"]
 PART_CONCERT_REL_KEYS     = ["演奏会", "出演", "FK演奏会"]
+
+# ── SCHEDULE（タイムスケジュール）DB ─────────────────────────
+SCHEDULE_KEY_KEYS         = ["schedule_key", "タイトル"]
+SCHEDULE_PRACTICE_REL_KEYS = ["練習", "FK練習"]
+SCHEDULE_START_KEYS       = ["開始時刻", "開始", "Start"]
+SCHEDULE_END_KEYS         = ["終了時刻", "終了", "End"]
+SCHEDULE_TYPE_KEYS        = ["種別", "Type", "区分"]
+SCHEDULE_CONTENT_KEYS     = ["内容", "メモ", "Content"]
+SCHEDULE_SONG_REL_KEYS    = ["演奏曲", "楽曲", "FK楽曲"]
+SCHEDULE_ORDER_KEYS       = ["表示順", "順番", "Order"]
+
+SCHEDULE_TYPE_OPTIONS     = ["練習", "休憩", "搬入", "搬出", "その他"]

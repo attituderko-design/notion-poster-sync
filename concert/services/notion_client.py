@@ -103,6 +103,7 @@ def get_concert_secrets() -> dict:
         "レンタルDB": db_rental,
         "パート定義DB": db_part_definition,
         "希望入力DB": db_preference,
+        "スケジュールDB": db_schedule,
     }
     missing_db = [name for name, val in required_db.items() if not val]
     if missing_db:
@@ -121,6 +122,7 @@ def get_concert_secrets() -> dict:
         "db_rental":           db_rental,
         "db_part_definition":  db_part_definition,
         "db_preference":       db_preference,
+            "db_schedule":         db_schedule,
     }
 
 
