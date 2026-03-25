@@ -413,7 +413,9 @@ def _upsert_player_bring_for_concert(
     can_bring: bool,
     note: str,
     existing_id: str = "",
-    bring_count: int = 1,
+    own_count: int = 1,
+    bring_assign: bool = False,
+    bring_count: int = 0,
 ) -> bool:
     db_id = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
     t = ctx["get_prop_types"](db_id)
@@ -429,7 +431,9 @@ def _upsert_player_bring_for_concert(
     ctx["put_prop_any"](props, t, PI_INST_REL_KEYS, instrument_id)
     ctx["put_prop_any"](props, t, PI_ASSIGN_KEYS, False)
     ctx["put_prop_any"](props, t, PI_BRING_KEYS, can_bring)
-    ctx["put_prop_any"](props, t, PI_BRING_COUNT_KEYS, bring_count if can_bring else 0)
+    ctx["put_prop_any"](props, t, PI_OWN_COUNT_KEYS, own_count)
+    ctx["put_prop_any"](props, t, PI_BRING_ASSIGN_KEYS, bring_assign)
+    ctx["put_prop_any"](props, t, PI_BRING_COUNT_KEYS, bring_count if bring_assign else 0)
     ctx["put_prop_any"](props, t, PI_NOTE_KEYS, note)
     key_seed = participant_id or player_id
     ctx["put_key_any"](props, t, ASSIGN_KEY_KEYS, concert_id, key_seed, instrument_id, prefix="bring")
@@ -827,24 +831,36 @@ def _render_assign_tab(ctx: dict):
     for iid in ordered_inst_ids:
         iname = inst_names.get(iid, iid)
         ex    = by_inst.get(iid)
-        cur_b = (ctx["extract_prop_text_any"](ex, PI_BRING_KEYS) == "True") if ex else False
+        cur_b  = (ctx["extract_prop_text_any"](ex, PI_BRING_KEYS) == "True") if ex else False
+        cur_ba = (ctx["extract_prop_text_any"](ex, PI_BRING_ASSIGN_KEYS) == "True") if ex else False
+        cur_own_str = ctx["extract_prop_text_any"](ex, PI_OWN_COUNT_KEYS) if ex else ""
         cur_cnt_str = ctx["extract_prop_text_any"](ex, PI_BRING_COUNT_KEYS) if ex else ""
         try:
-            cur_cnt = int(float(cur_cnt_str)) if cur_cnt_str else 1
+            cur_own = int(float(cur_own_str)) if cur_own_str else 1
         except ValueError:
-            cur_cnt = 1
+            cur_own = 1
+        try:
+            cur_cnt = int(float(cur_cnt_str)) if cur_cnt_str else 0
+        except ValueError:
+            cur_cnt = 0
         cur_n = ctx["extract_prop_text_any"](ex, PI_NOTE_KEYS) if ex else ""
         bring_rows_data.append({
-            "楽器": iname,
-            "持参可": cur_b,
-            "台数": cur_cnt,
-            "備考": cur_n,
+            "楽器":     iname,
+            "持参可":   cur_b,
+            "所有台数": cur_own,
+            "持参担当": cur_ba,
+            "持参台数": cur_cnt,
+            "備考":     cur_n,
         })
         bring_row_meta.append({
-            "iid":   iid,
-            "iname": iname,
-            "eid":   ex.get("id", "") if ex else "",
-            "cur_b": cur_b, "cur_cnt": cur_cnt, "cur_n": cur_n,
+            "iid":     iid,
+            "iname":   iname,
+            "eid":     ex.get("id", "") if ex else "",
+            "cur_b":   cur_b,
+            "cur_ba":  cur_ba,
+            "cur_own": cur_own,
+            "cur_cnt": cur_cnt,
+            "cur_n":   cur_n,
         })
 
     df_bring = pd.DataFrame(bring_rows_data)
@@ -854,10 +870,12 @@ def _render_assign_tab(ctx: dict):
         use_container_width=True,
         key=f"bring_editor_{c_id}_{p_id}",
         column_config={
-            "楽器": st.column_config.TextColumn("楽器", disabled=True),
-            "持参可": st.column_config.CheckboxColumn("持参可", default=False),
-            "台数": st.column_config.NumberColumn("台数", min_value=1, max_value=9, step=1, default=1),
-            "備考": st.column_config.TextColumn("備考", max_chars=100),
+            "楽器":     st.column_config.TextColumn("楽器", disabled=True),
+            "持参可":   st.column_config.CheckboxColumn("持参可",   default=False),
+            "所有台数": st.column_config.NumberColumn("所有台数", min_value=0, max_value=20, step=1, default=1),
+            "持参担当": st.column_config.CheckboxColumn("持参担当", default=False),
+            "持参台数": st.column_config.NumberColumn("持参台数", min_value=0, max_value=20, step=1, default=0),
+            "備考":     st.column_config.TextColumn("備考", max_chars=100),
         },
     )
 
@@ -868,11 +886,17 @@ def _render_assign_tab(ctx: dict):
             df_reset = edited_bring.reset_index(drop=True)
             for idx, meta in enumerate(bring_row_meta):
                 if idx >= len(df_reset): break
-                row   = df_reset.iloc[idx]
-                new_b   = bool(row.get("持参可") or False)
-                new_cnt = int(row.get("台数") or 1)
+                row     = df_reset.iloc[idx]
+                new_b   = bool(row.get("持参可")   or False)
+                new_ba  = bool(row.get("持参担当") or False)
+                new_own = int(row.get("所有台数") or 1)
+                new_cnt = int(row.get("持参台数") or 0)
                 new_n   = str(row.get("備考") or "").strip()
-                no_change = (new_b == meta["cur_b"]) and (new_cnt == meta["cur_cnt"]) and (new_n == meta["cur_n"])
+                no_change = (new_b   == meta["cur_b"]   and
+                             new_ba  == meta["cur_ba"]  and
+                             new_own == meta["cur_own"] and
+                             new_cnt == meta["cur_cnt"] and
+                             new_n   == meta["cur_n"])
                 if no_change and not meta["eid"] and not new_b:
                     skip_n += 1
                     continue
@@ -884,6 +908,8 @@ def _render_assign_tab(ctx: dict):
                     participant_id,
                     meta["iid"], meta["iname"],
                     new_b, new_n, meta["eid"],
+                    own_count=new_own,
+                    bring_assign=new_ba,
                     bring_count=new_cnt,
                 )
                 ok_n += 1 if ok else 0
