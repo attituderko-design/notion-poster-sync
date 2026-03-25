@@ -549,85 +549,108 @@ def _render_pref_tab(ctx: dict):
 
     st.subheader(f"希望入力：{selected_player_name}")
 
+    import pandas as pd
+
+    # 全曲のパートをまとめて1つのdata_editorに表示
+    all_pref_rows: list[dict] = []
+    all_pref_meta: list[dict] = []
+
     for song in sorted(songs, key=lambda x: _song_name(x, ctx)):
         sid   = song.get("id", "")
         sname = _song_name(song, ctx)
-
         si_rows = _load_song_instruments(ctx, sid)
         if not si_rows:
-            st.caption(f"　{sname}：必要楽器が未登録です。")
             continue
+        for si_idx, si in enumerate(si_rows):
+            part_id = si.get("id", "")
+            iids  = ctx["extract_relation_ids_any"](si, PARTDEF_INST_REL_KEYS)
+            iid   = iids[0] if iids else ""
+            iname = inst_name_map.get(iid, iid) if iid else ""
+            note  = ctx["extract_prop_text_any"](si, PARTDEF_NOTE_KEYS) or ""
+            pname = ctx["extract_prop_text_any"](si, PARTDEF_NAME_KEYS) or iname or "Part"
+            pname = _strip_song_prefix(pname, sname)
+            label = f"{pname}（{note}）" if note else pname
 
-        with st.expander(f"🎵 {sname}", expanded=True):
-            with st.form(f"pref_form_{player_id}_{sid}", border=True):
-                changes = []
-                for si_idx, si in enumerate(si_rows):
-                    part_id = si.get("id", "")
-                    iids = ctx["extract_relation_ids_any"](si, PARTDEF_INST_REL_KEYS)
-                    iid   = iids[0] if iids else ""
-                    iname = inst_name_map.get(iid, iid) if iid else ""
-                    note  = ctx["extract_prop_text_any"](si, PARTDEF_NOTE_KEYS) or ""
-                    pname = ctx["extract_prop_text_any"](si, PARTDEF_NAME_KEYS) or iname or "Part"
-                    pname = _strip_song_prefix(pname, sname)
-                    label = f"{pname}（{note}）" if note else pname
+            existing = pi_lookup.get((player_id, sid, part_id))
+            cur_p = ctx["extract_prop_text_any"](existing, PREF_PRIORITY_KEYS) if existing else "希望なし/降り番でも可"
+            if cur_p not in PRIORITY_OPTIONS:
+                cur_p = "希望なし/降り番でも可"
 
-                    existing = pi_lookup.get((player_id, sid, part_id))
-                    cur_priority_str = ctx["extract_prop_text_any"](existing, PREF_PRIORITY_KEYS) if existing else "希望なし/降り番でも可"
-                    if cur_priority_str not in PRIORITY_OPTIONS:
-                        cur_priority_str = "希望なし/降り番でも可"
-                    cur_idx = PRIORITY_OPTIONS.index(cur_priority_str)
+            all_pref_rows.append({"曲": sname, "パート": label, "希望": cur_p})
+            all_pref_meta.append({
+                "sid": sid, "sname": sname,
+                "part_id": part_id, "part_name": pname,
+                "iid": iid, "iname": iname,
+                "existing_id": existing.get("id", "") if existing else "",
+                "cur_p": cur_p,
+            })
 
-                    col_inst, col_sel = st.columns([3, 2])
-                    col_inst.markdown(f"**{label}**")
-                    priority_sel = col_sel.selectbox(
-                        label, PRIORITY_OPTIONS, index=cur_idx,
-                        label_visibility="collapsed",
-                        key=f"pref_sel_{player_id}_{sid}_{part_id or 'no_part'}_{si_idx}",
+    if not all_pref_rows:
+        st.info("パート定義が登録されていません。先に楽曲・楽器管理でパート定義を行ってください。")
+        return
+
+    df_pref = pd.DataFrame(all_pref_rows)
+    edited_pref = st.data_editor(
+        df_pref,
+        num_rows="fixed",
+        use_container_width=True,
+        key=f"pref_editor_{player_id}_{concert_id}",
+        column_config={
+            "曲":   st.column_config.TextColumn("曲", disabled=True),
+            "パート": st.column_config.TextColumn("パート", disabled=True),
+            "希望": st.column_config.SelectboxColumn(
+                "希望", options=PRIORITY_OPTIONS,
+                required=True, default="希望なし/降り番でも可",
+            ),
+        },
+    )
+
+    if st.button("💾 まとめて保存", use_container_width=True, type="primary",
+                 key=f"pref_save_{player_id}"):
+        ok_count = fail_count = 0
+        with st.spinner("保存中..."):
+            df_reset = edited_pref.reset_index(drop=True)
+            for idx, meta in enumerate(all_pref_meta):
+                if idx >= len(df_reset): break
+                row = df_reset.iloc[idx]
+                new_p = str(row.get("希望") or "希望なし/降り番でも可").strip()
+                pri_int = PRIORITY_TO_INT.get(new_p)
+
+                # 変更なしはスキップ
+                if new_p == meta["cur_p"]:
+                    continue
+
+                if pri_int is None and meta["existing_id"]:
+                    # 「なし」に変更 → アーカイブ
+                    res = ctx["api_request"](
+                        "patch",
+                        f"https://api.notion.com/v1/pages/{meta['existing_id']}",
+                        json={"archived": True},
                     )
-                    changes.append({
-                        "iid":         iid,
-                        "iname":       iname,
-                        "part_id":     part_id,
-                        "part_name":   pname,
-                        "priority_str": priority_sel,
-                        "existing_id": existing.get("id", "") if existing else "",
-                    })
+                    ok_count += 1 if (res and res.status_code == 200) else 0
+                    fail_count += 0 if (res and res.status_code == 200) else 1
+                    continue
+                if pri_int is None:
+                    continue  # 「なし」かつ未登録はスキップ
 
-                if st.form_submit_button("💾 保存", use_container_width=True, type="primary"):
-                    ok_count = fail_count = 0
-                    with st.spinner("保存中..."):
-                        for ch in changes:
-                            pri_int = PRIORITY_TO_INT.get(ch["priority_str"])
-                            if pri_int is None and not ch["existing_id"]:
-                                continue  # 「なし」かつ未登録はスキップ
-                            if pri_int is None and ch["existing_id"]:
-                                # 「なし」に変更 → アーカイブ
-                                res = ctx["api_request"](
-                                    "patch",
-                                    f"https://api.notion.com/v1/pages/{ch['existing_id']}",
-                                    json={"archived": True},
-                                )
-                                if res and res.status_code == 200:
-                                    ok_count += 1
-                                else:
-                                    fail_count += 1
-                                continue
-                            ok = _save_preference(
-                                ctx, player_id, selected_player_name,
-                                sid, sname, ch["part_id"], ch["part_name"], ch["iid"], ch["iname"],
-                                pri_int, participant_id_by_player_id.get(player_id, ""), ch["existing_id"],
-                            )
-                            if ok:
-                                ok_count += 1
-                            else:
-                                fail_count += 1
+                ok = _save_preference(
+                    ctx, player_id, selected_player_name,
+                    meta["sid"], meta["sname"],
+                    meta["part_id"], meta["part_name"],
+                    meta["iid"], meta["iname"],
+                    pri_int,
+                    participant_id_by_player_id.get(player_id, ""),
+                    meta["existing_id"],
+                )
+                ok_count += 1 if ok else 0
+                fail_count += 0 if ok else 1
 
-                    if fail_count == 0:
-                        st.success(f"✅ {ok_count}件を保存しました。")
-                        st.session_state.pop(f"pi_list_{concert_id}", None)
-                    else:
-                        st.warning(f"⚠️ {ok_count}件成功、{fail_count}件失敗。")
-                    st.rerun()
+        if fail_count == 0:
+            st.success(f"✅ {ok_count}件を保存しました。")
+            st.session_state.pop(f"pi_list_{concert_id}", None)
+        else:
+            st.warning(f"⚠️ {ok_count}件成功、{fail_count}件失敗。")
+        st.rerun()
 
 
 # ============================================================
