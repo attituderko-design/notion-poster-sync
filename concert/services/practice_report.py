@@ -149,6 +149,7 @@ def _tbl_style(header_bg="#E8E6F0"):
         ("FONT",         (0,0), (-1, 0), "IPAGothicB", 8),
         ("BACKGROUND",   (0,0), (-1, 0), colors.HexColor(header_bg)),
         ("GRID",         (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+        ("ALIGN",        (0,0), (-1,-1), "LEFT"),
         ("VALIGN",       (0,0), (-1,-1), "TOP"),
         ("TOPPADDING",   (0,0), (-1,-1), 3),
         ("BOTTOMPADDING",(0,0), (-1,-1), 3),
