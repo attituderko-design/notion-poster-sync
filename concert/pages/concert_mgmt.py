@@ -1370,15 +1370,19 @@ def render(ctx: dict):
         def _practice_round_no(p: dict) -> int:
             nm = ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or ""
             m = re.search(r"第\s*(\d+)\s*回練習", nm)
-            return int(m.group(1)) if m else 0
+            return int(m.group(1)) if m else 9999  # 本番当日など回番号なしは末尾
 
         def _prac_date(p: dict) -> str:
             d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
             return d[:10] if d else ""
 
+        def _prac_sort_key(p: dict):
+            is_cd = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
+            return (1 if is_cd else 0, _practice_round_no(p), _prac_date(p))
+
         sorted_practices = sorted(
             practices,
-            key=lambda p: (_practice_round_no(p), _prac_date(p)),
+            key=_prac_sort_key,
         )
         filtered_practices = []
         for p in sorted_practices:
@@ -1417,8 +1421,9 @@ def render(ctx: dict):
             pmemo  = ctx["extract_prop_text_any"](p, PRACTICE_MEMO_KEYS) or ""
             is_cd  = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
             is_po  = _extract_bool_any(ctx, p, PRACTICE_PERCUSSION_OFF_KEYS, False)
+            disp_name = f"【本番当日】{pname}" if is_cd else pname
             prac_df_rows.append({
-                "練習名":     pname,
+                "練習名":     disp_name,
                 "日時":       pdate_disp,
                 "会場名":     pvenue,
                 "会場住所":   paddr,
