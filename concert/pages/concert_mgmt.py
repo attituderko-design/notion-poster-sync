@@ -1399,11 +1399,112 @@ def render(ctx: dict):
         st.caption(f"表示件数: {len(filtered_practices)} / {len(practices)}")
         if not filtered_practices:
             st.info("検索条件に一致する練習がありません。")
+            return
+
+        # ── data_editor形式で一覧表示・一括編集 ──────────────
+        import pandas as pd
+        prac_df_rows: list[dict] = []
+        prac_meta:    list[dict] = []
+
+        for p in filtered_practices:
+            pid    = p.get("id", "")
+            pname  = ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or ""
+            pdate  = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS) or ""
+            # 日時："2026-04-25T19:00:00+09:00" → "2026-04-25 19:00"
+            pdate_disp = pdate[:16].replace("T", " ") if pdate else ""
+            pvenue = ctx["extract_prop_text_any"](p, PRACTICE_VENUE_KEYS) or ""
+            paddr  = ctx["extract_prop_text_any"](p, PRACTICE_ADDRESS_KEYS) or ""
+            pmemo  = ctx["extract_prop_text_any"](p, PRACTICE_MEMO_KEYS) or ""
+            is_cd  = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
+            is_po  = _extract_bool_any(ctx, p, PRACTICE_PERCUSSION_OFF_KEYS, False)
+            prac_df_rows.append({
+                "練習名":     pname,
+                "日時":       pdate_disp,
+                "会場名":     pvenue,
+                "会場住所":   paddr,
+                "本番日":     is_cd,
+                "打楽器休み": is_po,
+                "メモ":       pmemo,
+            })
+            prac_meta.append({"pid": pid, "pname": pname, "pdate": pdate})
+
+        df_prac = pd.DataFrame(prac_df_rows)
+        edited_prac = st.data_editor(
+            df_prac,
+            num_rows="fixed",
+            use_container_width=True,
+            key=f"practice_list_editor_{filter_concert_id}",
+            column_config={
+                "練習名":     st.column_config.TextColumn("練習名", disabled=True),
+                "日時":       st.column_config.TextColumn("日時", help="例: 2026-04-25 19:00"),
+                "会場名":     st.column_config.TextColumn("会場名"),
+                "会場住所":   st.column_config.TextColumn("会場住所"),
+                "本番日":     st.column_config.CheckboxColumn("本番日"),
+                "打楽器休み": st.column_config.CheckboxColumn("打楽器休み"),
+                "メモ":       st.column_config.TextColumn("メモ"),
+            },
+        )
+
+        if st.button("💾 まとめて保存", type="primary", use_container_width=True,
+                     key="practice_list_save"):
+            ok_n = ng_n = skip_n = 0
+            with st.spinner("保存中..."):
+                df_reset = edited_prac.reset_index(drop=True)
+                for idx, meta in enumerate(prac_meta):
+                    if idx >= len(df_reset): break
+                    row      = df_reset.iloc[idx]
+                    new_date = str(row.get("日時") or "").strip()
+                    new_venue= str(row.get("会場名") or "").strip()
+                    new_addr = str(row.get("会場住所") or "").strip()
+                    new_cd   = bool(row.get("本番日") or False)
+                    new_po   = bool(row.get("打楽器休み") or False)
+                    new_memo = str(row.get("メモ") or "").strip()
+
+                    # 変更チェック（日時・会場・フラグ）
+                    orig = prac_df_rows[idx]
+                    if (new_date == orig["日時"] and new_venue == orig["会場名"]
+                            and new_addr == orig["会場住所"]
+                            and new_cd == orig["本番日"]
+                            and new_po == orig["打楽器休み"]
+                            and new_memo == orig["メモ"]):
+                        skip_n += 1
+                        continue
+
+                    # 日時のパース（"2026-04-25 19:00" → Notion date format）
+                    dt_s = ""
+                    if new_date:
+                        try:
+                            dt_s, _ = _compose_notion_date_with_optional_time(
+                                __import__('datetime').date.fromisoformat(new_date[:10]),
+                                new_date[11:16] if len(new_date) > 10 else "",
+                                "",
+                            )
+                        except Exception:
+                            dt_s = meta["pdate"]  # パース失敗時は元の値を維持
+
+                    ok = _update_practice(
+                        ctx, meta["pid"], meta["pname"], filter_concert_id,
+                        dt_s or meta["pdate"], "",
+                        new_venue, new_addr,
+                        new_cd, new_po, new_memo,
+                    )
+                    ok_n += 1 if ok else 0
+                    ng_n += 0 if ok else 1
+
+            if ng_n == 0:
+                st.success(f"✅ {ok_n}件を保存しました。（変更なし {skip_n}件はスキップ）")
+            else:
+                st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+            _clear_concert_cache(ctx)
+            st.rerun()
+
+        st.divider()
+        st.caption("詳細編集・演奏曲設定・前日共有PDF出力は各練習を展開してください。")
         for p in filtered_practices:
             label = _practice_display_name(p, ctx)
             is_concert_day = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
             if is_concert_day:
-                label = "🎼 本番当日" + f"（{_prac_date(p)[:10]}）" if not label.startswith("🎼") else label
+                label = "【本番当日】" + label
             with st.expander(label, expanded=False):
                 _render_practice_form(ctx, concerts, existing=p)
                 st.divider()
