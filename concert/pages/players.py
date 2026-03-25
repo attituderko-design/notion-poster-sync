@@ -368,6 +368,11 @@ def _upsert_participant(
     ctx["put_prop_any"](props, t, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PARTICIPANT_PLAYER_REL_KEYS, player_id)
     ctx["put_key_any"](props, t, PARTICIPANT_RECORD_KEYS, concert_id, player_id, prefix="participant")
+    # 新規登録時は確定参加費を自動セット
+    if not existing_id:
+        confirmed_fee = st.session_state.get(f"confirmed_fee_{concert_id}", 0)
+        if confirmed_fee > 0:
+            ctx["put_prop_any"](props, t, PARTICIPANT_FEE_KEYS, confirmed_fee)
     if existing_id:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
     else:
@@ -1025,6 +1030,11 @@ def _render_assign_tab(ctx: dict):
     if not player_ids:
         st.info("演奏会参加者DBの出演者リレーションが空です。『出欠入力』で参加者を再保存してください。")
         return
+    # Percパートのみに絞り込み
+    player_ids = _filter_perc_players(ctx, player_ids, participants)
+    if not player_ids:
+        st.info("打楽器パート（Perc）の参加者が登録されていません。出欠入力タブでパートを設定してください。")
+        return
 
     songs = _load_concert_songs(ctx, c_id)
     required_inst_ids = set()
@@ -1478,6 +1488,22 @@ def _render_practice_bring_tab(ctx: dict):
         st.rerun()
 
 
+def _filter_perc_players(ctx, player_ids: list[str], participants: list[dict]) -> list[str]:
+    """CONCERT_CASTのパートがPercの奏者のみに絞り込む。未設定の場合は全員対象。"""
+    ext = ctx["extract_prop_text_any"]
+    part_set = {}
+    for row in participants:
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if pids:
+            part_set[pids[0]] = (ext(row, PARTICIPANT_PART_KEYS) or "").strip()
+    # パートが設定されている奏者がいる場合のみフィルタ
+    if any(v for v in part_set.values()):
+        return [pid for pid in player_ids
+                if part_set.get(pid, "").lower() in ("perc", "percussion", "打楽器", "")]
+    return player_ids  # 全員未設定なら全員対象
+
+
+
 def render(ctx: dict):
     st.header("🎻 奏者・出欠・持参楽器")
     global_concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
@@ -1490,8 +1516,10 @@ def render(ctx: dict):
     with t2:
         _render_attendance_tab(ctx)
     with t3:
+        st.caption("※ 打楽器パート（Perc）の奏者のみ対象です。")
         _render_assign_tab(ctx)
     with t4:
+        st.caption("※ 打楽器パート（Perc）の奏者のみ対象です。")
         _render_practice_bring_tab(ctx)
     with t5:
         _render_pi_master_tab(ctx)

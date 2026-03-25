@@ -286,7 +286,9 @@ def _render_budget_tab(ctx, concert_id: str):
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
         if ng_n == 0:
-            st.success(f"✅ {ok_n}人の参加費を ¥{per_person:,} に設定しました。")
+            # 確定参加費をsession_stateに保存（新規参加者登録時に自動セット用）
+            st.session_state[f"confirmed_fee_{concert_id}"] = per_person
+            st.success(f"✅ {ok_n}人の参加費を ¥{per_person:,} に設定しました。新規参加者登録時も自動で ¥{per_person:,} が入力されます。")
         else:
             st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
         _clear_finance_cache(concert_id)
