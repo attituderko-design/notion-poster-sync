@@ -612,7 +612,7 @@ def _render_partdef_tab(ctx: dict):
         cur_inst_ids = ctx["extract_relation_ids_any"](r, PARTDEF_INST_REL_KEYS)
         cur_inst_names = [k for k, v in inst_opts_all.items() if v in set(cur_inst_ids)]
         cur_note = ctx["extract_prop_text_any"](r, PARTDEF_NOTE_KEYS)
-        with st.expander(p_name, expanded=False):
+        with st.expander(p_name, expanded=True):
             with st.form(f"partdef_edit_{rid}", border=True):
                 n_name = st.text_input("パート名 *", value=p_name)
                 n_inst = st.multiselect(
@@ -733,35 +733,59 @@ def _render_instrument_tab(ctx: dict):
                     st.markdown(f"- {label}")
         return
 
+    import pandas as pd
+    # 全楽器をdata_editorで一括編集
+    edit_rows: list[dict] = []
+    edit_meta: list[dict] = []
     for cat in INSTRUMENT_CATEGORIES:
-        items = by_cat.get(cat, [])
-        if not items:
-            continue
-        st.markdown(f"**{cat}**")
-        for inst in sorted(items, key=lambda x: _instrument_name(x, ctx)):
+        for inst in sorted(by_cat.get(cat, []), key=lambda x: _instrument_name(x, ctx)):
             iid   = inst.get("id", "")
             label = _instrument_name(inst, ctx)
-            with st.expander(label, expanded=False):
-                cur_cat = ctx["extract_prop_text_any"](inst, INSTRUMENT_CATEGORY_KEYS) or "その他"
-                cat_idx = INSTRUMENT_CATEGORIES.index(cur_cat) if cur_cat in INSTRUMENT_CATEGORIES else 0
-                with st.form(f"inst_edit_{iid}", border=True):
-                    name     = st.text_input("楽器名 *", value=label, key=f"ie_name_{iid}")
-                    category = st.selectbox("カテゴリ", INSTRUMENT_CATEGORIES,
-                                            index=cat_idx, key=f"ie_cat_{iid}")
-                    memo     = st.text_area("メモ", value=ctx["extract_prop_text_any"](inst, INSTRUMENT_MEMO_KEYS),
-                                            height=60, key=f"ie_memo_{iid}")
-                    if st.form_submit_button("💾 更新", use_container_width=True):
-                        if not name.strip():
-                            st.error("楽器名は必須です。")
-                        else:
-                            with st.spinner("更新中..."):
-                                ok = _update_instrument(ctx, iid, name.strip(), category, memo)
-                            if ok:
-                                st.success("✅ 更新しました。")
-                                st.session_state.pop("instrument_list", None)
-                                st.rerun()
-                            else:
-                                st.error("❌ 更新に失敗しました。")
+            cur_cat  = ctx["extract_prop_text_any"](inst, INSTRUMENT_CATEGORY_KEYS) or "その他"
+            cur_memo = ctx["extract_prop_text_any"](inst, INSTRUMENT_MEMO_KEYS) or ""
+            edit_rows.append({"楽器名": label, "カテゴリ": cur_cat, "メモ": cur_memo})
+            edit_meta.append({"iid": iid, "iname": label, "icat": cur_cat, "imemo": cur_memo})
+
+    df_inst = pd.DataFrame(edit_rows)
+    edited_inst = st.data_editor(
+        df_inst,
+        num_rows="fixed",
+        use_container_width=True,
+        key=f"inst_edit_df_{q}",
+        column_config={
+            "楽器名": st.column_config.TextColumn("楽器名", max_chars=50),
+            "カテゴリ": st.column_config.SelectboxColumn(
+                "カテゴリ", options=INSTRUMENT_CATEGORIES,
+            ),
+            "メモ": st.column_config.TextColumn("メモ", max_chars=100),
+        },
+    )
+
+    if st.button("💾 まとめて保存", type="primary", use_container_width=True, key="inst_bulk_save"):
+        ok_n = ng_n = skip_n = 0
+        with st.spinner("保存中..."):
+            df_reset = edited_inst.reset_index(drop=True)
+            for idx, meta in enumerate(edit_meta):
+                if idx >= len(df_reset): break
+                row   = df_reset.iloc[idx]
+                new_n = str(row.get("楽器名") or "").strip()
+                new_c = str(row.get("カテゴリ") or "").strip()
+                new_m = str(row.get("メモ") or "").strip()
+                if not new_n:
+                    skip_n += 1
+                    continue
+                if new_n == meta["iname"] and new_c == meta["icat"] and new_m == meta["imemo"]:
+                    skip_n += 1
+                    continue
+                ok = _update_instrument(ctx, meta["iid"], new_n, new_c, new_m)
+                ok_n += 1 if ok else 0
+                ng_n += 0 if ok else 1
+        if ng_n == 0:
+            st.success(f"✅ {ok_n}件を保存しました。（変更なし {skip_n}件はスキップ）")
+        else:
+            st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+        st.session_state.pop("instrument_list", None)
+        st.rerun()
 
 
 # ============================================================

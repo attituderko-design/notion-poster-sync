@@ -667,50 +667,73 @@ def _render_attendance_tab(ctx: dict):
         return
 
     statuses = ["○", "×", "△"]
-    with st.form(f"attendance_form_{p_id}", border=True):
-        changes = []
-        for pl in sorted(players, key=lambda x: _player_name(x, ctx)):
-            pid = pl.get("id", "")
-            pname = _player_name(pl, ctx)
-            ex = by_player.get(pid)
-            cur_s = ctx["extract_prop_text_any"](ex, ATT_STATUS_KEYS) if ex else "△"
-            cur_n = ctx["extract_prop_text_any"](ex, ATT_NOTE_KEYS) if ex else ""
-            if cur_s not in statuses:
-                cur_s = "△"
-            c1, c2, c3 = st.columns([3, 2, 5])
-            c1.markdown(f"**{pname}**")
-            s = c2.radio(pname, statuses, index=statuses.index(cur_s), horizontal=True, label_visibility="collapsed", key=f"att_{p_id}_{pid}")
-            n = c3.text_input("備考", value=cur_n, label_visibility="collapsed", key=f"att_note_{p_id}_{pid}")
-            changes.append({
-                "player_id": pid,
-                "player_name": pname,
-                "status": s,
-                "note": n,
-                "existing_id": ex.get("id", "") if ex else "",
-                "participant_id": participant_id_by_player_id.get(pid, ""),
-            })
-        if st.form_submit_button("💾 出欠を保存", use_container_width=True, type="primary"):
-            ok_n, ng_n = 0, 0
-            for ch in changes:
+    import pandas as pd
+
+    # data_editor形式に変更
+    sorted_players = sorted(players, key=lambda x: _player_name(x, ctx))
+    att_rows: list[dict] = []
+    att_row_meta: list[dict] = []  # player_id・existing_id・participant_idを保持
+
+    for pl in sorted_players:
+        pid   = pl.get("id", "")
+        pname = _player_name(pl, ctx)
+        ex    = by_player.get(pid)
+        cur_s = ctx["extract_prop_text_any"](ex, ATT_STATUS_KEYS) if ex else "△"
+        cur_n = ctx["extract_prop_text_any"](ex, ATT_NOTE_KEYS) if ex else ""
+        if cur_s not in statuses:
+            cur_s = "△"
+        att_rows.append({"奏者": pname, "参加可否": cur_s, "備考": cur_n})
+        att_row_meta.append({
+            "player_id":      pid,
+            "player_name":    pname,
+            "existing_id":    ex.get("id", "") if ex else "",
+            "participant_id": participant_id_by_player_id.get(pid, ""),
+        })
+
+    df_att = pd.DataFrame(att_rows)
+    edited_att = st.data_editor(
+        df_att,
+        num_rows="fixed",
+        use_container_width=True,
+        key=f"att_editor_{p_id}",
+        column_config={
+            "奏者": st.column_config.TextColumn("奏者", disabled=True),
+            "参加可否": st.column_config.SelectboxColumn(
+                "参加可否",
+                options=statuses,
+                required=True,
+                default="△",
+            ),
+            "備考": st.column_config.TextColumn("備考", max_chars=100),
+        },
+    )
+
+    if st.button("💾 出欠を保存", use_container_width=True, type="primary",
+                 key=f"att_save_{p_id}"):
+        ok_n = ng_n = 0
+        with st.spinner("保存中..."):
+            df_reset = edited_att.reset_index(drop=True)
+            for idx, meta in enumerate(att_row_meta):
+                if idx >= len(df_reset): break
+                row   = df_reset.iloc[idx]
+                new_s = str(row.get("参加可否") or "△").strip()
+                new_n = str(row.get("備考") or "").strip()
                 ok = _upsert_attendance(
                     ctx,
-                    ch["player_id"],
-                    ch["player_name"],
-                    p_id,
-                    p_name,
-                    ch["status"],
-                    ch["note"],
-                    ch["existing_id"],
-                    ch.get("participant_id", ""),
+                    meta["player_id"], meta["player_name"],
+                    p_id, p_name,
+                    new_s, new_n,
+                    meta["existing_id"],
+                    meta["participant_id"],
                 )
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
-            if ng_n == 0:
-                st.success(f"✅ {ok_n}件の出欠を保存しました。")
-            else:
-                st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗しました。")
-            st.session_state.pop(f"attendance_list_{p_id}", None)
-            st.rerun()
+        if ng_n == 0:
+            st.success(f"✅ {ok_n}件の出欠を保存しました。")
+        else:
+            st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗しました。")
+        st.session_state.pop(f"attendance_list_{p_id}", None)
+        st.rerun()
 
 
 def _render_assign_tab(ctx: dict):
@@ -796,47 +819,72 @@ def _render_assign_tab(ctx: dict):
         if iids:
             by_inst[iids[0]] = row
 
-    with st.form(f"bring_form_{c_id}_{p_id}", border=True):
-        changes = []
-        for iid in ordered_inst_ids:
-            iname = inst_names.get(iid, iid)
-            ex = by_inst.get(iid)
-            cur_b = (ctx["extract_prop_text_any"](ex, PI_BRING_KEYS) == "True") if ex else False
-            cur_cnt_str = ctx["extract_prop_text_any"](ex, PI_BRING_COUNT_KEYS) if ex else ""
-            try:
-                cur_cnt = int(float(cur_cnt_str)) if cur_cnt_str else 1
-            except ValueError:
-                cur_cnt = 1
-            cur_n = ctx["extract_prop_text_any"](ex, PI_NOTE_KEYS) if ex else ""
-            c1, c2, c3, c4 = st.columns([4, 1, 1, 4])
-            c1.markdown(f"**{iname}**")
-            b = c2.checkbox("持参可", value=cur_b, key=f"bring_{c_id}_{p_id}_{iid}", label_visibility="collapsed")
-            cnt = c3.number_input("台数", min_value=1, max_value=9, value=cur_cnt, step=1,
-                                  key=f"bring_cnt_{c_id}_{p_id}_{iid}", label_visibility="collapsed",
-                                  disabled=not b)
-            n = c4.text_input("備考", value=cur_n, label_visibility="collapsed", key=f"bring_note_{c_id}_{p_id}_{iid}")
-            changes.append({
-                "iid": iid, "iname": iname,
-                "b": b, "cnt": cnt, "n": n,
-                "cur_b": cur_b, "cur_cnt": cur_cnt, "cur_n": cur_n,
-                "eid": ex.get("id", "") if ex else "",
-            })
-        if st.form_submit_button("💾 持参可を保存", use_container_width=True, type="primary"):
-            ok_n = ng_n = skip_n = 0
-            for ch in changes:
-                no_change = (ch["b"] == ch["cur_b"]) and (ch["cnt"] == ch["cur_cnt"]) and (ch["n"] == ch["cur_n"])
-                if no_change and not ch["eid"] and not ch["b"] and not ch["n"]:
+    import pandas as pd
+
+    bring_rows_data: list[dict] = []
+    bring_row_meta: list[dict] = []
+
+    for iid in ordered_inst_ids:
+        iname = inst_names.get(iid, iid)
+        ex    = by_inst.get(iid)
+        cur_b = (ctx["extract_prop_text_any"](ex, PI_BRING_KEYS) == "True") if ex else False
+        cur_cnt_str = ctx["extract_prop_text_any"](ex, PI_BRING_COUNT_KEYS) if ex else ""
+        try:
+            cur_cnt = int(float(cur_cnt_str)) if cur_cnt_str else 1
+        except ValueError:
+            cur_cnt = 1
+        cur_n = ctx["extract_prop_text_any"](ex, PI_NOTE_KEYS) if ex else ""
+        bring_rows_data.append({
+            "楽器": iname,
+            "持参可": cur_b,
+            "台数": cur_cnt,
+            "備考": cur_n,
+        })
+        bring_row_meta.append({
+            "iid":   iid,
+            "iname": iname,
+            "eid":   ex.get("id", "") if ex else "",
+            "cur_b": cur_b, "cur_cnt": cur_cnt, "cur_n": cur_n,
+        })
+
+    df_bring = pd.DataFrame(bring_rows_data)
+    edited_bring = st.data_editor(
+        df_bring,
+        num_rows="fixed",
+        use_container_width=True,
+        key=f"bring_editor_{c_id}_{p_id}",
+        column_config={
+            "楽器": st.column_config.TextColumn("楽器", disabled=True),
+            "持参可": st.column_config.CheckboxColumn("持参可", default=False),
+            "台数": st.column_config.NumberColumn("台数", min_value=1, max_value=9, step=1, default=1),
+            "備考": st.column_config.TextColumn("備考", max_chars=100),
+        },
+    )
+
+    if st.button("💾 持参可を保存", use_container_width=True, type="primary",
+                 key=f"bring_save_{c_id}_{p_id}"):
+        ok_n = ng_n = skip_n = 0
+        with st.spinner("保存中..."):
+            df_reset = edited_bring.reset_index(drop=True)
+            for idx, meta in enumerate(bring_row_meta):
+                if idx >= len(df_reset): break
+                row   = df_reset.iloc[idx]
+                new_b   = bool(row.get("持参可") or False)
+                new_cnt = int(row.get("台数") or 1)
+                new_n   = str(row.get("備考") or "").strip()
+                no_change = (new_b == meta["cur_b"]) and (new_cnt == meta["cur_cnt"]) and (new_n == meta["cur_n"])
+                if no_change and not meta["eid"] and not new_b:
                     skip_n += 1
                     continue
-                if no_change and ch["eid"]:
+                if no_change and meta["eid"]:
                     skip_n += 1
                     continue
                 ok = _upsert_player_bring_for_concert(
                     ctx, c_id, c_name, p_id, p_name,
                     participant_id,
-                    ch["iid"], ch["iname"],
-                    ch["b"], ch["n"], ch["eid"],
-                    bring_count=ch["cnt"],
+                    meta["iid"], meta["iname"],
+                    new_b, new_n, meta["eid"],
+                    bring_count=new_cnt,
                 )
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1

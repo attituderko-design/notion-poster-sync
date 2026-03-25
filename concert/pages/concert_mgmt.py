@@ -1144,7 +1144,7 @@ def _delete_schedule(ctx, page_id: str) -> bool:
 
 
 def _render_schedule_tab(ctx: dict):
-    st.caption("練習日ごとのタイムスケジュールを管理します。")
+    st.caption("練習日ごとのタイムスケジュールを管理します。行を追加・削除して「保存」を押してください。")
 
     concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
     if not concert_id:
@@ -1163,40 +1163,30 @@ def _render_schedule_tab(ctx: dict):
     practice_opts = {_practice_display_name(p, ctx): p.get("id", "")
                      for p in sorted(practices, key=_prac_date_sort)}
 
-    p_label = st.selectbox("練習日", list(practice_opts.keys()), key="sched_practice_sel")
+    col_sel, col_r = st.columns([8, 1])
+    p_label = col_sel.selectbox("練習日", list(practice_opts.keys()), key="sched_practice_sel")
     p_id    = practice_opts.get(p_label, "")
+    if col_r.button("🔄", key="sched_refresh", help="再読み込み"):
+        _clear_schedule_cache(p_id)
+        st.rerun()
     if not p_id:
         return
 
-    # 演奏曲一覧（練習日に設定されている曲、なければ演奏会の全曲）
-    practice_row = next((p for p in practices if p.get("id") == p_id), None)
-    song_ids_for_practice = []
-    if practice_row:
-        song_ids_for_practice = ctx["extract_relation_ids_any"](practice_row, PRACTICE_SONG_REL_KEYS)
-    if not song_ids_for_practice:
-        all_songs = _load_songs(ctx, concert_id)
-        song_ids_for_practice = [s.get("id", "") for s in all_songs]
+    # 演奏曲の選択肢
     all_songs_rows = _load_songs(ctx, concert_id)
     song_opts = {"（なし）": ""}
     for s in sorted(all_songs_rows, key=lambda x: ctx["extract_prop_text_any"](x, SONG_NAME_KEYS) or ""):
         name = ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or s.get("id", "")
         song_opts[name] = s.get("id", "")
-
-    col_h, col_r = st.columns([8, 1])
-    col_h.subheader("スケジュール一覧")
-    if col_r.button("🔄", key="sched_refresh", help="再読み込み"):
-        _clear_schedule_cache(p_id)
-        st.rerun()
+    song_names = list(song_opts.keys())
 
     schedules = _load_schedules(ctx, p_id)
 
-    # 既存スケジュール一覧＋編集
+    # 既存データをDataFrame形式に変換
+    existing_rows: list[dict] = []
+    row_ids: list[str] = []
     for r in schedules:
-        rid      = r.get("id", "")
-        cur_start   = ctx["extract_prop_text_any"](r, SCHEDULE_START_KEYS) or ""
-        cur_end     = ctx["extract_prop_text_any"](r, SCHEDULE_END_KEYS) or ""
-        cur_type    = ctx["extract_prop_text_any"](r, SCHEDULE_TYPE_KEYS) or "練習"
-        cur_content = ctx["extract_prop_text_any"](r, SCHEDULE_CONTENT_KEYS) or ""
+        s_id = r.get("id", "")
         cur_song_ids = ctx["extract_relation_ids_any"](r, SCHEDULE_SONG_REL_KEYS)
         cur_song_id  = cur_song_ids[0] if cur_song_ids else ""
         cur_song_name = next((k for k, v in song_opts.items() if v == cur_song_id), "（なし）")
@@ -1205,64 +1195,94 @@ def _render_schedule_tab(ctx: dict):
             cur_order = int(float(cur_order_str))
         except Exception:
             cur_order = 0
+        existing_rows.append({
+            "開始": ctx["extract_prop_text_any"](r, SCHEDULE_START_KEYS) or "",
+            "終了": ctx["extract_prop_text_any"](r, SCHEDULE_END_KEYS) or "",
+            "種別": ctx["extract_prop_text_any"](r, SCHEDULE_TYPE_KEYS) or "練習",
+            "内容": ctx["extract_prop_text_any"](r, SCHEDULE_CONTENT_KEYS) or "",
+            "演奏曲": cur_song_name,
+            "表示順": cur_order,
+        })
+        row_ids.append(s_id)
 
-        label = f"{cur_start}〜{cur_end}　{cur_type}　{cur_content or cur_song_name}"
-        with st.expander(label, expanded=False):
-            with st.form(f"sched_edit_{rid}", border=False):
-                c1, c2, c3 = st.columns([2, 2, 3])
-                new_start = c1.text_input("開始", value=cur_start, placeholder="19:00", key=f"se_s_{rid}")
-                new_end   = c2.text_input("終了", value=cur_end,   placeholder="19:30", key=f"se_e_{rid}")
-                new_type  = c3.selectbox("種別", SCHEDULE_TYPE_OPTIONS,
-                                          index=SCHEDULE_TYPE_OPTIONS.index(cur_type) if cur_type in SCHEDULE_TYPE_OPTIONS else 0,
-                                          key=f"se_t_{rid}")
-                new_content = st.text_input("内容（業者名など）", value=cur_content, key=f"se_c_{rid}")
-                new_song_name = st.selectbox("演奏曲", list(song_opts.keys()),
-                                              index=list(song_opts.keys()).index(cur_song_name) if cur_song_name in song_opts else 0,
-                                              key=f"se_song_{rid}")
-                new_order = st.number_input("表示順", min_value=1, max_value=99, value=max(cur_order, 1), step=1,
-                                             key=f"se_ord_{rid}")
-                ca, cb = st.columns(2)
-                if ca.form_submit_button("💾 更新", use_container_width=True):
-                    new_song_id = song_opts.get(new_song_name, "")
-                    ok = _upsert_schedule(ctx, p_id, p_label,
-                                          new_start, new_end, new_type, new_content,
-                                          new_song_id, int(new_order), existing_id=rid)
-                    if ok:
-                        st.success("✅ 更新しました。")
-                        _clear_schedule_cache(p_id)
-                        st.rerun()
-                    else:
-                        st.error("❌ 更新に失敗しました。")
-                if cb.form_submit_button("🗑️ 削除", use_container_width=True):
-                    if _delete_schedule(ctx, rid):
-                        _clear_schedule_cache(p_id)
-                        st.rerun()
+    # 既存0件のときだけ空行1行
+    if not existing_rows:
+        existing_rows.append({
+            "開始": "", "終了": "", "種別": "練習",
+            "内容": "", "演奏曲": "（なし）", "表示順": 1,
+        })
+        row_ids.append("")
 
-    st.divider()
-    st.markdown("**＋ 新規追加**")
-    with st.form("sched_new", border=True):
-        c1, c2, c3 = st.columns([2, 2, 3])
-        new_start   = c1.text_input("開始", placeholder="19:00", key="sn_s")
-        new_end     = c2.text_input("終了", placeholder="19:30", key="sn_e")
-        new_type    = c3.selectbox("種別", SCHEDULE_TYPE_OPTIONS, key="sn_t")
-        new_content = st.text_input("内容（業者名など）", key="sn_c")
-        new_song_name = st.selectbox("演奏曲（練習の場合）", list(song_opts.keys()), key="sn_song")
-        new_order = st.number_input("表示順", min_value=1, max_value=99,
-                                     value=len(schedules) + 1, step=1, key="sn_ord")
-        if st.form_submit_button("➕ 追加", use_container_width=True, type="primary"):
-            if not new_start:
-                st.error("開始時刻は必須です。")
-            else:
-                new_song_id = song_opts.get(new_song_name, "")
-                ok = _upsert_schedule(ctx, p_id, p_label,
-                                      new_start, new_end, new_type, new_content,
-                                      new_song_id, int(new_order))
+    import pandas as pd
+    df_init = pd.DataFrame(existing_rows)
+
+    edited_df = st.data_editor(
+        df_init,
+        num_rows="dynamic",
+        use_container_width=True,
+        key=f"sched_editor_{p_id}",
+        column_config={
+            "開始": st.column_config.TextColumn("開始", help="例: 19:00", max_chars=10),
+            "終了": st.column_config.TextColumn("終了", help="例: 19:30", max_chars=10),
+            "種別": st.column_config.SelectboxColumn(
+                "種別", options=SCHEDULE_TYPE_OPTIONS, required=True, default="練習",
+            ),
+            "内容": st.column_config.TextColumn("内容（業者名など）", max_chars=100),
+            "演奏曲": st.column_config.SelectboxColumn(
+                "演奏曲", options=song_names, default="（なし）",
+            ),
+            "表示順": st.column_config.NumberColumn(
+                "表示順", min_value=1, max_value=99, step=1, default=1,
+            ),
+        },
+    )
+
+    if st.button("💾 まとめて保存", type="primary", use_container_width=True, key=f"sched_save_{p_id}"):
+        ok_n = fail_n = skip_n = 0
+        with st.spinner("保存中..."):
+            saved_ids: set[str] = set()
+            df_reset = edited_df.reset_index(drop=True)
+
+            for idx in range(len(df_reset)):
+                row = df_reset.iloc[idx]
+                start_v   = str(row.get("開始") or "").strip()
+                end_v     = str(row.get("終了") or "").strip()
+                type_v    = str(row.get("種別") or "練習").strip()
+                content_v = str(row.get("内容") or "").strip()
+                song_n    = str(row.get("演奏曲") or "（なし）").strip()
+                order_v   = int(row.get("表示順") or idx + 1)
+                song_id_v = song_opts.get(song_n, "")
+
+                # 開始時刻が空はスキップ
+                if not start_v:
+                    skip_n += 1
+                    continue
+
+                existing_id = row_ids[idx] if idx < len(row_ids) else ""
+                ok = _upsert_schedule(
+                    ctx, p_id, p_label,
+                    start_v, end_v, type_v, content_v,
+                    song_id_v, order_v,
+                    existing_id=existing_id,
+                )
                 if ok:
-                    st.success("✅ 追加しました。")
-                    _clear_schedule_cache(p_id)
-                    st.rerun()
+                    ok_n += 1
+                    if existing_id:
+                        saved_ids.add(existing_id)
                 else:
-                    st.error("❌ 追加に失敗しました。")
+                    fail_n += 1
+
+            # 削除された既存行をアーカイブ
+            for rid in row_ids:
+                if rid and rid not in saved_ids:
+                    _delete_schedule(ctx, rid)
+
+        if fail_n == 0:
+            st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
+        else:
+            st.warning(f"⚠️ 成功 {ok_n} / 失敗 {fail_n} / スキップ {skip_n}")
+        _clear_schedule_cache(p_id)
+        st.rerun()
 
 def render(ctx: dict):
     st.header("🗓️ 練習管理")
