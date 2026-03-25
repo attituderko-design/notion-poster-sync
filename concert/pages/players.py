@@ -393,6 +393,8 @@ def _upsert_player_instrument(ctx: dict, player_id: str, player_name: str, instr
     ctx["put_prop_any"](props, t, PI_ASSIGN_KEYS, is_assign)
     ctx["put_prop_any"](props, t, PI_BRING_KEYS, can_bring)
     ctx["put_prop_any"](props, t, PI_NOTE_KEYS, note)
+    if practice_id:
+        ctx["put_prop_any"](props, t, PI_PRACTICE_REL_KEYS, practice_id)
     ctx["put_key_any"](props, t, ASSIGN_KEY_KEYS, player_id, instrument_id, prefix="assign")
     if existing_id:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
@@ -416,6 +418,7 @@ def _upsert_player_bring_for_concert(
     own_count: int = 1,
     bring_assign: bool = False,
     bring_count: int = 0,
+    practice_id: str = "",
 ) -> bool:
     db_id = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
     t = ctx["get_prop_types"](db_id)
@@ -928,10 +931,12 @@ def render(ctx: dict):
     if not global_concert_id:
         st.info("サイドバーで演奏会を選択してください。")
         return
-    t1, t2, t3 = st.tabs(["奏者管理", "出欠入力", "持参楽器整理"])
+    t1, t2, t3, t4 = st.tabs(["奏者管理", "出欠入力", "持参楽器整理", "練習日別持参担当"])
     with t1:
         _render_player_tab(ctx)
     with t2:
         _render_attendance_tab(ctx)
     with t3:
         _render_assign_tab(ctx)
+    with t4:
+        _render_practice_bring_tab(ctx)
