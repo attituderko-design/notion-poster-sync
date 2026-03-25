@@ -263,7 +263,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         repeatRows=1,
     )
     mat_sty = _base_style()
-    mat_sty.add("ALIGN", (1,0), (-1,-1), "CENTER")
+    mat_sty.add("ALIGN", (1,0), (-1,-1), "LEFT")
     mat_sty.add("FONT",  (0,0), (0,-1),  font_b, 7)
     # 出欠ごとに背景色
     for row_i, col_i, status in cell_styles:
@@ -273,7 +273,6 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     story.append(KeepTogether([mat_tbl, Spacer(1, 5*mm)]))
 
     # ── レンタル費用小計 ─────────────────────────────────────
-    story.append(Paragraph("■ レンタル費用小計", st_map["h2"]))
     rent_summary_data = [["練習日", "業者名", "品目", "台数", "単価", "小計", "確定"]]
     total_all = 0
     total_confirmed = 0
@@ -317,17 +316,23 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
             repeatRows=1,
         )
         rent_tbl.setStyle(_base_style())
-        story.append(rent_tbl)
-        story.append(Spacer(1, 2*mm))
-        story.append(Paragraph(
+        total_para = Paragraph(
             f"合計（全見積）: ¥{total_all:,}　／　確定済み: ¥{total_confirmed:,}",
             st_map["body"]
-        ))
+        )
+        story.append(KeepTogether([
+            Paragraph("■ レンタル費用小計", st_map["h2"]),
+            rent_tbl,
+            Spacer(1, 2*mm),
+            total_para,
+        ]))
     else:
         story.append(Paragraph("レンタル登録がありません。", st_map["small"]))
     story.append(Spacer(1, 5*mm))
 
     # ── 入金・活動資金のまとめ（枠のみ） ─────────────────────
+    # 入金セクション（KeepTogether）
+    story.append(Spacer(1, 5*mm))
     story.append(Paragraph("■ 入金・活動資金のまとめ", st_map["h2"]))
     placeholder_data = [
         ["項目", "金額", "備考"],
