@@ -4,26 +4,27 @@ concert/pages/test_data.py
 """
 import streamlit as st
 from datetime import date, timedelta
+from concert.services.keys import (
+    CONCERT_NAME_KEYS, CONCERT_DATE_KEYS,
+    PRACTICE_NAME_KEYS, PRACTICE_CONCERT_REL_KEYS, PRACTICE_DATE_KEYS,
+    PRACTICE_SONG_REL_KEYS,
+    SONG_NAME_KEYS, SONG_CONCERT_REL_KEYS,
+    INSTRUMENT_NAME_KEYS,
+    PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS, PARTDEF_NAME_KEYS,
+    PARTICIPANT_RECORD_KEYS, PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
+    PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_FEE_KEYS,
+    PLAYER_NAME_KEYS,
+    ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
+    PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
+    PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
+    EXPENSE_KEY_KEYS, EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS,
+    EXPENSE_CONTENT_KEYS, EXPENSE_AMOUNT_KEYS, EXPENSE_CONFIRMED_KEYS,
+)
 
 TEST_PREFIX = "[TEST]"
 
-# テスト対象の全DB定義（db_key, title_keys）
-TEST_DB_MAP = [
-    ("CONCERT_DB_CONCERT",          ["名称", "演奏会名", "タイトル", "PK名称"]),
-    ("CONCERT_DB_PRACTICE",         ["練習名", "名称", "タイトル"]),
-    ("CONCERT_DB_SONG",             ["曲名", "タイトル", "Song"]),
-    ("CONCERT_DB_INSTRUMENT",       ["楽器名", "名称", "タイトル"]),
-    ("CONCERT_DB_PART_DEFINITION",  ["パート名", "名称", "タイトル"]),
-    ("CONCERT_DB_PARTICIPANT",      ["record_key", "タイトル", "PK"]),
-    ("CONCERT_DB_ATTENDANCE",       ["record_key", "タイトル", "PK"]),
-    ("CONCERT_DB_PLAYER_INSTRUMENT",["record_key", "タイトル", "PK名称"]),
-    ("CONCERT_DB_PREFERENCE",       ["record_key", "タイトル", "PK"]),
-    ("CONCERT_DB_CONCERT_EXPENSE",  ["expense_key", "タイトル"]),
-    ("CONCERT_DB_PLAYER",           ["氏名", "名前", "タイトル"]),
-]
 
-
-def _archive_page(ctx, page_id: str) -> bool:
+def _archive(ctx, page_id: str) -> bool:
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"archived": True})
     return res is not None and res.status_code == 200
@@ -37,241 +38,253 @@ def _create(ctx, db_id: str, props: dict) -> str:
     return ""
 
 
-def _put(ctx, props, db_id, keys, value):
-    t = ctx["get_prop_types"](db_id)
-    if t:
-        ctx["put_prop_any"](props, t, keys, value)
+def _p(ctx, db_id):
+    return ctx["get_prop_types"](db_id) or {}
+
+
+def _put(ctx, props, t, keys, value):
+    ctx["put_prop_any"](props, t, keys, value)
 
 
 # ============================================================
-# 投入関数
+# 投入
 # ============================================================
 
 def _seed_all(ctx) -> dict:
-    """テストデータを全DB に一括投入する。作成したIDのサマリを返す。"""
     summary = {}
-    ext = ctx["extract_prop_text_any"]
+    created_ids: list[str] = []
 
-    def t(db_key): return ctx["get_prop_types"](ctx.get(db_key, "")) or {}
+    def track(page_id: str) -> str:
+        if page_id:
+            created_ids.append(page_id)
+        return page_id
 
-    # ── 1. PERFORMER（奏者） ───────────────────────────────
+    # ── 1. PERFORMER ──────────────────────────────────────
     player_db = ctx["CONCERT_DB_PLAYER"]
+    tp = _p(ctx, player_db)
     player_ids = []
-    test_players = [
-        ("テスト奏者A", "test_a@example.com"),
-        ("テスト奏者B", "test_b@example.com"),
-        ("テスト奏者C", "test_c@example.com"),
-        ("テスト奏者D", "test_d@example.com"),
-        ("テスト奏者E", "test_e@example.com"),
-    ]
-    for pname, email in test_players:
+    for name in ["テスト奏者A", "テスト奏者B", "テスト奏者C", "テスト奏者D", "テスト奏者E"]:
         props = {}
-        tp = t("CONCERT_DB_PLAYER")
-        ctx["put_prop_any"](props, tp, ["氏名", "名前", "タイトル"], f"{TEST_PREFIX} {pname}")
-        ctx["put_prop_any"](props, tp, ["メールアドレス", "Email"], email)
-        pid = _create(ctx, player_db, props)
+        _put(ctx, props, tp, PLAYER_NAME_KEYS, f"{TEST_PREFIX} {name}")
+        pid = track(_create(ctx, player_db, props))
         if pid:
             player_ids.append(pid)
     summary["PERFORMER"] = len(player_ids)
 
-    # ── 2. INSTRUMENT（楽器） ─────────────────────────────
+    # ── 2. INSTRUMENT ─────────────────────────────────────
     inst_db = ctx["CONCERT_DB_INSTRUMENT"]
+    ti = _p(ctx, inst_db)
     instrument_ids = []
-    test_instruments = ["Timpani", "Snare Drum", "Marimba"]
-    for iname in test_instruments:
+    for name in ["Timpani", "Snare Drum", "Marimba"]:
         props = {}
-        ti = t("CONCERT_DB_INSTRUMENT")
-        ctx["put_prop_any"](props, ti, ["楽器名", "名称", "タイトル"], f"{TEST_PREFIX} {iname}")
-        iid = _create(ctx, inst_db, props)
+        _put(ctx, props, ti, INSTRUMENT_NAME_KEYS, f"{TEST_PREFIX} {name}")
+        iid = track(_create(ctx, inst_db, props))
         if iid:
             instrument_ids.append(iid)
     summary["INSTRUMENT"] = len(instrument_ids)
 
-    # ── 3. CONCERT（演奏会） ──────────────────────────────
+    # ── 3. CONCERT ────────────────────────────────────────
     concert_db = ctx["CONCERT_DB_CONCERT"]
+    tc = _p(ctx, concert_db)
     props = {}
-    tc = t("CONCERT_DB_CONCERT")
-    ctx["put_prop_any"](props, tc, ["名称", "演奏会名", "タイトル", "PK名称"], f"{TEST_PREFIX} テスト演奏会")
-    # 媒体フィールドはselect/multi_select両対応
+    _put(ctx, props, tc, CONCERT_NAME_KEYS, f"{TEST_PREFIX} テスト演奏会")
     media_key = ctx["find_prop_name"](tc, ["媒体", "Media"])
     if media_key:
-        media_type = tc.get(media_key, "")
-        if media_type == "multi_select":
+        mtype = tc.get(media_key, "")
+        if mtype == "multi_select":
             props[media_key] = {"multi_select": [{"name": "出演"}]}
-        elif media_type == "select":
+        elif mtype == "select":
             props[media_key] = {"select": {"name": "出演"}}
-    dt_key = ctx["find_prop_name"](tc, ["日時", "日付", "出演日"])
+    dt_key = ctx["find_prop_name"](tc, CONCERT_DATE_KEYS)
     if dt_key:
         props[dt_key] = {"date": {"start": "2099-12-31"}}
-    concert_id = _create(ctx, concert_db, props)
+    concert_id = track(_create(ctx, concert_db, props))
     summary["CONCERT"] = 1 if concert_id else 0
     if not concert_id:
+        st.session_state["test_created_ids"] = created_ids
         return summary
 
-    # ── 4. SONG（楽曲） ───────────────────────────────────
+    # ── 4. SONG ───────────────────────────────────────────
     song_db = ctx["CONCERT_DB_SONG"]
+    ts = _p(ctx, song_db)
     song_ids = []
-    for sname in ["テスト曲α", "テスト曲β"]:
+    for name in ["テスト曲α", "テスト曲β"]:
         props = {}
-        ts = t("CONCERT_DB_SONG")
-        ctx["put_prop_any"](props, ts, ["曲名", "タイトル", "Song"], f"{TEST_PREFIX} {sname}")
-        ctx["put_prop_any"](props, ts, ["演奏会", "FK演奏会"], concert_id)
-        sid = _create(ctx, song_db, props)
+        _put(ctx, props, ts, SONG_NAME_KEYS,        f"{TEST_PREFIX} {name}")
+        _put(ctx, props, ts, SONG_CONCERT_REL_KEYS, concert_id)
+        sid = track(_create(ctx, song_db, props))
         if sid:
             song_ids.append(sid)
     summary["SONG"] = len(song_ids)
 
-    # ── 5. PRACTICE（練習日） ─────────────────────────────
+    # ── 5. PRACTICE ───────────────────────────────────────
     practice_db = ctx["CONCERT_DB_PRACTICE"]
+    tpr = _p(ctx, practice_db)
     practice_ids = []
     base = date(2099, 10, 1)
     for i in range(3):
         props = {}
-        tp2 = t("CONCERT_DB_PRACTICE")
-        ctx["put_prop_any"](props, tp2, ["練習名", "名称", "タイトル"], f"{TEST_PREFIX} 第{i+1}回練習")
-        ctx["put_prop_any"](props, tp2, ["演奏会", "FK演奏会", "Concert"], concert_id)
+        _put(ctx, props, tpr, PRACTICE_NAME_KEYS,        f"{TEST_PREFIX} 第{i+1}回練習")
+        _put(ctx, props, tpr, PRACTICE_CONCERT_REL_KEYS, concert_id)
         if song_ids:
-            ctx["put_prop_any"](props, tp2, ["演奏曲", "曲", "Songs"], song_ids)
-        dt_key2 = ctx["find_prop_name"](tp2, ["日時", "日付", "Date"])
+            _put(ctx, props, tpr, PRACTICE_SONG_REL_KEYS, song_ids)
+        dt_key2 = ctx["find_prop_name"](tpr, PRACTICE_DATE_KEYS)
         if dt_key2:
             d = base + timedelta(weeks=i*2)
             props[dt_key2] = {"date": {"start": d.isoformat()}}
-        pr_id = _create(ctx, practice_db, props)
+        pr_id = track(_create(ctx, practice_db, props))
         if pr_id:
             practice_ids.append(pr_id)
     summary["PRACTICE"] = len(practice_ids)
 
-    # ── 6. PART_DEFINITION（パート定義） ──────────────────
+    # ── 6. PART_DEFINITION ────────────────────────────────
     partdef_db = ctx["CONCERT_DB_PART_DEFINITION"]
+    tpd = _p(ctx, partdef_db)
     partdef_ids = []
-    part_defs = [("Part1 Timp.", instrument_ids[0] if instrument_ids else ""),
-                 ("Part2 S.D.",  instrument_ids[1] if len(instrument_ids)>1 else ""),
-                 ("Part3 Mar.",  instrument_ids[2] if len(instrument_ids)>2 else "")]
+    part_names = ["Part1 Timp.", "Part2 S.D.", "Part3 Mar."]
     for sid in song_ids:
-        for pname, iid in part_defs:
-            if not iid:
-                continue
+        for pname, iid in zip(part_names, instrument_ids):
             props = {}
-            tpd = t("CONCERT_DB_PART_DEFINITION")
-            ctx["put_prop_any"](props, tpd, ["パート名", "名称", "タイトル"], f"{TEST_PREFIX} {pname}")
-            ctx["put_prop_any"](props, tpd, ["曲", "FK曲", "Song"], sid)
-            ctx["put_prop_any"](props, tpd, ["楽器種別", "FK楽器種別", "Instrument"], iid)
-            pd_id = _create(ctx, partdef_db, props)
+            _put(ctx, props, tpd, PARTDEF_NAME_KEYS,     f"{TEST_PREFIX} {pname}")
+            _put(ctx, props, tpd, PARTDEF_SONG_REL_KEYS, sid)
+            _put(ctx, props, tpd, PARTDEF_INST_REL_KEYS, iid)
+            pd_id = track(_create(ctx, partdef_db, props))
             if pd_id:
                 partdef_ids.append(pd_id)
     summary["PART_DEFINITION"] = len(partdef_ids)
 
-    # ── 7. CONCERT_CAST（参加者） ─────────────────────────
+    # ── 7. CONCERT_CAST ───────────────────────────────────
     cast_db = ctx["CONCERT_DB_PARTICIPANT"]
+    tcast = _p(ctx, cast_db)
     cast_ids = []
     parts = ["Perc", "Perc", "Vn1", "Vn2", "Va"]
-    roles = ["プレイヤー", "プレイヤー", "トップ", "プレイヤー", "プレイヤー"]
-    fees  = [5000, 5000, 5000, 5000, 0]  # 最後はエキストラ想定で0
+    fees  = [5000, 5000, 5000, 5000, 0]
     for i, pid in enumerate(player_ids):
         props = {}
-        tcast = t("CONCERT_DB_PARTICIPANT")
-        ctx["put_prop_any"](props, tcast, ["record_key", "タイトル", "PK"],
-                            f"{TEST_PREFIX} cast_{i+1}")
-        ctx["put_prop_any"](props, tcast, ["演奏会", "FK演奏会"], concert_id)
-        ctx["put_prop_any"](props, tcast, ["奏者", "FK奏者", "Player"], pid)
-        ctx["put_prop_any"](props, tcast, ["パート", "Part"], parts[i % len(parts)])
-        ctx["put_prop_any"](props, tcast, ["役職", "Role"], roles[i % len(roles)])
-        ctx["put_prop_any"](props, tcast, ["参加費", "Fee"], fees[i % len(fees)])
-        cid = _create(ctx, cast_db, props)
+        _put(ctx, props, tcast, PARTICIPANT_RECORD_KEYS,      f"{TEST_PREFIX} cast_{i+1}")
+        _put(ctx, props, tcast, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
+        _put(ctx, props, tcast, PARTICIPANT_PLAYER_REL_KEYS,  pid)
+        _put(ctx, props, tcast, PARTICIPANT_PART_KEYS,        parts[i])
+        _put(ctx, props, tcast, PARTICIPANT_ROLE_KEYS,        "プレイヤー")
+        _put(ctx, props, tcast, PARTICIPANT_FEE_KEYS,         fees[i])
+        cid = track(_create(ctx, cast_db, props))
         if cid:
             cast_ids.append(cid)
     summary["CONCERT_CAST"] = len(cast_ids)
 
-    # ── 8. ATTENDANCE（出欠） ─────────────────────────────
+    # ── 8. ATTENDANCE ─────────────────────────────────────
     att_db = ctx["CONCERT_DB_ATTENDANCE"]
+    tatt = _p(ctx, att_db)
     att_count = 0
     statuses = ["○", "○", "△", "×", "○"]
     for pr_id in practice_ids:
         for i, pid in enumerate(player_ids):
             props = {}
-            tatt = t("CONCERT_DB_ATTENDANCE")
-            ctx["put_prop_any"](props, tatt, ["record_key", "タイトル", "PK"],
-                                f"{TEST_PREFIX} att_{pr_id[:6]}_{pid[:6]}")
-            ctx["put_prop_any"](props, tatt, ["練習", "FK練習", "Practice"], pr_id)
-            ctx["put_prop_any"](props, tatt, ["奏者", "FK奏者", "Player"], pid)
-            ctx["put_prop_any"](props, tatt, ["参加可否", "出欠", "Status"],
-                                statuses[i % len(statuses)])
-            att_id = _create(ctx, att_db, props)
+            _put(ctx, props, tatt, ["record_key", "タイトル", "PK"],
+                 f"{TEST_PREFIX} att_{pr_id[:6]}_{pid[:6]}")
+            _put(ctx, props, tatt, ATT_PRACTICE_REL_KEYS, pr_id)
+            _put(ctx, props, tatt, ATT_PLAYER_REL_KEYS,   pid)
+            _put(ctx, props, tatt, ATT_STATUS_KEYS,        statuses[i % len(statuses)])
+            att_id = track(_create(ctx, att_db, props))
             if att_id:
                 att_count += 1
     summary["ATTENDANCE"] = att_count
 
-    # ── 9. PLAYER_INSTRUMENT（所有楽器） ──────────────────
+    # ── 9. PLAYER_INSTRUMENT ──────────────────────────────
     pi_db = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
+    tpi = _p(ctx, pi_db)
     pi_count = 0
-    for i, pid in enumerate(player_ids[:2]):  # PercパートのみPI登録
+    for pid in player_ids[:2]:
         for iid in instrument_ids:
             props = {}
-            tpi = t("CONCERT_DB_PLAYER_INSTRUMENT")
-            ctx["put_prop_any"](props, tpi, ["record_key", "タイトル", "PK名称"],
-                                f"{TEST_PREFIX} pi_{pid[:6]}_{iid[:6]}")
-            ctx["put_prop_any"](props, tpi, ["演奏会", "FK演奏会", "Concert"], concert_id)
-            ctx["put_prop_any"](props, tpi, ["奏者", "FK奏者", "Player"], pid)
-            ctx["put_prop_any"](props, tpi, ["楽器種別", "FK楽器種別", "Instrument"], iid)
-            ctx["put_prop_any"](props, tpi, ["所有台数", "OwnCount"], 1)
-            pi_id = _create(ctx, pi_db, props)
+            _put(ctx, props, tpi, ["record_key", "タイトル", "PK名称"],
+                 f"{TEST_PREFIX} pi_{pid[:6]}_{iid[:6]}")
+            _put(ctx, props, tpi, PI_CONCERT_REL_KEYS, concert_id)
+            _put(ctx, props, tpi, PI_PLAYER_REL_KEYS,  pid)
+            _put(ctx, props, tpi, PI_INST_REL_KEYS,    iid)
+            _put(ctx, props, tpi, PI_OWN_COUNT_KEYS,   1)
+            pi_id = track(_create(ctx, pi_db, props))
             if pi_id:
                 pi_count += 1
     summary["PLAYER_INSTRUMENT"] = pi_count
 
-    # ── 10. PREFERENCE（希望入力） ────────────────────────
+    # ── 10. PREFERENCE ────────────────────────────────────
     pref_db = ctx["CONCERT_DB_PREFERENCE"]
+    tpref = _p(ctx, pref_db)
     pref_count = 0
     priorities = ["第1希望", "第2希望", "希望なし/降り番でも可"]
-    for i, pid in enumerate(player_ids[:2]):  # Perc奏者のみ
+    for i, pid in enumerate(player_ids[:2]):
         for j, pd_id in enumerate(partdef_ids[:3]):
             props = {}
-            tpref = t("CONCERT_DB_PREFERENCE")
-            ctx["put_prop_any"](props, tpref, ["record_key", "タイトル", "PK"],
-                                f"{TEST_PREFIX} pref_{pid[:6]}_{pd_id[:6]}")
-            ctx["put_prop_any"](props, tpref, ["演奏会", "FK演奏会"], concert_id)
-            ctx["put_prop_any"](props, tpref, ["奏者", "FK奏者", "Player"], pid)
-            ctx["put_prop_any"](props, tpref, ["パート定義", "FK パート定義", "PartDef"], pd_id)
-            ctx["put_prop_any"](props, tpref, ["希望順位", "Priority"],
-                                priorities[j % len(priorities)])
-            pref_id = _create(ctx, pref_db, props)
+            _put(ctx, props, tpref, ["record_key", "タイトル", "PK"],
+                 f"{TEST_PREFIX} pref_{pid[:6]}_{pd_id[:6]}")
+            _put(ctx, props, tpref, PREF_PLAYER_REL_KEYS, pid)
+            _put(ctx, props, tpref, PREF_PART_REL_KEYS,   pd_id)
+            _put(ctx, props, tpref, PREF_PRIORITY_KEYS,   priorities[j % len(priorities)])
+            pref_id = track(_create(ctx, pref_db, props))
             if pref_id:
                 pref_count += 1
     summary["PREFERENCE"] = pref_count
 
-    # ── 11. CONCERT_EXPENSE（経費） ───────────────────────
+    # ── 11. CONCERT_EXPENSE ───────────────────────────────
     exp_db = ctx.get("CONCERT_DB_CONCERT_EXPENSE", "")
     exp_count = 0
     if exp_db:
+        texp = _p(ctx, exp_db)
         items = [("会場費", "テスト会場", 30000, True),
                  ("楽器レンタル", "テストレンタル", 15000, False),
                  ("印刷物・プログラム", "テストプログラム", 8000, True)]
         for type_, content, amount, confirmed in items:
             props = {}
-            texp = t("CONCERT_DB_CONCERT_EXPENSE")
-            ctx["put_prop_any"](props, texp, ["expense_key", "タイトル"],
-                                f"{TEST_PREFIX} {type_}/{content}")
-            ctx["put_prop_any"](props, texp, ["演奏会", "FK演奏会"], concert_id)
-            ctx["put_prop_any"](props, texp, ["種別", "Type"], type_)
-            ctx["put_prop_any"](props, texp, ["内容", "Content"], content)
-            ctx["put_prop_any"](props, texp, ["金額", "Amount"], amount)
-            ctx["put_prop_any"](props, texp, ["確定", "Confirmed"], confirmed)
-            eid = _create(ctx, exp_db, props)
+            _put(ctx, props, texp, EXPENSE_KEY_KEYS,         f"{TEST_PREFIX} {type_}/{content}")
+            _put(ctx, props, texp, EXPENSE_CONCERT_REL_KEYS, concert_id)
+            _put(ctx, props, texp, EXPENSE_TYPE_KEYS,        type_)
+            _put(ctx, props, texp, EXPENSE_CONTENT_KEYS,     content)
+            _put(ctx, props, texp, EXPENSE_AMOUNT_KEYS,      amount)
+            _put(ctx, props, texp, EXPENSE_CONFIRMED_KEYS,   confirmed)
+            eid = track(_create(ctx, exp_db, props))
             if eid:
                 exp_count += 1
     summary["CONCERT_EXPENSE"] = exp_count
 
+    # 作成IDをsession_stateに保存（削除時に使用）
+    existing = st.session_state.get("test_created_ids", [])
+    st.session_state["test_created_ids"] = existing + created_ids
+    summary["作成総件数"] = len(created_ids)
     return summary
 
 
 # ============================================================
-# 削除関数
+# 削除
 # ============================================================
 
 def _delete_all_test_data(ctx) -> dict:
-    """[TEST]プレフィックスのレコードを全DBからアーカイブする。"""
     summary = {}
-    for db_key, title_keys in TEST_DB_MAP:
+
+    # 方法1: session_stateに記録されたIDを直接アーカイブ
+    created_ids = st.session_state.get("test_created_ids", [])
+    if created_ids:
+        count = sum(1 for pid in created_ids if _archive(ctx, pid))
+        st.session_state.pop("test_created_ids", None)
+        summary["削除件数（ID直接指定）"] = count
+        return summary
+
+    # 方法2: フォールバック（session_stateが消えた場合）[TEST]プレフィックスで全DB検索
+    st.warning("session_stateが消えているため、プレフィックス検索で削除します。時間がかかる場合があります。")
+    db_map = [
+        ("CONCERT_DB_ATTENDANCE",        ["record_key", "タイトル", "PK"]),
+        ("CONCERT_DB_PREFERENCE",        ["record_key", "タイトル", "PK"]),
+        ("CONCERT_DB_PLAYER_INSTRUMENT", ["record_key", "タイトル", "PK名称"]),
+        ("CONCERT_DB_CONCERT_EXPENSE",   EXPENSE_KEY_KEYS),
+        ("CONCERT_DB_PARTICIPANT",       PARTICIPANT_RECORD_KEYS),
+        ("CONCERT_DB_PART_DEFINITION",   PARTDEF_NAME_KEYS),
+        ("CONCERT_DB_PRACTICE",          PRACTICE_NAME_KEYS),
+        ("CONCERT_DB_SONG",              SONG_NAME_KEYS),
+        ("CONCERT_DB_CONCERT",           CONCERT_NAME_KEYS),
+        ("CONCERT_DB_INSTRUMENT",        INSTRUMENT_NAME_KEYS),
+        ("CONCERT_DB_PLAYER",            PLAYER_NAME_KEYS),
+    ]
+    for db_key, title_keys in db_map:
         db_id = ctx.get(db_key, "")
         if not db_id:
             continue
@@ -281,7 +294,7 @@ def _delete_all_test_data(ctx) -> dict:
             name = (ctx["extract_prop_text_any"](r, title_keys) or
                     ctx["extract_title"](r) or "")
             if name.startswith(TEST_PREFIX):
-                if _archive_page(ctx, r.get("id", "")):
+                if _archive(ctx, r.get("id", "")):
                     count += 1
         if count > 0:
             summary[db_key.replace("CONCERT_DB_", "")] = count
@@ -296,25 +309,29 @@ def render(ctx: dict):
     st.header("🧪 テストデータ管理")
     st.warning("⚠️ この画面はテスト・開発用です。本番運用時は使用しないでください。")
 
-    st.markdown("""
-**投入されるデータ：**
-- PERFORMER × 5名（テスト奏者A〜E）
-- INSTRUMENT × 3種（Timpani・Snare Drum・Marimba）
-- CONCERT × 1件（2099-12-31）
-- SONG × 2曲
-- PRACTICE × 3回
-- PART_DEFINITION × 6件（2曲×3パート）
-- CONCERT_CAST × 5件（Perc×2・その他×3）
-- ATTENDANCE × 15件（3練習×5人）
-- PLAYER_INSTRUMENT × 6件（Perc奏者×3楽器）
-- PREFERENCE × 6件（Perc奏者×3パート）
-- CONCERT_EXPENSE × 3件
+    created_ids = st.session_state.get("test_created_ids", [])
+    if created_ids:
+        st.info(f"投入済みテストデータ: {len(created_ids)}件（削除可能）")
 
-全レコードに `{prefix}` プレフィックスを付与します。削除時はこのプレフィックスで識別します。
-""".format(prefix=TEST_PREFIX))
+    st.markdown(f"""
+**投入されるデータ（全レコードに `{TEST_PREFIX}` プレフィックス付与）：**
+
+| DB | 件数 |
+|---|---|
+| PERFORMER | 5名 |
+| INSTRUMENT | 3種 |
+| CONCERT | 1件（2099-12-31） |
+| SONG | 2曲 |
+| PRACTICE | 3回 |
+| PART_DEFINITION | 6件 |
+| CONCERT_CAST | 5件 |
+| ATTENDANCE | 15件 |
+| PLAYER_INSTRUMENT | 6件 |
+| PREFERENCE | 6件 |
+| CONCERT_EXPENSE | 3件 |
+""")
 
     st.divider()
-
     col1, col2 = st.columns(2)
 
     with col1:
@@ -329,7 +346,10 @@ def render(ctx: dict):
 
     with col2:
         st.subheader("🗑️ テストデータ削除")
-        st.caption(f"`{TEST_PREFIX}` で始まる全レコードをアーカイブします。")
+        if created_ids:
+            st.caption(f"投入済み{len(created_ids)}件を削除します。")
+        else:
+            st.caption(f"`{TEST_PREFIX}` プレフィックスで全DB検索して削除します。")
         confirm = st.checkbox("削除対象を確認しました", key="delete_confirm")
         if st.button("🗑️ テストデータを一括削除", type="secondary",
                      use_container_width=True, key="delete_btn",
