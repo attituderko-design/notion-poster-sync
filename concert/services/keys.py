@@ -155,3 +155,6 @@ PARTICIPANT_PART_KEYS     = ["パート", "Part"]
 PARTICIPANT_ROLE_KEYS     = ["役職", "Role"]
 PARTICIPANT_FEE_KEYS      = ["参加費", "Fee"]
 PARTICIPANT_PAID_KEYS     = ["入金済", "Paid"]
+
+# ── ATLAS（CONCERT DB）追加フィールド ────────────────────────
+CONCERT_CONFIRMED_FEE_KEYS = ["確定参加費", "ConfirmedFee"]
