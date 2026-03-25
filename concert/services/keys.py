@@ -128,3 +128,10 @@ SCHEDULE_SONG_REL_KEYS    = ["演奏曲", "楽曲", "FK楽曲"]
 SCHEDULE_ORDER_KEYS       = ["表示順", "順番", "Order"]
 
 SCHEDULE_TYPE_OPTIONS     = ["練習", "休憩", "開場", "搬入", "搬出", "退館", "その他"]
+
+# ── PLAYER_INSTRUMENT_MASTER（所有楽器マスタ）DB ─────────────
+MASTER_KEY_KEYS           = ["master_key", "タイトル"]
+MASTER_PLAYER_REL_KEYS    = ["奏者", "FK奏者", "Player"]
+MASTER_INST_REL_KEYS      = ["楽器種別", "楽器", "FK楽器種別"]
+MASTER_OWN_COUNT_KEYS     = ["所有台数", "台数", "Count"]
+MASTER_NOTE_KEYS          = ["備考", "メモ", "Note"]

@@ -124,6 +124,7 @@ def get_concert_secrets() -> dict:
         "db_part_definition":  db_part_definition,
         "db_preference":       db_preference,
             "db_schedule":         db_schedule,
+            "db_pi_master":        db_pi_master,
     }
 
 
