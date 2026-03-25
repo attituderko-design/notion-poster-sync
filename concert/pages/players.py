@@ -471,12 +471,21 @@ def _upsert_player_bring_for_concert(
 
 
 def _render_player_tab(ctx: dict):
+    """奏者マスタ管理 + この演奏会の参加者設定・パート・役職設定を統合。"""
+    import pandas as pd
+
+    global_concert_id   = (ctx.get("SELECTED_CONCERT_ID")   or "").strip()
+    global_concert_name = (ctx.get("SELECTED_CONCERT_NAME") or "").strip()
+
     players = _load_players(ctx)
+
+    # ── 奏者マスタ（全奏者）────────────────────────────────────
+    st.markdown("### 奏者マスタ")
     with st.expander("➕ 新規奏者を登録", expanded=(len(players) == 0)):
         with st.form("player_new_form", border=True):
-            name = st.text_input("氏名 *", placeholder="例：山田 太郎")
+            name  = st.text_input("氏名 *", placeholder="例：山田 太郎")
             email = st.text_input("メールアドレス", placeholder="任意")
-            memo = st.text_area("メモ", height=60)
+            memo  = st.text_area("メモ", height=60)
             if st.form_submit_button("💾 登録", use_container_width=True, type="primary"):
                 if not name.strip():
                     st.error("氏名は必須です。")
@@ -486,27 +495,213 @@ def _render_player_tab(ctx: dict):
                     st.rerun()
                 else:
                     st.error("❌ 登録に失敗しました。")
-    st.divider()
+
     if not players:
         st.info("奏者がまだ登録されていません。")
         return
-    st.subheader(f"登録済み奏者（{len(players)}件）")
-    for p in sorted(players, key=lambda x: _player_name(x, ctx)):
+
+    # 検索
+    col_s, col_r = st.columns([8, 1])
+    search = col_s.text_input("奏者を検索", placeholder="氏名・メモ", key="player_master_search").strip().lower()
+    if col_r.button("🔄", key="player_master_refresh"):
+        _clear_player_cache()
+        st.rerun()
+
+    sorted_players = sorted(players, key=lambda x: _player_name(x, ctx))
+    if search:
+        sorted_players = [p for p in sorted_players
+                          if search in _player_name(p, ctx).lower()
+                          or search in (ctx["extract_prop_text_any"](p, PLAYER_MEMO_KEYS) or "").lower()]
+
+    st.caption(f"表示 {len(sorted_players)} / {len(players)} 件")
+
+    # data_editor形式で全奏者を表示・編集
+    master_rows = []
+    master_meta = []
+    for p in sorted_players:
         pid = p.get("id", "")
-        with st.expander(_player_name(p, ctx), expanded=False):
-            with st.form(f"player_edit_{pid}", border=True):
-                name = st.text_input("氏名 *", value=ctx["extract_prop_text_any"](p, PLAYER_NAME_KEYS))
-                email = st.text_input("メールアドレス", value=ctx["extract_prop_text_any"](p, PLAYER_EMAIL_KEYS))
-                memo = st.text_area("メモ", value=ctx["extract_prop_text_any"](p, PLAYER_MEMO_KEYS), height=60)
-                if st.form_submit_button("💾 更新", use_container_width=True):
-                    if not name.strip():
-                        st.error("氏名は必須です。")
-                    elif _update_player(ctx, pid, name.strip(), email, memo):
-                        st.success("✅ 更新しました。")
-                        _clear_player_cache()
-                        st.rerun()
-                    else:
-                        st.error("❌ 更新に失敗しました。")
+        master_rows.append({
+            "氏名":           ctx["extract_prop_text_any"](p, PLAYER_NAME_KEYS) or "",
+            "メールアドレス": ctx["extract_prop_text_any"](p, PLAYER_EMAIL_KEYS) or "",
+            "メモ":           ctx["extract_prop_text_any"](p, PLAYER_MEMO_KEYS) or "",
+        })
+        master_meta.append({"pid": pid,
+                             "cur_name":  ctx["extract_prop_text_any"](p, PLAYER_NAME_KEYS) or "",
+                             "cur_email": ctx["extract_prop_text_any"](p, PLAYER_EMAIL_KEYS) or "",
+                             "cur_memo":  ctx["extract_prop_text_any"](p, PLAYER_MEMO_KEYS) or ""})
+
+    master_version = st.session_state.get("player_master_version", 0)
+    df_master = pd.DataFrame(master_rows)
+    edited_master = st.data_editor(
+        df_master, num_rows="fixed", use_container_width=True,
+        key=f"player_master_editor_{master_version}",
+        column_config={
+            "氏名":           st.column_config.TextColumn("氏名 *", max_chars=50),
+            "メールアドレス": st.column_config.TextColumn("メールアドレス", max_chars=100),
+            "メモ":           st.column_config.TextColumn("メモ", max_chars=200),
+        },
+    )
+    if st.button("💾 奏者マスタを保存", type="primary", use_container_width=True, key="player_master_save"):
+        ok_n = ng_n = skip_n = 0
+        df_reset = edited_master.reset_index(drop=True)
+        for idx, meta in enumerate(master_meta):
+            if idx >= len(df_reset): break
+            row = df_reset.iloc[idx]
+            new_name  = str(row.get("氏名") or "").strip()
+            new_email = str(row.get("メールアドレス") or "").strip()
+            new_memo  = str(row.get("メモ") or "").strip()
+            if not new_name:
+                skip_n += 1; continue
+            if new_name == meta["cur_name"] and new_email == meta["cur_email"] and new_memo == meta["cur_memo"]:
+                skip_n += 1; continue
+            ok = _update_player(ctx, meta["pid"], new_name, new_email, new_memo)
+            ok_n += 1 if ok else 0
+            ng_n += 0 if ok else 1
+        if ng_n == 0:
+            st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
+        else:
+            st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+        st.session_state["player_master_version"] = master_version + 1
+        _clear_player_cache()
+        st.rerun()
+
+    if not global_concert_id:
+        return
+
+    # ── 演奏会参加者設定 ──────────────────────────────────────
+    st.divider()
+    st.markdown(f"### 演奏会参加者設定")
+    st.caption("この演奏会に参加する奏者を選択し、パート・役職を設定してください。")
+
+    participants = _load_participants(ctx, global_concert_id)
+    part_row_by_pid: dict[str, dict] = {}
+    for row in participants:
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if pids:
+            part_row_by_pid[pids[0]] = row
+    current_pids = set(part_row_by_pid.keys())
+
+    # Notionのselect選択肢を動的取得
+    part_opts     = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_PART_KEYS)
+    role_m_opts   = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_ROLE_KEYS)
+    role_ops_opts = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_ROLE_OPS_KEYS)
+
+    cast_rows = []
+    cast_meta = []
+    for p in sorted(players, key=lambda x: _player_name(x, ctx)):
+        pid   = p.get("id", "")
+        pname = _player_name(p, ctx)
+        row   = part_row_by_pid.get(pid, {})
+        rid   = row.get("id", "") if row else ""
+        in_cast = pid in current_pids
+        cur_part    = ctx["extract_prop_text_any"](row, PARTICIPANT_PART_KEYS)  if row else ""
+        cur_role_m  = ctx["extract_prop_text_any"](row, PARTICIPANT_ROLE_KEYS)  if row else ""
+        cur_role_o  = ctx["extract_prop_text_any"](row, PARTICIPANT_ROLE_OPS_KEYS) if row else ""
+        fee_s       = ctx["extract_prop_text_any"](row, PARTICIPANT_FEE_KEYS)   if row else ""
+        paid        = ctx["extract_prop_text_any"](row, PARTICIPANT_PAID_KEYS) == "True" if row else False
+        try: fee = int(float(fee_s)) if fee_s != "" else None
+        except: fee = None
+        is_extra = (fee == 0) if fee is not None else False
+
+        cast_rows.append({
+            "参加":     in_cast,
+            "エキストラ": is_extra,
+            "氏名":     pname,
+            "パート":   cur_part or "",
+            "役職(音楽)": cur_role_m or "",
+            "役職(運営)": cur_role_o or "",
+        })
+        cast_meta.append({
+            "pid": pid, "pname": pname, "rid": rid,
+            "in_cast": in_cast, "is_extra": is_extra,
+            "cur_part": cur_part, "cur_role_m": cur_role_m,
+            "cur_role_o": cur_role_o, "fee": fee, "paid": paid,
+        })
+
+    cast_version = st.session_state.get(f"cast_editor_version_{global_concert_id}", 0)
+    df_cast = pd.DataFrame(cast_rows)
+
+    col_cfg = {
+        "参加":       st.column_config.CheckboxColumn("参加", default=False),
+        "エキストラ": st.column_config.CheckboxColumn("エキストラ", default=False,
+                       help="チェックすると参加費0円で登録"),
+        "氏名":       st.column_config.TextColumn("氏名", disabled=True),
+        "パート":     st.column_config.SelectboxColumn("パート", options=part_opts) if part_opts
+                       else st.column_config.TextColumn("パート", max_chars=30),
+        "役職(音楽)": st.column_config.SelectboxColumn("役職(音楽)", options=role_m_opts) if role_m_opts
+                       else st.column_config.TextColumn("役職(音楽)", max_chars=30),
+        "役職(運営)": st.column_config.SelectboxColumn("役職(運営)", options=role_ops_opts) if role_ops_opts
+                       else st.column_config.TextColumn("役職(運営)", max_chars=30),
+    }
+    edited_cast = st.data_editor(
+        df_cast, num_rows="fixed", use_container_width=True,
+        key=f"cast_editor_{global_concert_id}_{cast_version}",
+        column_config=col_cfg,
+    )
+
+    if st.button("💾 参加者・パート・役職を保存", type="primary",
+                 use_container_width=True, key=f"cast_save_{global_concert_id}"):
+        ok_n = ng_n = skip_n = 0
+
+        # ATLASの確定参加費を取得してsession_stateにキャッシュ
+        try:
+            tc2   = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT"])
+            res_c = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{global_concert_id}")
+            if res_c and res_c.status_code == 200 and tc2:
+                fee_key2 = ctx["find_prop_name"](tc2, CONCERT_CONFIRMED_FEE_KEYS)
+                if fee_key2:
+                    num = res_c.json().get("properties", {}).get(fee_key2, {}).get("number")
+                    if num is not None:
+                        st.session_state[f"confirmed_fee_{global_concert_id}"] = int(num)
+        except Exception:
+            pass
+
+        with st.spinner("保存中..."):
+            df_reset = edited_cast.reset_index(drop=True)
+            for idx, meta in enumerate(cast_meta):
+                if idx >= len(df_reset): break
+                row        = df_reset.iloc[idx]
+                new_in     = bool(row.get("参加") or False)
+                new_extra  = bool(row.get("エキストラ") or False)
+                new_part   = str(row.get("パート")     or "").strip()
+                new_role_m = str(row.get("役職(音楽)") or "").strip()
+                new_role_o = str(row.get("役職(運営)") or "").strip()
+
+                if not new_in and not meta["in_cast"]:
+                    skip_n += 1; continue
+
+                # 参加→非参加：アーカイブ
+                if not new_in and meta["in_cast"] and meta["rid"]:
+                    ok = _archive_participant(ctx, meta["rid"])
+                    ok_n += 1 if ok else 0
+                    ng_n += 0 if ok else 1
+                    continue
+
+                # 新規参加 or 既存更新
+                no_change = (meta["in_cast"] and
+                             new_extra == meta["is_extra"] and
+                             new_part   == (meta["cur_part"]   or "") and
+                             new_role_m == (meta["cur_role_m"] or "") and
+                             new_role_o == (meta["cur_role_o"] or ""))
+                if no_change:
+                    skip_n += 1; continue
+
+                ok = _upsert_participant(
+                    ctx, global_concert_id, global_concert_name,
+                    meta["pid"], meta["pname"], meta["rid"],
+                    is_extra=new_extra,
+                    part=new_part, role_music=new_role_m, role_ops=new_role_o,
+                )
+                ok_n += 1 if ok else 0
+                ng_n += 0 if ok else 1
+
+        if ng_n == 0:
+            st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
+        else:
+            st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+        st.session_state[f"cast_editor_version_{global_concert_id}"] = cast_version + 1
+        st.session_state.pop(f"participant_list_{global_concert_id}", None)
+        st.rerun()
 
 
 def _render_attendance_tab(ctx: dict):

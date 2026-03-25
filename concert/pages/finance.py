@@ -7,7 +7,7 @@ import pandas as pd
 from concert.services.keys import (
     CONCERT_NAME_KEYS, CONCERT_CONFIRMED_FEE_KEYS,
     PARTICIPANT_RECORD_KEYS, PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
-    PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS,
+    PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_ROLE_OPS_KEYS,
     PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS,
     PLAYER_NAME_KEYS,
     EXPENSE_KEY_KEYS, EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS,
@@ -115,16 +115,17 @@ def _upsert_expense(ctx, concert_id: str, concert_name: str,
 
 
 def _update_cast_finance(ctx, page_id: str, part: str, role: str,
-                         fee: int, paid: bool) -> bool:
+                         fee: int, paid: bool, role_ops: str = "") -> bool:
     db_id = ctx["CONCERT_DB_PARTICIPANT"]
     t = ctx["get_prop_types"](db_id)
     if not t:
         return False
     props: dict = {}
-    ctx["put_prop_any"](props, t, PARTICIPANT_PART_KEYS, part)
-    ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_KEYS, role)
-    ctx["put_prop_any"](props, t, PARTICIPANT_FEE_KEYS,  fee)
-    ctx["put_prop_any"](props, t, PARTICIPANT_PAID_KEYS, paid)
+    ctx["put_prop_any"](props, t, PARTICIPANT_PART_KEYS,     part)
+    ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_KEYS,     role)
+    ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_OPS_KEYS, role_ops)
+    ctx["put_prop_any"](props, t, PARTICIPANT_FEE_KEYS,      fee)
+    ctx["put_prop_any"](props, t, PARTICIPANT_PAID_KEYS,     paid)
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200
@@ -364,20 +365,21 @@ def _render_payment_tab(ctx, concert_id: str):
         ext(x, PARTICIPANT_PART_KEYS) or "",
         ext(x, PARTICIPANT_ROLE_KEYS) or "",
     )):
-        rid   = r.get("id", "")
-        pids  = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
-        pname = player_name_map.get(pids[0], "") if pids else ""
-        part  = ext(r, PARTICIPANT_PART_KEYS) or ""
-        role  = ext(r, PARTICIPANT_ROLE_KEYS) or ""
-        fee_s = ext(r, PARTICIPANT_FEE_KEYS) or "0"
-        paid  = ext(r, PARTICIPANT_PAID_KEYS) == "True"
+        rid      = r.get("id", "")
+        pids     = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
+        pname    = player_name_map.get(pids[0], "") if pids else ""
+        part     = ext(r, PARTICIPANT_PART_KEYS)     or ""
+        role     = ext(r, PARTICIPANT_ROLE_KEYS)     or ""
+        role_ops = ext(r, PARTICIPANT_ROLE_OPS_KEYS) or ""
+        fee_s    = ext(r, PARTICIPANT_FEE_KEYS) or "0"
+        paid     = ext(r, PARTICIPANT_PAID_KEYS) == "True"
         try: fee = int(float(fee_s))
         except: fee = 0
 
-        df_rows.append({"氏名": pname, "パート": part, "役職": role,
-                        "参加費": fee, "入金済": paid})
+        df_rows.append({"氏名": pname, "パート": part, "役職(音楽)": role,
+                        "役職(運営)": role_ops, "参加費": fee, "入金済": paid})
         df_meta.append({"rid": rid, "pname": pname,
-                        "cur_part": part, "cur_role": role,
+                        "cur_part": part, "cur_role": role, "cur_role_ops": role_ops,
                         "cur_fee": fee, "cur_paid": paid})
 
     # 入金サマリ
@@ -400,8 +402,9 @@ def _render_payment_tab(ctx, concert_id: str):
         key=f"payment_editor_{concert_id}_{editor_version}",
         column_config={
             "氏名":   st.column_config.TextColumn("氏名", disabled=True),
-            "パート": st.column_config.TextColumn("パート", disabled=True),
-            "役職":   st.column_config.TextColumn("役職",  disabled=True),
+            "パート":     st.column_config.TextColumn("パート",     disabled=True),
+            "役職(音楽)": st.column_config.TextColumn("役職(音楽)", disabled=True),
+            "役職(運営)": st.column_config.TextColumn("役職(運営)", disabled=True),
             "参加費": st.column_config.NumberColumn("参加費（円）", min_value=0, step=100),
             "入金済": st.column_config.CheckboxColumn("入金済", default=False),
         },
@@ -421,7 +424,8 @@ def _render_payment_tab(ctx, concert_id: str):
                     continue
                 ok = _update_cast_finance(ctx, meta["rid"],
                                           meta["cur_part"], meta["cur_role"],
-                                          new_fee, new_paid)
+                                          new_fee, new_paid,
+                                          role_ops=meta["cur_role_ops"])
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
         if ng_n == 0:
