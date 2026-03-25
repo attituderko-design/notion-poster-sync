@@ -1069,6 +1069,7 @@ def _auto_mark_concert_day_attendance(ctx: dict, practice_id: str, concert_id: s
         ctx["put_prop_any"](props, type_map, ATT_PLAYER_REL_KEYS, pid)
         ctx["put_prop_any"](props, type_map, ATT_PRACTICE_REL_KEYS, practice_id)
         ctx["put_prop_any"](props, type_map, ATT_STATUS_KEYS, "○")
+        ctx["put_prop_any"](props, type_map, ATT_NOTE_KEYS, "本番当日のため自動登録")
         ctx["api_request"](
             "post",
             "https://api.notion.com/v1/pages",
@@ -1462,6 +1463,9 @@ def render(ctx: dict):
                         new_venue, new_addr,
                         new_cd, new_po, new_memo,
                     )
+                    if ok and new_cd and not prac_df_rows[idx]["本番日"]:
+                        # 本番フラグが新たにONになった→全参加者の出欠を○に自動登録
+                        _auto_mark_concert_day_attendance(ctx, meta["pid"], filter_concert_id)
                     ok_n += 1 if ok else 0
                     ng_n += 0 if ok else 1
 
