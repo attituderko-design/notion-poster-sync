@@ -32,6 +32,7 @@ try:
     from concert.services.notion_client import build_concert_ctx
     from concert.pages import (
         concert_mgmt,
+        finance,
         songs,
         players,
         rental,
@@ -8318,6 +8319,7 @@ if system_mode == "HARMONIA":
             "奏者・出欠・持参楽器",
             "アサイン検討",
             "レンタル管理",
+            "収支・振込管理",
         ],
         key="concert_page_radio",
     )
@@ -8418,6 +8420,8 @@ if system_mode == "HARMONIA":
         assign.render(concert_ctx)
     elif concert_page == "レンタル管理":
         rental.render(concert_ctx)
+    elif concert_page == "収支・振込管理":
+        finance.render(concert_ctx)
 
     st.stop()
 
