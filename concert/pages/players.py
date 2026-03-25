@@ -949,7 +949,7 @@ def _render_practice_bring_tab(ctx: dict):
     # 練習一覧（本番当日除く、日付順）
     all_practices = _load_practices(ctx, c_id)
     practices = [p for p in all_practices
-                 if not _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)]
+                 if not _is_truthy_text(ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS))]
     practices = sorted(practices, key=lambda p: ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS) or "9999")
     if not practices:
         st.info("練習が登録されていません。")
