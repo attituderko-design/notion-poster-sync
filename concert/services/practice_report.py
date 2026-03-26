@@ -326,9 +326,9 @@ def generate_practice_report(
         story.append(Spacer(1, 3*mm))
 
     # タイムスケジュール（データなしでも表示）
-    story.append(Paragraph("■ タイムスケジュール", st_map["h2"]))
+    _h_sched = Paragraph("■ タイムスケジュール", st_map["h2"])
     if not sched_rows:
-        story.append(Paragraph("スケジュールが登録されていません。", st_map["small"]))
+        story.append(KeepTogether([_h_sched, Paragraph("スケジュールが登録されていません。", st_map["small"])]))
         story.append(Spacer(1, 3*mm))
     if sched_rows:
         sched_data = [["開始", "終了", "種別", "内容"]]
@@ -358,11 +358,11 @@ def generate_practice_report(
             sched_style.add("BACKGROUND", (0,i), (-1,i), bg)
         sched_tbl.hAlign = "LEFT"
         sched_tbl.setStyle(sched_style)
-        story.append(sched_tbl)
+        story.append(KeepTogether([_h_sched, sched_tbl]))
         story.append(Spacer(1, 3*mm))
 
     # 出欠一覧
-    story.append(Paragraph("■ 出欠一覧", st_map["h2"]))
+    _h_att = Paragraph("■ 出欠一覧", st_map["h2"])
     att_data = [["奏者", "参加可否"]]
     for pid in participant_player_ids:
         pname  = player_name_map.get(pid, pid)
@@ -388,9 +388,9 @@ def generate_practice_report(
                 sty.add("BACKGROUND", (1,i), (1,i), colors.HexColor("#FEF9E7"))
         att_tbl.hAlign = "LEFT"
         att_tbl.setStyle(sty)
-        story.append(att_tbl)
+        story.append(KeepTogether([_h_att, att_tbl]))
     else:
-        story.append(Paragraph("出欠データがありません。", st_map["small"]))
+        story.append(KeepTogether([_h_att, Paragraph("出欠データがありません。", st_map["small"])]))
     story.append(Spacer(1, 3*mm))
 
     # 持参楽器一覧（出席者のみ）
@@ -412,7 +412,7 @@ def generate_practice_report(
             "count":  cnt,
         })
 
-    story.append(Paragraph("■ 持参楽器一覧", st_map["h2"]))
+    _h_bring = Paragraph("■ 持参楽器一覧", st_map["h2"])
     if bring_items:
         bring_data = [["奏者", "楽器", "台数"]]
         for b in sorted(bring_items, key=lambda x: x["player"]):
@@ -426,13 +426,13 @@ def generate_practice_report(
         )
         bring_tbl.hAlign = "LEFT"
         bring_tbl.setStyle(_tbl_style())
-        story.append(bring_tbl)
+        story.append(KeepTogether([_h_bring, bring_tbl]))
     else:
-        story.append(Paragraph("持参楽器の登録がありません。", st_map["small"]))
+        story.append(KeepTogether([_h_bring, Paragraph("持参楽器の登録がありません。", st_map["small"])]))
     story.append(Spacer(1, 3*mm))
 
     # レンタル一覧
-    story.append(Paragraph("■ レンタル一覧", st_map["h2"]))
+    _h_rent = Paragraph("■ レンタル一覧", st_map["h2"])
     if rent_rows:
         rent_data = [["業者名", "品目", "台数", "単価", "小計", "確定"]]
         rent_total = rent_confirmed = 0
@@ -471,9 +471,9 @@ def generate_practice_report(
             rent_sty.add("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F0EEF8"))
         rent_tbl.hAlign = "LEFT"
         rent_tbl.setStyle(rent_sty)
-        story.append(rent_tbl)
+        story.append(KeepTogether([_h_rent, rent_tbl]))
     else:
-        story.append(Paragraph("レンタル登録がありません。", st_map["small"]))
+        story.append(KeepTogether([_h_rent, Paragraph("レンタル登録がありません。", st_map["small"])]))
 
     doc.build(story)
     buf.seek(0)

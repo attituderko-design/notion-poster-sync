@@ -212,7 +212,7 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
     story.append(Spacer(1, 6*mm))
 
     # ── 収支サマリ ────────────────────────────────────────────
-    story.append(Paragraph("■ 収支サマリ", st_map["h2"]))
+    _h_sum = Paragraph("■ 収支サマリ", st_map["h2"])
     summary_data = [
         ["項目", "金額（確定）", "金額（全見積）"],
         ["参加費収入（入金済）",   f"¥{fee_paid:,}",              f"¥{fee_total:,}"],
@@ -237,11 +237,11 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
                     colors.HexColor("#FFEBEE"))
     sum_tbl.hAlign = "LEFT"
     sum_tbl.setStyle(sum_sty)
-    story.append(sum_tbl)
+    story.append(KeepTogether([_h_sum, sum_tbl]))
     story.append(Spacer(1, 5*mm))
 
     # ── 参加費・振込状況 ──────────────────────────────────────
-    story.append(Paragraph("■ 参加費・振込状況", st_map["h2"]))
+    _h_cast = Paragraph("■ 参加費・振込状況", st_map["h2"])
     story.append(Paragraph(
         f"参加者 {len(cast)}名  ／  入金済 {paid_count}名（¥{fee_paid:,}）  ／  未入金 {unpaid_count}名（¥{fee_unpaid:,}）",
         st_map["body"]
@@ -273,12 +273,12 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
     cast_sty = _base_style(font, font_b)
     cast_tbl.hAlign = "LEFT"
     cast_tbl.setStyle(cast_sty)
-    story.append(cast_tbl)
+    story.append(KeepTogether([_h_cast, cast_tbl]))
     story.append(Spacer(1, 5*mm))
 
     # ── 経費明細（CONCERT_EXPENSE） ───────────────────────────
     if expenses:
-        story.append(Paragraph("■ 経費明細", st_map["h2"]))
+        _h_exp = Paragraph("■ 経費明細", st_map["h2"])
         exp_data = [["種別", "内容", "金額", "確定", "備考"]]
         for type_, items in sorted(exp_by_type.items()):
             for content, amt, conf, note in items:
@@ -302,7 +302,7 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
             exp_sty.add("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F0EEF8"))
         exp_tbl.hAlign = "LEFT"
         exp_tbl.setStyle(exp_sty)
-        story.append(exp_tbl)
+        story.append(KeepTogether([_h_exp, exp_tbl]))
         story.append(Spacer(1, 5*mm))
 
     # ── レンタル費用明細 ──────────────────────────────────────
@@ -337,7 +337,7 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
         story.append(Spacer(1, 5*mm))
 
     # ── 種別ごとの経費集計 ────────────────────────────────────
-    story.append(Paragraph("■ 種別別経費集計", st_map["h2"]))
+    _h_bt = Paragraph("■ 種別別経費集計", st_map["h2"])
     by_type_data = [["種別", "確定", "全見積"]]
     grand_conf = grand_all = 0
     for type_, items in sorted(exp_by_type.items()):
@@ -366,7 +366,7 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
                colors.HexColor("#E8E6F0"))
     bt_tbl.hAlign = "LEFT"
     bt_tbl.setStyle(bt_sty)
-    story.append(bt_tbl)
+    story.append(KeepTogether([_h_bt, bt_tbl]))
 
     doc.build(story)
     buf.seek(0)

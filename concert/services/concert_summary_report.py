@@ -271,7 +271,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     story.extend(_venue_qr_block(c_address, c_venue, font, font_b, W))
 
     # ── 全練習日一覧 ─────────────────────────────────────────
-    story.append(Paragraph("■ 練習日一覧", st_map["h2"]))
+    _h_prac = Paragraph("■ 練習日一覧", st_map["h2"])
     prac_list_data = [["回", "日付", "会場", "出欠（○/△/×/未）"]]
     for p in practices:
         pid   = p.get("id","")
@@ -296,7 +296,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     )
     pl_tbl.hAlign = "LEFT"
     pl_tbl.setStyle(_base_style())
-    story.append(pl_tbl)
+    story.append(KeepTogether([_h_prac, pl_tbl]))
     story.append(Spacer(1, 5*mm))
 
     # ── 出欠マトリクス ───────────────────────────────────────
@@ -408,7 +408,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
 
     # ── 入金・活動資金のまとめ ─────────────────────────────────
     story.append(Spacer(1, 5*mm))
-    story.append(Paragraph("■ 入金・活動資金のまとめ", st_map["h2"]))
+    _h_fin = Paragraph("■ 入金・活動資金のまとめ", st_map["h2"])
 
     # 参加費集計
     participant_rows_s = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
@@ -463,7 +463,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
                colors.HexColor("#E8F5E9") if balance_s >= 0 else colors.HexColor("#FFEBEE"))
     ph_tbl.hAlign = "LEFT"
     ph_tbl.setStyle(ph_sty)
-    story.append(ph_tbl)
+    story.append(KeepTogether([_h_fin, ph_tbl]))
 
     doc.build(story)
     buf.seek(0)
