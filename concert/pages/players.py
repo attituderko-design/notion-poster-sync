@@ -484,12 +484,15 @@ def _render_player_tab(ctx: dict):
     with st.expander("➕ 新規奏者を登録", expanded=(len(players) == 0)):
         with st.form("player_new_form", border=True):
             name  = st.text_input("氏名 *", placeholder="例：山田 太郎")
+            hn    = st.text_input("H.N.", placeholder="任意")
             email = st.text_input("メールアドレス", placeholder="任意")
+            phone = st.text_input("電話番号", placeholder="任意")
+            line  = st.text_input("LINE ID", placeholder="任意")
             memo  = st.text_area("メモ", height=60)
             if st.form_submit_button("💾 登録", use_container_width=True, type="primary"):
                 if not name.strip():
                     st.error("氏名は必須です。")
-                elif _create_player(ctx, name.strip(), email, memo):
+                elif _create_player(ctx, name.strip(), email, memo, hn=hn, phone=phone, line_id=line):
                     st.success("✅ 奏者を登録しました。")
                     _clear_player_cache()
                     st.rerun()
@@ -522,13 +525,19 @@ def _render_player_tab(ctx: dict):
         pid = p.get("id", "")
         master_rows.append({
             "氏名":           ctx["extract_prop_text_any"](p, PLAYER_NAME_KEYS) or "",
+            "H.N.":           ctx["extract_prop_text_any"](p, PLAYER_HN_KEYS)    or "",
             "メールアドレス": ctx["extract_prop_text_any"](p, PLAYER_EMAIL_KEYS) or "",
-            "メモ":           ctx["extract_prop_text_any"](p, PLAYER_MEMO_KEYS) or "",
+            "電話番号":       ctx["extract_prop_text_any"](p, PLAYER_PHONE_KEYS) or "",
+            "LINE ID":        ctx["extract_prop_text_any"](p, PLAYER_LINE_KEYS)  or "",
+            "メモ":           ctx["extract_prop_text_any"](p, PLAYER_MEMO_KEYS)  or "",
         })
         master_meta.append({"pid": pid,
                              "cur_name":  ctx["extract_prop_text_any"](p, PLAYER_NAME_KEYS) or "",
+                             "cur_hn":    ctx["extract_prop_text_any"](p, PLAYER_HN_KEYS)    or "",
                              "cur_email": ctx["extract_prop_text_any"](p, PLAYER_EMAIL_KEYS) or "",
-                             "cur_memo":  ctx["extract_prop_text_any"](p, PLAYER_MEMO_KEYS) or ""})
+                             "cur_phone": ctx["extract_prop_text_any"](p, PLAYER_PHONE_KEYS) or "",
+                             "cur_line":  ctx["extract_prop_text_any"](p, PLAYER_LINE_KEYS)  or "",
+                             "cur_memo":  ctx["extract_prop_text_any"](p, PLAYER_MEMO_KEYS)  or ""})
 
     master_version = st.session_state.get("player_master_version", 0)
     df_master = pd.DataFrame(master_rows)
@@ -536,9 +545,12 @@ def _render_player_tab(ctx: dict):
         df_master, num_rows="fixed", use_container_width=True,
         key=f"player_master_editor_{master_version}",
         column_config={
-            "氏名":           st.column_config.TextColumn("氏名 *", max_chars=50),
+            "氏名":           st.column_config.TextColumn("氏名 *",         max_chars=50),
+            "H.N.":           st.column_config.TextColumn("H.N.",            max_chars=50),
             "メールアドレス": st.column_config.TextColumn("メールアドレス", max_chars=100),
-            "メモ":           st.column_config.TextColumn("メモ", max_chars=200),
+            "電話番号":       st.column_config.TextColumn("電話番号",        max_chars=20),
+            "LINE ID":        st.column_config.TextColumn("LINE ID",         max_chars=50),
+            "メモ":           st.column_config.TextColumn("メモ",            max_chars=200),
         },
     )
     if st.button("💾 奏者マスタを保存", type="primary", use_container_width=True, key="player_master_save"):
@@ -547,14 +559,20 @@ def _render_player_tab(ctx: dict):
         for idx, meta in enumerate(master_meta):
             if idx >= len(df_reset): break
             row = df_reset.iloc[idx]
-            new_name  = str(row.get("氏名") or "").strip()
-            new_email = str(row.get("メールアドレス") or "").strip()
-            new_memo  = str(row.get("メモ") or "").strip()
+            new_name  = str(row.get("氏名")           or "").strip()
+            new_hn    = str(row.get("H.N.")            or "").strip()
+            new_email = str(row.get("メールアドレス")  or "").strip()
+            new_phone = str(row.get("電話番号")        or "").strip()
+            new_line  = str(row.get("LINE ID")         or "").strip()
+            new_memo  = str(row.get("メモ")            or "").strip()
             if not new_name:
                 skip_n += 1; continue
-            if new_name == meta["cur_name"] and new_email == meta["cur_email"] and new_memo == meta["cur_memo"]:
+            if (new_name  == meta["cur_name"]  and new_hn    == meta["cur_hn"]    and
+                new_email == meta["cur_email"] and new_phone == meta["cur_phone"] and
+                new_line  == meta["cur_line"]  and new_memo  == meta["cur_memo"]):
                 skip_n += 1; continue
-            ok = _update_player(ctx, meta["pid"], new_name, new_email, new_memo)
+            ok = _update_player(ctx, meta["pid"], new_name, new_email, new_memo,
+                                hn=new_hn, phone=new_phone, line_id=new_line)
             ok_n += 1 if ok else 0
             ng_n += 0 if ok else 1
         if ng_n == 0:
