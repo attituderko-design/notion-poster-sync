@@ -266,6 +266,9 @@ def put_concert_prop(props: dict, type_map: dict, key: str, value) -> None:
     elif ptype == "email":
         props[key] = {"email": str(value) if value else None}
 
+    elif ptype == "phone_number":
+        props[key] = {"phone_number": str(value) if value else None}
+
     elif ptype == "url":
         props[key] = {"url": str(value) if value else None}
 
@@ -322,6 +325,8 @@ def extract_prop_text(page: dict, prop_name: str) -> str:
         return ((meta.get("date") or {}).get("start") or "")
     if ptype == "email":
         return (meta.get("email") or "")
+    if ptype == "phone_number":
+        return (meta.get("phone_number") or "")
     if ptype == "url":
         return (meta.get("url") or "")
     if ptype == "formula":
