@@ -10,13 +10,14 @@ from concert.services.keys import (
     PRACTICE_SONG_REL_KEYS,
     SONG_NAME_KEYS, SONG_CONCERT_REL_KEYS,
     INSTRUMENT_NAME_KEYS,
+    PARTDEF_KEY_KEYS, PARTDEF_RECORD_KEYS, PARTDEF_CONCERT_REL_KEYS,
     PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS, PARTDEF_NAME_KEYS,
     PARTICIPANT_RECORD_KEYS, PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
     PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_FEE_KEYS,
     PLAYER_NAME_KEYS,
     ATTENDANCE_KEY_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
-    PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
+    PREFERENCE_KEY_KEYS, PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     EXPENSE_KEY_KEYS, EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS,
     EXPENSE_CONTENT_KEYS, EXPENSE_AMOUNT_KEYS, EXPENSE_CONFIRMED_KEYS,
     PLAYER_HN_KEYS, PLAYER_PHONE_KEYS, PLAYER_LINE_KEYS,
@@ -97,6 +98,7 @@ def _seed_all(ctx) -> dict:
         props = {}
         _put(ctx, props, tp, PLAYER_NAME_KEYS,  f"{TEST_PREFIX} {name}")
         _put(ctx, props, tp, PLAYER_HN_KEYS,    hn)
+        _put(ctx, props, tp, PLAYER_EMAIL_KEYS, f"test_{name.lower().replace(' ','')}@example.com")
         _put(ctx, props, tp, PLAYER_PHONE_KEYS, phone)
         _put(ctx, props, tp, PLAYER_LINE_KEYS,  line_id)
         pid = track(_create(ctx, player_db, props))
@@ -175,12 +177,26 @@ def _seed_all(ctx) -> dict:
     tpd = _p(ctx, partdef_db)
     partdef_ids = []
     part_names = ["Part1 Timp.", "Part2 S.D.", "Part3 Mar."]
+    # 曲名マップ
+    song_name_map = {s.get("id",""): ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or ""
+                     for s in ctx["query_all"](ctx["CONCERT_DB_SONG"], None)}
+    inst_name_map_pd = {i.get("id",""): ctx["extract_prop_text_any"](i, INSTRUMENT_NAME_KEYS) or ""
+                        for i in ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"], None)}
+    part_no = 0
     for sid in song_ids:
+        sname = song_name_map.get(sid, sid[:8])
         for pname, iid in zip(part_names, instrument_ids):
+            iname = inst_name_map_pd.get(iid, iid[:8])
             props = {}
-            _put(ctx, props, tpd, PARTDEF_NAME_KEYS,     f"{TEST_PREFIX} {pname}")
-            _put(ctx, props, tpd, PARTDEF_SONG_REL_KEYS, sid)
-            _put(ctx, props, tpd, PARTDEF_INST_REL_KEYS, iid)
+            # songs.pyと同じ形式でタイトル設定
+            _put(ctx, props, tpd, PARTDEF_RECORD_KEYS,      f"{TEST_PREFIX} {sname} / {pname} / {iname}")
+            _put(ctx, props, tpd, PARTDEF_CONCERT_REL_KEYS, concert_id)
+            _put(ctx, props, tpd, PARTDEF_SONG_REL_KEYS,    sid)
+            _put(ctx, props, tpd, PARTDEF_INST_REL_KEYS,    iid)
+            _put(ctx, props, tpd, PARTDEF_NAME_KEYS,        f"{TEST_PREFIX} {pname}")
+            ctx["put_key_any"](props, tpd, PARTDEF_KEY_KEYS,
+                               concert_id, sid, part_no, pname, iid, prefix="part")
+            part_no += 1
             pd_id = track(_create(ctx, partdef_db, props))
             if pd_id:
                 partdef_ids.append(pd_id)
@@ -278,7 +294,7 @@ def _seed_all(ctx) -> dict:
     for i, (pid, cast_id) in enumerate(zip(player_ids[:2], cast_ids[:2])):
         for j, pd_id in enumerate(partdef_ids[:3]):
             props = {}
-            ctx["put_key_any"](props, tpref, ["record_key", "タイトル", "PK"],
+            ctx["put_key_any"](props, tpref, PREFERENCE_KEY_KEYS,
                                cast_id, pd_id, prefix="pref")
             _put(ctx, props, tpref, PREF_PLAYER_REL_KEYS, cast_id)
             _put(ctx, props, tpref, PREF_PART_REL_KEYS,   pd_id)

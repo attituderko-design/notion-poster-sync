@@ -11,7 +11,8 @@ from concert.services.keys import (
     CONCERT_CONDUCTOR_KEYS, CONCERT_SOLOIST_KEYS,
     PRACTICE_NAME_KEYS, PRACTICE_DATE_KEYS, PRACTICE_VENUE_KEYS,
     PRACTICE_CONCERT_REL_KEYS, PRACTICE_CONCERT_DAY_KEYS,
-    PARTICIPANT_PART_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
+    PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_ROLE_OPS_KEYS,
+    PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
     PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_RECORD_KEYS,
     PARTDEF_NAME_KEYS, PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS,
     SONG_NAME_KEYS, SONG_CREATOR_KEYS, SONG_CONCERT_REL_KEYS,
@@ -20,7 +21,7 @@ from concert.services.keys import (
     PLAYER_PHONE_KEYS, PLAYER_LINE_KEYS,
     ATTENDANCE_KEY_KEYS, ATT_RECORD_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
-    PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
+    PREFERENCE_KEY_KEYS, PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     CONCERT_CONFIRMED_FEE_KEYS,
 )
 
@@ -174,7 +175,7 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                                 st.session_state.get("form_player_part", ""))
             confirmed_fee = st.session_state.get(f"confirmed_fee_{concert_id}")
             if confirmed_fee is not None:
-                ctx["put_prop_any"](props, t_cast, ["参加費", "Fee"], confirmed_fee)
+                ctx["put_prop_any"](props, t_cast, PARTICIPANT_FEE_KEYS, confirmed_fee)
             res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                                      json={"parent": {"database_id": cast_db}, "properties": props})
             if res and res.status_code == 200:
@@ -279,7 +280,7 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                         break
                 pref_target = cast_id if cast_id else player_id
                 props = {}
-                ctx["put_key_any"](props, t_pref, ["record_key", "タイトル", "PK"],
+                ctx["put_key_any"](props, t_pref, PREFERENCE_KEY_KEYS,
                                    pref_target, pd_id, prefix="pref")
                 ctx["put_prop_any"](props, t_pref, PREF_PLAYER_REL_KEYS, pref_target)
                 ctx["put_prop_any"](props, t_pref, PREF_PART_REL_KEYS,   pd_id)
