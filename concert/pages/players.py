@@ -279,12 +279,16 @@ def _create_player(ctx: dict, name: str, email: str, memo: str) -> bool:
     return res is not None and res.status_code == 200
 
 
-def _update_player(ctx: dict, page_id: str, name: str, email: str, memo: str) -> bool:
+def _update_player(ctx: dict, page_id: str, name: str, email: str = "", memo: str = "",
+                    hn: str = "", phone: str = "", line_id: str = "") -> bool:
     t = ctx["get_prop_types"](ctx["CONCERT_DB_PLAYER"])
     props = {}
-    ctx["put_prop_any"](props, t, PLAYER_NAME_KEYS, name)
+    ctx["put_prop_any"](props, t, PLAYER_NAME_KEYS,  name)
     ctx["put_prop_any"](props, t, PLAYER_EMAIL_KEYS, email)
-    ctx["put_prop_any"](props, t, PLAYER_MEMO_KEYS, memo)
+    ctx["put_prop_any"](props, t, PLAYER_MEMO_KEYS,  memo)
+    ctx["put_prop_any"](props, t, PLAYER_HN_KEYS,    hn)
+    ctx["put_prop_any"](props, t, PLAYER_PHONE_KEYS, phone)
+    ctx["put_prop_any"](props, t, PLAYER_LINE_KEYS,  line_id)
     ctx["put_key_any"](props, t, PLAYER_KEY_KEYS, name, prefix="player")
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
     return res is not None and res.status_code == 200
