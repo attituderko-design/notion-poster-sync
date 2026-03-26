@@ -273,13 +273,15 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                 for r in all_pref:
                     pl = ext_rel(r, PREF_PLAYER_REL_KEYS)
                     pd = ext_rel(r, PREF_PART_REL_KEYS)
-                    if player_id in pl and pd_id in pd:
+                    pref_id_check = cast_id if cast_id else player_id
+                    if pref_id_check in pl and pd_id in pd:
                         existing_id = r.get("id", "")
                         break
+                pref_target = cast_id if cast_id else player_id
                 props = {}
                 ctx["put_key_any"](props, t_pref, ["record_key", "タイトル", "PK"],
-                                   player_id, pd_id, prefix="pref")
-                ctx["put_prop_any"](props, t_pref, PREF_PLAYER_REL_KEYS, player_id)
+                                   pref_target, pd_id, prefix="pref")
+                ctx["put_prop_any"](props, t_pref, PREF_PLAYER_REL_KEYS, pref_target)
                 ctx["put_prop_any"](props, t_pref, PREF_PART_REL_KEYS,   pd_id)
                 ctx["put_prop_any"](props, t_pref, PREF_PRIORITY_KEYS,   priority)
                 if existing_id:

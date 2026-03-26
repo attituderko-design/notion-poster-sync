@@ -275,12 +275,12 @@ def _seed_all(ctx) -> dict:
     tpref = _p(ctx, pref_db)
     pref_count = 0
     priorities = ["第1希望", "第2希望", "希望なし/降り番でも可"]
-    for i, pid in enumerate(player_ids[:2]):
+    for i, (pid, cast_id) in enumerate(zip(player_ids[:2], cast_ids[:2])):
         for j, pd_id in enumerate(partdef_ids[:3]):
             props = {}
             ctx["put_key_any"](props, tpref, ["record_key", "タイトル", "PK"],
-                               pid, pd_id, prefix="pref")
-            _put(ctx, props, tpref, PREF_PLAYER_REL_KEYS, pid)
+                               cast_id, pd_id, prefix="pref")
+            _put(ctx, props, tpref, PREF_PLAYER_REL_KEYS, cast_id)
             _put(ctx, props, tpref, PREF_PART_REL_KEYS,   pd_id)
             _put(ctx, props, tpref, PREF_PRIORITY_KEYS,   priorities[j % len(priorities)])
             pref_id = track(_create(ctx, pref_db, props))
