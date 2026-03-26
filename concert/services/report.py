@@ -275,15 +275,16 @@ def generate_assign_report(
                     sc   = 0.0
                 tied_mark = " ⚠" if a.get("tied") else ""
                 detail_rows.append([
-                    player_name_map.get(a["player_id"], a["player_name"]),
-                    a["part_name"],
-                    hope + tied_mark,
-                    f"{sc:.1f}",
+                    Paragraph(player_name_map.get(a["player_id"], a["player_name"]), dname_s),
+                    Paragraph(a["part_name"], dcell_s),
+                    Paragraph(hope + tied_mark, dcell_s),
+                    Paragraph(f"{sc:.1f}", dcell_s),
                 ])
 
             # 曲別一覧もParagraphで折り返し
-            dcell_s = ParagraphStyle("dc", fontName=font,   fontSize=8, leading=11, alignment=TA_LEFT)
-            dhdr_s  = ParagraphStyle("dh", fontName=font_b, fontSize=8, leading=11, alignment=TA_LEFT)
+            dcell_s = ParagraphStyle("dc",  fontName=font,   fontSize=7.5, leading=10, alignment=TA_LEFT)
+            dname_s = ParagraphStyle("dn",  fontName=font,   fontSize=6.5, leading=9,  alignment=TA_LEFT)
+            dhdr_s  = ParagraphStyle("dh",  fontName=font_b, fontSize=7.5, leading=10, alignment=TA_LEFT)
             detail_rows_p = []
             for ri, row in enumerate(detail_rows):
                 new_row = []
@@ -295,7 +296,7 @@ def generate_assign_report(
                         new_row.append(cell)
                 detail_rows_p.append(new_row)
 
-            dtbl = Table(detail_rows_p, colWidths=[28*mm, 90*mm, 18*mm, 14*mm], repeatRows=1)
+            dtbl = Table(detail_rows_p, colWidths=[32*mm, 85*mm, 22*mm, 11*mm], repeatRows=1)
             dtbl.hAlign = "LEFT"
             dtbl.setStyle(TableStyle([
                 ("FONT",        (0,0), (-1,-1), font,   8),
@@ -341,7 +342,7 @@ def generate_assign_report(
          "最大250回の改善試行で候補案を洗練させる。"],
     ]
     algo_tbl = Table(
-        [[Paragraph(str(c), st["cellb"] if i==0 else st["cell"])
+        [[Paragraph(str(c), st["cellb_wht"] if i==0 else st["cell"])
           for c in row]
          for i, row in enumerate(algo_data)],
         colWidths=[22*mm, 28*mm, _tips_W - 50*mm],
@@ -386,7 +387,7 @@ def generate_assign_report(
          "人数と曲数のバランスが悪い場合に有効。"],
     ]
     cand_tbl = Table(
-        [[Paragraph(str(c), st["cellb"] if i==0 else st["cell"])
+        [[Paragraph(str(c), st["cellb_wht"] if i==0 else st["cell"])
           for c in row]
          for i, row in enumerate(candidates_data)],
         colWidths=[28*mm, 55*mm, _tips_W - 83*mm],
@@ -421,7 +422,7 @@ def generate_assign_report(
         ["NG",                   "対象外", "割り当て不可。このパートには絶対に割り当てない"],
     ]
     score_tbl = Table(
-        [[Paragraph(str(c), st["cellb"] if i==0 else st["cell"])
+        [[Paragraph(str(c), st["cellb_wht"] if i==0 else st["cell"])
           for c in row]
          for i, row in enumerate(score_data)],
         colWidths=[48*mm, 18*mm, _tips_W - 66*mm],
