@@ -11,7 +11,6 @@ from concert.services.keys import (
     CONCERT_CONDUCTOR_KEYS, CONCERT_SOLOIST_KEYS,
     PRACTICE_NAME_KEYS, PRACTICE_DATE_KEYS, PRACTICE_VENUE_KEYS,
     PRACTICE_CONCERT_REL_KEYS, PRACTICE_CONCERT_DAY_KEYS,
-    PRACTICE_PERCUSSION_OFF_KEYS,
     PARTICIPANT_PART_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
     PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_RECORD_KEYS,
     PARTDEF_NAME_KEYS, PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS,
@@ -19,17 +18,17 @@ from concert.services.keys import (
     INSTRUMENT_NAME_KEYS,
     PLAYER_NAME_KEYS, PLAYER_HN_KEYS, PLAYER_EMAIL_KEYS,
     PLAYER_PHONE_KEYS, PLAYER_LINE_KEYS,
-    ATT_RECORD_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS, ATT_NOTE_KEYS,
+    ATT_RECORD_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
     PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     CONCERT_CONFIRMED_FEE_KEYS,
 )
 
-_TOKEN_SECRET  = "harmonia_form_2024"
-PRIORITY_OPTS  = ["第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
-ATT_OPTS       = ["○", "△", "×"]
-OTHER_PART     = "一覧にない（管理者に連絡）"
-IS_PERC        = lambda part: (part or "").lower() in ("perc", "percussion", "打楽器")
+_TOKEN_SECRET = "harmonia_form_2024"
+PRIORITY_OPTS = ["第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
+ATT_OPTS      = ["○", "△", "×"]
+OTHER_PART    = "一覧にない（管理者に連絡）"
+IS_PERC       = lambda p: (p or "").lower() in ("perc", "percussion", "打楽器")
 
 # ── トークン ──────────────────────────────────────────────────
 
@@ -55,53 +54,53 @@ def shorten_url(long_url: str) -> str:
 # ── データ一括取得（初回のみ） ────────────────────────────────
 
 def _load_form_data(ctx, concert_id: str):
-    """フォーム表示に必要な全データをsession_stateにキャッシュ。"""
     if st.session_state.get("form_data_loaded") == concert_id:
-        return  # 既にロード済み
-
+        return
     ext     = ctx["extract_prop_text_any"]
     ext_rel = ctx["extract_relation_ids_any"]
 
-    # 演奏会
     concert_rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT"], None)
     concert = next((r for r in concert_rows if r.get("id") == concert_id), None)
 
-    # 練習一覧（本番除く、日付順）
     all_prac = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"], None)
+    # 練習回のみ（本番当日除く）
     practices = sorted(
         [p for p in all_prac
          if concert_id in ext_rel(p, PRACTICE_CONCERT_REL_KEYS)
          and ext(p, PRACTICE_CONCERT_DAY_KEYS) != "True"],
         key=lambda p: ext(p, PRACTICE_DATE_KEYS) or "9999"
     )
+    # 本番当日レコード
+    concert_day = next(
+        (p for p in all_prac
+         if concert_id in ext_rel(p, PRACTICE_CONCERT_REL_KEYS)
+         and ext(p, PRACTICE_CONCERT_DAY_KEYS) == "True"),
+        None
+    )
 
-    # 楽曲一覧
     all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
     songs = [s for s in all_songs
              if concert_id in ext_rel(s, SONG_CONCERT_REL_KEYS)]
     song_ids = {s.get("id","") for s in songs}
 
-    # パート定義
     all_pd = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
     partdefs = [p for p in all_pd
                 if any(sid in ext_rel(p, PARTDEF_SONG_REL_KEYS) for sid in song_ids)]
 
-    # 楽器
     instruments = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"], None)
     inst_map = {i.get("id",""): ext(i, INSTRUMENT_NAME_KEYS) or "" for i in instruments}
 
-    # 必要楽器（パート定義から）
     req_inst_ids: set[str] = set()
     for pd in partdefs:
         req_inst_ids.update(ext_rel(pd, PARTDEF_INST_REL_KEYS))
 
-    # パート選択肢（CONCERT_CASTから）
     part_opts = _get_select_opts(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_PART_KEYS)
 
     st.session_state.update({
         "form_data_loaded": concert_id,
         "form_concert":     concert,
         "form_practices":   practices,
+        "form_concert_day": concert_day,
         "form_songs":       songs,
         "form_partdefs":    partdefs,
         "form_inst_map":    inst_map,
@@ -128,16 +127,17 @@ def _get_select_opts(ctx, db_id: str, field_keys: list) -> list[str]:
 
 def _submit_all(ctx, concert_id: str, concert_name: str,
                 player_id: str, player_name: str,
-                att: dict, pref: dict, own: dict) -> tuple[int, list[str]]:
-    """全データをまとめてNotionに送信。成功件数とエラーリストを返す。"""
-    ext_rel = ctx["extract_relation_ids_any"]
-    ok_n    = 0
-    errors  = []
+                att: dict, pref: dict, own: dict) -> tuple[int, list[str], dict]:
+    """全データをNotionに送信。(成功件数, エラーリスト, デバッグ情報)を返す。"""
+    ext_rel  = ctx["extract_relation_ids_any"]
+    ok_n     = 0
+    errors: list[str] = []
+    debug: dict = {}  # テスト用デバッグ情報
 
-    # ── CONCERT_CAST登録（参加者として追加） ──────────────────
+    # ── CONCERT_CAST ──────────────────────────────────────────
     cast_db = ctx["CONCERT_DB_PARTICIPANT"]
     t_cast  = ctx["get_prop_types"](cast_db)
-    cast_id = ""  # ATTENDANCEのリレーション先として使用
+    cast_id = ""
     if t_cast:
         all_cast = ctx["query_all"](cast_db, None)
         for r in all_cast:
@@ -147,10 +147,9 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                 cast_id = r.get("id", "")
                 break
         if not cast_id:
-            # 新規登録
             props: dict = {}
             ctx["put_prop_any"](props, t_cast, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
-            ctx["put_prop_any"](props, t_cast, PARTICIPANT_PLAYER_REL_KEYS, player_id)
+            ctx["put_prop_any"](props, t_cast, PARTICIPANT_PLAYER_REL_KEYS,  player_id)
             ctx["put_key_any"](props, t_cast, PARTICIPANT_RECORD_KEYS,
                                concert_id, player_id, prefix="participant")
             ctx["put_prop_any"](props, t_cast, PARTICIPANT_PART_KEYS,
@@ -163,15 +162,14 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
             if res and res.status_code == 200:
                 cast_id = res.json().get("id", "")
                 ok_n += 1
+                debug["cast_id"] = cast_id
             else:
-                errors.append("演奏会参加者の登録に失敗しました")
+                errors.append(f"CONCERT_CAST登録失敗 (status={getattr(res,'status_code','?')})")
         else:
-            # 既存レコードにパートを書き込む（空欄の場合のみ）
-            existing_part = ctx["extract_prop_text_any"](
-                next((r for r in all_cast if r.get("id","") == cast_id), {}),
-                PARTICIPANT_PART_KEYS
-            ) or ""
-            if not existing_part:
+            debug["cast_id"] = cast_id + "（既存）"
+            # 既存レコードのパートが空なら書き込む
+            existing_row = next((r for r in all_cast if r.get("id","") == cast_id), {})
+            if not ctx["extract_prop_text_any"](existing_row, PARTICIPANT_PART_KEYS):
                 props_p: dict = {}
                 ctx["put_prop_any"](props_p, t_cast, PARTICIPANT_PART_KEYS,
                                     st.session_state.get("form_player_part", ""))
@@ -179,17 +177,30 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                     f"https://api.notion.com/v1/pages/{cast_id}",
                     json={"properties": props_p})
 
-    # ── 出欠登録 ──────────────────────────────────────────────
+    debug["player_id"] = player_id
+
+    # ── ATTENDANCE（練習回 + 本番当日を○で自動登録） ──────────
     att_db = ctx["CONCERT_DB_ATTENDANCE"]
     t_att  = ctx["get_prop_types"](att_db)
     if t_att:
         all_att = ctx["query_all"](att_db, None)
         practices = st.session_state.get("form_practices", [])
+        concert_day = st.session_state.get("form_concert_day")
         prac_name_map = {p.get("id",""): ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or ""
                          for p in practices}
-        for pr_id, status in att.items():
+        if concert_day:
+            prac_name_map[concert_day.get("id","")] = \
+                ctx["extract_prop_text_any"](concert_day, PRACTICE_NAME_KEYS) or "本番当日"
+
+        # 練習回の出欠 + 本番当日を○で追加
+        att_all = dict(att)
+        if concert_day:
+            att_all[concert_day.get("id","")] = "○"
+
+        check_id = cast_id if cast_id else player_id
+        att_ids: list[str] = []
+        for pr_id, status in att_all.items():
             existing_id = ""
-            check_id = cast_id if cast_id else player_id
             for r in all_att:
                 pl = ext_rel(r, ATT_PLAYER_REL_KEYS)
                 pr = ext_rel(r, ATT_PRACTICE_REL_KEYS)
@@ -199,11 +210,8 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
             pname = prac_name_map.get(pr_id, "")
             props = {}
             ctx["put_key_any"](props, t_att, ATT_RECORD_KEYS,
-                               pr_id, cast_id if cast_id else player_id,
-                               prefix="att")
-            # ATTENDANCEはCONCERT_CASTへのリレーション
-            ctx["put_prop_any"](props, t_att, ATT_PLAYER_REL_KEYS,
-                                cast_id if cast_id else player_id)
+                               pr_id, check_id, prefix="att")
+            ctx["put_prop_any"](props, t_att, ATT_PLAYER_REL_KEYS,   check_id)
             ctx["put_prop_any"](props, t_att, ATT_PRACTICE_REL_KEYS, pr_id)
             ctx["put_prop_any"](props, t_att, ATT_STATUS_KEYS,        status)
             if existing_id:
@@ -216,10 +224,12 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                                                "properties": props})
             if res and res.status_code == 200:
                 ok_n += 1
+                att_ids.append(res.json().get("id","") if not existing_id else existing_id)
             else:
-                errors.append(f"出欠登録失敗：{pname}")
+                errors.append(f"出欠登録失敗：{pname} (status={getattr(res,'status_code','?')})")
+        debug["att_ids"] = att_ids
 
-    # ── パート希望登録 ────────────────────────────────────────
+    # ── パート希望 ────────────────────────────────────────────
     if pref:
         pref_db = ctx["CONCERT_DB_PREFERENCE"]
         t_pref  = ctx["get_prop_types"](pref_db)
@@ -236,8 +246,8 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                         existing_id = r.get("id", "")
                         break
                 props = {}
-                ctx["put_prop_any"](props, t_pref, ["record_key", "タイトル", "PK"],
-                                    f"希望_{player_id[:6]}_{pd_id[:6]}")
+                ctx["put_key_any"](props, t_pref, ["record_key", "タイトル", "PK"],
+                                   player_id, pd_id, prefix="pref")
                 ctx["put_prop_any"](props, t_pref, PREF_PLAYER_REL_KEYS, player_id)
                 ctx["put_prop_any"](props, t_pref, PREF_PART_REL_KEYS,   pd_id)
                 ctx["put_prop_any"](props, t_pref, PREF_PRIORITY_KEYS,   priority)
@@ -252,9 +262,9 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                 if res and res.status_code == 200:
                     ok_n += 1
                 else:
-                    errors.append(f"希望登録失敗：{pd_id[:8]}")
+                    errors.append(f"希望登録失敗：{pd_id[:8]} (status={getattr(res,'status_code','?')})")
 
-    # ── 所有楽器登録 ──────────────────────────────────────────
+    # ── 所有楽器 ──────────────────────────────────────────────
     if own:
         pi_db  = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
         t_pi   = ctx["get_prop_types"](pi_db)
@@ -267,15 +277,14 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                 iname = inst_map.get(iid, iid)
                 existing_id = ""
                 for r in all_pi:
-                    pl = ext_rel(r, PI_PLAYER_REL_KEYS)
-                    ii = ext_rel(r, PI_INST_REL_KEYS)
-                    cc = ext_rel(r, PI_CONCERT_REL_KEYS)
-                    if player_id in pl and iid in ii and concert_id in cc:
+                    if (player_id in ext_rel(r, PI_PLAYER_REL_KEYS) and
+                            iid in ext_rel(r, PI_INST_REL_KEYS) and
+                            concert_id in ext_rel(r, PI_CONCERT_REL_KEYS)):
                         existing_id = r.get("id", "")
                         break
                 props = {}
-                ctx["put_prop_any"](props, t_pi, ["record_key", "タイトル", "PK名称"],
-                                    f"{iname}_{player_id[:6]}")
+                ctx["put_key_any"](props, t_pi, ["record_key", "タイトル", "PK名称"],
+                                   player_id, iid, prefix="pi")
                 ctx["put_prop_any"](props, t_pi, PI_PLAYER_REL_KEYS,  player_id)
                 ctx["put_prop_any"](props, t_pi, PI_INST_REL_KEYS,    iid)
                 ctx["put_prop_any"](props, t_pi, PI_CONCERT_REL_KEYS, concert_id)
@@ -291,9 +300,11 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                 if res and res.status_code == 200:
                     ok_n += 1
                 else:
-                    errors.append(f"楽器登録失敗：{iname}")
+                    errors.append(f"楽器登録失敗：{iname} (status={getattr(res,'status_code','?')})")
 
-    return ok_n, errors
+    return ok_n, errors, debug
+
+# ── プライバシーポリシー ──────────────────────────────────────
 
 _PRIVACY_POLICY = """
 ## プライバシーポリシー
@@ -312,7 +323,7 @@ _PRIVACY_POLICY = """
 収集した個人情報を本演奏会の運営目的以外に使用せず、第三者に提供しません。
 
 ### 管理者
-ArtéMis HARMONIA開発者　喜田悠太  
+ArtéMis HARMONIA開発者　喜田悠太
 attituderko@gmail.com
 
 ### 開示・削除請求
@@ -328,16 +339,17 @@ def render_form(ctx, concert_id: str):
     ext = ctx["extract_prop_text_any"]
 
     # 初回のみデータ一括取得
-    with st.spinner("読み込み中...") if not st.session_state.get("form_data_loaded") else st.empty():
-        _load_form_data(ctx, concert_id)
+    if not st.session_state.get("form_data_loaded"):
+        with st.spinner("読み込み中..."):
+            _load_form_data(ctx, concert_id)
 
-    concert   = st.session_state["form_concert"]
-    practices = st.session_state["form_practices"]
-    songs     = st.session_state["form_songs"]
-    partdefs  = st.session_state["form_partdefs"]
-    inst_map  = st.session_state["form_inst_map"]
-    req_insts = st.session_state["form_req_insts"]
-    part_opts = st.session_state["form_part_opts"]
+    concert   = st.session_state.get("form_concert")
+    practices = st.session_state.get("form_practices", [])
+    songs     = st.session_state.get("form_songs", [])
+    partdefs  = st.session_state.get("form_partdefs", [])
+    inst_map  = st.session_state.get("form_inst_map", {})
+    req_insts = st.session_state.get("form_req_insts", [])
+    part_opts = st.session_state.get("form_part_opts", [OTHER_PART])
 
     if not concert:
         st.error("演奏会が見つかりません。URLを確認してください。")
@@ -351,14 +363,10 @@ def render_form(ctx, concert_id: str):
     c_soloist   = ext(concert, CONCERT_SOLOIST_KEYS) or ""
 
     st.title(f"🎵 {c_name}")
-    info_parts = []
-    if c_date:      info_parts.append(f"📅 本番日：{c_date}")
-    if c_venue:     info_parts.append(f"📍 会場：{c_venue}")
-    if c_conductor: info_parts.append(f"🎼 指揮：{c_conductor}")
-    if c_soloist:   info_parts.append(f"🌟 ソリスト：{c_soloist}")
-    for info in info_parts:
-        st.caption(info)
-
+    if c_date:      st.caption(f"📅 本番日：{c_date}")
+    if c_venue:     st.caption(f"📍 会場：{c_venue}")
+    if c_conductor: st.caption(f"🎼 指揮：{c_conductor}")
+    if c_soloist:   st.caption(f"🌟 ソリスト：{c_soloist}")
     if songs:
         st.caption("🎶 演奏曲目：" + "　/　".join(
             f"{ext(s, SONG_NAME_KEYS) or ''}（{ext(s, SONG_CREATOR_KEYS) or ''}）".strip("（）")
@@ -378,12 +386,16 @@ def render_form(ctx, concert_id: str):
             st.rerun()
         return
 
-    # ── STEP 1: 氏名・パート ──────────────────────────────────
+    # ── STEP 1: 氏名・連絡先・パート ──────────────────────────
     if step == 1:
-        st.subheader("Step 1 / 氏名とパートを入力してください")
+        st.subheader("Step 1 / 基本情報を入力してください")
         with st.form("step1"):
             name     = st.text_input("氏名 *", placeholder="例：山田太郎")
             hn       = st.text_input("H.N.（任意）", placeholder="例：酒席ティンパニ奏者")
+            email    = st.text_input("メールアドレス（任意）", placeholder="例：yamada@example.com")
+            phone    = st.text_input("電話番号（任意）", placeholder="例：09012345678")
+            line_id  = st.text_input("LINE ID（任意）", placeholder="例：yamada_taro")
+            st.divider()
             part_sel = st.selectbox("担当パート *", part_opts)
             part_other = ""
             if part_sel == OTHER_PART:
@@ -398,6 +410,7 @@ def render_form(ctx, concert_id: str):
             if not actual_part or actual_part == OTHER_PART:
                 st.error("パートを選択または入力してください。")
                 return
+
             with st.spinner("確認中..."):
                 players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
                 existing = next(
@@ -407,13 +420,26 @@ def render_form(ctx, concert_id: str):
                 )
                 if existing:
                     player_id = existing.get("id", "")
+                    # 連絡先の更新（入力があった場合のみ）
+                    t_pl = ctx["get_prop_types"](ctx["CONCERT_DB_PLAYER"])
+                    if t_pl and any([hn.strip(), email.strip(), phone.strip(), line_id.strip()]):
+                        upd: dict = {}
+                        if hn.strip():      ctx["put_prop_any"](upd, t_pl, PLAYER_HN_KEYS,    hn.strip())
+                        if email.strip():   ctx["put_prop_any"](upd, t_pl, PLAYER_EMAIL_KEYS, email.strip())
+                        if phone.strip():   ctx["put_prop_any"](upd, t_pl, PLAYER_PHONE_KEYS, phone.strip())
+                        if line_id.strip(): ctx["put_prop_any"](upd, t_pl, PLAYER_LINE_KEYS,  line_id.strip())
+                        ctx["api_request"]("patch",
+                            f"https://api.notion.com/v1/pages/{player_id}",
+                            json={"properties": upd})
                     st.session_state["form_is_new"] = False
                 else:
                     t_pl = ctx["get_prop_types"](ctx["CONCERT_DB_PLAYER"])
                     props = {}
                     ctx["put_prop_any"](props, t_pl, PLAYER_NAME_KEYS, name.strip())
-                    if hn.strip():
-                        ctx["put_prop_any"](props, t_pl, PLAYER_HN_KEYS, hn.strip())
+                    if hn.strip():      ctx["put_prop_any"](props, t_pl, PLAYER_HN_KEYS,    hn.strip())
+                    if email.strip():   ctx["put_prop_any"](props, t_pl, PLAYER_EMAIL_KEYS, email.strip())
+                    if phone.strip():   ctx["put_prop_any"](props, t_pl, PLAYER_PHONE_KEYS, phone.strip())
+                    if line_id.strip(): ctx["put_prop_any"](props, t_pl, PLAYER_LINE_KEYS,  line_id.strip())
                     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                                              json={"parent": {"database_id": ctx["CONCERT_DB_PLAYER"]},
                                                    "properties": props})
@@ -427,25 +453,25 @@ def render_form(ctx, concert_id: str):
             st.session_state.update({
                 "form_player_id":   player_id,
                 "form_player_name": name.strip(),
-                "form_player_hn":   hn.strip(),
                 "form_player_part": actual_part,
-                "form_att":         {},
-                "form_pref":        {},
-                "form_own":         {},
-                "form_step":        2,
+                "form_att":  {},
+                "form_pref": {},
+                "form_own":  {},
+                "form_step": 2,
             })
             st.rerun()
 
     # ── STEP 2: 出欠 ──────────────────────────────────────────
     elif step == 2:
-        pname = st.session_state.get("form_player_name","")
-        part  = st.session_state.get("form_player_part","")
+        pname  = st.session_state.get("form_player_name","")
+        part   = st.session_state.get("form_player_part","")
         is_new = st.session_state.get("form_is_new", False)
 
         st.subheader("Step 2 / 練習出欠を入力してください")
         st.caption(f"👤 {pname}　　パート：{part}")
         if is_new:
             st.success("✅ 新規奏者として登録しました。")
+        st.caption("※ 本番当日の出席は自動で登録されます。")
 
         if not practices:
             st.info("練習日が登録されていません。")
@@ -457,19 +483,15 @@ def render_form(ctx, concert_id: str):
         with st.form("step2"):
             att: dict[str, str] = {}
             for p in practices:
-                pr_id   = p.get("id", "")
-                pr_name = ext(p, PRACTICE_NAME_KEYS) or pr_id
-                pr_date = (ext(p, PRACTICE_DATE_KEYS) or "")[:10]
-                pr_venue= ext(p, PRACTICE_VENUE_KEYS) or ""
-                pr_date_str = ext(p, PRACTICE_DATE_KEYS) or ""
-                # 時刻表示
-                if pr_date_str and "T" in pr_date_str:
-                    time_str = pr_date_str.split("T")[1][:5]
-                    label = f"**{pr_name}**　{pr_date} {time_str}"
-                else:
-                    label = f"**{pr_name}**　{pr_date}"
-                if pr_venue:
-                    label += f"　📍{pr_venue}"
+                pr_id    = p.get("id","")
+                pr_name  = ext(p, PRACTICE_NAME_KEYS) or pr_id
+                pr_date  = ext(p, PRACTICE_DATE_KEYS) or ""
+                pr_venue = ext(p, PRACTICE_VENUE_KEYS) or ""
+                date_disp = pr_date[:10] if pr_date else "日時未設定"
+                time_disp = pr_date[11:16] if len(pr_date) > 10 else ""
+                label = f"**{pr_name}**　{date_disp}"
+                if time_disp: label += f" {time_disp}"
+                if pr_venue:  label += f"　📍 {pr_venue}"
                 st.markdown(label)
                 val = st.radio("　", ATT_OPTS, index=1, horizontal=True,
                                key=f"att_{pr_id}", label_visibility="collapsed")
@@ -485,6 +507,7 @@ def render_form(ctx, concert_id: str):
     # ── STEP 3: パート希望（Percのみ） ───────────────────────
     elif step == 3:
         st.subheader("Step 3 / パート希望を入力してください")
+        st.caption("希望するパートに第1希望〜第3希望を入力してください。それ以外のパートは「希望なし/降り番でも可」を選択してください。")
 
         if not partdefs:
             st.info("パート定義がまだ登録されていません。スキップします。")
@@ -493,17 +516,26 @@ def render_form(ctx, concert_id: str):
             st.rerun()
             return
 
+        # 曲ごとにグループ化
         song_name_map = {s.get("id",""): ext(s, SONG_NAME_KEYS) or "" for s in songs}
+        from collections import defaultdict
+        pd_by_song: dict[str, list] = defaultdict(list)
+        for pd in partdefs:
+            sids = ctx["extract_relation_ids_any"](pd, PARTDEF_SONG_REL_KEYS)
+            sid = sids[0] if sids else "__none__"
+            pd_by_song[sid].append(pd)
+
         with st.form("step3"):
             pref: dict[str, str] = {}
-            for pd in partdefs:
-                pd_id   = pd.get("id","")
-                pd_name = ext(pd, PARTDEF_NAME_KEYS) or pd_id
-                sids    = ctx["extract_relation_ids_any"](pd, PARTDEF_SONG_REL_KEYS)
-                sname   = song_name_map.get(sids[0], "") if sids else ""
-                label   = f"【{sname}】{pd_name}" if sname else pd_name
-                val = st.selectbox(label, PRIORITY_OPTS, index=3, key=f"pref_{pd_id}")
-                pref[pd_id] = val
+            for sid, pds in pd_by_song.items():
+                sname = song_name_map.get(sid, "曲目未設定")
+                st.markdown(f"**🎵 {sname}**")
+                for pd in pds:
+                    pd_id   = pd.get("id","")
+                    pd_name = ext(pd, PARTDEF_NAME_KEYS) or pd_id
+                    val = st.selectbox(pd_name, PRIORITY_OPTS, index=3, key=f"pref_{pd_id}")
+                    pref[pd_id] = val
+                st.divider()
             submitted = st.form_submit_button("次へ →", type="primary",
                                               use_container_width=True)
         if submitted:
@@ -518,7 +550,7 @@ def render_form(ctx, concert_id: str):
 
         if not req_insts:
             st.info("必要楽器の情報がありません。スキップします。")
-            st.session_state["form_own"] = {}
+            st.session_state["form_own"]  = {}
             st.session_state["form_step"] = 5
             st.rerun()
             return
@@ -527,46 +559,42 @@ def render_form(ctx, concert_id: str):
             own: dict[str, int] = {}
             for iid in req_insts:
                 iname = inst_map.get(iid, iid)
-                val = st.number_input(f"{iname}", min_value=0, max_value=10,
+                val = st.number_input(iname, min_value=0, max_value=10,
                                       step=1, value=0, key=f"own_{iid}")
                 own[iid] = int(val)
             submitted = st.form_submit_button("次へ →", type="primary",
                                               use_container_width=True)
         if submitted:
-            st.session_state["form_own"] = own
+            st.session_state["form_own"]  = own
             st.session_state["form_step"] = 5
             st.rerun()
 
     # ── STEP 5: 確認・送信 ───────────────────────────────────
     elif step == 5:
-        player_id   = st.session_state.get("form_player_id","")
-        player_name = st.session_state.get("form_player_name","")
-        part        = st.session_state.get("form_player_part","")
-        att         = st.session_state.get("form_att", {})
-        pref        = st.session_state.get("form_pref", {})
-        own         = st.session_state.get("form_own", {})
+        player_id    = st.session_state.get("form_player_id","")
+        player_name  = st.session_state.get("form_player_name","")
+        part         = st.session_state.get("form_player_part","")
+        att          = st.session_state.get("form_att",  {})
+        pref         = st.session_state.get("form_pref", {})
+        own          = st.session_state.get("form_own",  {})
         concert_name = ext(concert, CONCERT_NAME_KEYS) or ""
 
         st.subheader("Step 5 / 内容を確認して送信してください")
         st.markdown(f"**氏名：** {player_name}　　**パート：** {part}")
 
-        # 出欠確認
         if att:
             with st.expander("出欠", expanded=True):
-                prac_map = {p.get("id",""): ext(p, PRACTICE_NAME_KEYS) or p.get("id","")
-                            for p in practices}
+                prac_map = {p.get("id",""): ext(p, PRACTICE_NAME_KEYS) or "" for p in practices}
                 for pr_id, status in att.items():
                     st.write(f"{prac_map.get(pr_id, pr_id)}：**{status}**")
+                st.caption("※ 本番当日は自動で○が登録されます。")
 
-        # パート希望確認
         if pref:
             with st.expander("パート希望", expanded=True):
-                pd_map = {p.get("id",""): ext(p, PARTDEF_NAME_KEYS) or p.get("id","")
-                          for p in partdefs}
+                pd_map = {p.get("id",""): ext(p, PARTDEF_NAME_KEYS) or "" for p in partdefs}
                 for pd_id, priority in pref.items():
                     st.write(f"{pd_map.get(pd_id, pd_id)}：**{priority}**")
 
-        # 所有楽器確認
         owned = {iid: cnt for iid, cnt in own.items() if cnt > 0}
         if owned:
             with st.expander("所有楽器", expanded=True):
@@ -580,35 +608,113 @@ def render_form(ctx, concert_id: str):
 
         if col2.button("✅ 送信する", type="primary", use_container_width=True):
             with st.spinner("送信中..."):
-                ok_n, errors = _submit_all(
+                ok_n, errors, debug = _submit_all(
                     ctx, concert_id, concert_name,
                     player_id, player_name, att, pref, own
                 )
-            if errors:
-                st.error("一部の登録に失敗しました：")
-                for e in errors:
-                    st.caption(f"・{e}")
-            if ok_n > 0:
-                st.session_state["form_submit_count"] = ok_n
-                st.session_state["form_step"] = 6
-                st.rerun()
+            st.session_state["form_submit_count"] = ok_n
+            st.session_state["form_submit_errors"] = errors
+            st.session_state["form_submit_debug"]  = debug
+            st.session_state["form_step"] = 6
+            st.rerun()
 
     # ── STEP 6: 完了 ─────────────────────────────────────────
     elif step == 6:
         player_name = st.session_state.get("form_player_name","")
         ok_n        = st.session_state.get("form_submit_count", 0)
-        st.balloons()
-        st.success(f"✅ 送信完了！ {ok_n}件のデータが登録されました。")
+        errors      = st.session_state.get("form_submit_errors", [])
+        debug       = st.session_state.get("form_submit_debug", {})
+
+        if errors:
+            st.warning(f"⚠️ 一部の登録に失敗しました。")
+            for e in errors:
+                st.error(e)
+        else:
+            st.balloons()
+            st.success(f"✅ 送信完了！ {ok_n}件のデータが登録されました。")
         st.markdown(f"**{player_name}** さん、ありがとうございました。")
         st.info("このページを閉じて構いません。")
-        if st.button("別の方の入力をする", use_container_width=True):
-            for k in list(st.session_state.keys()):
-                if k.startswith("form_") and k not in ("form_data_loaded",):
-                    st.session_state.pop(k, None)
-            st.rerun()
+
+        # テスト用デバッグ情報（URLにdebug=1がある場合のみ表示）
+        if st.query_params.get("debug") == "1" and debug:
+            with st.expander("🔧 デバッグ情報", expanded=True):
+                for k, v in debug.items():
+                    st.code(f"{k}: {v}")
 
 
 # ── 管理者：URL生成UI ─────────────────────────────────────────
+
+def _delete_form_test_data(ctx, concert_id: str) -> dict:
+    """フォームから送信されたテストデータを一括削除。
+    対象：指定演奏会に紐づくATTENDANCE・CONCERT_CAST・PREFERENCE・PLAYER_INSTRUMENT。
+    PERFORMERは[TEST]プレフィックスのもののみ削除。
+    """
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext     = ctx["extract_prop_text_any"]
+    summary: dict[str, int] = {}
+
+    def archive(page_id: str) -> bool:
+        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
+                                 json={"archived": True})
+        return res is not None and res.status_code == 200
+
+    # 1. この演奏会のCONCERT_CASTを取得（後続の削除に使用）
+    all_cast = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+    cast_rows = [r for r in all_cast
+                 if concert_id in ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)]
+    cast_ids = {r.get("id","") for r in cast_rows}
+
+    # 2. ATTENDANCE（cast_idまたはplayer_idでリレーション）
+    all_att = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], None)
+    att_count = 0
+    for r in all_att:
+        pl_ids = ext_rel(r, ATT_PLAYER_REL_KEYS)
+        pr_ids = ext_rel(r, ATT_PRACTICE_REL_KEYS)
+        # 練習がこの演奏会に紐づいているか確認
+        all_pr = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"], None)
+        pr_concert_map = {p.get("id",""): ext_rel(p, PRACTICE_CONCERT_REL_KEYS) for p in all_pr}
+        if any(concert_id in pr_concert_map.get(pr_id, []) for pr_id in pr_ids):
+            if archive(r.get("id","")):
+                att_count += 1
+    if att_count: summary["ATTENDANCE"] = att_count
+
+    # 3. PREFERENCE（player_idで紐づく、この演奏会のパート定義に関連）
+    all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
+    song_ids = {s.get("id","") for s in all_songs
+                if concert_id in ext_rel(s, SONG_CONCERT_REL_KEYS)}
+    all_pd = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
+    pd_ids = {p.get("id","") for p in all_pd
+              if any(sid in ext_rel(p, PARTDEF_SONG_REL_KEYS) for sid in song_ids)}
+    all_pref = ctx["query_all"](ctx["CONCERT_DB_PREFERENCE"], None)
+    pref_count = 0
+    for r in all_pref:
+        if any(pd_id in ext_rel(r, PREF_PART_REL_KEYS) for pd_id in pd_ids):
+            if archive(r.get("id","")): pref_count += 1
+    if pref_count: summary["PREFERENCE"] = pref_count
+
+    # 4. PLAYER_INSTRUMENT（この演奏会に紐づく）
+    all_pi = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"], None)
+    pi_count = 0
+    for r in all_pi:
+        if concert_id in ext_rel(r, PI_CONCERT_REL_KEYS):
+            if archive(r.get("id","")): pi_count += 1
+    if pi_count: summary["PLAYER_INSTRUMENT"] = pi_count
+
+    # 5. CONCERT_CAST
+    cast_count = sum(1 for r in cast_rows if archive(r.get("id","")))
+    if cast_count: summary["CONCERT_CAST"] = cast_count
+
+    # 6. PERFORMER（[TEST]プレフィックスのみ）
+    from concert.services.keys import PLAYER_NAME_KEYS as PNK
+    all_pl = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    pl_count = 0
+    for r in all_pl:
+        if (ext(r, PNK) or "").startswith("[TEST]"):
+            if archive(r.get("id","")): pl_count += 1
+    if pl_count: summary["PERFORMER[TEST]"] = pl_count
+
+    return summary
+
 
 def render_url_generator(ctx: dict, concert_id: str, concert_name: str):
     if not concert_id:
@@ -630,5 +736,23 @@ def render_url_generator(ctx: dict, concert_id: str, concert_name: str):
         if short != long_url:
             st.success("短縮URL：")
             st.code(short, language=None)
+            st.caption("テスト用（デバッグ情報表示）：")
+            st.code(f"{long_url}&debug=1", language=None)
         else:
             st.warning("短縮に失敗しました。上のURLをそのまま使用してください。")
+
+    st.divider()
+    st.caption("🗑️ フォームテストデータ削除")
+    st.caption("この演奏会に紐づくATTENDANCE・CONCERT_CAST・PREFERENCE・PLAYER_INSTRUMENTを削除します。PERFORMERは[TEST]プレフィックスのもののみ対象。")
+    confirm = st.checkbox("削除対象を確認しました", key="form_test_delete_confirm")
+    if st.button("🗑️ フォームテストデータを削除", type="secondary",
+                 use_container_width=True, key="form_test_delete_btn",
+                 disabled=not confirm):
+        with st.spinner("削除中..."):
+            summary = _delete_form_test_data(ctx, concert_id)
+        if summary:
+            st.success("✅ 削除完了")
+            for k, v in summary.items():
+                st.caption(f"  {k}: {v}件")
+        else:
+            st.info("削除対象が見つかりませんでした。")
