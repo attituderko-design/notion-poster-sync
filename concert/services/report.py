@@ -277,7 +277,7 @@ def generate_assign_report(
                 else:
                     hope = "降り番"
                     sc   = 0.0
-                tied_mark = " ⚠" if a.get("tied") else ""
+                tied_mark = "※" if a.get("tied") else ""
                 detail_rows.append([
                     Paragraph(player_name_map.get(a["player_id"], a["player_name"]), dname_s),
                     Paragraph(a["part_name"], dcell_s),
