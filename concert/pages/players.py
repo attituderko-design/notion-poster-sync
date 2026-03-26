@@ -368,9 +368,10 @@ def _upsert_participant(
     part: str = "",
     role_music: str = "",
     role_ops: str = "",
+    _prop_types: dict | None = None,
 ) -> bool:
     db_id = ctx["CONCERT_DB_PARTICIPANT"]
-    t = ctx["get_prop_types"](db_id)
+    t = _prop_types if _prop_types is not None else ctx["get_prop_types"](db_id)
     if not t:
         st.error("演奏会参加者DBのプロパティ取得に失敗しました。")
         return False
@@ -385,22 +386,10 @@ def _upsert_participant(
         ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_KEYS, role_music)
     if role_ops:
         ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_OPS_KEYS, role_ops)
-    # 新規登録時のみ：ATLASの確定参加費を参照してセット（既存レコードは絶対に上書きしない）
+    # 新規登録時のみ：session_stateの確定参加費をセット
     if not existing_id:
-        confirmed_fee = st.session_state.get(f"confirmed_fee_{concert_id}", 0)
-        if confirmed_fee == 0:
-            # session_stateにない場合はATLASから取得
-            try:
-                t_c = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT"])
-                res_c = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{concert_id}")
-                if res_c and res_c.status_code == 200:
-                    fee_key = ctx["find_prop_name"](t_c, CONCERT_CONFIRMED_FEE_KEYS) if t_c else None
-                    if fee_key:
-                        num = res_c.json().get("properties", {}).get(fee_key, {}).get("number")
-                        confirmed_fee = int(num) if num else 0
-            except Exception:
-                confirmed_fee = 0
-        if confirmed_fee > 0:
+        confirmed_fee = st.session_state.get(f"confirmed_fee_{concert_id}")
+        if confirmed_fee is not None:
             ctx["put_prop_any"](props, t, PARTICIPANT_FEE_KEYS, confirmed_fee)
     if existing_id:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
@@ -691,6 +680,8 @@ def _render_player_tab(ctx: dict):
             pass
 
         with st.spinner("保存中..."):
+            # prop_typesを事前取得（ループ内でのAPI呼び出しを削減）
+            _t_cast = ctx["get_prop_types"](ctx["CONCERT_DB_PARTICIPANT"])
             df_reset = edited_cast.reset_index(drop=True)
             for idx, meta in enumerate(cast_meta):
                 if idx >= len(df_reset): break
@@ -725,6 +716,7 @@ def _render_player_tab(ctx: dict):
                     meta["pid"], meta["pname"], meta["rid"],
                     is_extra=new_extra,
                     part=new_part, role_music=new_role_m, role_ops=new_role_o,
+                    _prop_types=_t_cast,
                 )
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
