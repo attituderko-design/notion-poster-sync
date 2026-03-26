@@ -28,6 +28,9 @@ PRACTICE_PERCUSSION_OFF_KEYS = ["打楽器休み", "打楽器不要フラグ", "
 # ── PERFORMER（出演者）DB ────────────────────────────────────
 PLAYER_NAME_KEYS          = ["氏名", "名前", "表示名", "タイトル"]
 PLAYER_EMAIL_KEYS         = ["メールアドレス", "Email", "email"]
+PLAYER_HN_KEYS            = ["H.N.", "ハンドルネーム", "HN"]
+PLAYER_PHONE_KEYS         = ["電話番号", "Phone", "Tel"]
+PLAYER_LINE_KEYS          = ["LINE ID", "LINE", "Line"]
 PLAYER_MEMO_KEYS          = ["メモ", "備考"]
 PLAYER_KEY_KEYS           = ["player_key", "PlayerKey", "奏者キー", "PK奏者キー"]
 
