@@ -581,7 +581,6 @@ def _render_player_tab(ctx: dict):
             st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
         else:
             st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
-        st.session_state["player_master_version"] = master_version + 1
         _clear_player_cache()
         st.rerun()
 
