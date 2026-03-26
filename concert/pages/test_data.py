@@ -130,7 +130,11 @@ def _seed_all(ctx) -> dict:
     concert_db = ctx["CONCERT_DB_CONCERT"]
     tc = _p(ctx, concert_db)
     props = {}
-    _put(ctx, props, tc, CONCERT_NAME_KEYS, f"{TEST_PREFIX} テスト演奏会")
+    _put(ctx, props, tc, CONCERT_NAME_KEYS,      f"{TEST_PREFIX} テスト演奏会")
+    _put(ctx, props, tc, CONCERT_VENUE_KEYS,     "いずみホール")
+    _put(ctx, props, tc, CONCERT_ADDRESS_KEYS,   "大阪府大阪市中央区城見1丁目4-70")
+    _put(ctx, props, tc, CONCERT_CONDUCTOR_KEYS, "テスト指揮者 太郎")
+    _put(ctx, props, tc, CONCERT_SOLOIST_KEYS,   "テストソリスト 花子（Vn）")
     media_key = ctx["find_prop_name"](tc, ["媒体", "Media"])
     if media_key:
         mtype = tc.get(media_key, "")
