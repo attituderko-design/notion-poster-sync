@@ -755,6 +755,14 @@ def _render_solver_tab(ctx: dict):
 
     st.divider()
 
+    # デバッグ：pref_mapの中身確認
+    with st.expander("🔍 pref_mapデバッグ（希望データ確認）", expanded=False):
+        if results:
+            pm = results[0]["pref_map"]
+            st.caption(f"登録された希望件数: {len(pm)}件")
+            for k, v in list(pm.items())[:20]:
+                st.caption(f"`{k}` → player:{v.get('player_name','?')} priority:{v.get('priority','?')}")
+
     # PDFダウンロードボタン
     col_title, col_pdf = st.columns([6, 2])
     col_title.subheader("候補案比較")
