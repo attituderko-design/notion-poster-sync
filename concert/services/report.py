@@ -88,9 +88,11 @@ def generate_assign_report(
     # ── 表紙 ──────────────────────────────────────────────────
     story.append(Spacer(1, 20*mm))
     story.append(Paragraph("ArtéMis HARMONIA", st["subtitle"]))
-    story.append(Paragraph("パート割当 候補案", st["title"]))
     story.append(Spacer(1, 2*mm))
+    story.append(Paragraph("パート割当 候補案", st["title"]))
+    story.append(Spacer(1, 4*mm))
     story.append(Paragraph(concert_name, st["h2"]))
+    story.append(Spacer(1, 4*mm))
     story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CCCCCC")))
     story.append(Spacer(1, 6*mm))
 
@@ -310,6 +312,147 @@ def generate_assign_report(
                 dtbl,
                 Spacer(1, 2*mm),
             ]))
+
+    # ── アルゴリズム解説ページ ────────────────────────────────
+    story.append(PageBreak())
+    story.append(Paragraph("ArtéMis HARMONIA　アサイン検討 Tips", st["subtitle"]))
+    story.append(Spacer(1, 2*mm))
+    story.append(Paragraph("候補案の読み方・選び方", st["title"]))
+    story.append(Spacer(1, 4*mm))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CCCCCC")))
+    story.append(Spacer(1, 6*mm))
+
+    # アルゴリズム概要
+    story.append(Paragraph("■ 生成アルゴリズム", st["h2"]))
+    story.append(Spacer(1, 2*mm))
+    algo_data = [
+        ["フェーズ", "手法", "説明"],
+        ["第1段階", "貪欲法\n(Greedy)",
+         "スコアの高い希望から順に割り当てていく。\n"
+         "高速だが最初の割当に引きずられやすい。\n"
+         "各候補案の「たたき台」として使用。"],
+        ["第2段階", "局所探索\n(Local Search)",
+         "貪欲法の結果を出発点に、2人の割当を交換して\n"
+         "スコアが改善するなら採用する操作を繰り返す。\n"
+         "最大250回の改善試行で候補案を洗練させる。"],
+    ]
+    algo_tbl = Table(
+        [[Paragraph(str(c), st["cellb"] if i==0 else st["cell"])
+          for c in row]
+         for i, row in enumerate(algo_data)],
+        colWidths=[22*mm, 28*mm, W - 50*mm],
+        repeatRows=1,
+    )
+    algo_tbl.hAlign = "LEFT"
+    algo_tbl.setStyle(TableStyle([
+        ("FONT",         (0,0), (-1,-1), font,   8),
+        ("FONT",         (0,0), (-1, 0), font_b, 8),
+        ("BACKGROUND",   (0,0), (-1, 0), colors.HexColor("#2C2C6C")),
+        ("TEXTCOLOR",    (0,0), (-1, 0), colors.white),
+        ("GRID",         (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+        ("VALIGN",       (0,0), (-1,-1), "TOP"),
+        ("TOPPADDING",   (0,0), (-1,-1), 3),
+        ("BOTTOMPADDING",(0,0), (-1,-1), 3),
+        ("LEFTPADDING",  (0,0), (-1,-1), 4),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1), [colors.white, colors.HexColor("#F5F5F5")]),
+    ]))
+    story.append(algo_tbl)
+    story.append(Spacer(1, 6*mm))
+
+    # 候補案の説明
+    story.append(Paragraph("■ 4つの候補案", st["h2"]))
+    story.append(Spacer(1, 2*mm))
+    candidates_data = [
+        ["候補", "最適化の目標", "向いている状況"],
+        ["候補A\n第1希望率最大",
+         "第1希望が叶う人数を最大化",
+         "「絶対これをやりたい」という強い希望を優先したいとき。\n"
+         "第2・第3希望は後回しになりやすい点に注意。"],
+        ["候補B\n総スコア最大",
+         "全員の希望スコア合計（第1希望×3点・第2希望×2点・第3希望×1点）を最大化",
+         "全体として「満足度の総量」を最も高くしたいとき。\n"
+         "バランス型。多くの場合まずこれを確認するとよい。"],
+        ["候補C\n公平性重視",
+         "最も不満な人のスコアを底上げ（最低スコアを最大化）",
+         "「誰か一人が割を食う」状況を避けたいとき。\n"
+         "全体スコアより個人間の公平さを優先する。"],
+        ["候補D\n降り番均等",
+         "降り番（割当なし）の偏りを最小化（割当件数の標準偏差を最小化）",
+         "特定の人だけ降り番が多くなる状況を避けたいとき。\n"
+         "人数と曲数のバランスが悪い場合に有効。"],
+    ]
+    cand_tbl = Table(
+        [[Paragraph(str(c), st["cellb"] if i==0 else st["cell"])
+          for c in row]
+         for i, row in enumerate(candidates_data)],
+        colWidths=[28*mm, 55*mm, W - 83*mm],
+        repeatRows=1,
+    )
+    cand_tbl.hAlign = "LEFT"
+    cand_tbl.setStyle(TableStyle([
+        ("FONT",         (0,0), (-1,-1), font,   8),
+        ("FONT",         (0,0), (-1, 0), font_b, 8),
+        ("BACKGROUND",   (0,0), (-1, 0), colors.HexColor("#2C2C6C")),
+        ("TEXTCOLOR",    (0,0), (-1, 0), colors.white),
+        ("GRID",         (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+        ("VALIGN",       (0,0), (-1,-1), "TOP"),
+        ("TOPPADDING",   (0,0), (-1,-1), 3),
+        ("BOTTOMPADDING",(0,0), (-1,-1), 3),
+        ("LEFTPADDING",  (0,0), (-1,-1), 4),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1), [colors.white, colors.HexColor("#F5F5F5")]),
+    ]))
+    story.append(cand_tbl)
+    story.append(Spacer(1, 6*mm))
+
+    # スコア説明
+    story.append(Paragraph("■ スコアの見方", st["h2"]))
+    story.append(Spacer(1, 2*mm))
+    score_data = [
+        ["希望順位", "スコア", "説明"],
+        ["第1希望",              "3.0点", "最も優先度が高い希望"],
+        ["第2希望",              "2.0点", "次点の希望"],
+        ["第3希望",              "1.0点", "できれば希望"],
+        ["希望なし/降り番でも可", "0.0点", "どちらでもよい"],
+        ["フォールバック",        "0.5点", "希望外だが他に選択肢がなく割り当てられたパート"],
+        ["NG",                   "対象外", "割り当て不可。このパートには絶対に割り当てない"],
+    ]
+    score_tbl = Table(
+        [[Paragraph(str(c), st["cellb"] if i==0 else st["cell"])
+          for c in row]
+         for i, row in enumerate(score_data)],
+        colWidths=[48*mm, 18*mm, W - 66*mm],
+        repeatRows=1,
+    )
+    score_tbl.hAlign = "LEFT"
+    score_tbl.setStyle(TableStyle([
+        ("FONT",         (0,0), (-1,-1), font,   8),
+        ("FONT",         (0,0), (-1, 0), font_b, 8),
+        ("BACKGROUND",   (0,0), (-1, 0), colors.HexColor("#2C2C6C")),
+        ("TEXTCOLOR",    (0,0), (-1, 0), colors.white),
+        ("GRID",         (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+        ("VALIGN",       (0,0), (-1,-1), "TOP"),
+        ("TOPPADDING",   (0,0), (-1,-1), 3),
+        ("BOTTOMPADDING",(0,0), (-1,-1), 3),
+        ("LEFTPADDING",  (0,0), (-1,-1), 4),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1), [colors.white, colors.HexColor("#F5F5F5")]),
+    ]))
+    story.append(score_tbl)
+    story.append(Spacer(1, 6*mm))
+
+    # 使い方のヒント
+    story.append(Paragraph("■ 候補案の選び方：実践的なヒント", st["h2"]))
+    story.append(Spacer(1, 2*mm))
+    tips = [
+        "まず候補Bを確認する。総合満足度が最も高く、多くの場合これが出発点として最適。",
+        "第1希望率が低い場合は候補Aと比較する。候補Aで第1希望率が大幅に上がる場合は検討の価値あり。",
+        "最低スコアが低い奏者がいる場合は候補Cを確認する。特定の人が不満を持ちやすい構成かどうか確認できる。",
+        "降り番が特定の人に集中している場合は候補Dを検討する。",
+        "フォールバック（FB）件数が多い場合は希望不成立が多い状態。パート数と奏者数のバランスを再確認するとよい。",
+        "どの候補案も完璧ではない。最終的な判断は人間が行い、特殊事情（楽器の持参可否・体力面など）を加味して調整する。",
+    ]
+    for i, tip in enumerate(tips, 1):
+        story.append(Paragraph(f"{i}. {tip}", st["body"]))
+        story.append(Spacer(1, 1.5*mm))
 
     doc.build(story)
     buf.seek(0)
