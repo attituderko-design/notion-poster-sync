@@ -19,7 +19,7 @@ from concert.services.keys import (
     INSTRUMENT_NAME_KEYS,
     PLAYER_NAME_KEYS, PLAYER_HN_KEYS, PLAYER_EMAIL_KEYS,
     PLAYER_PHONE_KEYS, PLAYER_LINE_KEYS,
-    ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS, ATT_NOTE_KEYS,
+    ATT_RECORD_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS, ATT_NOTE_KEYS,
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
     PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     CONCERT_CONFIRMED_FEE_KEYS,
@@ -149,15 +149,15 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                 break
         if not existing_cast:
             props: dict = {}
-            ctx["put_prop_any"](props, t_cast, PARTICIPANT_RECORD_KEYS,
-                                f"{player_name} × {concert_name}")
             ctx["put_prop_any"](props, t_cast, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
             ctx["put_prop_any"](props, t_cast, PARTICIPANT_PLAYER_REL_KEYS, player_id)
-            # 確定参加費があればセット
+            ctx["put_key_any"](props, t_cast, PARTICIPANT_RECORD_KEYS,
+                               concert_id, player_id, prefix="participant")
+            ctx["put_prop_any"](props, t_cast, PARTICIPANT_PART_KEYS,
+                                st.session_state.get("form_player_part", ""))
             confirmed_fee = st.session_state.get(f"confirmed_fee_{concert_id}")
             if confirmed_fee is not None:
-                ctx["put_prop_any"](props, t_cast, PARTICIPANT_PART_KEYS,
-                                    st.session_state.get("form_player_part", ""))
+                ctx["put_prop_any"](props, t_cast, ["参加費", "Fee"], confirmed_fee)
             res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                                      json={"parent": {"database_id": cast_db}, "properties": props})
             if res and res.status_code == 200:
@@ -175,17 +175,21 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                          for p in practices}
         for pr_id, status in att.items():
             existing_id = ""
+            check_id = cast_id if cast_id else player_id
             for r in all_att:
                 pl = ext_rel(r, ATT_PLAYER_REL_KEYS)
                 pr = ext_rel(r, ATT_PRACTICE_REL_KEYS)
-                if player_id in pl and pr_id in pr:
+                if check_id in pl and pr_id in pr:
                     existing_id = r.get("id", "")
                     break
             pname = prac_name_map.get(pr_id, "")
             props = {}
-            ctx["put_prop_any"](props, t_att, ["record_key", "タイトル", "PK"],
-                                f"{pname} × {player_name}")
-            ctx["put_prop_any"](props, t_att, ATT_PLAYER_REL_KEYS,   player_id)
+            ctx["put_key_any"](props, t_att, ATT_RECORD_KEYS,
+                               pr_id, cast_id if cast_id else player_id,
+                               prefix="att")
+            # ATTENDANCEはCONCERT_CASTへのリレーション
+            ctx["put_prop_any"](props, t_att, ATT_PLAYER_REL_KEYS,
+                                cast_id if cast_id else player_id)
             ctx["put_prop_any"](props, t_att, ATT_PRACTICE_REL_KEYS, pr_id)
             ctx["put_prop_any"](props, t_att, ATT_STATUS_KEYS,        status)
             if existing_id:
