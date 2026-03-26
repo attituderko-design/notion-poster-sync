@@ -36,6 +36,7 @@ from concert.services.keys import (
     RENTAL_INST_REL_KEYS, RENTAL_COST_TYPE_KEYS,
     PLAYER_NAME_KEYS, INSTRUMENT_NAME_KEYS,
     PARTICIPANT_CONCERT_REL_KEYS, PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS,
+    CONCERT_CONFIRMED_FEE_KEYS,
     EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS, EXPENSE_AMOUNT_KEYS,
     EXPENSE_CONFIRMED_KEYS,
 )
@@ -409,7 +410,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         story.append(Paragraph("レンタル登録がありません。", st_map["small"]))
     story.append(Spacer(1, 5*mm))
 
-    # ── 入金・活動資金のまとめ ─────────────────────────────────
+    # ── 入金・活動資金のまとめ（貸借形式） ─────────────────────
     story.append(Spacer(1, 5*mm))
     _h_fin = Paragraph("■ 入金・活動資金のまとめ", st_map["h2"])
 
@@ -417,53 +418,126 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     participant_rows_s = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
     cast_s = [r for r in participant_rows_s
               if concert_id in ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)]
-    fee_total_s = fee_paid_s = 0
+    fee_total_s = fee_paid_s = paid_count_s = 0
     for r in cast_s:
         fee_s = ext(r, PARTICIPANT_FEE_KEYS) or "0"
         try: fee = int(float(fee_s))
         except: fee = 0
         fee_total_s += fee
         if ext(r, PARTICIPANT_PAID_KEYS) == "True":
-            fee_paid_s += fee
+            fee_paid_s  += fee
+            paid_count_s += 1
+
+    # 確定参加費（1人あたり）をATLASから取得
+    confirmed_fee_per_s = 0
+    try:
+        t_c = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT"])
+        if t_c:
+            fk = ctx["find_prop_name"](t_c, CONCERT_CONFIRMED_FEE_KEYS)
+            if fk:
+                concert_page = next(
+                    (r for r in ctx["query_all"](ctx["CONCERT_DB_CONCERT"], None)
+                     if r.get("id","") == concert_id), {}
+                )
+                num = (concert_page.get("properties",{}) or {}).get(fk,{}).get("number")
+                if num is not None:
+                    confirmed_fee_per_s = int(num)
+    except Exception:
+        pass
 
     # 経費集計（CONCERT_EXPENSE）
     exp_db_s = ctx.get("CONCERT_DB_CONCERT_EXPENSE", "")
     exp_total_s = exp_conf_s = 0
+    exp_by_type_s: dict = {}
     if exp_db_s:
         all_exp_s = ctx["query_all"](exp_db_s, None)
         for r in all_exp_s:
             if concert_id not in ext_rel(r, EXPENSE_CONCERT_REL_KEYS):
                 continue
+            type_s = ext(r, EXPENSE_TYPE_KEYS) or "その他"
             amt_s2 = ext(r, EXPENSE_AMOUNT_KEYS) or "0"
+            conf_s = ext(r, EXPENSE_CONFIRMED_KEYS) == "True"
             try: amt2 = int(float(amt_s2))
             except: amt2 = 0
             exp_total_s += amt2
-            if ext(r, EXPENSE_CONFIRMED_KEYS) == "True":
+            if conf_s:
                 exp_conf_s += amt2
+            exp_by_type_s.setdefault(type_s, [0, 0])
+            exp_by_type_s[type_s][1] += amt2
+            if conf_s:
+                exp_by_type_s[type_s][0] += amt2
 
-    total_exp_s  = exp_conf_s + total_confirmed   # EXPENSE確定 + レンタル確定
-    balance_s    = fee_paid_s - total_exp_s
+    total_exp_conf_s = exp_conf_s + total_confirmed
+    total_exp_all_s  = exp_total_s + total_all
+    balance_conf_s   = fee_paid_s  - total_exp_conf_s
+    balance_all_s    = fee_total_s - total_exp_all_s
+    bal_color = colors.HexColor("#E8F5E9") if balance_conf_s >= 0 else colors.HexColor("#FFEBEE")
 
-    ph_data = [
-        ["項目", "金額"],
-        ["参加費合計（予定）",   f"¥{fee_total_s:,}"],
-        ["参加費合計（入金済）", f"¥{fee_paid_s:,}"],
-        ["レンタル費用（確定）", f"¥{total_confirmed:,}"],
-        ["レンタル費用（全見積）",f"¥{total_all:,}"],
-        ["その他経費（確定）",   f"¥{exp_conf_s:,}"],
-        ["その他経費（全見積）", f"¥{exp_total_s:,}"],
-        ["収支（入金済 - 確定支出）", f"¥{balance_s:,}"],
+    # 収入行
+    fee_per_str = f"¥{confirmed_fee_per_s:,}/人" if confirmed_fee_per_s else "未確定"
+    income_rows = [
+        ("参加費収入（入金済）",   f"¥{fee_paid_s:,}"),
+        ("参加費収入（全額・予定）",f"¥{fee_total_s:,}"),
+        ("確定参加費（1人あたり）", fee_per_str),
+        (f"参加者数", f"{len(cast_s)}名（入金済 {paid_count_s}名）"),
     ]
+
+    # 支出行
+    expense_rows = []
+    for type_s, (conf_a, all_a) in sorted(exp_by_type_s.items()):
+        expense_rows.append((f"{type_s}", f"¥{conf_a:,}（全見積¥{all_a:,}）"))
+    expense_rows.append(("レンタル費用", f"¥{total_confirmed:,}（全見積¥{total_all:,}）"))
+    expense_rows.append(("支出合計（確定）", f"¥{total_exp_conf_s:,}"))
+    expense_rows.append(("支出合計（全見積）",f"¥{total_exp_all_s:,}"))
+
+    # 行数を揃える
+    max_r = max(len(income_rows), len(expense_rows))
+    while len(income_rows)  < max_r: income_rows.append(("", ""))
+    while len(expense_rows) < max_r: expense_rows.append(("", ""))
+
+    col_w = W / 2
+    lb_header = [
+        Paragraph("収　入", st_map["cellb"]),
+        Paragraph("金額", st_map["cellb"]),
+        Paragraph("支　出", st_map["cellb"]),
+        Paragraph("金額", st_map["cellb"]),
+    ]
+    lb_rows = [lb_header]
+    for (il, iv), (el, ev) in zip(income_rows, expense_rows):
+        lb_rows.append([
+            Paragraph(il, st_map["cell"]),
+            Paragraph(iv, st_map["cellb"] if iv else st_map["cell"]),
+            Paragraph(el, st_map["cell"]),
+            Paragraph(ev, st_map["cellb"] if ev else st_map["cell"]),
+        ])
+    # 収支差引行
+    bal_str = f"¥{balance_conf_s:,}　{'（黒字）' if balance_conf_s >= 0 else '（赤字）'}"
+    lb_rows.append([
+        Paragraph("収支差引（確定）", st_map["cellb"]),
+        Paragraph(bal_str, st_map["cellb"]),
+        Paragraph(f"全見積ベース ¥{balance_all_s:,}", st_map["cell"]),
+        Paragraph("", st_map["cell"]),
+    ])
+
     ph_tbl = Table(
-        [[Paragraph(str(c), st_map["cellb"] if (i==0 or j==0 or i==len(ph_data)-1) else st_map["cell"])
-          for j, c in enumerate(row)]
-         for i, row in enumerate(ph_data)],
-        colWidths=[70*mm, 40*mm],
-        repeatRows=1,
+        lb_rows,
+        colWidths=[col_w*0.55, col_w*0.45, col_w*0.55, col_w*0.45],
     )
-    ph_sty = _base_style()
-    ph_sty.add("BACKGROUND", (0, len(ph_data)-1), (-1, len(ph_data)-1),
-               colors.HexColor("#E8F5E9") if balance_s >= 0 else colors.HexColor("#FFEBEE"))
+    ph_sty = TableStyle([
+        ("FONT",          (0,0), (-1,-1), font,   8),
+        ("FONT",          (0,0), (-1, 0), font_b, 8),
+        ("BACKGROUND",    (0,0), (-1, 0), colors.HexColor("#2C2C6C")),
+        ("TEXTCOLOR",     (0,0), (-1, 0), colors.white),
+        ("GRID",          (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+        ("LINEAFTER",     (1,0), (1,-1), 1.0, colors.HexColor("#2C2C6C")),
+        ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
+        ("TOPPADDING",    (0,0), (-1,-1), 2),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 2),
+        ("LEFTPADDING",   (0,0), (-1,-1), 3),
+        ("ROWBACKGROUNDS",(0,1),(-1,-2), [colors.white, colors.HexColor("#F5F5F5")]),
+        ("BACKGROUND",    (0,-1), (-1,-1), bal_color),
+        ("SPAN",          (2,-1), (3,-1)),
+    ])
     ph_tbl.hAlign = "LEFT"
     ph_tbl.setStyle(ph_sty)
     story.append(KeepTogether([_h_fin, Spacer(1, 1*mm)]))
