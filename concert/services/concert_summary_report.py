@@ -296,7 +296,8 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     )
     pl_tbl.hAlign = "LEFT"
     pl_tbl.setStyle(_base_style())
-    story.append(KeepTogether([_h_prac, pl_tbl]))
+    story.append(KeepTogether([_h_prac, Spacer(1, 1*mm)]))
+    story.append(pl_tbl)
     story.append(Spacer(1, 5*mm))
 
     # ── 出欠マトリクス ───────────────────────────────────────
@@ -345,7 +346,9 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         mat_sty.add("BACKGROUND", (col_i, row_i), (col_i, row_i), bg)
     mat_tbl.hAlign = "LEFT"
     mat_tbl.setStyle(mat_sty)
-    story.append(KeepTogether([_mat_title, mat_tbl, Spacer(1, 5*mm)]))
+    story.append(KeepTogether([_mat_title, Spacer(1, 1*mm)]))
+    story.append(mat_tbl)
+    story.append(Spacer(1, 5*mm))
 
     # ── レンタル費用小計 ─────────────────────────────────────
     rent_summary_data = [["練習日", "業者名", "品目", "台数", "単価", "小計", "確定"]]
@@ -463,7 +466,8 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
                colors.HexColor("#E8F5E9") if balance_s >= 0 else colors.HexColor("#FFEBEE"))
     ph_tbl.hAlign = "LEFT"
     ph_tbl.setStyle(ph_sty)
-    story.append(KeepTogether([_h_fin, ph_tbl]))
+    story.append(KeepTogether([_h_fin, Spacer(1, 1*mm)]))
+    story.append(ph_tbl)
 
     doc.build(story)
     buf.seek(0)

@@ -358,7 +358,8 @@ def generate_practice_report(
             sched_style.add("BACKGROUND", (0,i), (-1,i), bg)
         sched_tbl.hAlign = "LEFT"
         sched_tbl.setStyle(sched_style)
-        story.append(KeepTogether([_h_sched, sched_tbl]))
+        story.append(KeepTogether([_h_sched, Spacer(1, 1*mm)]))
+        story.append(sched_tbl)
         story.append(Spacer(1, 3*mm))
 
     # 出欠一覧
@@ -388,7 +389,8 @@ def generate_practice_report(
                 sty.add("BACKGROUND", (1,i), (1,i), colors.HexColor("#FEF9E7"))
         att_tbl.hAlign = "LEFT"
         att_tbl.setStyle(sty)
-        story.append(KeepTogether([_h_att, att_tbl]))
+        story.append(KeepTogether([_h_att, Spacer(1, 1*mm)]))
+        story.append(att_tbl)
     else:
         story.append(KeepTogether([_h_att, Paragraph("出欠データがありません。", st_map["small"])]))
     story.append(Spacer(1, 3*mm))
@@ -426,7 +428,8 @@ def generate_practice_report(
         )
         bring_tbl.hAlign = "LEFT"
         bring_tbl.setStyle(_tbl_style())
-        story.append(KeepTogether([_h_bring, bring_tbl]))
+        story.append(KeepTogether([_h_bring, Spacer(1, 1*mm)]))
+        story.append(bring_tbl)
     else:
         story.append(KeepTogether([_h_bring, Paragraph("持参楽器の登録がありません。", st_map["small"])]))
     story.append(Spacer(1, 3*mm))
@@ -471,7 +474,8 @@ def generate_practice_report(
             rent_sty.add("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F0EEF8"))
         rent_tbl.hAlign = "LEFT"
         rent_tbl.setStyle(rent_sty)
-        story.append(KeepTogether([_h_rent, rent_tbl]))
+        story.append(KeepTogether([_h_rent, Spacer(1, 1*mm)]))
+        story.append(rent_tbl)
     else:
         story.append(KeepTogether([_h_rent, Paragraph("レンタル登録がありません。", st_map["small"])]))
 

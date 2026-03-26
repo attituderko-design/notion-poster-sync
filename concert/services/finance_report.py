@@ -237,7 +237,8 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
                     colors.HexColor("#FFEBEE"))
     sum_tbl.hAlign = "LEFT"
     sum_tbl.setStyle(sum_sty)
-    story.append(KeepTogether([_h_sum, sum_tbl]))
+    story.append(KeepTogether([_h_sum, Spacer(1, 1*mm)]))
+    story.append(sum_tbl)
     story.append(Spacer(1, 5*mm))
 
     # ── 参加費・振込状況 ──────────────────────────────────────
@@ -273,7 +274,8 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
     cast_sty = _base_style(font, font_b)
     cast_tbl.hAlign = "LEFT"
     cast_tbl.setStyle(cast_sty)
-    story.append(KeepTogether([_h_cast, cast_tbl]))
+    story.append(KeepTogether([_h_cast, Spacer(1, 1*mm)]))
+    story.append(cast_tbl)
     story.append(Spacer(1, 5*mm))
 
     # ── 経費明細（CONCERT_EXPENSE） ───────────────────────────
@@ -302,7 +304,8 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
             exp_sty.add("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F0EEF8"))
         exp_tbl.hAlign = "LEFT"
         exp_tbl.setStyle(exp_sty)
-        story.append(KeepTogether([_h_exp, exp_tbl]))
+        story.append(KeepTogether([_h_exp, Spacer(1, 1*mm)]))
+        story.append(exp_tbl)
         story.append(Spacer(1, 5*mm))
 
     # ── レンタル費用明細 ──────────────────────────────────────
@@ -366,7 +369,8 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
                colors.HexColor("#E8E6F0"))
     bt_tbl.hAlign = "LEFT"
     bt_tbl.setStyle(bt_sty)
-    story.append(KeepTogether([_h_bt, bt_tbl]))
+    story.append(KeepTogether([_h_bt, Spacer(1, 1*mm)]))
+    story.append(bt_tbl)
 
     doc.build(story)
     buf.seek(0)
