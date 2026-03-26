@@ -261,6 +261,10 @@ def generate_assign_report(
             _song_title = Paragraph(song_name_map.get(sid, sid), st["h3"])
             detail_header = ["奏者", "パート", "希望", "点数"]
             detail_rows = [detail_header]
+            # スタイルをループの前に定義
+            dcell_s = ParagraphStyle("dc",  fontName=font,   fontSize=7.5, leading=10, alignment=TA_LEFT)
+            dname_s = ParagraphStyle("dn",  fontName=font,   fontSize=6.5, leading=9,  alignment=TA_LEFT)
+            dhdr_s  = ParagraphStyle("dh",  fontName=font_b, fontSize=7.5, leading=10, alignment=TA_LEFT)
             for a in items:
                 pk   = str((a["player_id"], a["song_id"], a["part_id"]))
                 pref = r["pref_map"].get(pk)
@@ -282,9 +286,6 @@ def generate_assign_report(
                 ])
 
             # 曲別一覧もParagraphで折り返し
-            dcell_s = ParagraphStyle("dc",  fontName=font,   fontSize=7.5, leading=10, alignment=TA_LEFT)
-            dname_s = ParagraphStyle("dn",  fontName=font,   fontSize=6.5, leading=9,  alignment=TA_LEFT)
-            dhdr_s  = ParagraphStyle("dh",  fontName=font_b, fontSize=7.5, leading=10, alignment=TA_LEFT)
             detail_rows_p = []
             for ri, row in enumerate(detail_rows):
                 new_row = []
