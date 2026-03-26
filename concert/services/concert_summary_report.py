@@ -123,6 +123,8 @@ def _styles(font, font_b):
         "title":   ParagraphStyle("title", alignment=TA_LEFT,  fontName=font_b, fontSize=15, spaceAfter=2),
         "subtitle":ParagraphStyle("sub", alignment=TA_LEFT,    fontName=font,   fontSize=9,  spaceAfter=6,
                                   textColor=colors.HexColor("#555555")),
+        "cellb_wht": ParagraphStyle("cellb_wht", alignment=TA_LEFT, fontName=font_b,
+                       fontSize=8, leading=11, textColor=colors.white),
         "h2":      ParagraphStyle("h2", alignment=TA_LEFT,     fontName=font_b, fontSize=11, spaceBefore=14, spaceAfter=6,
                                   textColor=colors.HexColor("#2C2C6C")),
         "body":    ParagraphStyle("body", alignment=TA_LEFT,   fontName=font,   fontSize=9),
@@ -246,9 +248,12 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
 
     # ── 表紙：演奏会基本情報 ─────────────────────────────────
     story.append(Paragraph("ArtéMis HARMONIA　演奏会サマリ", st_map["subtitle"]))
+    story.append(Spacer(1, 2*mm))
     story.append(Paragraph(c_name, st_map["title"]))
+    story.append(Spacer(1, 4*mm))
     story.append(HRFlowable(width=W, thickness=1,
-                             color=colors.HexColor("#CCCCCC"), spaceAfter=4))
+                             color=colors.HexColor("#CCCCCC"), spaceAfter=0))
+    story.append(Spacer(1, 4*mm))
 
     date_str = c_date[:10] if c_date else "未設定"
     info_data = [
@@ -498,13 +503,17 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         (f"参加者数", f"{len(cast_s)}名（入金済 {paid_count_s}名）"),
     ]
 
-    # 支出行
+    # 支出行（確定・見積を明確に分けて表示）
     expense_rows = []
     for type_s, (conf_a, all_a) in sorted(exp_by_type_s.items()):
-        expense_rows.append((f"{type_s}", f"¥{conf_a:,}（全見積¥{all_a:,}）"))
-    expense_rows.append(("レンタル費用", f"¥{total_confirmed:,}（全見積¥{total_all:,}）"))
-    expense_rows.append(("支出合計（確定）", f"¥{total_exp_conf_s:,}"))
-    expense_rows.append(("支出合計（全見積）",f"¥{total_exp_all_s:,}"))
+        expense_rows.append((f"  {type_s}（確定）", f"¥{conf_a:,}"))
+        if all_a != conf_a:
+            expense_rows.append((f"  {type_s}（未確定含む見積）", f"¥{all_a:,}"))
+    expense_rows.append(("  レンタル費用（確定）", f"¥{total_confirmed:,}"))
+    if total_all != total_confirmed:
+        expense_rows.append(("  レンタル費用（未確定含む見積）", f"¥{total_all:,}"))
+    expense_rows.append(("支出合計（確定のみ）", f"¥{total_exp_conf_s:,}"))
+    expense_rows.append(("支出合計（全見積）",    f"¥{total_exp_all_s:,}"))
 
     # 行数を揃える
     max_r = max(len(income_rows), len(expense_rows))
@@ -513,10 +522,10 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
 
     col_w = W / 2
     lb_header = [
-        Paragraph("収　入", st_map["cellb"]),
-        Paragraph("金額", st_map["cellb"]),
-        Paragraph("支　出", st_map["cellb"]),
-        Paragraph("金額", st_map["cellb"]),
+        Paragraph("収　入", st_map["cellb_wht"]),
+        Paragraph("金額",   st_map["cellb_wht"]),
+        Paragraph("支　出", st_map["cellb_wht"]),
+        Paragraph("金額",   st_map["cellb_wht"]),
     ]
     lb_rows = [lb_header]
     for (il, iv), (el, ev) in zip(income_rows, expense_rows):
@@ -526,12 +535,19 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
             Paragraph(el, st_map["cell"]),
             Paragraph(ev, st_map["cellb"] if ev else st_map["cell"]),
         ])
-    # 収支差引行
-    bal_str = f"¥{balance_conf_s:,}　{'（黒字）' if balance_conf_s >= 0 else '（赤字）'}"
+    # 収支差引行（2行：現時点 / 着地予測）
+    bal_now_str  = f"¥{balance_conf_s:,}　{'（黒字）' if balance_conf_s >= 0 else '（赤字）'}"
+    bal_proj_str = f"¥{balance_all_s:,}　{'（黒字）' if balance_all_s >= 0 else '（赤字）'}"
     lb_rows.append([
-        Paragraph("収支差引（確定）", st_map["cellb"]),
-        Paragraph(bal_str, st_map["cellb"]),
-        Paragraph(f"全見積ベース ¥{balance_all_s:,}", st_map["cell"]),
+        Paragraph("収支差引（現時点）", st_map["cellb"]),
+        Paragraph(bal_now_str,  st_map["cellb"]),
+        Paragraph("入金済 − 確定支出", st_map["small"]),
+        Paragraph("", st_map["cell"]),
+    ])
+    lb_rows.append([
+        Paragraph("収支差引（着地予測）", st_map["cellb"]),
+        Paragraph(bal_proj_str, st_map["cellb"]),
+        Paragraph("参加費全額 − 全見積支出", st_map["small"]),
         Paragraph("", st_map["cell"]),
     ])
 

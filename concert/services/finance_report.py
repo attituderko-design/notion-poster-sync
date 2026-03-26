@@ -5,6 +5,9 @@ concert/services/finance_report.py
 import io
 from collections import defaultdict
 from reportlab.lib.pagesizes import A4
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics import renderPDF
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.units import mm
@@ -48,9 +51,11 @@ def _styles(font, font_b):
         "title":   ParagraphStyle("title",   alignment=TA_LEFT, fontName=font_b, fontSize=16, spaceAfter=4),
         "subtitle":ParagraphStyle("sub",     alignment=TA_LEFT, fontName=font,   fontSize=9,  spaceAfter=6,
                                   textColor=colors.HexColor("#555555")),
-        "h2":      ParagraphStyle("h2",      alignment=TA_LEFT, fontName=font_b, fontSize=12, spaceBefore=8, spaceAfter=4,
+        "cellb_wht": ParagraphStyle("cellb_wht", alignment=TA_LEFT, fontName=font_b,
+                       fontSize=8, leading=11, textColor=colors.white),
+        "h2":      ParagraphStyle("h2",      alignment=TA_LEFT, fontName=font_b, fontSize=12, spaceBefore=14, spaceAfter=6,
                                   textColor=colors.HexColor("#2C2C6C")),
-        "h3":      ParagraphStyle("h3",      alignment=TA_LEFT, fontName=font_b, fontSize=10, spaceBefore=6, spaceAfter=3),
+        "h3":      ParagraphStyle("h3",      alignment=TA_LEFT, fontName=font_b, fontSize=10, spaceBefore=14, spaceAfter=6),
         "body":    ParagraphStyle("body",    alignment=TA_LEFT, fontName=font,   fontSize=9),
         "cell":    ParagraphStyle("cell",    alignment=TA_LEFT, fontName=font,   fontSize=8,  leading=11),
         "cellb":   ParagraphStyle("cellb",   alignment=TA_LEFT, fontName=font_b, fontSize=8,  leading=11),
@@ -217,10 +222,12 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
 
     # 表紙
     story.append(Paragraph("ArtéMis HARMONIA", st_map["subtitle"]))
-    story.append(Paragraph("収支報告", st_map["title"]))
     story.append(Spacer(1, 2*mm))
+    story.append(Paragraph("収支報告", st_map["title"]))
+    story.append(Spacer(1, 4*mm))
     story.append(Paragraph(c_name, st_map["h2"]))
     story.append(Paragraph(f"本番日：{concert_date}", st_map["body"]))
+    story.append(Spacer(1, 4*mm))
     story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CCCCCC")))
     story.append(Spacer(1, 6*mm))
 
@@ -277,10 +284,10 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
 
     col_w = W / 2
     lb_header = [
-        Paragraph("収　入", st_map["cellb"]),
-        Paragraph("金額", st_map["cellb"]),
-        Paragraph("支　出", st_map["cellb"]),
-        Paragraph("金額", st_map["cellb"]),
+        Paragraph("収　入", st_map["cellb_wht"]),
+        Paragraph("金額",   st_map["cellb_wht"]),
+        Paragraph("支　出", st_map["cellb_wht"]),
+        Paragraph("金額",   st_map["cellb_wht"]),
     ]
     lb_rows = [lb_header]
     for (il, iv, _), (el, ev, _) in zip(income_rows, expense_rows):
@@ -322,6 +329,49 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
     sum_tbl.setStyle(sum_sty)
     story.append(KeepTogether([_h_sum, Spacer(1, 1*mm)]))
     story.append(sum_tbl)
+    story.append(Spacer(1, 4*mm))
+
+    # ── 収支グラフ（棒グラフ：収入 vs 支出） ─────────────────
+    try:
+        chart_w, chart_h = 120*mm, 55*mm
+        d = Drawing(chart_w, chart_h)
+        bc = VerticalBarChart()
+        bc.x        = 30*mm
+        bc.y        = 8*mm
+        bc.width    = chart_w - 40*mm
+        bc.height   = chart_h - 16*mm
+        bc.data     = [
+            [fee_paid, fee_total],       # 収入（確定、予定）
+            [total_expense_confirmed, total_expense_all],  # 支出（確定、全見積）
+        ]
+        bc.bars[0].fillColor = colors.HexColor("#4CAF50")  # 収入：緑
+        bc.bars[1].fillColor = colors.HexColor("#F44336")  # 支出：赤
+        bc.categoryAxis.categoryNames = ["確定", "全見積"]
+        bc.categoryAxis.labels.fontSize = 7
+        bc.categoryAxis.labels.fontName = font
+        bc.valueAxis.labels.fontSize    = 7
+        bc.valueAxis.labels.fontName    = font
+        bc.valueAxis.valueMin = 0
+        bc.groupSpacing = 5
+        bc.barSpacing   = 2
+        # 凡例ラベル
+        from reportlab.graphics.charts.legends import Legend
+        leg = Legend()
+        leg.x            = chart_w - 8*mm
+        leg.y            = chart_h - 4*mm
+        leg.deltax       = 50
+        leg.deltay       = 10
+        leg.fontSize     = 7
+        leg.fontName     = font
+        leg.colorNamePairs = [
+            (colors.HexColor("#4CAF50"), "収入"),
+            (colors.HexColor("#F44336"), "支出"),
+        ]
+        d.add(bc)
+        d.add(leg)
+        story.append(d)
+    except Exception:
+        pass  # グラフ生成失敗時はスキップ
     story.append(Spacer(1, 5*mm))
 
     # ── 参加費・振込状況 ──────────────────────────────────────
