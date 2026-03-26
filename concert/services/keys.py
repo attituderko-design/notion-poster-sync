@@ -162,3 +162,7 @@ PARTICIPANT_PAID_KEYS     = ["入金済", "Paid"]
 
 # ── ATLAS（CONCERT DB）追加フィールド ────────────────────────
 CONCERT_CONFIRMED_FEE_KEYS = ["確定参加費", "ConfirmedFee"]
+
+CONCERT_CONDUCTOR_KEYS    = ["クリエイター", "指揮者", "Conductor"]
+CONCERT_SOLOIST_KEYS      = ["ソリスト", "Soloist"]
+SONG_CREATOR_KEYS         = ["クリエイター", "作曲家", "Composer", "作曲者"]
