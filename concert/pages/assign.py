@@ -446,6 +446,25 @@ def _render_pref_tab(ctx: dict):
         st.info("この演奏会に紐づく奏者が見つかりませんでした。参加者DBのリレーションを確認してください。")
         return
 
+    # パートフィルタ：CONCERT_CASTからパート一覧を取得して選択
+    part_by_player: dict[str, str] = {}
+    for row in participant_rows:
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if pids:
+            part_by_player[pids[0]] = ctx["extract_prop_text_any"](row, PARTICIPANT_PART_KEYS) or ""
+    all_parts = sorted({p for p in part_by_player.values() if p})
+    if all_parts:
+        selected_part = st.selectbox(
+            "パートを選択", all_parts,
+            key="pref_part_filter",
+            help="選択したパートの奏者のみ希望入力・入力状況に表示されます。"
+        )
+        players = [p for p in players
+                   if part_by_player.get(p.get("id",""), "") == selected_part]
+        if not players:
+            st.info(f"「{selected_part}」の参加者が見つかりません。")
+            return
+
     # 楽器マスタ
     inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
     inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
