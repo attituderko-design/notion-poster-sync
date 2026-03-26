@@ -27,6 +27,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from concert.services.keys import (
     CONCERT_NAME_KEYS, CONCERT_DATE_KEYS, CONCERT_VENUE_KEYS,
     CONCERT_ADDRESS_KEYS, CONCERT_MEMO_KEYS,
+    CONCERT_CONDUCTOR_KEYS, CONCERT_SOLOIST_KEYS,
     PRACTICE_NAME_KEYS, PRACTICE_DATE_KEYS, PRACTICE_VENUE_KEYS,
     PRACTICE_ADDRESS_KEYS, PRACTICE_CONCERT_DAY_KEYS, PRACTICE_CONCERT_REL_KEYS,
     ATT_PLAYER_REL_KEYS, ATT_STATUS_KEYS, ATT_PRACTICE_REL_KEYS,
@@ -35,6 +36,7 @@ from concert.services.keys import (
     RENTAL_CONFIRMED_KEYS, RENTAL_VENDOR_KEYS, RENTAL_ITEM_NAME_KEYS,
     RENTAL_INST_REL_KEYS, RENTAL_COST_TYPE_KEYS,
     PLAYER_NAME_KEYS, INSTRUMENT_NAME_KEYS,
+    SONG_NAME_KEYS, SONG_CONCERT_REL_KEYS, SONG_COMPOSER_KEYS,
     PARTICIPANT_CONCERT_REL_KEYS, PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS,
     PARTICIPANT_PART_KEYS, CONCERT_CONFIRMED_FEE_KEYS,
     EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS, EXPENSE_AMOUNT_KEYS,
@@ -167,9 +169,17 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     # 演奏会
     concert_rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT"], None)
     concert = next((r for r in concert_rows if r.get("id") == concert_id), {})
-    c_name    = ext(concert, CONCERT_NAME_KEYS) or ""
-    c_date    = ext(concert, CONCERT_DATE_KEYS) or ""
-    c_memo    = ext(concert, CONCERT_MEMO_KEYS) or ""
+    c_name      = ext(concert, CONCERT_NAME_KEYS)      or ""
+    c_date      = ext(concert, CONCERT_DATE_KEYS)      or ""
+    c_memo      = ext(concert, CONCERT_MEMO_KEYS)      or ""
+    c_conductor = ext(concert, CONCERT_CONDUCTOR_KEYS) or ""
+    c_soloist   = ext(concert, CONCERT_SOLOIST_KEYS)   or ""
+
+    # 演奏曲目
+    all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
+    concert_songs = [s for s in all_songs
+                     if concert_id in ext_rel(s, SONG_CONCERT_REL_KEYS)]
+    concert_songs.sort(key=lambda s: ext(s, SONG_NAME_KEYS) or "")
 
     # 練習一覧（この演奏会に紐づく）- 会場取得のため先に取得
     all_practices = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"], None)
@@ -258,9 +268,19 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     date_str = c_date[:10] if c_date else "未設定"
     info_data = [
         ["本番日", date_str],
-        ["会場",   c_venue   or "—"],
-        ["住所",   c_address or "—"],
+        ["会場",   c_venue     or "—"],
+        ["住所",   c_address   or "—"],
     ]
+    if c_conductor:
+        info_data.append(["指揮", c_conductor])
+    if c_soloist:
+        info_data.append(["ソリスト", c_soloist])
+    if concert_songs:
+        songs_str = "　/　".join(
+            f"{ext(s, SONG_NAME_KEYS) or ''}（{ext(s, SONG_COMPOSER_KEYS) or ''}）".strip("（）")
+            for s in concert_songs
+        )
+        info_data.append(["演奏曲目", songs_str])
     if c_memo:
         info_data.append(["メモ", c_memo])
     info_tbl = Table(
