@@ -223,50 +223,7 @@ def _seed_all(ctx) -> dict:
             cast_ids.append(cid)
     summary["CONCERT_CAST"] = len(cast_ids)
 
-    # ── 8. ATTENDANCE ─────────────────────────────────────
-    att_db = ctx["CONCERT_DB_ATTENDANCE"]
-    tatt = _p(ctx, att_db)
-    att_count = 0
-    statuses = ["○", "○", "△", "×", "○"]
-    # 本番当日も○で追加
-    all_pr_rows = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"], None)
-    concert_day_id = next(
-        (p.get("id","") for p in all_pr_rows
-         if concert_id in ctx["extract_relation_ids_any"](p, PRACTICE_CONCERT_REL_KEYS)
-         and ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS) == "True"),
-        None
-    )
-    all_prac_ids = practice_ids + ([concert_day_id] if concert_day_id else [])
-    # _find_relation_propと同等のロジックでフィールド名を特定
-    practice_rel_key = ctx["find_prop_name"](tatt, ATT_PRACTICE_REL_KEYS)
-    if not practice_rel_key:
-        for k, t in (tatt or {}).items():
-            if t == "relation" and any(kw in str(k).lower() for kw in ["練習", "practice"]):
-                practice_rel_key = k; break
-    player_rel_key = ctx["find_prop_name"](tatt, ATT_PLAYER_REL_KEYS)
-    if not player_rel_key:
-        for k, t in (tatt or {}).items():
-            if t == "relation" and k != practice_rel_key and any(
-                kw in str(k).lower() for kw in ["奏者", "participant", "player", "出演"]):
-                player_rel_key = k; break
-    status_key = ctx["find_prop_name"](tatt, ATT_STATUS_KEYS)
-
-    for pr_id in all_prac_ids:
-        for i, (pid, cast_id) in enumerate(zip(player_ids, cast_ids)):
-            status = "○" if pr_id == concert_day_id else statuses[i % len(statuses)]
-            props = {}
-            ctx["put_key_any"](props, tatt, ATTENDANCE_KEY_KEYS,
-                               cast_id, pr_id, prefix="att")
-            if practice_rel_key:
-                ctx["put_prop"](props, tatt, practice_rel_key, pr_id)
-            if player_rel_key:
-                ctx["put_prop"](props, tatt, player_rel_key, cast_id)
-            if status_key:
-                ctx["put_prop"](props, tatt, status_key, status)
-            att_id = track(_create(ctx, att_db, props))
-            if att_id:
-                att_count += 1
-    summary["ATTENDANCE"] = att_count
+    # ── 8. ATTENDANCE → ステップ12（本番当日作成）後に実施 ───
 
     # ── 9. PLAYER_INSTRUMENT ──────────────────────────────
     pi_db = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
@@ -337,6 +294,43 @@ def _seed_all(ctx) -> dict:
     if concert_day_id:
         practice_ids.append(concert_day_id)
     summary["PRACTICE（本番日）"] = 1 if concert_day_id else 0
+
+    # ── 8→12移動: ATTENDANCE（本番当日含む全練習日） ──────────
+    att_db = ctx["CONCERT_DB_ATTENDANCE"]
+    tatt = _p(ctx, att_db)
+    att_count = 0
+    statuses = ["○", "○", "△", "×", "○"]
+    # この時点でpractice_idsに本番当日IDが追加済み
+    # concert_day_idも本番当日のIDとして使える
+    practice_rel_key = ctx["find_prop_name"](tatt, ATT_PRACTICE_REL_KEYS)
+    if not practice_rel_key:
+        for k, t in (tatt or {}).items():
+            if t == "relation" and any(kw in str(k).lower() for kw in ["練習", "practice"]):
+                practice_rel_key = k; break
+    player_rel_key = ctx["find_prop_name"](tatt, ATT_PLAYER_REL_KEYS)
+    if not player_rel_key:
+        for k, t in (tatt or {}).items():
+            if t == "relation" and k != practice_rel_key and any(
+                kw in str(k).lower() for kw in ["奏者", "participant", "player", "出演"]):
+                player_rel_key = k; break
+    status_key = ctx["find_prop_name"](tatt, ATT_STATUS_KEYS)
+
+    for pr_id in practice_ids:  # 本番当日を含む全練習日
+        for i, (pid, cast_id) in enumerate(zip(player_ids, cast_ids)):
+            status = "○" if pr_id == concert_day_id else statuses[i % len(statuses)]
+            props = {}
+            ctx["put_key_any"](props, tatt, ATTENDANCE_KEY_KEYS,
+                               cast_id, pr_id, prefix="att")
+            if practice_rel_key:
+                ctx["put_prop"](props, tatt, practice_rel_key, pr_id)
+            if player_rel_key:
+                ctx["put_prop"](props, tatt, player_rel_key, cast_id)
+            if status_key:
+                ctx["put_prop"](props, tatt, status_key, status)
+            att_id = track(_create(ctx, att_db, props))
+            if att_id:
+                att_count += 1
+    summary["ATTENDANCE"] = att_count
 
     # ── 13. 持参担当（PLAYER_INSTRUMENT追加）─────────────────
     bring_count = 0
