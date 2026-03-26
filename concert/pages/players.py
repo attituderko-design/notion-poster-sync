@@ -705,7 +705,7 @@ def _render_player_tab(ctx: dict):
                     continue
 
                 # 新規参加 or 既存更新
-                no_change = (meta["in_cast"] and
+                no_change = (meta["in_cast"] and new_in and
                              new_extra == meta["is_extra"] and
                              new_part   == (meta["cur_part"]   or "") and
                              new_role_m == (meta["cur_role_m"] or "") and
