@@ -137,17 +137,17 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
     # ── CONCERT_CAST登録（参加者として追加） ──────────────────
     cast_db = ctx["CONCERT_DB_PARTICIPANT"]
     t_cast  = ctx["get_prop_types"](cast_db)
+    cast_id = ""  # ATTENDANCEのリレーション先として使用
     if t_cast:
-        # 既存チェック
-        existing_cast = ""
         all_cast = ctx["query_all"](cast_db, None)
         for r in all_cast:
             pids = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
             cids = ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)
             if player_id in pids and concert_id in cids:
-                existing_cast = r.get("id", "")
+                cast_id = r.get("id", "")
                 break
-        if not existing_cast:
+        if not cast_id:
+            # 新規登録
             props: dict = {}
             ctx["put_prop_any"](props, t_cast, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
             ctx["put_prop_any"](props, t_cast, PARTICIPANT_PLAYER_REL_KEYS, player_id)
@@ -161,9 +161,23 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
             res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                                      json={"parent": {"database_id": cast_db}, "properties": props})
             if res and res.status_code == 200:
+                cast_id = res.json().get("id", "")
                 ok_n += 1
             else:
                 errors.append("演奏会参加者の登録に失敗しました")
+        else:
+            # 既存レコードにパートを書き込む（空欄の場合のみ）
+            existing_part = ctx["extract_prop_text_any"](
+                next((r for r in all_cast if r.get("id","") == cast_id), {}),
+                PARTICIPANT_PART_KEYS
+            ) or ""
+            if not existing_part:
+                props_p: dict = {}
+                ctx["put_prop_any"](props_p, t_cast, PARTICIPANT_PART_KEYS,
+                                    st.session_state.get("form_player_part", ""))
+                ctx["api_request"]("patch",
+                    f"https://api.notion.com/v1/pages/{cast_id}",
+                    json={"properties": props_p})
 
     # ── 出欠登録 ──────────────────────────────────────────────
     att_db = ctx["CONCERT_DB_ATTENDANCE"]
