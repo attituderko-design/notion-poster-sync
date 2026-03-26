@@ -277,6 +277,33 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
 
     return ok_n, errors
 
+_PRIVACY_POLICY = """
+## プライバシーポリシー
+
+本フォームは **ArtéMis HARMONIA** が提供する演奏会運営支援フォームです。
+
+### 収集する情報
+- 氏名・ハンドルネーム
+- メールアドレス・電話番号・LINE ID（任意）
+- 練習出欠・パート希望・所有楽器情報
+
+### 利用目的
+収集した情報は演奏会の運営・調整（出欠管理・パートアサイン・楽器手配）のみに使用します。
+
+### 第三者提供
+収集した個人情報を本演奏会の運営目的以外に使用せず、第三者に提供しません。
+
+### 管理者
+ArtéMis HARMONIA開発者　喜田悠太  
+attituderko@gmail.com
+
+### 開示・削除請求
+上記メールアドレスにご連絡ください。
+
+---
+*本フォームへの入力・送信をもって上記に同意したものとみなします。*
+"""
+
 # ── フォームメイン ────────────────────────────────────────────
 
 def render_form(ctx, concert_id: str):
@@ -322,6 +349,16 @@ def render_form(ctx, concert_id: str):
     st.divider()
 
     step = st.session_state.get("form_step", 1)
+
+    # ── STEP 0: プライバシーポリシー同意 ─────────────────────
+    if step == 1 and not st.session_state.get("form_privacy_agreed"):
+        st.subheader("はじめに")
+        st.markdown(_PRIVACY_POLICY)
+        if st.button("✅ 同意して入力を開始する", type="primary",
+                     use_container_width=True, key="privacy_agree"):
+            st.session_state["form_privacy_agreed"] = True
+            st.rerun()
+        return
 
     # ── STEP 1: 氏名・パート ──────────────────────────────────
     if step == 1:
@@ -548,7 +585,7 @@ def render_form(ctx, concert_id: str):
         st.info("このページを閉じて構いません。")
         if st.button("別の方の入力をする", use_container_width=True):
             for k in list(st.session_state.keys()):
-                if k.startswith("form_") and k != "form_data_loaded":
+                if k.startswith("form_") and k not in ("form_data_loaded",):
                     st.session_state.pop(k, None)
             st.rerun()
 
