@@ -19,6 +19,8 @@ from concert.services.keys import (
     PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     EXPENSE_KEY_KEYS, EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS,
     EXPENSE_CONTENT_KEYS, EXPENSE_AMOUNT_KEYS, EXPENSE_CONFIRMED_KEYS,
+    PLAYER_HN_KEYS, PLAYER_PHONE_KEYS, PLAYER_LINE_KEYS,
+    PARTICIPANT_ROLE_OPS_KEYS,
     PRACTICE_CONCERT_DAY_KEYS,
     PI_BRING_ASSIGN_KEYS, PI_BRING_COUNT_KEYS, PI_PRACTICE_REL_KEYS,
     RENTAL_RECORD_KEYS, RENTAL_PRACTICE_REL_KEYS, RENTAL_INST_REL_KEYS,
@@ -84,9 +86,19 @@ def _seed_all(ctx) -> dict:
     player_db = ctx["CONCERT_DB_PLAYER"]
     tp = _p(ctx, player_db)
     player_ids = []
-    for name in ["テスト奏者A", "テスト奏者B", "テスト奏者C", "テスト奏者D", "テスト奏者E"]:
+    player_data = [
+        ("テスト奏者A", "A", "090-0001-0001", "test_line_a"),
+        ("テスト奏者B", "B", "090-0001-0002", "test_line_b"),
+        ("テスト奏者C", "C", "090-0001-0003", ""),
+        ("テスト奏者D", "D", "", ""),
+        ("テスト奏者E", "E", "", ""),
+    ]
+    for name, hn, phone, line_id in player_data:
         props = {}
-        _put(ctx, props, tp, PLAYER_NAME_KEYS, f"{TEST_PREFIX} {name}")
+        _put(ctx, props, tp, PLAYER_NAME_KEYS,  f"{TEST_PREFIX} {name}")
+        _put(ctx, props, tp, PLAYER_HN_KEYS,    hn)
+        _put(ctx, props, tp, PLAYER_PHONE_KEYS, phone)
+        _put(ctx, props, tp, PLAYER_LINE_KEYS,  line_id)
         pid = track(_create(ctx, player_db, props))
         if pid:
             player_ids.append(pid)
@@ -187,6 +199,7 @@ def _seed_all(ctx) -> dict:
         _put(ctx, props, tcast, PARTICIPANT_PLAYER_REL_KEYS,  pid)
         _put(ctx, props, tcast, PARTICIPANT_PART_KEYS,        parts[i])
         _put(ctx, props, tcast, PARTICIPANT_ROLE_KEYS,        "プレイヤー")
+        _put(ctx, props, tcast, PARTICIPANT_ROLE_OPS_KEYS,    "" if i < 3 else "会計" if i == 3 else "広報")
         _put(ctx, props, tcast, PARTICIPANT_FEE_KEYS,         fees[i])
         cid = track(_create(ctx, cast_db, props))
         if cid:
