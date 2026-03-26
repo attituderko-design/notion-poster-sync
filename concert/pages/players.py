@@ -380,12 +380,9 @@ def _upsert_participant(
     ctx["put_prop_any"](props, t, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PARTICIPANT_PLAYER_REL_KEYS, player_id)
     ctx["put_key_any"](props, t, PARTICIPANT_RECORD_KEYS, concert_id, player_id, prefix="participant")
-    if part:
-        ctx["put_prop_any"](props, t, PARTICIPANT_PART_KEYS, part)
-    if role_music:
-        ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_KEYS, role_music)
-    if role_ops:
-        ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_OPS_KEYS, role_ops)
+    ctx["put_prop_any"](props, t, PARTICIPANT_PART_KEYS,     part)
+    ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_KEYS,     role_music)
+    ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_OPS_KEYS, role_ops)
     # 新規登録時のみ：session_stateの確定参加費をセット
     if not existing_id:
         confirmed_fee = st.session_state.get(f"confirmed_fee_{concert_id}")
