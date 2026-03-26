@@ -424,8 +424,10 @@ def render_form(ctx, concert_id: str):
     if step == 1:
         st.subheader("Step 1 / 基本情報を入力してください")
         with st.form("step1"):
-            name     = st.text_input("氏名 *", placeholder="例：山田太郎")
-            hn       = st.text_input("H.N.（任意）", placeholder="例：酒席ティンパニ奏者")
+            col_last, col_first = st.columns(2)
+            last_name  = col_last.text_input("姓 *",  placeholder="例：山田")
+            first_name = col_first.text_input("名 *", placeholder="例：太郎")
+            hn         = st.text_input("H.N.（任意）", placeholder="例：酒席ティンパニ奏者")
             email    = st.text_input("メールアドレス（任意）", placeholder="例：yamada@example.com")
             phone    = st.text_input("電話番号（任意）", placeholder="例：09012345678")
             line_id  = st.text_input("LINE ID（任意）", placeholder="例：yamada_taro")
@@ -437,9 +439,10 @@ def render_form(ctx, concert_id: str):
             submitted = st.form_submit_button("次へ →", type="primary",
                                               use_container_width=True)
         if submitted:
-            if not name.strip():
-                st.error("氏名は必須です。")
+            if not last_name.strip() or not first_name.strip():
+                st.error("姓・名はどちらも必須です。")
                 return
+            name = last_name.strip() + first_name.strip()  # スペースなしで結合
             actual_part = part_other.strip() if part_sel == OTHER_PART else part_sel
             if not actual_part or actual_part == OTHER_PART:
                 st.error("パートを選択または入力してください。")
@@ -449,7 +452,7 @@ def render_form(ctx, concert_id: str):
                 players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
                 existing = next(
                     (p for p in players
-                     if (ext(p, PLAYER_NAME_KEYS) or "").strip() == name.strip()),
+                     if (ext(p, PLAYER_NAME_KEYS) or "").strip() == name),
                     None
                 )
                 if existing:
@@ -469,7 +472,7 @@ def render_form(ctx, concert_id: str):
                 else:
                     t_pl = ctx["get_prop_types"](ctx["CONCERT_DB_PLAYER"])
                     props = {}
-                    ctx["put_prop_any"](props, t_pl, PLAYER_NAME_KEYS, name.strip())
+                    ctx["put_prop_any"](props, t_pl, PLAYER_NAME_KEYS, name)
                     if hn.strip():      ctx["put_prop_any"](props, t_pl, PLAYER_HN_KEYS,    hn.strip())
                     if email.strip():   ctx["put_prop_any"](props, t_pl, PLAYER_EMAIL_KEYS, email.strip())
                     if phone.strip():   ctx["put_prop_any"](props, t_pl, PLAYER_PHONE_KEYS, phone.strip())
@@ -486,7 +489,7 @@ def render_form(ctx, concert_id: str):
 
             st.session_state.update({
                 "form_player_id":   player_id,
-                "form_player_name": name.strip(),
+                "form_player_name": name,
                 "form_player_part": actual_part,
                 "form_att":  {},
                 "form_pref": {},
