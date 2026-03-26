@@ -18,7 +18,7 @@ from concert.services.keys import (
     INSTRUMENT_NAME_KEYS,
     PLAYER_NAME_KEYS, PLAYER_HN_KEYS, PLAYER_EMAIL_KEYS,
     PLAYER_PHONE_KEYS, PLAYER_LINE_KEYS,
-    ATT_RECORD_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
+    ATTENDANCE_KEY_KEYS, ATT_RECORD_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
     PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     CONCERT_CONFIRMED_FEE_KEYS,
@@ -125,6 +125,24 @@ def _get_select_opts(ctx, db_id: str, field_keys: list) -> list[str]:
 
 # ── 送信処理 ──────────────────────────────────────────────────
 
+def _find_rel(type_map: dict, candidates: list, keywords: list,
+              exclude: set | None = None) -> str:
+    """relationフィールド名をfuzzy検索（players.pyの_find_relation_propと同等）。"""
+    exclude = exclude or set()
+    for k in candidates:
+        if (type_map or {}).get(k) == "relation" and k not in exclude:
+            return k
+    for k, t in (type_map or {}).items():
+        if t != "relation" or k in exclude:
+            continue
+        if any(kw.lower() in str(k).lower() for kw in keywords):
+            return k
+    for k, t in (type_map or {}).items():
+        if t == "relation" and k not in exclude:
+            return k
+    return ""
+
+
 def _submit_all(ctx, concert_id: str, concert_name: str,
                 player_id: str, player_name: str,
                 att: dict, pref: dict, own: dict) -> tuple[int, list[str], dict]:
@@ -192,28 +210,41 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
             prac_name_map[concert_day.get("id","")] = \
                 ctx["extract_prop_text_any"](concert_day, PRACTICE_NAME_KEYS) or "本番当日"
 
-        # 練習回の出欠 + 本番当日を○で追加
         att_all = dict(att)
         if concert_day:
             att_all[concert_day.get("id","")] = "○"
 
-        check_id = cast_id if cast_id else player_id
+        # 既存players.pyと同じロジック：_find_relation_propでフィールド名を特定
+        practice_rel_key = _find_rel(t_att, ATT_PRACTICE_REL_KEYS, ["練習", "practice"])
+        player_rel_key   = _find_rel(t_att, ATT_PLAYER_REL_KEYS,
+                                     ["奏者", "出演者", "participant", "player"],
+                                     exclude={practice_rel_key} if practice_rel_key else set())
+        status_key = ctx["find_prop_name"](t_att, ATT_STATUS_KEYS)
+        rel_target = cast_id if cast_id else player_id
+
         att_ids: list[str] = []
         for pr_id, status in att_all.items():
             existing_id = ""
             for r in all_att:
-                pl = ext_rel(r, ATT_PLAYER_REL_KEYS)
-                pr = ext_rel(r, ATT_PRACTICE_REL_KEYS)
-                if check_id in pl and pr_id in pr:
-                    existing_id = r.get("id", "")
+                pl = (r.get("properties",{}).get(player_rel_key,{}).get("relation",[]) or [])
+                pr = (r.get("properties",{}).get(practice_rel_key,{}).get("relation",[]) or [])
+                pl_ids = [x.get("id","") for x in pl]
+                pr_ids = [x.get("id","") for x in pr]
+                if rel_target in pl_ids and pr_id in pr_ids:
+                    existing_id = r.get("id","")
                     break
             pname = prac_name_map.get(pr_id, "")
             props = {}
-            ctx["put_key_any"](props, t_att, ATT_RECORD_KEYS,
-                               pr_id, check_id, prefix="att")
-            ctx["put_prop_any"](props, t_att, ATT_PLAYER_REL_KEYS,   check_id)
-            ctx["put_prop_any"](props, t_att, ATT_PRACTICE_REL_KEYS, pr_id)
-            ctx["put_prop_any"](props, t_att, ATT_STATUS_KEYS,        status)
+            # attendance_key
+            ctx["put_key_any"](props, t_att, ATTENDANCE_KEY_KEYS,
+                               rel_target, pr_id, prefix="att")
+            # relationsをput_propで直接指定
+            if player_rel_key:
+                ctx["put_prop"](props, t_att, player_rel_key,   rel_target)
+            if practice_rel_key:
+                ctx["put_prop"](props, t_att, practice_rel_key, pr_id)
+            if status_key:
+                ctx["put_prop"](props, t_att, status_key, status)
             if existing_id:
                 res = ctx["api_request"]("patch",
                     f"https://api.notion.com/v1/pages/{existing_id}",
@@ -284,7 +315,7 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                         break
                 props = {}
                 ctx["put_key_any"](props, t_pi, ["record_key", "タイトル", "PK名称"],
-                                   player_id, iid, prefix="pi")
+                                   player_id, iid, prefix="assign")
                 ctx["put_prop_any"](props, t_pi, PI_PLAYER_REL_KEYS,  player_id)
                 ctx["put_prop_any"](props, t_pi, PI_INST_REL_KEYS,    iid)
                 ctx["put_prop_any"](props, t_pi, PI_CONCERT_REL_KEYS, concert_id)

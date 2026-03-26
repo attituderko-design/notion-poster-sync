@@ -14,7 +14,7 @@ from concert.services.keys import (
     PARTICIPANT_RECORD_KEYS, PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
     PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_FEE_KEYS,
     PLAYER_NAME_KEYS,
-    ATT_RECORD_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
+    ATTENDANCE_KEY_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
     PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     EXPENSE_KEY_KEYS, EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS,
@@ -221,15 +221,32 @@ def _seed_all(ctx) -> dict:
         None
     )
     all_prac_ids = practice_ids + ([concert_day_id] if concert_day_id else [])
+    # _find_relation_propと同等のロジックでフィールド名を特定
+    practice_rel_key = ctx["find_prop_name"](tatt, ATT_PRACTICE_REL_KEYS)
+    if not practice_rel_key:
+        for k, t in (tatt or {}).items():
+            if t == "relation" and any(kw in str(k).lower() for kw in ["練習", "practice"]):
+                practice_rel_key = k; break
+    player_rel_key = ctx["find_prop_name"](tatt, ATT_PLAYER_REL_KEYS)
+    if not player_rel_key:
+        for k, t in (tatt or {}).items():
+            if t == "relation" and k != practice_rel_key and any(
+                kw in str(k).lower() for kw in ["奏者", "participant", "player", "出演"]):
+                player_rel_key = k; break
+    status_key = ctx["find_prop_name"](tatt, ATT_STATUS_KEYS)
+
     for pr_id in all_prac_ids:
         for i, (pid, cast_id) in enumerate(zip(player_ids, cast_ids)):
             status = "○" if pr_id == concert_day_id else statuses[i % len(statuses)]
             props = {}
-            ctx["put_key_any"](props, tatt, ATT_RECORD_KEYS,
-                               pr_id, cast_id, prefix="att")
-            _put(ctx, props, tatt, ATT_PRACTICE_REL_KEYS, pr_id)
-            _put(ctx, props, tatt, ATT_PLAYER_REL_KEYS,   cast_id)
-            _put(ctx, props, tatt, ATT_STATUS_KEYS,        status)
+            ctx["put_key_any"](props, tatt, ATTENDANCE_KEY_KEYS,
+                               cast_id, pr_id, prefix="att")
+            if practice_rel_key:
+                ctx["put_prop"](props, tatt, practice_rel_key, pr_id)
+            if player_rel_key:
+                ctx["put_prop"](props, tatt, player_rel_key, cast_id)
+            if status_key:
+                ctx["put_prop"](props, tatt, status_key, status)
             att_id = track(_create(ctx, att_db, props))
             if att_id:
                 att_count += 1
@@ -242,8 +259,8 @@ def _seed_all(ctx) -> dict:
     for pid in player_ids[:2]:
         for iid in instrument_ids:
             props = {}
-            _put(ctx, props, tpi, ["record_key", "タイトル", "PK名称"],
-                 f"{TEST_PREFIX} pi_{pid[:6]}_{iid[:6]}")
+            ctx["put_key_any"](props, tpi, ["record_key", "タイトル", "PK名称"],
+                               pid, iid, prefix="assign")
             _put(ctx, props, tpi, PI_CONCERT_REL_KEYS, concert_id)
             _put(ctx, props, tpi, PI_PLAYER_REL_KEYS,  pid)
             _put(ctx, props, tpi, PI_INST_REL_KEYS,    iid)
@@ -261,8 +278,8 @@ def _seed_all(ctx) -> dict:
     for i, pid in enumerate(player_ids[:2]):
         for j, pd_id in enumerate(partdef_ids[:3]):
             props = {}
-            _put(ctx, props, tpref, ["record_key", "タイトル", "PK"],
-                 f"{TEST_PREFIX} pref_{pid[:6]}_{pd_id[:6]}")
+            ctx["put_key_any"](props, tpref, ["record_key", "タイトル", "PK"],
+                               pid, pd_id, prefix="pref")
             _put(ctx, props, tpref, PREF_PLAYER_REL_KEYS, pid)
             _put(ctx, props, tpref, PREF_PART_REL_KEYS,   pd_id)
             _put(ctx, props, tpref, PREF_PRIORITY_KEYS,   priorities[j % len(priorities)])
