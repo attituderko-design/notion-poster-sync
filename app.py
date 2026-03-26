@@ -8286,6 +8286,26 @@ st.caption(
 st.caption("MUSE collects. ATLAS archives. APOLLO performs. HARMONIA orchestrates.")
 st.caption(f"v{APP_VERSION}")
 
+# ── 奏者フォームモード（?concert=TOKEN&cid=CONCERT_ID） ──────
+_qp = st.query_params
+if "concert" in _qp and "cid" in _qp:
+    try:
+        from concert.pages.form import verify_form_token, render_form
+        from concert.services.notion_client import build_concert_ctx
+        _token = _qp["concert"]
+        _cid   = _qp["cid"]
+        if verify_form_token(_token, _cid):
+            try:
+                _form_ctx = build_concert_ctx()
+                render_form(_form_ctx, _cid)
+            except Exception as _e:
+                st.error(f"フォームの読み込みに失敗しました: {_e}")
+        else:
+            st.error("URLが無効です。正しいURLを使用してください。")
+    except Exception as _e:
+        st.error(f"フォームの初期化に失敗しました: {_e}")
+    st.stop()
+
 # ============================================================
 # システム切替（通常 / Concert）
 # ============================================================
@@ -8411,6 +8431,15 @@ if system_mode == "HARMONIA":
 
     # サイドバー：演奏会サマリPDF出力
     concert_mgmt.render_sidebar_summary_pdf(concert_ctx)
+    # サイドバー：奏者フォームURL生成
+    try:
+        from concert.pages.form import render_url_generator
+        with st.sidebar.expander("📋 奏者フォームURL", expanded=False):
+            render_url_generator(concert_ctx,
+                                 concert_ctx.get("SELECTED_CONCERT_ID",""),
+                                 concert_ctx.get("SELECTED_CONCERT_NAME",""))
+    except Exception:
+        pass
 
     if concert_page == "練習管理":
         concert_mgmt.render(concert_ctx)
