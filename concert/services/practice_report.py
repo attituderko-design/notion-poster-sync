@@ -225,7 +225,14 @@ def generate_practice_report(
         v = ext(r, SCHEDULE_ORDER_KEYS)
         try: return int(float(v)) if v else 9999
         except: return 9999
-    sched_rows = sorted(sched_rows, key=_sched_order)
+    def _sched_key(r):
+        v = ctx["extract_prop_text_any"](r, SCHEDULE_ORDER_KEYS)
+        try:
+            if v: return (int(float(v)), "")
+        except: pass
+        t = ctx["extract_prop_text_any"](r, SCHEDULE_START_KEYS) or "99:99"
+        return (9999, t)
+    sched_rows = sorted(sched_rows, key=_sched_key)
 
     # 出欠
     att_t   = ctx["get_prop_types"](ctx["CONCERT_DB_ATTENDANCE"])
@@ -250,7 +257,7 @@ def generate_practice_report(
         att_map[pid] = ext(r, ATT_STATUS_KEYS) or "—"
 
     # 参加者（演奏会参加者DB経由）
-    from concert.services.keys import PARTICIPANT_CONCERT_REL_KEYS
+    from concert.services.keys import PARTICIPANT_CONCERT_REL_KEYS, PARTICIPANT_PART_KEYS
     concert_participants = [r for r in participant_rows
                              if concert_id in ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)]
     participant_player_ids = []
@@ -290,11 +297,15 @@ def generate_practice_report(
     # タイトル
     prefix = "本番当日" if is_concert_day else "練習前日共有"
     story.append(Paragraph(f"ArtéMis HARMONIA　{prefix}", st_map["subtitle"]))
+    story.append(Spacer(1, 2*mm))
     title_str = ("【本番当日】" if is_concert_day else "") + prac_name
     story.append(Paragraph(title_str, st_map["title"]))
+    story.append(Spacer(1, 3*mm))
     if concert_name:
         story.append(Paragraph(concert_name, st_map["subtitle"]))
-    story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#CCCCCC"), spaceAfter=4))
+        story.append(Spacer(1, 2*mm))
+    story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor("#CCCCCC"), spaceAfter=0))
+    story.append(Spacer(1, 4*mm))
 
     # 基本情報
     date_str = prac_date[:16].replace("T", "　") if prac_date else "未設定"
@@ -317,6 +328,7 @@ def generate_practice_report(
     ]))
     story.append(info_tbl)
     story.append(Spacer(1, 3*mm))
+    story.append(Spacer(1, 2*mm))
     # 会場情報 + QRコード
     story.extend(_venue_qr_block(prac_address, prac_venue, font, font_b, W))
 
@@ -364,31 +376,48 @@ def generate_practice_report(
         story.append(sched_tbl)
         story.append(Spacer(1, 3*mm))
 
-    # 出欠一覧
+    # 出欠一覧（パート順ソート・パート列追加）
     _h_att = Paragraph("■ 出欠一覧", st_map["h2"])
-    att_data = [["奏者", "参加可否"]]
-    for pid in participant_player_ids:
+
+    # パート情報取得
+    player_part_map_pr: dict[str, str] = {}
+    for r in concert_participants:
+        p_ids = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
+        if p_ids:
+            player_part_map_pr[p_ids[0]] = ctx["extract_prop_text_any"](r, PARTICIPANT_PART_KEYS) or ""
+    # パート→氏名順でソート
+    sorted_pids = sorted(participant_player_ids,
+                         key=lambda pid: (player_part_map_pr.get(pid,"zzz"), player_name_map.get(pid,"")))
+
+    att_data = [["パート", "奏者", "参加可否"]]
+    cur_part_pr = None
+    for pid in sorted_pids:
         pname  = player_name_map.get(pid, pid)
         status = att_map.get(pid, "未回答")
-        att_data.append([pname, status])
+        part   = player_part_map_pr.get(pid, "")
+        part_disp = part if part != cur_part_pr else ""
+        if part != cur_part_pr:
+            cur_part_pr = part
+        att_data.append([part_disp, pname, status])
 
     if len(att_data) > 1:
         att_tbl = Table(
             [[Paragraph(str(c), st_map["cellb"] if i == 0 else st_map["cell"])
               for c in row]
              for i, row in enumerate(att_data)],
-            colWidths=[50*mm, 25*mm],
+            colWidths=[16*mm, 40*mm, 20*mm],
             repeatRows=1,
         )
         sty = _tbl_style()
+        sty.add("BACKGROUND", (0,1), (0,-1), colors.HexColor("#F0EEF8"))
         for i, row in enumerate(att_data[1:], 1):
-            status = row[1]
+            status = row[2]
             if status == "○":
-                sty.add("BACKGROUND", (1,i), (1,i), colors.HexColor("#EAF7EA"))
+                sty.add("BACKGROUND", (2,i), (2,i), colors.HexColor("#EAF7EA"))
             elif status == "×":
-                sty.add("BACKGROUND", (1,i), (1,i), colors.HexColor("#FDEDEC"))
+                sty.add("BACKGROUND", (2,i), (2,i), colors.HexColor("#FDEDEC"))
             elif status == "△":
-                sty.add("BACKGROUND", (1,i), (1,i), colors.HexColor("#FEF9E7"))
+                sty.add("BACKGROUND", (2,i), (2,i), colors.HexColor("#FEF9E7"))
         att_tbl.hAlign = "LEFT"
         att_tbl.setStyle(sty)
         story.append(KeepTogether([_h_att, Spacer(1, 1*mm)]))
@@ -416,7 +445,7 @@ def generate_practice_report(
             "count":  cnt,
         })
 
-    _h_bring = Paragraph("■ 持参楽器一覧", st_map["h2"])
+    _h_bring = Paragraph("■ 打楽器奏者持参楽器一覧", st_map["h2"])
     if bring_items:
         bring_data = [["奏者", "楽器", "台数"]]
         for b in sorted(bring_items, key=lambda x: x["player"]):

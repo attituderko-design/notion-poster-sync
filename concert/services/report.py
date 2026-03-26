@@ -36,6 +36,9 @@ def _styles(font, font_b):
         "body":     ParagraphStyle("body", alignment=TA_LEFT,    fontName=font,   fontSize=9),
         "small":    ParagraphStyle("small", alignment=TA_LEFT,   fontName=font,   fontSize=8,  textColor=colors.HexColor("#666666")),
         "caption":  ParagraphStyle("caption", alignment=TA_LEFT, fontName=font,   fontSize=7,  textColor=colors.HexColor("#888888")),
+        "cell":     ParagraphStyle("cell",  alignment=TA_LEFT,   fontName=font,   fontSize=8,  leading=11),
+        "cellb":    ParagraphStyle("cellb", alignment=TA_LEFT,   fontName=font_b, fontSize=8,  leading=11),
+        "cellb_wht":ParagraphStyle("cellb_wht", alignment=TA_LEFT, fontName=font_b, fontSize=8, leading=11, textColor=colors.white),
         "desc":     ParagraphStyle("desc", alignment=TA_LEFT,    fontName=font,   fontSize=8,  textColor=colors.HexColor("#444444"),
                                    spaceAfter=4, leading=12),
     }
