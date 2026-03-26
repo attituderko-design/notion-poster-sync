@@ -28,6 +28,9 @@ PRACTICE_PERCUSSION_OFF_KEYS = ["打楽器休み", "打楽器不要フラグ", "
 # ── PERFORMER（出演者）DB ────────────────────────────────────
 PLAYER_NAME_KEYS          = ["氏名", "名前", "表示名", "タイトル"]
 PLAYER_EMAIL_KEYS         = ["メールアドレス", "Email", "email"]
+PLAYER_HN_KEYS            = ["H.N.", "ハンドルネーム", "HN"]
+PLAYER_PHONE_KEYS         = ["電話番号", "Phone", "Tel"]
+PLAYER_LINE_KEYS          = ["LINE ID", "LINE", "Line"]
 PLAYER_MEMO_KEYS          = ["メモ", "備考"]
 PLAYER_KEY_KEYS           = ["player_key", "PlayerKey", "奏者キー", "PK奏者キー"]
 
@@ -85,7 +88,10 @@ PI_CONCERT_REL_KEYS       = ["演奏会", "出演", "FK演奏会"]
 PI_PARTICIPANT_REL_KEYS   = ["演奏会参加者", "参加者", "FK参加者"]
 PI_ASSIGN_KEYS            = ["担当フラグ", "担当", "担当有無"]
 PI_BRING_KEYS             = ["持参可フラグ", "持参可", "持参"]
-PI_BRING_COUNT_KEYS       = ["持参台数", "持参数", "持参可能台数"]
+PI_OWN_COUNT_KEYS         = ["所有台数", "持参台数", "持参数"]
+PI_BRING_COUNT_KEYS       = ["持参台数", "持参数"]
+PI_BRING_ASSIGN_KEYS      = ["持参担当", "持参担当フラグ"]
+PI_PRACTICE_REL_KEYS      = ["練習", "FK練習", "Practice"]
 PI_NOTE_KEYS              = ["備考", "メモ"]
 ASSIGN_KEY_KEYS           = ["assign_key", "assignment_key", "AssignmentKey", "割当キー", "PK割当キー"]
 
@@ -125,3 +131,34 @@ SCHEDULE_SONG_REL_KEYS    = ["演奏曲", "楽曲", "FK楽曲"]
 SCHEDULE_ORDER_KEYS       = ["表示順", "順番", "Order"]
 
 SCHEDULE_TYPE_OPTIONS     = ["練習", "休憩", "開場", "搬入", "搬出", "退館", "その他"]
+
+# ── PLAYER_INSTRUMENT_MASTER（所有楽器マスタ）DB ─────────────
+MASTER_KEY_KEYS           = ["master_key", "タイトル"]
+MASTER_PLAYER_REL_KEYS    = ["奏者", "FK奏者", "Player"]
+MASTER_INST_REL_KEYS      = ["楽器種別", "楽器", "FK楽器種別"]
+MASTER_OWN_COUNT_KEYS     = ["所有台数", "台数", "Count"]
+MASTER_NOTE_KEYS          = ["備考", "メモ", "Note"]
+
+# ── CONCERT_EXPENSE（経費明細）DB ────────────────────────────
+EXPENSE_KEY_KEYS          = ["expense_key", "タイトル"]
+EXPENSE_CONCERT_REL_KEYS  = ["演奏会", "FK演奏会"]
+EXPENSE_TYPE_KEYS         = ["種別", "Type"]
+EXPENSE_CONTENT_KEYS      = ["内容", "Content"]
+EXPENSE_AMOUNT_KEYS       = ["金額", "Amount"]
+EXPENSE_CONFIRMED_KEYS    = ["確定", "Confirmed"]
+EXPENSE_NOTE_KEYS         = ["備考", "Note"]
+
+EXPENSE_TYPE_OPTIONS = [
+    "会場費", "楽器レンタル", "楽譜レンタル",
+    "印刷物・プログラム", "フライヤー", "謝礼", "その他"
+]
+
+# ── CONCERT_CAST 追加フィールド ───────────────────────────────
+PARTICIPANT_PART_KEYS     = ["パート", "Part"]
+PARTICIPANT_ROLE_KEYS     = ["役職_音楽", "役職", "Role"]
+PARTICIPANT_ROLE_OPS_KEYS = ["役職_運営", "RoleOps"]
+PARTICIPANT_FEE_KEYS      = ["参加費", "Fee"]
+PARTICIPANT_PAID_KEYS     = ["入金済", "Paid"]
+
+# ── ATLAS（CONCERT DB）追加フィールド ────────────────────────
+CONCERT_CONFIRMED_FEE_KEYS = ["確定参加費", "ConfirmedFee"]
