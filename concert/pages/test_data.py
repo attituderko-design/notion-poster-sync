@@ -14,7 +14,7 @@ from concert.services.keys import (
     PARTICIPANT_RECORD_KEYS, PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
     PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_FEE_KEYS,
     PLAYER_NAME_KEYS,
-    ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
+    ATT_RECORD_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
     PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     EXPENSE_KEY_KEYS, EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS,
@@ -194,7 +194,8 @@ def _seed_all(ctx) -> dict:
     fees  = [5000, 5000, 5000, 5000, 0]
     for i, pid in enumerate(player_ids):
         props = {}
-        _put(ctx, props, tcast, PARTICIPANT_RECORD_KEYS,      f"{TEST_PREFIX} cast_{i+1}")
+        ctx["put_key_any"](props, tcast, PARTICIPANT_RECORD_KEYS,
+                           concert_id, pid, prefix="participant")
         _put(ctx, props, tcast, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
         _put(ctx, props, tcast, PARTICIPANT_PLAYER_REL_KEYS,  pid)
         _put(ctx, props, tcast, PARTICIPANT_PART_KEYS,        parts[i])
@@ -211,14 +212,24 @@ def _seed_all(ctx) -> dict:
     tatt = _p(ctx, att_db)
     att_count = 0
     statuses = ["○", "○", "△", "×", "○"]
-    for pr_id in practice_ids:
-        for i, pid in enumerate(player_ids):
+    # 本番当日も○で追加
+    all_pr_rows = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"], None)
+    concert_day_id = next(
+        (p.get("id","") for p in all_pr_rows
+         if concert_id in ctx["extract_relation_ids_any"](p, PRACTICE_CONCERT_REL_KEYS)
+         and ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS) == "True"),
+        None
+    )
+    all_prac_ids = practice_ids + ([concert_day_id] if concert_day_id else [])
+    for pr_id in all_prac_ids:
+        for i, (pid, cast_id) in enumerate(zip(player_ids, cast_ids)):
+            status = "○" if pr_id == concert_day_id else statuses[i % len(statuses)]
             props = {}
-            _put(ctx, props, tatt, ["record_key", "タイトル", "PK"],
-                 f"{TEST_PREFIX} att_{pr_id[:6]}_{pid[:6]}")
+            ctx["put_key_any"](props, tatt, ATT_RECORD_KEYS,
+                               pr_id, cast_id, prefix="att")
             _put(ctx, props, tatt, ATT_PRACTICE_REL_KEYS, pr_id)
-            _put(ctx, props, tatt, ATT_PLAYER_REL_KEYS,   pid)
-            _put(ctx, props, tatt, ATT_STATUS_KEYS,        statuses[i % len(statuses)])
+            _put(ctx, props, tatt, ATT_PLAYER_REL_KEYS,   cast_id)
+            _put(ctx, props, tatt, ATT_STATUS_KEYS,        status)
             att_id = track(_create(ctx, att_db, props))
             if att_id:
                 att_count += 1
