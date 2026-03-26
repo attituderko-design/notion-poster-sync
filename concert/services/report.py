@@ -318,6 +318,7 @@ def generate_assign_report(
 
     # ── アルゴリズム解説ページ ────────────────────────────────
     story.append(PageBreak())
+    _tips_W = A4[0] - 30*mm  # A4幅 - 左右マージン(各15mm)
     story.append(Paragraph("ArtéMis HARMONIA　アサイン検討 Tips", st["subtitle"]))
     story.append(Spacer(1, 2*mm))
     story.append(Paragraph("候補案の読み方・選び方", st["title"]))
@@ -343,7 +344,7 @@ def generate_assign_report(
         [[Paragraph(str(c), st["cellb"] if i==0 else st["cell"])
           for c in row]
          for i, row in enumerate(algo_data)],
-        colWidths=[22*mm, 28*mm, W - 50*mm],
+        colWidths=[22*mm, 28*mm, _tips_W - 50*mm],
         repeatRows=1,
     )
     algo_tbl.hAlign = "LEFT"
@@ -388,7 +389,7 @@ def generate_assign_report(
         [[Paragraph(str(c), st["cellb"] if i==0 else st["cell"])
           for c in row]
          for i, row in enumerate(candidates_data)],
-        colWidths=[28*mm, 55*mm, W - 83*mm],
+        colWidths=[28*mm, 55*mm, _tips_W - 83*mm],
         repeatRows=1,
     )
     cand_tbl.hAlign = "LEFT"
@@ -423,7 +424,7 @@ def generate_assign_report(
         [[Paragraph(str(c), st["cellb"] if i==0 else st["cell"])
           for c in row]
          for i, row in enumerate(score_data)],
-        colWidths=[48*mm, 18*mm, W - 66*mm],
+        colWidths=[48*mm, 18*mm, _tips_W - 66*mm],
         repeatRows=1,
     )
     score_tbl.hAlign = "LEFT"
