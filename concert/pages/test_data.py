@@ -5,10 +5,12 @@ concert/pages/test_data.py
 import streamlit as st
 from datetime import date, timedelta
 from concert.services.keys import (
-    CONCERT_NAME_KEYS, CONCERT_DATE_KEYS,
+    CONCERT_NAME_KEYS, CONCERT_DATE_KEYS, CONCERT_VENUE_KEYS, CONCERT_ADDRESS_KEYS,
+    CONCERT_CONDUCTOR_KEYS, CONCERT_SOLOIST_KEYS,
     PRACTICE_NAME_KEYS, PRACTICE_CONCERT_REL_KEYS, PRACTICE_DATE_KEYS,
+    PRACTICE_VENUE_KEYS, PRACTICE_ADDRESS_KEYS,
     PRACTICE_SONG_REL_KEYS,
-    SONG_NAME_KEYS, SONG_CONCERT_REL_KEYS,
+    SONG_NAME_KEYS, SONG_CONCERT_REL_KEYS, SONG_COMPOSER_KEYS,
     INSTRUMENT_NAME_KEYS,
     PARTDEF_KEY_KEYS, PARTDEF_RECORD_KEYS, PARTDEF_CONCERT_REL_KEYS,
     PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS, PARTDEF_NAME_KEYS,
@@ -89,11 +91,16 @@ def _seed_all(ctx) -> dict:
     tp = _p(ctx, player_db)
     player_ids = []
     player_data = [
-        ("テスト奏者A", "A", "090-0001-0001", "test_line_a"),
-        ("テスト奏者B", "B", "090-0001-0002", "test_line_b"),
-        ("テスト奏者C", "C", "090-0001-0003", ""),
-        ("テスト奏者D", "D", "", ""),
-        ("テスト奏者E", "E", "", ""),
+        # Percパート奏者（5名）
+        ("テスト奏者A", "Perc-A", "090-0001-0001", "test_line_a"),
+        ("テスト奏者B", "Perc-B", "090-0001-0002", "test_line_b"),
+        ("テスト奏者C", "Perc-C", "090-0001-0003", "test_line_c"),
+        ("テスト奏者D", "Perc-D", "090-0001-0004", ""),
+        ("テスト奏者E", "Perc-E", "",              ""),
+        # 他パート奏者（3名）
+        ("テスト奏者F", "Vn1-F", "090-0001-0006", ""),
+        ("テスト奏者G", "Vn2-G", "",              ""),
+        ("テスト奏者H", "Va-H",  "",              ""),
     ]
     for name, hn, phone, line_id in player_data:
         props = {}
@@ -144,10 +151,12 @@ def _seed_all(ctx) -> dict:
     song_db = ctx["CONCERT_DB_SONG"]
     ts = _p(ctx, song_db)
     song_ids = []
+    song_composers = {"テスト曲α": "テスト太郎（作曲）", "テスト曲β": "テスト次郎（作曲）"}
     for name in ["テスト曲α", "テスト曲β"]:
         props = {}
         _put(ctx, props, ts, SONG_NAME_KEYS,        f"{TEST_PREFIX} {name}")
         _put(ctx, props, ts, SONG_CONCERT_REL_KEYS, concert_id)
+        _put(ctx, props, ts, SONG_COMPOSER_KEYS,    song_composers[name])
         sid = track(_create(ctx, song_db, props))
         if sid:
             song_ids.append(sid)
@@ -207,8 +216,8 @@ def _seed_all(ctx) -> dict:
     cast_db = ctx["CONCERT_DB_PARTICIPANT"]
     tcast = _p(ctx, cast_db)
     cast_ids = []
-    parts = ["Perc", "Perc", "Vn1", "Vn2", "Va"]
-    fees  = [5000, 5000, 5000, 5000, 0]
+    parts = ["Perc", "Perc", "Perc", "Perc", "Perc"]
+    fees  = [5000, 5000, 5000, 5000, 5000]
     for i, pid in enumerate(player_ids):
         props = {}
         ctx["put_key_any"](props, tcast, PARTICIPANT_RECORD_KEYS,
@@ -230,7 +239,7 @@ def _seed_all(ctx) -> dict:
     pi_db = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
     tpi = _p(ctx, pi_db)
     pi_count = 0
-    for pid in player_ids[:2]:
+    for pid in player_ids[:5]:  # Perc奏者5名分
         for iid in instrument_ids:
             props = {}
             ctx["put_key_any"](props, tpi, ["record_key", "タイトル", "PK名称"],
@@ -245,18 +254,36 @@ def _seed_all(ctx) -> dict:
     summary["PLAYER_INSTRUMENT"] = pi_count
 
     # ── 10. PREFERENCE ────────────────────────────────────
+    # Percパート奏者（cast_ids[:2]=奏者A・B）の全パート定義に希望を登録
+    # 希望分布：各奏者が異なる第1希望を持つようにデザイン
+    #
+    # 奏者A: 曲α Part1=第1希望, Part2=希望なし, Part3=第2希望
+    #        曲β Part1=第2希望, Part2=希望なし, Part3=第1希望
+    # 奏者B: 曲α Part1=希望なし, Part2=第1希望, Part3=第2希望
+    #        曲β Part1=第1希望, Part2=第2希望, Part3=希望なし
+    # partdef_ids = [α_P1, α_P2, α_P3, β_P1, β_P2, β_P3]（2曲×3パート）
     pref_db = ctx["CONCERT_DB_PREFERENCE"]
     tpref = _p(ctx, pref_db)
     pref_count = 0
-    priorities = ["第1希望", "第2希望", "希望なし/降り番でも可"]
-    for i, (pid, cast_id) in enumerate(zip(player_ids[:2], cast_ids[:2])):
-        for j, pd_id in enumerate(partdef_ids[:3]):
+    # 全5奏者×全6パート定義（αP1,αP2,αP3,βP1,βP2,βP3）
+    # 競合を意図的に作り、アルゴリズムの動きが分かるよう設計
+    NA = "希望なし/降り番でも可"
+    pref_matrix = {
+        0: ["第1希望", NA,       "第2希望", "第3希望", NA,       "第1希望"],  # 奏者A
+        1: [NA,       "第1希望", "第2希望", "第1希望", "第2希望", NA      ],  # 奏者B
+        2: ["第2希望", "第1希望", NA,       NA,       "第1希望", "第2希望"],  # 奏者C
+        3: ["第1希望", "第2希望", "第1希望", NA,       "第3希望", NA      ],  # 奏者D
+        4: ["第3希望", NA,       "第1希望", "第2希望", NA,       "第1希望"],  # 奏者E
+    }
+    for i, (pid, cast_id) in enumerate(zip(player_ids, cast_ids)):
+        for j, pd_id in enumerate(partdef_ids[:6]):
+            priority = pref_matrix[i][j] if j < len(pref_matrix[i]) else NA
             props = {}
             ctx["put_key_any"](props, tpref, PREFERENCE_KEY_KEYS,
                                cast_id, pd_id, prefix="pref")
             _put(ctx, props, tpref, PREF_PLAYER_REL_KEYS, cast_id)
             _put(ctx, props, tpref, PREF_PART_REL_KEYS,   pd_id)
-            _put(ctx, props, tpref, PREF_PRIORITY_KEYS,   priorities[j % len(priorities)])
+            _put(ctx, props, tpref, PREF_PRIORITY_KEYS,   priority)
             pref_id = track(_create(ctx, pref_db, props))
             if pref_id:
                 pref_count += 1
@@ -288,9 +315,11 @@ def _seed_all(ctx) -> dict:
     _put(ctx, props, tpr, PRACTICE_NAME_KEYS,        f"{TEST_PREFIX} 本番当日")
     _put(ctx, props, tpr, PRACTICE_CONCERT_REL_KEYS, concert_id)
     _put(ctx, props, tpr, PRACTICE_CONCERT_DAY_KEYS, True)
+    _put(ctx, props, tpr, PRACTICE_VENUE_KEYS,       "テスト文化ホール 大ホール")
+    _put(ctx, props, tpr, PRACTICE_ADDRESS_KEYS,     "大阪府大阪市中央区テスト町1-2-3")
     dt_key3 = ctx["find_prop_name"](tpr, PRACTICE_DATE_KEYS)
     if dt_key3:
-        props[dt_key3] = {"date": {"start": "2099-12-31"}}
+        props[dt_key3] = {"date": {"start": "2099-12-31T10:00:00+09:00"}}
     concert_day_id = track(_create(ctx, practice_db, props))
     if concert_day_id:
         practice_ids.append(concert_day_id)
@@ -300,7 +329,7 @@ def _seed_all(ctx) -> dict:
     att_db = ctx["CONCERT_DB_ATTENDANCE"]
     tatt = _p(ctx, att_db)
     att_count = 0
-    statuses = ["○", "○", "△", "×", "○"]
+    statuses = ["○", "○", "△", "×", "○", "○", "△", "○"]
     # この時点でpractice_idsに本番当日IDが追加済み
     # concert_day_idも本番当日のIDとして使える
     practice_rel_key = ctx["find_prop_name"](tatt, ATT_PRACTICE_REL_KEYS)
