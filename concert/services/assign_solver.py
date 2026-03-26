@@ -551,6 +551,8 @@ def local_search(
                 if improved:
                     break
 
+    return cur
+
 
 def _calc_stats(solution: list[Assignment], pref_map: dict[tuple[str, str, str], Pref], all_player_ids: list[str]) -> dict:
     return {
