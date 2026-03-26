@@ -484,12 +484,31 @@ def _delete_all_test_data(ctx) -> dict:
 
     # 方法2: フォールバック（session_stateが消えた場合）[TEST]プレフィックスで全DB検索
     st.warning("session_stateが消えているため、プレフィックス検索で削除します。時間がかかる場合があります。")
+
+    # CONCERT_CASTはタイトルがparticipant_xxx形式で[TEST]が付かないため
+    # [TEST]演奏会に紐づくレコードを先に特定して削除
+    test_concert_ids: set[str] = set()
+    concert_rows = ctx["query_all"](ctx.get("CONCERT_DB_CONCERT",""), None)
+    for r in concert_rows:
+        name = ctx["extract_prop_text_any"](r, CONCERT_NAME_KEYS) or ""
+        if name.startswith(TEST_PREFIX):
+            test_concert_ids.add(r.get("id",""))
+
+    cast_count = 0
+    if test_concert_ids:
+        cast_rows_all = ctx["query_all"](ctx.get("CONCERT_DB_PARTICIPANT",""), None)
+        for r in cast_rows_all:
+            if any(cid in ctx["extract_relation_ids_any"](r, PARTICIPANT_CONCERT_REL_KEYS)
+                   for cid in test_concert_ids):
+                if _archive(ctx, r.get("id","")): cast_count += 1
+    if cast_count > 0:
+        summary["PARTICIPANT"] = cast_count
+
     db_map = [
         ("CONCERT_DB_ATTENDANCE",        ["record_key", "タイトル", "PK"]),
         ("CONCERT_DB_PREFERENCE",        ["record_key", "タイトル", "PK"]),
         ("CONCERT_DB_PLAYER_INSTRUMENT", ["record_key", "タイトル", "PK名称"]),
         ("CONCERT_DB_CONCERT_EXPENSE",   EXPENSE_KEY_KEYS),
-        ("CONCERT_DB_PARTICIPANT",       PARTICIPANT_RECORD_KEYS),
         ("CONCERT_DB_PART_DEFINITION",   PARTDEF_NAME_KEYS),
         ("CONCERT_DB_PRACTICE",          PRACTICE_NAME_KEYS),
         ("CONCERT_DB_SONG",              SONG_NAME_KEYS),
