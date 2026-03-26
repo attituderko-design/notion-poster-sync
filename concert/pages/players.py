@@ -264,16 +264,19 @@ def _instrument_name(i: dict, ctx: dict) -> str:
     return ctx["extract_prop_text_any"](i, INSTRUMENT_NAME_KEYS) or ctx["extract_title"](i) or i.get("id", "")
 
 
-def _create_player(ctx: dict, name: str, email: str, memo: str) -> bool:
+def _create_player(ctx: dict, name: str, email: str = "", memo: str = "", hn: str = "", phone: str = "", line_id: str = "") -> bool:
     db_id = ctx["CONCERT_DB_PLAYER"]
     t = ctx["get_prop_types"](db_id)
     if not t:
         st.error("奏者DBのプロパティ取得に失敗しました。")
         return False
     props = {}
-    ctx["put_prop_any"](props, t, PLAYER_NAME_KEYS, name)
+    ctx["put_prop_any"](props, t, PLAYER_NAME_KEYS,  name)
     ctx["put_prop_any"](props, t, PLAYER_EMAIL_KEYS, email)
-    ctx["put_prop_any"](props, t, PLAYER_MEMO_KEYS, memo)
+    ctx["put_prop_any"](props, t, PLAYER_MEMO_KEYS,  memo)
+    ctx["put_prop_any"](props, t, PLAYER_HN_KEYS,    hn)
+    ctx["put_prop_any"](props, t, PLAYER_PHONE_KEYS, phone)
+    ctx["put_prop_any"](props, t, PLAYER_LINE_KEYS,  line_id)
     ctx["put_key_any"](props, t, PLAYER_KEY_KEYS, name, prefix="player")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
     return res is not None and res.status_code == 200
