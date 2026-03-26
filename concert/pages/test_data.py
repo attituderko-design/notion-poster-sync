@@ -216,8 +216,9 @@ def _seed_all(ctx) -> dict:
     cast_db = ctx["CONCERT_DB_PARTICIPANT"]
     tcast = _p(ctx, cast_db)
     cast_ids = []
-    parts = ["Perc", "Perc", "Perc", "Perc", "Perc"]
-    fees  = [5000, 5000, 5000, 5000, 5000]
+    parts = ["Perc", "Perc", "Perc", "Perc", "Perc", "Vn1", "Vn2", "Va"]
+    fees  = [5000, 5000, 5000, 5000, 5000, 5000, 5000, 0]
+    roles_ops = ["", "", "", "会計", "広報", "", "", ""]
     for i, pid in enumerate(player_ids):
         props = {}
         ctx["put_key_any"](props, tcast, PARTICIPANT_RECORD_KEYS,
@@ -226,7 +227,7 @@ def _seed_all(ctx) -> dict:
         _put(ctx, props, tcast, PARTICIPANT_PLAYER_REL_KEYS,  pid)
         _put(ctx, props, tcast, PARTICIPANT_PART_KEYS,        parts[i])
         _put(ctx, props, tcast, PARTICIPANT_ROLE_KEYS,        "プレイヤー")
-        _put(ctx, props, tcast, PARTICIPANT_ROLE_OPS_KEYS,    "" if i < 3 else "会計" if i == 3 else "広報")
+        _put(ctx, props, tcast, PARTICIPANT_ROLE_OPS_KEYS,    roles_ops[i] if i < len(roles_ops) else "")
         _put(ctx, props, tcast, PARTICIPANT_FEE_KEYS,         fees[i])
         cid = track(_create(ctx, cast_db, props))
         if cid:
@@ -275,7 +276,7 @@ def _seed_all(ctx) -> dict:
         3: ["第1希望", "第2希望", "第1希望", NA,       "第3希望", NA      ],  # 奏者D
         4: ["第3希望", NA,       "第1希望", "第2希望", NA,       "第1希望"],  # 奏者E
     }
-    for i, (pid, cast_id) in enumerate(zip(player_ids, cast_ids)):
+    for i, (pid, cast_id) in enumerate(zip(player_ids[:5], cast_ids[:5])):  # Perc奏者5名のみ
         for j, pd_id in enumerate(partdef_ids[:6]):
             priority = pref_matrix[i][j] if j < len(pref_matrix[i]) else NA
             props = {}
