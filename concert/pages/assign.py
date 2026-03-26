@@ -765,7 +765,9 @@ def _render_solver_tab(ctx: dict):
                 st.session_state[f"assign_result_{concert_id}"] = results
                 st.success("✅ 候補案を生成しました。")
             except Exception as e:
+                import traceback
                 st.error(f"❌ 実行エラー：{e}")
+                st.code(traceback.format_exc())
                 return
 
     results = st.session_state.get(f"assign_result_{concert_id}")
