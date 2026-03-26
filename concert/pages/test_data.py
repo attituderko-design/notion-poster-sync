@@ -155,8 +155,12 @@ def _seed_all(ctx) -> dict:
     song_db = ctx["CONCERT_DB_SONG"]
     ts = _p(ctx, song_db)
     song_ids = []
-    song_composers = {"テスト曲α": "テスト太郎（作曲）", "テスト曲β": "テスト次郎（作曲）"}
-    for name in ["テスト曲α", "テスト曲β"]:
+    song_composers = {
+        "テスト曲α": "テスト太郎（作曲）",
+        "テスト曲β": "テスト次郎（作曲）",
+        "テスト曲γ": "テスト三郎（作曲）",
+    }
+    for name in ["テスト曲α", "テスト曲β", "テスト曲γ"]:
         props = {}
         _put(ctx, props, ts, SONG_NAME_KEYS,        f"{TEST_PREFIX} {name}")
         _put(ctx, props, ts, SONG_CONCERT_REL_KEYS, concert_id)
@@ -530,13 +534,13 @@ def render(ctx: dict):
 | PERFORMER | 8名（Perc×5・Vn1/Vn2/Va×各1） |
 | INSTRUMENT | 3種 |
 | CONCERT | 1件（2099-12-31） |
-| SONG | 2曲 |
+| SONG | 3曲 |
 | PRACTICE | 3回 |
-| PART_DEFINITION | 6件（2曲×3パート） |
+| PART_DEFINITION | 9件（3曲×3パート） |
 | CONCERT_CAST | 8件 |
-| ATTENDANCE | 32件（4回×8名） |
+| ATTENDANCE | 40件（5回×8名） |
 | PLAYER_INSTRUMENT | 15件（所有：Perc5名×3楽器）+ 2件（持参担当） |
-| PREFERENCE | 30件（Perc5名×6パート定義） |
+| PREFERENCE | 45件（Perc5名×9パート定義） |
 | CONCERT_EXPENSE | 3件 |
 | RENTAL | 2件 |
 | SCHEDULE | 5件（第1回練習のタイムスケジュール） |
