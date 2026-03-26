@@ -166,17 +166,30 @@ def _seed_all(ctx) -> dict:
     practice_db = ctx["CONCERT_DB_PRACTICE"]
     tpr = _p(ctx, practice_db)
     practice_ids = []
+    venues   = [
+        "ザ・シンフォニーホール",
+        "豊中市立文化芸術センター",
+        "吹田市文化会館 メイシアター",
+    ]
+    addresses = [
+        "大阪府大阪市北区大淀南2丁目3-3",
+        "大阪府豊中市曽根東町3丁目7-2",
+        "大阪府吹田市泉町2丁目29-1",
+    ]
+    times = ["T10:00:00+09:00", "T13:00:00+09:00", "T09:30:00+09:00"]
     base = date(2099, 10, 1)
     for i in range(3):
         props = {}
         _put(ctx, props, tpr, PRACTICE_NAME_KEYS,        f"{TEST_PREFIX} 第{i+1}回練習")
         _put(ctx, props, tpr, PRACTICE_CONCERT_REL_KEYS, concert_id)
+        _put(ctx, props, tpr, PRACTICE_VENUE_KEYS,       venues[i])
+        _put(ctx, props, tpr, PRACTICE_ADDRESS_KEYS,     addresses[i])
         if song_ids:
             _put(ctx, props, tpr, PRACTICE_SONG_REL_KEYS, song_ids)
         dt_key2 = ctx["find_prop_name"](tpr, PRACTICE_DATE_KEYS)
         if dt_key2:
             d = base + timedelta(weeks=i*2)
-            props[dt_key2] = {"date": {"start": d.isoformat()}}
+            props[dt_key2] = {"date": {"start": d.isoformat() + times[i]}}
         pr_id = track(_create(ctx, practice_db, props))
         if pr_id:
             practice_ids.append(pr_id)
