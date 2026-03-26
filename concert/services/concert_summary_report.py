@@ -36,7 +36,7 @@ from concert.services.keys import (
     RENTAL_INST_REL_KEYS, RENTAL_COST_TYPE_KEYS,
     PLAYER_NAME_KEYS, INSTRUMENT_NAME_KEYS,
     PARTICIPANT_CONCERT_REL_KEYS, PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS,
-    CONCERT_CONFIRMED_FEE_KEYS,
+    PARTICIPANT_PART_KEYS, CONCERT_CONFIRMED_FEE_KEYS,
     EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS, EXPENSE_AMOUNT_KEYS,
     EXPENSE_CONFIRMED_KEYS,
 )
@@ -123,7 +123,7 @@ def _styles(font, font_b):
         "title":   ParagraphStyle("title", alignment=TA_LEFT,  fontName=font_b, fontSize=15, spaceAfter=2),
         "subtitle":ParagraphStyle("sub", alignment=TA_LEFT,    fontName=font,   fontSize=9,  spaceAfter=6,
                                   textColor=colors.HexColor("#555555")),
-        "h2":      ParagraphStyle("h2", alignment=TA_LEFT,     fontName=font_b, fontSize=11, spaceBefore=8, spaceAfter=3,
+        "h2":      ParagraphStyle("h2", alignment=TA_LEFT,     fontName=font_b, fontSize=11, spaceBefore=14, spaceAfter=6,
                                   textColor=colors.HexColor("#2C2C6C")),
         "body":    ParagraphStyle("body", alignment=TA_LEFT,   fontName=font,   fontSize=9),
         "cell":    ParagraphStyle("cell", alignment=TA_LEFT,   fontName=font,   fontSize=8,  leading=11),
@@ -192,12 +192,19 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     player_name_map = {r.get("id",""): ext(r, PLAYER_NAME_KEYS) or "" for r in player_rows}
     part_to_player = {r.get("id",""): (ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0]
                       for r in participant_rows}
+    # player_id → パート名のマップ
+    player_part_map: dict[str, str] = {}
     participant_player_ids = []
     for r in concert_parts:
         p_ids = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
         if p_ids and p_ids[0] not in participant_player_ids:
             participant_player_ids.append(p_ids[0])
-    participant_player_ids.sort(key=lambda pid: player_name_map.get(pid, ""))
+            player_part_map[p_ids[0]] = ext(r, PARTICIPANT_PART_KEYS) or ""
+    # パート→氏名順でソート
+    participant_player_ids.sort(key=lambda pid: (
+        player_part_map.get(pid, "zzz"),
+        player_name_map.get(pid, "")
+    ))
 
     # 出欠データ全件
     all_att = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], None)
@@ -312,35 +319,44 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         label = "本番" if is_cd else (d[5:10] if d else "?")
         prac_labels_short.append(label)
 
-    matrix_data = [["奏者"] + prac_labels_short]
+    matrix_data = [["パート", "奏者"] + prac_labels_short]
     cell_styles = []  # (row, col, status) for coloring
 
+    cur_part = None
     for row_i, pid in enumerate(participant_player_ids, 1):
         pname = player_name_map.get(pid, pid)
-        row = [pname]
+        part  = player_part_map.get(pid, "")
+        # パートが変わったら表示、同じパートは空欄
+        part_disp = part if part != cur_part else ""
+        if part != cur_part:
+            cur_part = part
+        row = [part_disp, pname]
         for col_i, p in enumerate(practices, 1):
             pid_ = p.get("id","")
             status = att_matrix.get(pid_, {}).get(pid, "未")
             row.append(status)
-            cell_styles.append((row_i, col_i, status))
+            cell_styles.append((row_i, col_i + 1, status))  # +1でパート列分オフセット
         matrix_data.append(row)
 
-    # 列幅計算（奏者列固定、残りを等分）
-    name_col_w = 28*mm
+    # 列幅計算（パート列・奏者列固定、残りを等分）
+    part_col_w = 16*mm
+    name_col_w = 24*mm
     n_prac = len(practices)
-    prac_col_w = min((W - name_col_w) / max(n_prac, 1), 20*mm)
+    prac_col_w = min((W - part_col_w - name_col_w) / max(n_prac, 1), 20*mm)
 
     mat_tbl = Table(
         [[Paragraph(str(c),
-                    st_map["cellbsm"] if (i==0 or j==0) else st_map["cellsm"])
+                    st_map["cellbsm"] if (i==0 or j<=1) else st_map["cellsm"])
           for j, c in enumerate(row)]
          for i, row in enumerate(matrix_data)],
-        colWidths=[name_col_w] + [prac_col_w] * n_prac,
+        colWidths=[part_col_w, name_col_w] + [prac_col_w] * n_prac,
         repeatRows=1,
     )
     mat_sty = _base_style()
-    mat_sty.add("ALIGN", (1,0), (-1,-1), "LEFT")
-    mat_sty.add("FONT",  (0,0), (0,-1),  font_b, 7)
+    mat_sty.add("ALIGN", (2,0), (-1,-1), "CENTER")
+    mat_sty.add("FONT",  (0,0), (1,-1),  font_b, 7)
+    # パート列：同一パートをまとめて見せるため薄い背景
+    mat_sty.add("BACKGROUND", (0,1), (0,-1), colors.HexColor("#F0EEF8"))
     # 出欠ごとに背景色
     for row_i, col_i, status in cell_styles:
         bg = STATUS_COLORS.get(status, colors.white)
