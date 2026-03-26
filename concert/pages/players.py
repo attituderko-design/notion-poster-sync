@@ -358,6 +358,9 @@ def _upsert_participant(
     player_name: str,
     existing_id: str = "",
     is_extra: bool = False,
+    part: str = "",
+    role_music: str = "",
+    role_ops: str = "",
 ) -> bool:
     db_id = ctx["CONCERT_DB_PARTICIPANT"]
     t = ctx["get_prop_types"](db_id)
@@ -369,6 +372,12 @@ def _upsert_participant(
     ctx["put_prop_any"](props, t, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PARTICIPANT_PLAYER_REL_KEYS, player_id)
     ctx["put_key_any"](props, t, PARTICIPANT_RECORD_KEYS, concert_id, player_id, prefix="participant")
+    if part:
+        ctx["put_prop_any"](props, t, PARTICIPANT_PART_KEYS, part)
+    if role_music:
+        ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_KEYS, role_music)
+    if role_ops:
+        ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_OPS_KEYS, role_ops)
     # 新規登録時のみ：ATLASの確定参加費を参照してセット（既存レコードは絶対に上書きしない）
     if not existing_id:
         confirmed_fee = st.session_state.get(f"confirmed_fee_{concert_id}", 0)
