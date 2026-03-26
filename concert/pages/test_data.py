@@ -29,6 +29,7 @@ from concert.services.keys import (
     RENTAL_UNIT_PRICE_KEYS, RENTAL_CONFIRMED_KEYS, RENTAL_NOTE_KEYS,
     SCHEDULE_KEY_KEYS, SCHEDULE_PRACTICE_REL_KEYS, SCHEDULE_START_KEYS,
     SCHEDULE_END_KEYS, SCHEDULE_TYPE_KEYS, SCHEDULE_CONTENT_KEYS,
+    SCHEDULE_ORDER_KEYS,
 )
 
 TEST_PREFIX = "[TEST]"
@@ -382,20 +383,21 @@ def _seed_all(ctx) -> dict:
     if sched_db and practice_ids:
         tsched = _p(ctx, sched_db)
         sched_items = [
-            ("搬入",   "09:00", "10:00", "楽器搬入"),
-            ("練習",   "10:00", "12:00", "午前練習"),
-            ("休憩",   "12:00", "13:00", "昼休憩"),
-            ("練習",   "13:00", "17:00", "午後練習"),
-            ("搬出",   "17:00", "18:00", "楽器搬出"),
+            (1, "搬入", "09:00", "10:00", "楽器搬入"),
+            (2, "練習", "10:00", "12:00", "午前練習"),
+            (3, "休憩", "12:00", "13:00", "昼休憩"),
+            (4, "練習", "13:00", "17:00", "午後練習"),
+            (5, "搬出", "17:00", "18:00", "楽器搬出"),
         ]
-        for stype, start, end, content in sched_items:
+        for order, stype, start, end, content in sched_items:
             props = {}
-            _put(ctx, props, tsched, SCHEDULE_KEY_KEYS,         f"{TEST_PREFIX} sched_{start}")
+            _put(ctx, props, tsched, SCHEDULE_KEY_KEYS,          f"{TEST_PREFIX} sched_{start}")
             _put(ctx, props, tsched, SCHEDULE_PRACTICE_REL_KEYS, practice_ids[0])
             _put(ctx, props, tsched, SCHEDULE_TYPE_KEYS,         stype)
             _put(ctx, props, tsched, SCHEDULE_START_KEYS,        start)
             _put(ctx, props, tsched, SCHEDULE_END_KEYS,          end)
             _put(ctx, props, tsched, SCHEDULE_CONTENT_KEYS,      content)
+            _put(ctx, props, tsched, SCHEDULE_ORDER_KEYS,        order)
             sid2 = track(_create(ctx, sched_db, props))
             if sid2:
                 sched_count += 1

@@ -1093,11 +1093,16 @@ def _load_schedules(ctx, practice_id: str) -> list[dict]:
         rel = ctx["find_prop_name"](t, SCHEDULE_PRACTICE_REL_KEYS)
         f = {"filter": {"property": rel, "relation": {"contains": practice_id}}} if rel else None
         rows = ctx["query_all"](ctx["CONCERT_DB_SCHEDULE"], f)
-        # 表示順でソート
+        # 表示順でソート、未設定の場合は開始時刻でフォールバック
         def _sort_key(r):
             v = ctx["extract_prop_text_any"](r, SCHEDULE_ORDER_KEYS)
-            try: return int(float(v)) if v else 9999
-            except: return 9999
+            try:
+                if v:
+                    return (int(float(v)), "")
+            except: pass
+            # フォールバック：開始時刻でソート
+            t = ctx["extract_prop_text_any"](r, SCHEDULE_START_KEYS) or "99:99"
+            return (9999, t)
         st.session_state[key] = sorted(rows, key=_sort_key)
     return st.session_state.get(key, [])
 
