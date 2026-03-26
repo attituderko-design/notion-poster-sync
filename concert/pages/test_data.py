@@ -316,8 +316,8 @@ def _seed_all(ctx) -> dict:
     _put(ctx, props, tpr, PRACTICE_NAME_KEYS,        f"{TEST_PREFIX} 本番当日")
     _put(ctx, props, tpr, PRACTICE_CONCERT_REL_KEYS, concert_id)
     _put(ctx, props, tpr, PRACTICE_CONCERT_DAY_KEYS, True)
-    _put(ctx, props, tpr, PRACTICE_VENUE_KEYS,       "テスト文化ホール 大ホール")
-    _put(ctx, props, tpr, PRACTICE_ADDRESS_KEYS,     "大阪府大阪市中央区テスト町1-2-3")
+    _put(ctx, props, tpr, PRACTICE_VENUE_KEYS,       "いずみホール")
+    _put(ctx, props, tpr, PRACTICE_ADDRESS_KEYS,     "大阪府大阪市中央区城見1丁目4-70")
     dt_key3 = ctx["find_prop_name"](tpr, PRACTICE_DATE_KEYS)
     if dt_key3:
         props[dt_key3] = {"date": {"start": "2099-12-31T10:00:00+09:00"}}
