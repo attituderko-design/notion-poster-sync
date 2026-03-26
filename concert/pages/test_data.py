@@ -287,19 +287,17 @@ def _seed_all(ctx) -> dict:
     pref_db = ctx["CONCERT_DB_PREFERENCE"]
     tpref = _p(ctx, pref_db)
     pref_count = 0
-    # 全5奏者×全6パート定義（αP1,αP2,αP3,βP1,βP2,βP3）
-    # 競合を意図的に作り、アルゴリズムの動きが分かるよう設計
     NA = "希望なし/降り番でも可"
+    # αP1 αP2 αP3 βP1 βP2 βP3 γP1 γP2 γP3（3曲×3パート=9列）
     pref_matrix = {
-        # αP1 αP2 αP3  βP1  βP2  βP3
-        0: ["第1希望", NA,       "第2希望", "第3希望", NA,       "第1希望"],  # 奏者A: αP1★,βP3★
-        1: [NA,       "第1希望", "第2希望", "第1希望", "第2希望", NA      ],  # 奏者B: αP2★,βP1★
-        2: ["第2希望", "第1希望", NA,       NA,       "第1希望", "第2希望"],  # 奏者C: αP2★(競合B),βP2★(競合B)
-        3: [NA,       "第2希望", "第1希望", NA,       "第1希望", "第3希望"],  # 奏者D: αP3★(競合E),βP2★(競合C)→候補で分かれる
-        4: ["第3希望", NA,       "第1希望", "第1希望", NA,       "第2希望"],  # 奏者E: αP3★(競合D),βP1★(競合B)
+        0: ["第1希望","第2希望",NA,       "第3希望",NA,       "第1希望","第2希望",NA,       "第1希望"],  # 奏者A
+        1: [NA,       "第1希望","第2希望","第1希望","第3希望",NA,       NA,       "第1希望","第2希望"],  # 奏者B
+        2: ["第2希望","第1希望",NA,       NA,       "第1希望","第2希望","第1希望","第2希望",NA      ],  # 奏者C
+        3: [NA,       "第2希望","第1希望",NA,       "第1希望","第3希望","第3希望",NA,       "第1希望"],  # 奏者D
+        4: ["第3希望",NA,       "第1希望","第1希望",NA,       "第2希望",NA,       "第1希望","第3希望"],  # 奏者E
     }
     for i, (pid, cast_id) in enumerate(zip(player_ids[:5], cast_ids[:5])):  # Perc奏者5名のみ
-        for j, pd_id in enumerate(partdef_ids[:6]):
+        for j, pd_id in enumerate(partdef_ids[:9]):
             priority = pref_matrix[i][j] if j < len(pref_matrix[i]) else NA
             props = {}
             ctx["put_key_any"](props, tpref, PREFERENCE_KEY_KEYS,
