@@ -177,15 +177,22 @@ def get_concert_db_property_types(db_id: str, api_key: str) -> dict:
     """
     指定 DB のプロパティ名→型の辞書を返す。
     {"名称": "title", "カテゴリ": "select", ...}
+    session_stateにキャッシュして2回目以降はAPIを叩かない。
     """
+    import streamlit as st
     if not db_id:
         return {}
+    cache_key = f"_prop_types_{db_id}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
     headers = get_concert_headers(api_key)
     res = concert_api_request("get", f"https://api.notion.com/v1/databases/{db_id}", headers=headers)
     if res is None or res.status_code != 200:
         return {}
     props = (res.json() or {}).get("properties", {})
-    return {k: (v.get("type") or "") for k, v in props.items()}
+    result = {k: (v.get("type") or "") for k, v in props.items()}
+    st.session_state[cache_key] = result
+    return result
 
 
 # ============================================================
