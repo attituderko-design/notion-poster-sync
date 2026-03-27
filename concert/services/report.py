@@ -370,46 +370,12 @@ def generate_assign_report(
     player_name_map= {p.get("id"): (extract(p, ["氏名","名前","表示名","タイトル"]) or p.get("id","")) for p in players}
     song_order     = [s.get("id") for s in sorted(songs, key=lambda x: song_name_map.get(x.get("id",""),""))]
 
-    # 共通採点関数（全PDFでこれだけを使う）
-    try:
-        from concert.services.verify_results import verify as _verify
-    except ImportError:
-        _verify = None
+    # 共通採点関数（verify_results.verify()のみを使用。フォールバックなし）
+    from concert.services.verify_results import verify as _verify
 
-    def _v(r):
+    def _v(r: dict) -> dict:
         """1つのresultをverify()で採点して返す。"""
-        if _verify:
-            return _verify(r["assignments"], r["pref_map"])
-        s = r.get("stats", {})
-        return {
-            "total_score":              s.get("total_score", 0),
-            "first_choice_count":       0,
-            "first_choice_rate":        s.get("first_choice_rate", 0),
-            "min_player_score":         s.get("min_score", 0),
-            "fallback_count":           sum(1 for a in r["assignments"] if a.get("source")=="fallback"),
-            "swap_count":               0,
-            "assignment_count_by_player": {},
-        }
-
-    # 共通採点関数（全PDFでこれだけを使う）
-    try:
-        from concert.services.verify_results import verify as _verify
-    except ImportError:
-        _verify = None
-
-    def _v(r):
-        """1つのresultをverify()で採点して返す。verify未使用時はstatsからフォールバック。"""
-        if _verify:
-            return _verify(r["assignments"], r["pref_map"])
-        s = r.get("stats", {})
-        return {
-            "total_score":        s.get("total_score", 0),
-            "first_choice_count": 0,
-            "first_choice_rate":  s.get("first_choice_rate", 0),
-            "min_player_score":   s.get("min_score", 0),
-            "fallback_count":     sum(1 for a in r["assignments"] if a.get("source")=="fallback"),
-            "swap_count":         0,
-        }
+        return _verify(r["assignments"], r["pref_map"])
 
     # ── 表紙 ──────────────────────────────────────────────────
     story.append(Spacer(1, 20*mm))
