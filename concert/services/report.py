@@ -469,32 +469,7 @@ def generate_assign_report(
             ("BOTTOMPADDING",(0,0),(-1,-1), 4),
         ]))
         story.append(tbl)
-        story.append(Spacer(1, 4*mm))
-
-        # ── 希望充足の積み上げ横棒グラフ ─────────────────────────
-        try:
-            from reportlab.platypus import Image as RLImage
-            _bar_png = make_stacked_bar(results)
-            _bar_img = RLImage(io.BytesIO(_bar_png), width=130*mm, height=None)
-            _bar_img.hAlign = "LEFT"
-            story.append(Paragraph("希望充足の内訳", st["h3"]))
-            story.append(Spacer(1, 1*mm))
-            story.append(_bar_img)
-            story.append(Spacer(1, 4*mm))
-        except Exception as _eg:
-            story.append(Paragraph(f"（グラフ生成エラー: {_eg}）", st["small"]))
-
-        # ── 担当数分布グラフ ──────────────────────────────────────
-        try:
-            _dist_png = make_dist_bar(results)
-            _dist_img = RLImage(io.BytesIO(_dist_png), width=130*mm, height=None)
-            _dist_img.hAlign = "LEFT"
-            story.append(Paragraph("担当曲数の分布", st["h3"]))
-            story.append(Spacer(1, 1*mm))
-            story.append(_dist_img)
-            story.append(Spacer(1, 4*mm))
-        except Exception as _eg:
-            story.append(Paragraph(f"（グラフ生成エラー: {_eg}）", st["small"]))
+        story.append(Spacer(1, 6*mm))
 
         # ── 奏者別スコアサマリー ──────────────────────────────────
         story.append(Paragraph("■ 奏者別スコア・希望不成立サマリー", st["h2"]))
