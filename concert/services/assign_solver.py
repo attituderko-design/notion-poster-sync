@@ -875,7 +875,7 @@ def solve_exact(
             "stats": _calc_stats(sol_b, pref_map, _eval_pids),
         })
 
-    # ── 候補C: 降り番均等（min c_max - c_min）────────────────
+    # ── 候補D: 降り番均等（min c_max - c_min）────────────────
     # 変数: [x(n_x), c_max(1), c_min(1)]  目的: min c_max - c_min
     n_c = n_x + 2; cmax_i = n_x; cmin_i = n_x + 1
     c_c = np.zeros(n_c); c_c[cmax_i] = 1.0; c_c[cmin_i] = -1.0

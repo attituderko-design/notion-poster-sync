@@ -45,11 +45,14 @@ def _styles(font, font_b):
 
 # 候補ごとの説明文
 CANDIDATE_DESC = {
-    "候補A：第1希望率最大": "第1希望が叶う人数を最大化。「絶対やりたい」という強い希望をできるだけ通す。",
-    "候補B：総スコア最大":  "全員の満足度スコア合計を最大化。第1×3点・第2×2点・第3×1点の総和が最大。",
-    "候補C：公平性重視":    "最も不満な人のスコアを底上げ。誰か一人が割を食う状況を避け、希望不成立も最小化。",
-    "候補D：降り番均等":    "降り番の偏りを最小化。特定の人だけ多くの曲で降り番にならないよう割当件数を均等化。",
-    "候補E：降り番均等":    "降り番の偏りを最小化。特定の人だけ多くの曲で降り番にならないよう割当件数を均等化。",
+    "候補A：第1希望率最大":        "第1希望が叶う人数を最大化。「絶対やりたい」という強い希望をできるだけ通す。",
+    "候補A：第1希望率最大（厳密解）": "第1希望が叶う人数を最大化（整数計画法による最適解）。",
+    "候補B：総スコア最大":          "全員の満足度スコア合計を最大化。第1×3点・第2×2点・第3×1点の総和が最大。",
+    "候補B：総スコア最大（厳密解）":  "総スコアを最大化（整数計画法による最適解）。",
+    "候補C：公平性重視":            "最も不満な人のスコアを底上げ。誰か一人が割を食う状況を避け、希望不成立も最小化。",
+    "候補C：公平性重視（厳密解）":    "公平性を最大化（整数計画法による最適解）。",
+    "候補D：降り番均等":            "降り番の偏りを最小化。特定の人だけ多くの曲で降り番にならないよう割当件数を均等化。",
+    "候補D：降り番均等（厳密解）":    "降り番の均等化を最適化（整数計画法による最適解）。",
 }
 
 SCORE_COLOR = {
@@ -152,13 +155,18 @@ def generate_assign_report(
         score_cells = []
         ua_cells = []
         for r in results:
-            sc = sum(
-                {1:3.0,2:2.0,3:1.0}.get(
-                    (r["pref_map"].get(str((a["player_id"],a["song_id"],a["part_id"]))) or {}).get("priority", 0),
-                    0.5
-                )
-                for a in r["assignments"] if a["player_id"] == pid
-            )
+            def _a_score(a, pm):
+                pk   = str((a["player_id"], a["song_id"], a["part_id"]))
+                pref = pm.get(pk)
+                src  = a.get("source", "")
+                if pref and pref.get("priority", 0) > 0:
+                    return {1:3.0,2:2.0,3:1.0}.get(pref["priority"], 0.0)
+                elif pref and pref.get("priority", 0) == 0:
+                    return 0.0   # 降り番希望
+                elif src in ("fallback", "swap", "exact"):
+                    return 0.5   # 補完割当
+                return 0.0
+            sc = sum(_a_score(a, r["pref_map"]) for a in r["assignments"] if a["player_id"] == pid)
             # 希望不成立（曲単位）
             wanted = {v["song_id"] for v in r["pref_map"].values()
                       if v["player_id"] == pid and v["priority"] > 0}
@@ -274,8 +282,11 @@ def generate_assign_report(
                 elif pref and pref["priority"] == 0:
                     hope = "降り番"
                     sc   = 0.0
-                elif a["source"] in ("fallback", "swap"):
+                elif a["source"] == "fallback":
                     hope = "FB"
+                    sc   = 0.5
+                elif a["source"] in ("swap", "exact"):
+                    hope = "補完"
                     sc   = 0.5
                 else:
                     hope = "降り番"
@@ -595,7 +606,7 @@ def generate_assign_report(
             "目的値（スコア合計など）が高速モードと一致すれば、高速モードが最適解を出せていた証拠。差がある場合は厳密解を採用する。",
             "奏者数×パート定義数が200以下なら数秒以内で解ける。それより大きい場合は時間がかかることがある（上限60秒）。",
             "候補Dの降り番均等は「割当数の範囲最小化」で近似しているため、高速モードの標準偏差最小化と完全一致しない場合がある。",
-            "制約（欠席・NG・必要数）は厳密解でも完全に守られる。フォールバック割当は発生しない（希望提出者のみが対象）。",
+            "制約（欠席・NG・必要数）は数学的に厳密に守られる。希望未提出者は割当対象外。希望提出者の中でパート希望がない人への補完割当（補完）は発生しうる。",
         ]
         for i, tip in enumerate(exact_tips, 1):
             story.append(Paragraph(f"{i}. {tip}", st["body"]))
