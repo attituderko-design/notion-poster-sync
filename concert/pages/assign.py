@@ -724,6 +724,7 @@ def _render_solver_tab(ctx: dict):
                     greedy_solve, local_search, _calc_stats, _build_absent_set,
                     _first_choice_rate, _total_score,
                     _min_player_score, _bring_count, _rest_std,
+                    solve_exact,
                 )
                 absent   = _build_absent_set(ctx, concert_id)
                 prefs, requirements = _build_solver_input(ctx, concert_id, songs, players)
@@ -767,34 +768,55 @@ def _render_solver_tab(ctx: dict):
                 def obj_d(sol):
                     return int((1000 - _rest_std(sol, all_pids) * 100) * 100) + _total_score(sol, pref_map)
 
-                variants = [
-                    ("候補A：第1希望率最大", obj_a),
-                    ("候補B：総スコア最大",  obj_b),
-                    ("候補C：公平性重視",    obj_c),
-                    ("候補D：降り番均等",    obj_d),
-                ]
-                results = []
-                for label, fn in variants:
-                    sol   = local_search(base, pref_map, fn, max_iter=250,
-                                           absent_players=absent, all_player_ids=all_pids)
-                    stats = _calc_stats(sol, pref_map, all_pids)
-                    # player_nameがIDになっている場合をplayer_name_mapで補完
+                if use_exact:
+                    with st.spinner("厳密解を計算中... しばらくお待ちください"):
+                        results = solve_exact(
+                            prefs, requirements, absent,
+                            all_player_ids=all_pids,
+                            time_limit_sec=60.0,
+                        )
+                    # player_name補完
+                    _name_map_e = {p.get("id",""): _player_name(p, ctx) for p in players}
+                    for _pid, _pname in _all_participants:
+                        if _pid not in _name_map_e or not _name_map_e[_pid]:
+                            _name_map_e[_pid] = _pname
+                    for _r in results:
+                        for _a in _r["assignments"]:
+                            if not _a.get("player_name") or _a["player_name"] == _a["player_id"]:
+                                _a["player_name"] = _name_map_e.get(_a["player_id"], _a["player_id"])
+                        _r["pref_map"] = {str(k): v.__dict__ for k, v in pref_map.items()}
+                    if not results:
+                        st.error("❌ 厳密解の計算に失敗しました。高速モードをお試しください。")
+                        return
+                else:
+                    variants = [
+                        ("候補A：第1希望率最大", obj_a),
+                        ("候補B：総スコア最大",  obj_b),
+                        ("候補C：公平性重視",    obj_c),
+                        ("候補D：降り番均等",    obj_d),
+                    ]
                     _name_map = {p.get("id",""): _player_name(p, ctx) for p in players}
                     for _pid, _pname in _all_participants:
                         if _pid not in _name_map or not _name_map[_pid]:
                             _name_map[_pid] = _pname
-                    _assignments_fixed = []
-                    for _a in sol:
-                        _d = _a.__dict__.copy()
-                        if not _d.get("player_name") or _d["player_name"] == _d["player_id"]:
-                            _d["player_name"] = _name_map.get(_d["player_id"], _d["player_id"])
-                        _assignments_fixed.append(_d)
-                    results.append({
-                        "label":       label,
-                        "assignments": _assignments_fixed,
-                        "stats":       stats,
-                        "pref_map":    {str(k): v.__dict__ for k, v in pref_map.items()},
-                    })
+                    results = []
+                    for label, fn in variants:
+                        sol   = local_search(base, pref_map, fn, max_iter=250,
+                                               absent_players=absent, all_player_ids=all_pids)
+                        stats = _calc_stats(sol, pref_map, all_pids)
+                        # player_nameがIDになっている場合をplayer_name_mapで補完
+                        _assignments_fixed = []
+                        for _a in sol:
+                            _d = _a.__dict__.copy()
+                            if not _d.get("player_name") or _d["player_name"] == _d["player_id"]:
+                                _d["player_name"] = _name_map.get(_d["player_id"], _d["player_id"])
+                            _assignments_fixed.append(_d)
+                        results.append({
+                            "label":       label,
+                            "assignments": _assignments_fixed,
+                            "stats":       stats,
+                            "pref_map":    {str(k): v.__dict__ for k, v in pref_map.items()},
+                        })
                 st.session_state[f"assign_result_{concert_id}"] = results
                 st.success("✅ 候補案を生成しました。")
             except Exception as e:
