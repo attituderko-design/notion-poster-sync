@@ -717,17 +717,10 @@ def _render_solver_tab(ctx: dict):
         st.info("奏者・楽曲が登録されていません。")
         return
 
-    solve_mode = st.radio(
-        "解法モード",
-        ["⚡ 高速モード（貪欲法＋局所探索）", "🎯 厳密モード（整数計画法・小規模向け）"],
-        index=0, horizontal=True,
-        help="厳密モードは数学的に最適な解を求めます。目安：奏者×パート数が200以下なら数秒以内。",
-        key=f"solve_mode_{concert_id}",
-    )
-    use_exact = "厳密モード" in solve_mode
+    st.caption("ヒューリスティック解（高速）と厳密解（整数計画法）を同時に生成します。")
 
-    if st.button("▶ 割当を実行", type="primary", key=f"run_solver_{concert_id}"):
-        with st.spinner("アルゴリズム実行中..."):
+    if st.button("▶ 候補案を生成", type="primary", key=f"run_solver_{concert_id}"):
+        with st.spinner("候補案を生成中...（厳密解を含むため数秒かかります）"):
             try:
                 from concert.services.assign_solver import (
                     greedy_solve, local_search, iterated_local_search,
@@ -791,72 +784,66 @@ def _render_solver_tab(ctx: dict):
                 def obj_d(sol):
                     return int((1000 - _rest_std(sol, all_pids) * 100) * 100) + _total_score(sol, pref_map)
 
-                if use_exact:
-                    with st.spinner("厳密解を計算中... しばらくお待ちください"):
-                        results = solve_exact(
-                            prefs, requirements, absent,
-                            all_player_ids=all_pids,
-                            time_limit_sec=60.0,
-                        )
-                    # player_name補完
-                    _name_map_e = {p.get("id",""): _player_name(p, ctx) for p in players}
-                    for _pid, _pname in _all_participants:
-                        if _pid not in _name_map_e or not _name_map_e[_pid]:
-                            _name_map_e[_pid] = _pname
-                    for _r in results:
-                        for _a in _r["assignments"]:
-                            if not _a.get("player_name") or _a["player_name"] == _a["player_id"]:
-                                _a["player_name"] = _name_map_e.get(_a["player_id"], _a["player_id"])
-                        _r["pref_map"] = {str(k): v.__dict__ for k, v in pref_map.items()}
-                    if not results:
-                        st.error("❌ 厳密解の計算に失敗しました。高速モードをお試しください。")
-                        return
-                else:
-                    variants = [
-                        ("候補A：第1希望率最大", obj_a),
-                        ("候補B：総スコア最大",  obj_b),
-                        ("候補C：公平性重視",    obj_c),
-                        ("候補D：降り番均等",    obj_d),
-                    ]
-                    _name_map = {p.get("id",""): _player_name(p, ctx) for p in players}
-                    for _pid, _pname in _all_participants:
-                        if _pid not in _name_map or not _name_map[_pid]:
-                            _name_map[_pid] = _pname
-                    results = []
-                    for label, fn in variants:
-                        # ILSで広域探索（揺さぶり付き反復局所探索）
-                        sol = iterated_local_search(
-                            base, pref_map, fn,
-                            absent_players=absent,
-                            all_player_ids=all_pids,
-                            n_restart=15, max_iter_per_restart=200,
-                        )
-                        # verboseログは最終解に対して1回だけ局所探索で取得
-                        _ls_ret = local_search(sol, pref_map, fn, max_iter=50,
-                                               absent_players=absent, all_player_ids=all_pids,
-                                               verbose=True)
-                        sol, _ls_log = _ls_ret if isinstance(_ls_ret, tuple) else (_ls_ret, {})
-                        stats = _calc_stats(sol, pref_map, all_pids)
-                        stats["_ls_log"] = _ls_log  # 改善ログをstatsに付帯
-                        # player_nameがIDになっている場合をplayer_name_mapで補完
-                        _assignments_fixed = []
-                        for _a in sol:
-                            _d = _a.__dict__.copy()
-                            if not _d.get("player_name") or _d["player_name"] == _d["player_id"]:
-                                _d["player_name"] = _name_map.get(_d["player_id"], _d["player_id"])
-                            _assignments_fixed.append(_d)
-                        results.append({
-                            "label":       label,
-                            "assignments": _assignments_fixed,
-                            "stats":       stats,
-                            "pref_map":    {str(k): v.__dict__ for k, v in pref_map.items()},
-                        })
-                st.session_state[f"assign_result_{concert_id}"] = results
-                # モード別に保存（検証用に両方保持）
-                if use_exact:
-                    st.session_state[f"assign_result_exact_{concert_id}"] = results
-                else:
-                    st.session_state[f"assign_result_heuristic_{concert_id}"] = results
+                # ── ヒューリスティック解（ILS）────────────────────
+                variants = [
+                    ("候補A：第1希望率最大", obj_a),
+                    ("候補B：総スコア最大",  obj_b),
+                    ("候補C：公平性重視",    obj_c),
+                    ("候補D：降り番均等",    obj_d),
+                ]
+                _name_map = {p.get("id",""): _player_name(p, ctx) for p in players}
+                for _pid, _pname in _all_participants:
+                    if _pid not in _name_map or not _name_map[_pid]:
+                        _name_map[_pid] = _pname
+                h_results = []
+                for label, fn in variants:
+                    sol = iterated_local_search(
+                        base, pref_map, fn,
+                        absent_players=absent,
+                        all_player_ids=all_pids,
+                        n_restart=15, max_iter_per_restart=200,
+                    )
+                    _ls_ret = local_search(sol, pref_map, fn, max_iter=50,
+                                           absent_players=absent, all_player_ids=all_pids,
+                                           verbose=True)
+                    sol, _ls_log = _ls_ret if isinstance(_ls_ret, tuple) else (_ls_ret, {})
+                    stats = _calc_stats(sol, pref_map, all_pids)
+                    stats["_ls_log"] = _ls_log
+                    _assignments_fixed = []
+                    for _a in sol:
+                        _d = _a.__dict__.copy()
+                        if not _d.get("player_name") or _d["player_name"] == _d["player_id"]:
+                            _d["player_name"] = _name_map.get(_d["player_id"], _d["player_id"])
+                        _assignments_fixed.append(_d)
+                    h_results.append({
+                        "label":       label,
+                        "assignments": _assignments_fixed,
+                        "stats":       stats,
+                        "pref_map":    {str(k): v.__dict__ for k, v in pref_map.items()},
+                    })
+                st.session_state[f"assign_result_heuristic_{concert_id}"] = h_results
+
+                # ── 厳密解（MILP）────────────────────────────────
+                e_results = solve_exact(
+                    prefs, requirements, absent,
+                    all_player_ids=all_pids,
+                    time_limit_sec=60.0,
+                )
+                _name_map_e = {p.get("id",""): _player_name(p, ctx) for p in players}
+                for _pid, _pname in _all_participants:
+                    if _pid not in _name_map_e or not _name_map_e[_pid]:
+                        _name_map_e[_pid] = _pname
+                for _r in e_results:
+                    for _a in _r["assignments"]:
+                        if not _a.get("player_name") or _a["player_name"] == _a["player_id"]:
+                            _a["player_name"] = _name_map_e.get(_a["player_id"], _a["player_id"])
+                    _r["pref_map"] = {str(k): v.__dict__ for k, v in pref_map.items()}
+                if not e_results:
+                    st.warning("⚠️ 厳密解の計算に失敗しました。ヒューリスティック解のみ表示します。")
+                st.session_state[f"assign_result_exact_{concert_id}"] = e_results
+
+                # 表示用はヒューリスティックをデフォルトに
+                st.session_state[f"assign_result_{concert_id}"] = h_results
                 st.success("✅ 候補案を生成しました。")
             except Exception as e:
                 import traceback
@@ -941,8 +928,8 @@ def _render_solver_tab(ctx: dict):
         except Exception as _ve:
             st.warning(f"検証エラー: {_ve}")
 
-    # PDFダウンロードボタン
-    col_title, col_pdf1, col_pdf2 = st.columns([5, 1, 2])
+    # PDFダウンロードボタン（3種類）
+    col_title, col_pdf1, col_pdf2, col_pdf3 = st.columns([4, 1, 1, 2])
     col_title.subheader("候補案比較")
     try:
         from concert.services.report import generate_assign_report
@@ -950,35 +937,43 @@ def _render_solver_tab(ctx: dict):
         _h_res = st.session_state.get(f"assign_result_heuristic_{concert_id}", [])
         _e_res = st.session_state.get(f"assign_result_exact_{concert_id}", [])
 
-        # 通常PDF（現在表示中のモード）
-        pdf_bytes = generate_assign_report(concert_name, results, songs, players, ctx)
-        col_pdf1.download_button(
-            "📄 PDF",
-            data=pdf_bytes,
-            file_name=f"アサイン候補案_{concert_name}.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-            help="現在のモードの候補案PDF",
-        )
-
-        # 比較PDF（ヒューリスティック+厳密解が両方ある場合）
-        if _h_res and _e_res:
-            _is_exact_mode = st.session_state.get(f"solve_mode_{concert_id}", "").count("厳密") > 0
-            if _is_exact_mode:
-                _base = _h_res; _cmp = _e_res; _cmp_lbl = "厳密解"
-            else:
-                _base = _h_res; _cmp = _e_res; _cmp_lbl = "厳密解"
-            pdf_cmp = generate_assign_report(
-                concert_name, _base, songs, players, ctx,
-                compare_results=_cmp, compare_label=_cmp_lbl,
+        # (1) ヒューリスティックPDF
+        if _h_res:
+            pdf_h = generate_assign_report(concert_name, _h_res, songs, players, ctx)
+            col_pdf1.download_button(
+                "⚡ H解",
+                data=pdf_h,
+                file_name=f"アサイン_ヒューリスティック_{concert_name}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                help="ヒューリスティック解（高速）の候補案PDF",
             )
+
+        # (2) 厳密解PDF
+        if _e_res:
+            pdf_e = generate_assign_report(concert_name, _e_res, songs, players, ctx)
             col_pdf2.download_button(
+                "🎯 厳密解",
+                data=pdf_e,
+                file_name=f"アサイン_厳密解_{concert_name}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                help="厳密解（整数計画法）の候補案PDF",
+            )
+
+        # (3) 比較PDF（両方ある場合のみ）
+        if _h_res and _e_res:
+            pdf_cmp = generate_assign_report(
+                concert_name, _h_res, songs, players, ctx,
+                compare_results=_e_res, compare_label="厳密解",
+            )
+            col_pdf3.download_button(
                 "📊 比較PDF",
                 data=pdf_cmp,
                 file_name=f"アサイン比較_{concert_name}.pdf",
                 mime="application/pdf",
                 use_container_width=True,
-                help="ヒューリスティック解と厳密解を横並びで比較したPDF",
+                help="ヒューリスティック解と厳密解を横並び比較したPDF",
             )
     except Exception as e:
         col_pdf1.caption(f"PDF生成エラー: {e}")
