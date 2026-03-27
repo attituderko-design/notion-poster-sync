@@ -8356,6 +8356,27 @@ if system_mode == "HARMONIA":
         st.error(f"HARMONIA System の設定が不足しています。secrets.toml を確認してください。（{e}）")
         st.stop()
 
+    # HARMONIA契約チェック（品質重視: 先に設定齟齬を可視化）
+    _contract_check = {}
+    try:
+        _contract_check = concert_ctx.get("validate_contract", lambda: {})() or {}
+    except Exception as _contract_e:
+        st.warning(f"⚠️ HARMONIA契約チェックの実行に失敗しました: {_contract_e}")
+    if _contract_check:
+        _contract_errors = _contract_check.get("errors", []) or []
+        _contract_warnings = _contract_check.get("warnings", []) or []
+        if _contract_errors:
+            st.error("⚠️ HARMONIA設定に不整合があります。保存系処理で失敗する可能性があります。")
+            with st.expander("詳細（契約チェック）", expanded=False):
+                for _m in _contract_errors:
+                    st.write(f"- {_m}")
+                for _m in _contract_warnings:
+                    st.write(f"- {_m}")
+        elif _contract_warnings:
+            with st.expander("ℹ️ HARMONIA設定チェック（警告）", expanded=False):
+                for _m in _contract_warnings:
+                    st.write(f"- {_m}")
+
     # HARMONIA共通: 演奏会を先に1つ選び、各画面はその演奏会だけを対象にする
 
     @st.cache_data(ttl=300, show_spinner=False)

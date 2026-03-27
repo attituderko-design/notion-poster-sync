@@ -10,6 +10,26 @@ import streamlit as st
 from functools import lru_cache
 import re
 import unicodedata
+from concert.services.keys import (
+    CONCERT_NAME_KEYS,
+    CONCERT_DATE_KEYS,
+    PRACTICE_NAME_KEYS,
+    PRACTICE_DATE_KEYS,
+    PRACTICE_CONCERT_REL_KEYS,
+    SONG_NAME_KEYS,
+    SONG_CONCERT_REL_KEYS,
+    INSTRUMENT_NAME_KEYS,
+    PARTICIPANT_PLAYER_REL_KEYS,
+    PARTICIPANT_CONCERT_REL_KEYS,
+    ATT_PLAYER_REL_KEYS,
+    ATT_PRACTICE_REL_KEYS,
+    PARTDEF_CONCERT_REL_KEYS,
+    PARTDEF_SONG_REL_KEYS,
+    PARTDEF_INST_REL_KEYS,
+    PREF_PLAYER_REL_KEYS,
+    PREF_PART_REL_KEYS,
+    PREF_PRIORITY_KEYS,
+)
 
 NOTION_VERSION = "2022-06-28"
 DEFAULT_TIMEOUT = 20
@@ -32,6 +52,26 @@ _DEFAULT_CONCERT_DB_IDS = {
     "part_definition": "32c4532d7d56803ba3e1c8c87d1cd0dc",  # パート定義DB
     "preference": "32c4532d7d5680b1902dce3555590db3",       # 希望入力DB
 }
+
+_NOTION_ID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def _normalize_notion_id(value: str) -> str:
+    """Notion DB/Page IDを正規化（ハイフン有りUUID形式）する。"""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if _NOTION_ID_PATTERN.fullmatch(raw):
+        return raw.lower()
+    compact = raw.replace("-", "")
+    if re.fullmatch(r"[0-9a-fA-F]{32}", compact):
+        return (
+            f"{compact[0:8]}-{compact[8:12]}-{compact[12:16]}-"
+            f"{compact[16:20]}-{compact[20:32]}"
+        ).lower()
+    return ""
 
 
 # ============================================================
@@ -108,26 +148,29 @@ def get_concert_secrets() -> dict:
         "希望入力DB": db_preference,
         "スケジュールDB": db_schedule,
     }
-    missing_db = [name for name, val in required_db.items() if not val]
+    normalized_required_db = {
+        name: _normalize_notion_id(val) for name, val in required_db.items()
+    }
+    missing_db = [name for name, val in normalized_required_db.items() if not val]
     if missing_db:
         raise KeyError(f"secrets.toml のDB ID設定が不足しています: {', '.join(missing_db)}")
     return {
         "api_key":              st.secrets["NOTION_API_KEY"],  # ArtéMis と共用
-        "db_concert":          db_concert,
-        "db_practice":         db_practice,
-        "db_song":             db_song,
-        "db_instrument":       db_instrument,
-        "db_song_instrument":  db_song_instrument,
-        "db_player":           db_player,
-        "db_participant":      db_participant,
-        "db_attendance":       db_attendance,
-        "db_player_instrument":db_player_instrument,
-        "db_rental":           db_rental,
-        "db_part_definition":  db_part_definition,
-        "db_preference":       db_preference,
-        "db_schedule":         db_schedule,
-        "db_pi_master":        db_pi_master,
-        "db_expense":          db_expense,
+        "db_concert":          normalized_required_db["演奏会DB"],
+        "db_practice":         normalized_required_db["練習DB"],
+        "db_song":             normalized_required_db["楽曲DB"],
+        "db_instrument":       normalized_required_db["楽器種別DB"],
+        "db_song_instrument":  normalized_required_db["パート定義DB(SONG_INSTRUMENT兼用)"],
+        "db_player":           normalized_required_db["奏者DB"],
+        "db_participant":      normalized_required_db["演奏会参加者DB"],
+        "db_attendance":       normalized_required_db["出欠DB"],
+        "db_player_instrument":normalized_required_db["楽器アサインDB"],
+        "db_rental":           normalized_required_db["レンタルDB"],
+        "db_part_definition":  normalized_required_db["パート定義DB"],
+        "db_preference":       normalized_required_db["希望入力DB"],
+        "db_schedule":         normalized_required_db["スケジュールDB"],
+        "db_pi_master":        _normalize_notion_id(db_pi_master),
+        "db_expense":          _normalize_notion_id(db_expense),
     }
 
 
@@ -193,6 +236,18 @@ def get_concert_db_property_types(db_id: str, api_key: str) -> dict:
     result = {k: (v.get("type") or "") for k, v in props.items()}
     st.session_state[cache_key] = result
     return result
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_concert_db_schema(db_id: str, api_key: str) -> dict:
+    """DBの生スキーマ（properties）を返す。"""
+    if not db_id:
+        return {}
+    headers = get_concert_headers(api_key)
+    res = concert_api_request("get", f"https://api.notion.com/v1/databases/{db_id}", headers=headers)
+    if res is None or res.status_code != 200:
+        return {}
+    return (res.json() or {}).get("properties", {}) or {}
 
 
 # ============================================================
@@ -497,6 +552,157 @@ def build_concert_ctx() -> dict:
     def _get_prop_types(db_id):
         return get_concert_db_property_types(db_id, api_key)
 
+    def _get_db_schema(db_id):
+        return get_concert_db_schema(db_id, api_key)
+
+    def _validate_contract() -> dict:
+        """
+        HARMONIA最小契約の健全性を検証する。
+        - 必須プロパティ候補の存在
+        - relationの向き（target DB）の一致
+        """
+        checks = [
+            ("CONCERT_DB_CONCERT", "演奏会DB", [("any", CONCERT_NAME_KEYS), ("any", CONCERT_DATE_KEYS)]),
+            (
+                "CONCERT_DB_PRACTICE",
+                "練習DB",
+                [
+                    ("any", PRACTICE_NAME_KEYS),
+                    ("any", PRACTICE_DATE_KEYS),
+                    ("relation", PRACTICE_CONCERT_REL_KEYS, "CONCERT_DB_CONCERT"),
+                ],
+            ),
+            (
+                "CONCERT_DB_SONG",
+                "楽曲DB",
+                [("any", SONG_NAME_KEYS), ("relation", SONG_CONCERT_REL_KEYS, "CONCERT_DB_CONCERT")],
+            ),
+            ("CONCERT_DB_INSTRUMENT", "楽器種別DB", [("any", INSTRUMENT_NAME_KEYS)]),
+            (
+                "CONCERT_DB_PARTICIPANT",
+                "演奏会参加者DB",
+                [
+                    ("relation", PARTICIPANT_PLAYER_REL_KEYS, "CONCERT_DB_PLAYER"),
+                    ("relation", PARTICIPANT_CONCERT_REL_KEYS, "CONCERT_DB_CONCERT"),
+                ],
+            ),
+            (
+                "CONCERT_DB_ATTENDANCE",
+                "練習出欠DB",
+                [
+                    ("relation", ATT_PLAYER_REL_KEYS, "CONCERT_DB_PARTICIPANT"),
+                    ("relation", ATT_PRACTICE_REL_KEYS, "CONCERT_DB_PRACTICE"),
+                ],
+            ),
+            (
+                "CONCERT_DB_PART_DEFINITION",
+                "パート定義DB",
+                [
+                    ("relation", PARTDEF_CONCERT_REL_KEYS, "CONCERT_DB_CONCERT"),
+                    ("relation", PARTDEF_SONG_REL_KEYS, "CONCERT_DB_SONG"),
+                    ("relation", PARTDEF_INST_REL_KEYS, "CONCERT_DB_INSTRUMENT"),
+                ],
+            ),
+            (
+                "CONCERT_DB_PREFERENCE",
+                "希望入力DB",
+                [
+                    ("relation", PREF_PLAYER_REL_KEYS, "CONCERT_DB_PARTICIPANT"),
+                    ("relation", PREF_PART_REL_KEYS, "CONCERT_DB_PART_DEFINITION"),
+                    ("any", PREF_PRIORITY_KEYS),
+                ],
+            ),
+        ]
+
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        def _find_rel(schema: dict, candidates: list[str]) -> tuple[str, dict]:
+            for c in candidates:
+                m = schema.get(c) or {}
+                if m.get("type") == "relation":
+                    return c, m
+            # ゆるい一致（空白除去・小文字）
+            norm = {re.sub(r"\s+", "", str(k)).lower(): k for k in schema.keys()}
+            for c in candidates:
+                key = norm.get(re.sub(r"\s+", "", str(c)).lower())
+                if not key:
+                    continue
+                m = schema.get(key) or {}
+                if m.get("type") == "relation":
+                    return key, m
+            return "", {}
+
+        def _find_any(type_map: dict, candidates: list[str]) -> str:
+            key = find_prop_name(type_map, candidates)
+            if key:
+                return key
+            norm = {re.sub(r"\s+", "", str(k)).lower(): k for k in type_map.keys()}
+            for c in candidates:
+                got = norm.get(re.sub(r"\s+", "", str(c)).lower(), "")
+                if got:
+                    return got
+            return ""
+
+        for db_ctx_key, db_label, db_checks in checks:
+            db_id = secrets.get(
+                {
+                    "CONCERT_DB_CONCERT": "db_concert",
+                    "CONCERT_DB_PRACTICE": "db_practice",
+                    "CONCERT_DB_SONG": "db_song",
+                    "CONCERT_DB_INSTRUMENT": "db_instrument",
+                    "CONCERT_DB_PLAYER": "db_player",
+                    "CONCERT_DB_PARTICIPANT": "db_participant",
+                    "CONCERT_DB_ATTENDANCE": "db_attendance",
+                    "CONCERT_DB_PART_DEFINITION": "db_part_definition",
+                    "CONCERT_DB_PREFERENCE": "db_preference",
+                }.get(db_ctx_key, ""),
+                "",
+            )
+            schema = _get_db_schema(db_id)
+            type_map = {k: (v.get("type") or "") for k, v in schema.items()}
+            if not schema:
+                errors.append(f"{db_label}: スキーマ取得失敗（Integration接続/DB IDを確認）")
+                continue
+
+            for chk in db_checks:
+                if chk[0] == "any":
+                    _, candidates = chk
+                    found = _find_any(type_map, candidates)
+                    if not found:
+                        errors.append(f"{db_label}: 必須候補が見つかりません {candidates}")
+                elif chk[0] == "relation":
+                    _, candidates, target_ctx_key = chk
+                    found, meta = _find_rel(schema, candidates)
+                    if not found:
+                        errors.append(f"{db_label}: relation候補が見つかりません {candidates}")
+                        continue
+                    target_db = ((meta.get("relation") or {}).get("database_id") or "").lower()
+                    expected_db = (
+                        secrets.get(
+                            {
+                                "CONCERT_DB_CONCERT": "db_concert",
+                                "CONCERT_DB_PRACTICE": "db_practice",
+                                "CONCERT_DB_SONG": "db_song",
+                                "CONCERT_DB_INSTRUMENT": "db_instrument",
+                                "CONCERT_DB_PLAYER": "db_player",
+                                "CONCERT_DB_PARTICIPANT": "db_participant",
+                                "CONCERT_DB_ATTENDANCE": "db_attendance",
+                                "CONCERT_DB_PART_DEFINITION": "db_part_definition",
+                                "CONCERT_DB_PREFERENCE": "db_preference",
+                            }.get(target_ctx_key, ""),
+                            "",
+                        )
+                        or ""
+                    ).lower()
+                    if target_db and expected_db and target_db != expected_db:
+                        warnings.append(
+                            f"{db_label}.{found}: relation先が想定と不一致 "
+                            f"(actual={target_db}, expected={expected_db})"
+                        )
+
+        return {"ok": len(errors) == 0, "errors": errors, "warnings": warnings}
+
     def _put_prop(props, type_map, key, value):
         put_concert_prop(props, type_map, key, value)
 
@@ -520,6 +726,7 @@ def build_concert_ctx() -> dict:
         "CONCERT_DB_SCHEDULE":         secrets["db_schedule"],
         "query_all":                   _query_all,
         "get_prop_types":              _get_prop_types,
+        "get_db_schema":               _get_db_schema,
         "put_prop":                    _put_prop,
         "extract_title":               extract_concert_title,
         "extract_prop_text":           extract_prop_text,
@@ -530,4 +737,5 @@ def build_concert_ctx() -> dict:
         "put_prop_any":                put_concert_prop_any,
         "make_key":                    make_concert_key,
         "put_key_any":                 put_concert_key_any,
+        "validate_contract":           _validate_contract,
     }
