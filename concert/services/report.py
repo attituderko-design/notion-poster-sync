@@ -43,6 +43,289 @@ def _styles(font, font_b):
                                    spaceAfter=4, leading=12),
     }
 
+# ── グラフ生成関数（matplotlib）────────────────────────────
+
+_HOPE_CATS   = ["第1希望","第2希望","第3希望","補完","降り番"]
+_HOPE_COLORS = ["#3C3489","#085041","#633806","#A32D2D","#AAAAAA"]
+_DIST_CATS   = ["0曲","1曲","2曲","3曲以上"]
+_DIST_COLORS = ["#CCCCCC","#7B9ED9","#3C5FA0","#1A2F6A"]
+
+
+def _collect_bar_data(results: list[dict]) -> list[dict]:
+    """resultsから希望充足内訳を集計する。"""
+    rows = []
+    for r in results:
+        pm = r["pref_map"]
+        c = {k: 0 for k in _HOPE_CATS}
+        for a in r["assignments"]:
+            pk   = str((a["player_id"], a["song_id"], a["part_id"]))
+            pref = pm.get(pk)
+            prio = pref.get("priority", 0) if pref else None
+            src  = a.get("source", "")
+            if prio == 1:   c["第1希望"] += 1
+            elif prio == 2: c["第2希望"] += 1
+            elif prio == 3: c["第3希望"] += 1
+            elif prio is None or (isinstance(prio, int) and prio <= 0
+                                  and src in ("fallback","swap","exact")):
+                c["補完"] += 1
+            else:           c["降り番"] += 1
+        rows.append({"label": r["label"].split("：")[0], **c})
+    return rows
+
+
+def _collect_dist_data(results: list[dict]) -> list[dict]:
+    """resultsから奏者ごとの担当曲数分布を集計する。"""
+    rows = []
+    for r in results:
+        cnt: dict[str, int] = {}
+        for a in r["assignments"]:
+            pid = a["player_id"]
+            cnt[pid] = cnt.get(pid, 0) + 1
+        dist = {"0曲":0,"1曲":0,"2曲":0,"3曲以上":0}
+        # 希望提出者で割当0の人
+        pref_pids = {v["player_id"] for v in r["pref_map"].values()}
+        for pid in pref_pids:
+            if pid not in cnt:
+                dist["0曲"] += 1
+        for n in cnt.values():
+            if n == 1:   dist["1曲"] += 1
+            elif n == 2: dist["2曲"] += 1
+            else:        dist["3曲以上"] += 1
+        rows.append({"label": r["label"].split("：")[0], **dist})
+    return rows
+
+
+def make_stacked_bar(results: list[dict]) -> bytes:
+    """希望充足の積み上げ横棒グラフをPNG bytesで返す。"""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    import io
+    plt.rcParams['font.family'] = ['IPAGothic', 'Noto Sans CJK JP', 'sans-serif']
+
+    bar_data = _collect_bar_data(results)
+    labels   = [d["label"] for d in bar_data]
+    n        = len(labels)
+    fig, ax  = plt.subplots(figsize=(5.5, max(1.6, n * 0.55 + 0.8)))
+    bottoms  = [0] * n
+    fs = 7
+
+    for cat, col in zip(_HOPE_CATS, _HOPE_COLORS):
+        vals = [d.get(cat, 0) for d in bar_data]
+        bars = ax.barh(labels, vals, left=bottoms, color=col, height=0.55, label=cat)
+        for bar, v, b in zip(bars, vals, bottoms):
+            if v > 0:
+                ax.text(b + v / 2, bar.get_y() + bar.get_height() / 2,
+                        str(v), ha='center', va='center',
+                        fontsize=fs - 1, color='white', fontweight='bold')
+        bottoms = [b + v for b, v in zip(bottoms, vals)]
+
+    ax.set_xlabel("割当件数", fontsize=fs)
+    ax.tick_params(axis='both', labelsize=fs)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    patches = [mpatches.Patch(color=c, label=l)
+               for l, c in zip(_HOPE_CATS, _HOPE_COLORS)]
+    ax.legend(handles=patches, fontsize=fs - 1, loc='lower right',
+              ncol=len(_HOPE_CATS), bbox_to_anchor=(1, -0.38), frameon=False)
+    fig.tight_layout(pad=0.5)
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
+def make_dist_bar(results: list[dict]) -> bytes:
+    """奏者ごとの担当曲数分布棒グラフをPNG bytesで返す。"""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    import io
+    plt.rcParams['font.family'] = ['IPAGothic', 'Noto Sans CJK JP', 'sans-serif']
+
+    dist_data = _collect_dist_data(results)
+    labels    = [d["label"] for d in dist_data]
+    n_labels  = len(labels)
+    n_cats    = len(_DIST_CATS)
+    bar_w     = 0.18
+    x         = list(range(n_labels))
+    fs        = 7
+
+    fig, ax = plt.subplots(figsize=(5.5, 2.0))
+    for ci, (cat, col) in enumerate(zip(_DIST_CATS, _DIST_COLORS)):
+        vals   = [d.get(cat, 0) for d in dist_data]
+        offset = (ci - n_cats / 2 + 0.5) * bar_w
+        bars   = ax.bar([xi + offset for xi in x], vals, width=bar_w,
+                        color=col, label=cat)
+        for bar, v in zip(bars, vals):
+            if v > 0:
+                ax.text(bar.get_x() + bar.get_width() / 2,
+                        bar.get_height() + 0.05,
+                        str(v), ha='center', va='bottom', fontsize=fs - 1)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=fs)
+    ax.set_ylabel("人数", fontsize=fs)
+    max_v = max((d.get(c, 0) for d in dist_data for c in _DIST_CATS), default=1)
+    ax.set_yticks(range(0, max_v + 2))
+    ax.tick_params(axis='both', labelsize=fs)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    patches = [mpatches.Patch(color=c, label=l)
+               for l, c in zip(_DIST_CATS, _DIST_COLORS)]
+    ax.legend(handles=patches, fontsize=fs - 1, loc='upper right', frameon=False)
+    fig.tight_layout(pad=0.5)
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
+# ── グラフ生成関数（matplotlib）────────────────────────────
+
+_HOPE_CATS   = ["第1希望","第2希望","第3希望","補完","降り番"]
+_HOPE_COLORS = ["#3C3489","#085041","#633806","#A32D2D","#AAAAAA"]
+_DIST_CATS   = ["0曲","1曲","2曲","3曲以上"]
+_DIST_COLORS = ["#CCCCCC","#7B9ED9","#3C5FA0","#1A2F6A"]
+
+
+def _collect_bar_data(results: list[dict]) -> list[dict]:
+    """resultsから希望充足内訳を集計する。"""
+    rows = []
+    for r in results:
+        pm = r["pref_map"]
+        c = {k: 0 for k in _HOPE_CATS}
+        for a in r["assignments"]:
+            pk   = str((a["player_id"], a["song_id"], a["part_id"]))
+            pref = pm.get(pk)
+            prio = pref.get("priority", 0) if pref else None
+            src  = a.get("source", "")
+            if prio == 1:   c["第1希望"] += 1
+            elif prio == 2: c["第2希望"] += 1
+            elif prio == 3: c["第3希望"] += 1
+            elif prio is None or (isinstance(prio, int) and prio <= 0
+                                  and src in ("fallback","swap","exact")):
+                c["補完"] += 1
+            else:           c["降り番"] += 1
+        rows.append({"label": r["label"].split("：")[0], **c})
+    return rows
+
+
+def _collect_dist_data(results: list[dict]) -> list[dict]:
+    """resultsから奏者ごとの担当曲数分布を集計する。"""
+    rows = []
+    for r in results:
+        cnt: dict[str, int] = {}
+        for a in r["assignments"]:
+            pid = a["player_id"]
+            cnt[pid] = cnt.get(pid, 0) + 1
+        dist = {"0曲":0,"1曲":0,"2曲":0,"3曲以上":0}
+        pref_pids = {v["player_id"] for v in r["pref_map"].values()}
+        for pid in pref_pids:
+            if pid not in cnt:
+                dist["0曲"] += 1
+        for n in cnt.values():
+            if n == 1:   dist["1曲"] += 1
+            elif n == 2: dist["2曲"] += 1
+            else:        dist["3曲以上"] += 1
+        rows.append({"label": r["label"].split("：")[0], **dist})
+    return rows
+
+
+def make_stacked_bar(results: list[dict]) -> bytes:
+    """希望充足の積み上げ横棒グラフをPNG bytesで返す。"""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    import io
+    plt.rcParams['font.family'] = ['IPAGothic', 'Noto Sans CJK JP', 'sans-serif']
+
+    bar_data = _collect_bar_data(results)
+    labels   = [d["label"] for d in bar_data]
+    n        = len(labels)
+    fig, ax  = plt.subplots(figsize=(5.5, max(1.6, n * 0.55 + 0.8)))
+    bottoms  = [0] * n
+    fs = 7
+
+    for cat, col in zip(_HOPE_CATS, _HOPE_COLORS):
+        vals = [d.get(cat, 0) for d in bar_data]
+        bars = ax.barh(labels, vals, left=bottoms, color=col, height=0.55)
+        for bar, v, b in zip(bars, vals, bottoms):
+            if v > 0:
+                ax.text(b + v / 2, bar.get_y() + bar.get_height() / 2,
+                        str(v), ha='center', va='center',
+                        fontsize=fs - 1, color='white', fontweight='bold')
+        bottoms = [b + v for b, v in zip(bottoms, vals)]
+
+    ax.set_xlabel("割当件数", fontsize=fs)
+    ax.tick_params(axis='both', labelsize=fs)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    patches = [mpatches.Patch(color=c, label=l)
+               for l, c in zip(_HOPE_CATS, _HOPE_COLORS)]
+    ax.legend(handles=patches, fontsize=fs - 1, loc='lower right',
+              ncol=len(_HOPE_CATS), bbox_to_anchor=(1, -0.38), frameon=False)
+    fig.tight_layout(pad=0.5)
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
+def make_dist_bar(results: list[dict]) -> bytes:
+    """奏者ごとの担当曲数分布棒グラフをPNG bytesで返す。"""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    import io
+    plt.rcParams['font.family'] = ['IPAGothic', 'Noto Sans CJK JP', 'sans-serif']
+
+    dist_data = _collect_dist_data(results)
+    labels    = [d["label"] for d in dist_data]
+    n_labels  = len(labels)
+    n_cats    = len(_DIST_CATS)
+    bar_w     = 0.18
+    x         = list(range(n_labels))
+    fs        = 7
+
+    fig, ax = plt.subplots(figsize=(5.5, 2.0))
+    for ci, (cat, col) in enumerate(zip(_DIST_CATS, _DIST_COLORS)):
+        vals   = [d.get(cat, 0) for d in dist_data]
+        offset = (ci - n_cats / 2 + 0.5) * bar_w
+        bars   = ax.bar([xi + offset for xi in x], vals, width=bar_w,
+                        color=col, label=cat)
+        for bar, v in zip(bars, vals):
+            if v > 0:
+                ax.text(bar.get_x() + bar.get_width() / 2,
+                        bar.get_height() + 0.05,
+                        str(v), ha='center', va='bottom', fontsize=fs - 1)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=fs)
+    ax.set_ylabel("人数", fontsize=fs)
+    max_v = max((d.get(c, 0) for d in dist_data for c in _DIST_CATS), default=1)
+    ax.set_yticks(range(0, max_v + 2))
+    ax.tick_params(axis='both', labelsize=fs)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    patches = [mpatches.Patch(color=c, label=l)
+               for l, c in zip(_DIST_CATS, _DIST_COLORS)]
+    ax.legend(handles=patches, fontsize=fs - 1, loc='upper right', frameon=False)
+    fig.tight_layout(pad=0.5)
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
 # 候補ごとの説明文
 CANDIDATE_DESC = {
     "候補A：第1希望率最大":        "第1希望が叶う人数を最大化。「絶対やりたい」という強い希望をできるだけ通す。",
@@ -186,8 +469,33 @@ def generate_assign_report(
             ("BOTTOMPADDING",(0,0),(-1,-1), 4),
         ]))
         story.append(tbl)
-        story.append(Spacer(1, 6*mm))
-    
+        story.append(Spacer(1, 4*mm))
+
+        # ── 希望充足の積み上げ横棒グラフ ─────────────────────────
+        try:
+            from reportlab.platypus import Image as RLImage
+            _bar_png = make_stacked_bar(results)
+            _bar_img = RLImage(io.BytesIO(_bar_png), width=130*mm, height=None)
+            _bar_img.hAlign = "LEFT"
+            story.append(Paragraph("希望充足の内訳", st["h3"]))
+            story.append(Spacer(1, 1*mm))
+            story.append(_bar_img)
+            story.append(Spacer(1, 4*mm))
+        except Exception as _eg:
+            story.append(Paragraph(f"（グラフ生成エラー: {_eg}）", st["small"]))
+
+        # ── 担当数分布グラフ ──────────────────────────────────────
+        try:
+            _dist_png = make_dist_bar(results)
+            _dist_img = RLImage(io.BytesIO(_dist_png), width=130*mm, height=None)
+            _dist_img.hAlign = "LEFT"
+            story.append(Paragraph("担当曲数の分布", st["h3"]))
+            story.append(Spacer(1, 1*mm))
+            story.append(_dist_img)
+            story.append(Spacer(1, 4*mm))
+        except Exception as _eg:
+            story.append(Paragraph(f"（グラフ生成エラー: {_eg}）", st["small"]))
+
         # ── 奏者別スコアサマリー ──────────────────────────────────
         story.append(Paragraph("■ 奏者別スコア・希望不成立サマリー", st["h2"]))
     
@@ -964,43 +1272,43 @@ def generate_assign_report(
 
         avg_ab = sum(ab_ratio_vals) / len(ab_ratio_vals) if ab_ratio_vals else 0
 
-        # 1文目：候補A/B
+        # 1文目：候補A/B（奏者向け・希望の通りやすさで表現）
         if avg_ab >= 0.98:
-            s1 = f"ヒューリスティック解は候補A/Bにおいて厳密解の{avg_ab*100:.1f}%の水準を示し、希望充足の観点では厳密解に非常に近い品質を確保した。"
+            s1 = "今回の比較では、候補A・Bについては2つの計算方法でほとんど差がなく、希望の反映という点ではどちらも近い結果になりました。"
         elif avg_ab >= 0.95:
-            s1 = f"ヒューリスティック解は候補A/Bにおいて厳密解の{avg_ab*100:.1f}%の水準を示し、希望充足の観点では厳密解に概ね近い品質を示した。"
+            s1 = "今回の比較では、候補A・Bについては2つの計算方法で概ね近い結果になりましたが、わずかに差が見られました。"
         elif avg_ab >= 0.90:
-            s1 = f"ヒューリスティック解は候補A/Bにおいて厳密解の{avg_ab*100:.1f}%の水準を示し、一定の品質を確保しているが改善余地がある。"
+            s1 = "今回の比較では、候補A・Bについては2つの計算方法である程度近い結果になりましたが、希望の反映に改善余地があります。"
         else:
-            s1 = f"ヒューリスティック解は候補A/Bで厳密解の{avg_ab*100:.1f}%にとどまり、希望充足において厳密解との差が確認された。"
+            s1 = "今回の比較では、候補A・Bについて2つの計算方法で差が見られました。希望の通り方が異なる可能性があるため、各候補の内容をよく確認してください。"
 
-        # 2文目：候補C
+        # 2文目：候補C（公平性の観点）
         if c_fair_ratio is None:
             s2 = ""
         elif c_fair_ratio >= 1.0:
-            s2 = "候補Cでは公平性指標（最低スコア）は厳密解と同等であった。"
+            s2 = "候補Cは、できるだけ誰かひとりに不満が集中しないよう配慮した案で、2つの計算方法でほぼ同じ結果になりました。"
         elif c_fair_ratio >= 0.80:
-            s2 = f"候補Cでは公平性指標（最低スコア）が厳密解の{c_fair_ratio*100:.0f}%であり、厳密解に近い水準を示した。"
+            s2 = "候補Cは、できるだけ誰かひとりに不満が集中しないよう配慮した案で、2つの計算方法で近い結果になりました。"
         else:
-            s2 = f"一方、候補Cでは公平性指標（最低スコア）が厳密解の{c_fair_ratio*100:.0f}%にとどまり、公平性を重視する場合は厳密解を推奨する。"
+            s2 = "一方、候補Cのように担当の公平さを重視した案では、2つの計算方法で割当の出方が変わる場合があります。公平さを特に重視したい場合は、候補の内容をよく確認してください。"
 
-        # 3文目：候補D
+        # 3文目：候補D（均等性の観点）
         if d_rest_equal is None:
             s3 = ""
         elif d_rest_equal:
-            s3 = "候補Dでは均等性指標（割当数の範囲）は厳密解と同等であったが、実際の割当内容は大きく異なり得るため参考案として扱うことが適切である。"
+            s3 = "候補Dは、できるだけ担当曲数の偏りが出ないようにした案で、2つの計算方法で同じ結果になりました。ただし誰がどの曲を担当するかという内容は異なる場合があるため、曲別の一覧も合わせて確認してください。"
         elif abs(d_h_rng - d_e_rng) <= 1:
-            s3 = f"候補Dでは均等性指標の差は{abs(d_h_rng - d_e_rng)}曲差にとどまり、厳密解に近い結果を示した。"
+            s3 = "候補Dは、担当曲数の偏りを抑えた案で、2つの計算方法でほぼ近い結果になりました。"
         else:
-            s3 = f"候補Dでは均等性指標が厳密解と{abs(d_h_rng - d_e_rng)}曲差あり、均等配置を重視する場合は厳密解を推奨する。"
+            s3 = "候補Dのように担当の均等さを重視した案では、2つの計算方法で割当の出方が変わることがあります。担当の偏りを特に気にする場合は、候補の内容をよく確認してください。"
 
-        # 4文目：運用推奨
-        if avg_ab >= 0.98 and (c_fair_ratio is None or c_fair_ratio >= 0.80) and (d_rest_equal is None or d_rest_equal):
-            s4 = "総合的には、通常運用ではヒューリスティック解を迅速な候補生成に用い、最終確認に厳密解を参照する運用が妥当である。"
+        # 4文目：読み方の案内
+        if avg_ab >= 0.95 and (c_fair_ratio is None or c_fair_ratio >= 0.80) and (d_rest_equal is None or d_rest_equal):
+            s4 = "通常は候補A・Bを中心に見れば十分ですが、できるだけ公平さや担当の均等さを重視したい場合は、候補C・Dも参考にしてください。"
         elif avg_ab >= 0.90:
-            s4 = "総合的には、候補A/B中心の運用であれば高速モードでも実用的であるが、候補C/Dを重視する場合は厳密解を優先することが望ましい。"
+            s4 = "候補A・Bを中心に検討しつつ、公平さや均等さを重視したい場合は候補C・Dの内容も参照することをお勧めします。"
         else:
-            s4 = "総合的には、最終判断には厳密解を優先することが望ましい。高速モードは迅速な方向性確認に有用であるが、採用可否の判断は厳密解を基準とすることを推奨する。"
+            s4 = "各候補の内容をよく見比べながら、どの観点を重視するかに応じて選択してください。"
 
         full_comment = " ".join(s for s in [s1, s2, s3, s4] if s)
         story.append(Paragraph(full_comment, st["body"]))
