@@ -717,7 +717,16 @@ def _render_solver_tab(ctx: dict):
         st.info("奏者・楽曲が登録されていません。")
         return
 
-    if st.button("▶ 割当を実行", type="primary", key="run_solver"):
+    solve_mode = st.radio(
+        "解法モード",
+        ["⚡ 高速モード（貪欲法＋局所探索）", "🎯 厳密モード（整数計画法・小規模向け）"],
+        index=0, horizontal=True,
+        help="厳密モードは数学的に最適な解を求めます。目安：奏者×パート数が200以下なら数秒以内。",
+        key=f"solve_mode_{concert_id}",
+    )
+    use_exact = "厳密モード" in solve_mode
+
+    if st.button("▶ 割当を実行", type="primary", key=f"run_solver_{concert_id}"):
         with st.spinner("アルゴリズム実行中..."):
             try:
                 from concert.services.assign_solver import (
