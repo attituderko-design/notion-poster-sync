@@ -615,6 +615,137 @@ def generate_assign_report(
             story.append(Paragraph(f"{i}. {tip}", st["body"]))
             story.append(Spacer(1, 1.5*mm))
 
+    # ── 比較ページ（compare_resultsが指定された場合）────────────
+    if compare_results:
+        story.append(PageBreak())
+        story.append(Paragraph("ヒューリスティック vs 厳密解　比較", st["h2"]))
+        story.append(HRFlowable(width="100%", thickness=0.5,
+                                color=colors.HexColor("#CCCCCC")))
+        story.append(Spacer(1, 4*mm))
+
+        try:
+            from concert.services.verify_results import verify as _vfy
+        except ImportError:
+            _vfy = None
+
+        # スコア比較テーブル（候補ごと）
+        if _vfy:
+            for r_h, r_e in zip(results, compare_results):
+                vh = _vfy(r_h["assignments"], r_h["pref_map"])
+                ve = _vfy(r_e["assignments"], r_e["pref_map"])
+                opt = ve["total_score"]
+                cur = vh["total_score"]
+                gap = opt - cur
+                rate = (cur / opt * 100) if opt > 0 else 100.0
+                cmp_rows = [
+                    ["指標", "ヒューリスティック", "厳密解", "差"],
+                    ["総スコア",
+                     f"{vh['total_score']:.1f}", f"{ve['total_score']:.1f}", f"{gap:+.1f}"],
+                    ["第1希望本数",
+                     f"{vh['first_choice_count']}件", f"{ve['first_choice_count']}件",
+                     f"{ve['first_choice_count']-vh['first_choice_count']:+d}"],
+                    ["第1希望率",
+                     f"{vh['first_choice_rate']:.1%}", f"{ve['first_choice_rate']:.1%}", "—"],
+                    ["最低スコア",
+                     f"{vh['min_player_score']:.1f}", f"{ve['min_player_score']:.1f}",
+                     f"{ve['min_player_score']-vh['min_player_score']:+.1f}"],
+                    ["最適解比率", f"{rate:.1f}%", "100%", "—"],
+                ]
+                cmp_ps = [
+                    [Paragraph(str(c), st["cellb_wht"] if ri == 0 else st["cell"])
+                     for c in row]
+                    for ri, row in enumerate(cmp_rows)
+                ]
+                cmp_tbl = Table(cmp_ps, colWidths=[35*mm, 40*mm, 40*mm, 25*mm])
+                cmp_tbl.setStyle(TableStyle([
+                    ("BACKGROUND", (0,0), (-1,0),  colors.HexColor("#2C3E50")),
+                    ("BACKGROUND", (0,1), (-1,-1), colors.HexColor("#F8F8F8")),
+                    ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+                    ("FONT",       (0,0), (-1,-1), font,   8),
+                    ("FONT",       (0,0), (-1,0),  font_b, 8),
+                    ("TOPPADDING",    (0,0), (-1,-1), 4),
+                    ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+                ]))
+                label_short = r_h["label"].split("：")[0]
+                story.append(KeepTogether([
+                    Paragraph(f"{label_short}　スコア比較", st["h3"]),
+                    Spacer(1, 2*mm),
+                    cmp_tbl,
+                    Spacer(1, 5*mm),
+                ]))
+
+        # 曲別割当の横並び比較
+        story.append(PageBreak())
+        story.append(Paragraph("曲別割当　横並び比較", st["h2"]))
+        story.append(HRFlowable(width="100%", thickness=0.5,
+                                color=colors.HexColor("#CCCCCC")))
+        story.append(Spacer(1, 4*mm))
+
+        cell_s = ParagraphStyle("cs", fontName=font,   fontSize=7, leading=10)
+        cell_b = ParagraphStyle("cb", fontName=font_b, fontSize=7, leading=10,
+                                textColor=colors.white)
+
+        def _cmp_song_tbl(items, pm):
+            rows = [["奏者", "パート", "希望"]]
+            for a in sorted(items, key=lambda x: x["part_name"]):
+                pk   = str((a["player_id"], a["song_id"], a["part_id"]))
+                pref = pm.get(pk)
+                if pref and pref.get("priority", 0) > 0:
+                    hope = {1:"第1",2:"第2",3:"第3"}.get(pref["priority"], "—")
+                elif a.get("source") in ("fallback","swap","exact"):
+                    hope = "補完"
+                else:
+                    hope = "降り番"
+                rows.append([
+                    player_name_map.get(a["player_id"], a.get("player_name","")),
+                    Paragraph(a["part_name"], cell_s),
+                    hope,
+                ])
+            ps = [[Paragraph(str(c), cell_b if ri==0 else cell_s)
+                   if isinstance(c, str) else c
+                   for c in row]
+                  for ri, row in enumerate(rows)]
+            t = Table(ps, colWidths=[22*mm, 50*mm, 12*mm])
+            t.setStyle(TableStyle([
+                ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#2C3E50")),
+                ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+                ("FONT",       (0,0), (-1,-1), font, 7),
+                ("TOPPADDING",    (0,0), (-1,-1), 3),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+            ]))
+            return t
+
+        for r_h, r_e in zip(results, compare_results):
+            label_h = r_h["label"]
+            label_e = r_e["label"]
+            story.append(KeepTogether([
+                Paragraph(f"{label_h.split('：')[0]}", st["h3"]),
+                Spacer(1, 1*mm),
+            ]))
+            for sid in song_order:
+                sname = song_name_map.get(sid, sid)
+                items_h = [a for a in r_h["assignments"] if a["song_id"] == sid]
+                items_e = [a for a in r_e["assignments"] if a["song_id"] == sid]
+                if not items_h and not items_e:
+                    continue
+                tbl_h = _cmp_song_tbl(items_h, r_h["pref_map"])
+                tbl_e = _cmp_song_tbl(items_e, r_e["pref_map"])
+                outer = Table(
+                    [[Paragraph(f"H: {sname}", cell_s),
+                      Paragraph(f"E: {sname}", cell_s)],
+                     [tbl_h, tbl_e]],
+                    colWidths=[93*mm, 93*mm],
+                )
+                outer.setStyle(TableStyle([
+                    ("FONT",        (0,0), (-1,-1), font, 7),
+                    ("VALIGN",      (0,0), (-1,-1), "TOP"),
+                    ("LEFTPADDING", (0,0), (-1,-1), 2),
+                    ("RIGHTPADDING",(0,0), (-1,-1), 2),
+                    ("BOTTOMPADDING",(0,0),(-1,-1), 4),
+                ]))
+                story.append(outer)
+            story.append(Spacer(1, 6*mm))
+
     doc.build(story)
     buf.seek(0)
     return buf.read()
