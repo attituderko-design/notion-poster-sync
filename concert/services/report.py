@@ -69,9 +69,12 @@ def generate_assign_report(
     songs: list[dict],
     players: list[dict],
     ctx: dict,
+    compare_results: list[dict] | None = None,  # 比較対象（厳密解 or ヒューリスティック）
+    compare_label: str = "比較",
 ) -> bytes:
     """
     アサイン候補案PDFを生成してbytesで返す。
+    compare_results が指定された場合、各候補の後に比較対象を並べて表示する。
     """
     font, font_b = _register_fonts()
     st = _styles(font, font_b)
