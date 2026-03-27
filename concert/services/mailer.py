@@ -48,25 +48,46 @@ def _build_message(
     body: str,
     pdf_bytes: bytes | None = None,
     pdf_filename: str = "attachment.pdf",
-) -> MIMEMultipart:
-    """MIMEメッセージを構築する。"""
-    msg = MIMEMultipart()
-    msg["From"]    = cfg.from_addr
-    msg["To"]      = to_addr
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain", "utf-8"))
-
+):
+    """MIMEメッセージを構築する。PDFなしの場合はMIMETextのみ。"""
     if pdf_bytes and len(pdf_bytes) > 0:
+        # PDF添付あり: MIMEMultipart
+        msg = MIMEMultipart()
+        msg["From"]    = cfg.from_addr
+        msg["To"]      = to_addr
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain", "utf-8"))
         part = MIMEBase("application", "octet-stream")
         part.set_payload(pdf_bytes)
         encoders.encode_base64(part)
+        # RFC2231準拠でファイル名をエンコード（日本語ファイル名対応）
+        from email.utils import encode_rfc2231
+        encoded_name = encode_rfc2231(pdf_filename, charset="utf-8")
         part.add_header(
             "Content-Disposition",
-            f'attachment; filename="{pdf_filename}"',
+            f"attachment",
+            filename=("utf-8", "", pdf_filename),
         )
         msg.attach(part)
+    else:
+        # テキストのみ: MIMEText
+        msg = MIMEText(body, "plain", "utf-8")
+        msg["From"]    = cfg.from_addr
+        msg["To"]      = to_addr
+        msg["Subject"] = subject
 
     return msg
+
+
+def send_text_to_all(
+    ctx: dict,
+    recipients: list[dict],
+    subject: str,
+    body: str,
+) -> SendResult:
+    """テキストのみのメールを送信する（PDF添付なし）。"""
+    return send_pdf_to_all(ctx, recipients, subject, body,
+                           pdf_bytes=b"", pdf_filename="")
 
 
 def send_pdf_to_all(
@@ -79,6 +100,7 @@ def send_pdf_to_all(
 ) -> SendResult:
     """
     全受信者にPDFを添付してメール送信する。
+    pdf_bytesが空の場合はテキストのみ送信。
     1件ずつ個別送信（BCCなし・宛名が個別に入れられる）。
 
     Parameters
