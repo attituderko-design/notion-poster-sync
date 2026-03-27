@@ -131,11 +131,21 @@ def send_pdf_to_all(
 
 def get_recipients_from_players(ctx: dict, players: list[dict]) -> list[dict]:
     """
-    playersリストからメール送信対象（メールアドレス登録済み）を抽出する。
+    playersリストから送信対象（受信=True かつ メールアドレス登録済み）を抽出する。
+    受信フラグが未設定（None）の場合はオプトアウト扱い（対象外）。
     """
-    from concert.services.keys import PLAYER_EMAIL_KEYS
+    from concert.services.keys import PLAYER_EMAIL_KEYS, PLAYER_RECEIVE_KEYS
     result = []
     for p in players:
+        # 受信フラグ確認（チェックボックス型）
+        receive = ctx["extract_prop_text_any"](p, PLAYER_RECEIVE_KEYS)
+        # Notionのチェックボックスはtrue/falseの文字列で返ることがある
+        if isinstance(receive, str):
+            receive = receive.lower() in ("true", "1", "yes", "はい", "○")
+        elif receive is None:
+            receive = False  # 未設定はオプトアウト
+        if not receive:
+            continue
         email = ctx["extract_prop_text_any"](p, PLAYER_EMAIL_KEYS) or ""
         name  = ctx["extract_prop_text_any"](p, ["氏名", "名前", "表示名", "タイトル"]) or p.get("id", "")
         result.append({"name": name, "email": email.strip()})

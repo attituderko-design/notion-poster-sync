@@ -31,6 +31,7 @@ PLAYER_EMAIL_KEYS         = ["メールアドレス", "Email", "email"]
 PLAYER_HN_KEYS            = ["H.N.", "ハンドルネーム", "HN"]
 PLAYER_PHONE_KEYS         = ["電話番号", "Phone", "Tel"]
 PLAYER_LINE_KEYS          = ["LINE ID", "LINE", "Line"]
+PLAYER_RECEIVE_KEYS       = ["受信", "メール受信", "前日共有受信"]
 PLAYER_MEMO_KEYS          = ["メモ", "備考"]
 PLAYER_KEY_KEYS           = ["player_key", "PlayerKey", "奏者キー", "PK奏者キー"]
 
