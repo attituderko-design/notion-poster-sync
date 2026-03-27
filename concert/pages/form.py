@@ -453,6 +453,13 @@ def render_form(ctx, concert_id: str):
 
     step = st.session_state.get("form_step", 1)
 
+    # STEP2以降は認証済みであることを確認（認証バイパス防止）
+    if step > 1 and not st.session_state.get("form_auth_verified"):
+        st.warning("セッションが切れました。最初からやり直してください。")
+        st.session_state.clear()
+        st.rerun()
+        return
+
     # ── STEP 0: プライバシーポリシー同意 ─────────────────────
     if step == 1 and not st.session_state.get("form_privacy_agreed"):
         st.subheader("はじめに")
