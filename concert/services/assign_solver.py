@@ -656,3 +656,259 @@ def solve_all(ctx: dict, concert_id: str) -> list[dict]:
             }
         )
     return out
+
+
+# ============================================================
+# 厳密解法（scipy.optimize.milp による整数計画法）
+# ============================================================
+
+def _build_var_index(
+    player_ids: list[str],
+    song_ids: list[str],
+    part_ids_by_song: dict[str, list[str]],
+) -> tuple[dict[tuple[str, str, str], int], int]:
+    """変数インデックス (player_id, song_id, part_id) → int を構築。"""
+    var_index: dict[tuple[str, str, str], int] = {}
+    idx = 0
+    for p in player_ids:
+        for s in song_ids:
+            for t in part_ids_by_song.get(s, []):
+                var_index[(p, s, t)] = idx
+                idx += 1
+    return var_index, idx
+
+
+def _base_constraints(
+    var_index: dict,
+    n_vars: int,
+    player_ids: list[str],
+    song_ids: list[str],
+    part_ids_by_song: dict[str, list[str]],
+    req_map: dict[tuple[str, str], int],
+    absent_players: set[str],
+    ng_set: set[tuple[str, str, str]],
+) -> tuple[list, list, list, "np.ndarray"]:
+    """
+    全候補共通の基本制約を構築。
+    戻り値: (A_rows, b_lo, b_hi, ub)
+    """
+    import numpy as np
+    ub = np.ones(n_vars)
+    for (p, s, t), vi in var_index.items():
+        if p in absent_players or (p, s, t) in ng_set:
+            ub[vi] = 0.0
+
+    A_rows, b_lo, b_hi = [], [], []
+
+    # C1: 各(s,t)の必要数
+    for (s, t), rc in req_map.items():
+        row = np.zeros(n_vars)
+        for p in player_ids:
+            vi = var_index.get((p, s, t))
+            if vi is not None:
+                row[vi] = 1.0
+        A_rows.append(row)
+        b_lo.append(float(rc))
+        b_hi.append(float(rc))
+
+    # C2: 1奏者1曲1パート
+    for p in player_ids:
+        for s in song_ids:
+            pts = part_ids_by_song.get(s, [])
+            if len(pts) <= 1:
+                continue
+            row = np.zeros(n_vars)
+            for t in pts:
+                vi = var_index.get((p, s, t))
+                if vi is not None:
+                    row[vi] = 1.0
+            A_rows.append(row)
+            b_lo.append(0.0)
+            b_hi.append(1.0)
+
+    return A_rows, b_lo, b_hi, ub
+
+
+def _run_milp(c, A_rows, b_lo, b_hi, ub_arr, n_int_vars: int, time_limit: float):
+    """共通のmilp呼び出し。"""
+    import numpy as np
+    from scipy.optimize import milp, LinearConstraint, Bounds
+    n_vars = len(c)
+    integrality = np.zeros(n_vars)
+    integrality[:n_int_vars] = 1
+    bounds = Bounds(lb=np.zeros(n_vars), ub=ub_arr)
+    constraints = LinearConstraint(np.array(A_rows), lb=b_lo, ub=b_hi)
+    return milp(c=c, constraints=constraints, integrality=integrality,
+                bounds=bounds, options={"time_limit": time_limit, "disp": False})
+
+
+def _extract_assignments(
+    x,
+    var_index: dict,
+    pref_map: dict,
+    req_name_map: dict,
+    player_name_map: dict,
+) -> list[Assignment]:
+    """milp解からAssignmentリストを生成。"""
+    result = []
+    for (p, s, t), vi in var_index.items():
+        if x[vi] > 0.5:
+            sname, pname, iid, iname = req_name_map.get((s, t), (s, t, "", ""))
+            pref = pref_map.get((p, s, t))
+            result.append(Assignment(
+                player_id=p,
+                player_name=player_name_map.get(p, p),
+                song_id=s,
+                song_name=sname,
+                part_id=t,
+                part_name=pname,
+                instrument_id=iid,
+                instrument_name=iname,
+                source="exact",
+            ))
+    return result
+
+
+def solve_exact(
+    prefs: list[Pref],
+    requirements: list[Requirement],
+    absent_players: set[str],
+    all_player_ids: list[str] | None = None,
+    time_limit_sec: float = 30.0,
+) -> list[dict]:
+    """
+    scipy.optimize.milp による厳密解法（整数計画法）。
+    候補A〜Dを厳密に最適化して返す。
+
+    候補A: 総スコア最大化（Σ score*x を最大化）
+    候補B: 公平性（max min_p y_p、補助変数mで線形化）
+    候補C: 降り番均等（min range of c_p = c_max - c_min）
+    候補D: 第1希望率最大化（第1希望割当数を最大化）
+
+    制約（全候補共通）:
+      Σ_p x[p,s,t] = req[s,t]        （必要数充足）
+      Σ_t x[p,s,t] ≤ 1              （1奏者1曲1パート）
+      x[p,s,t] = 0 if p ∈ absent   （欠席除外）
+      x[p,s,t] = 0 if NG           （NG除外）
+      x[p,s,t] ∈ {0, 1}
+    """
+    import numpy as np
+
+    if not prefs or not requirements:
+        return []
+
+    # 希望提出者のみをfallback候補に（未提出者は割当対象外）
+    player_ids  = sorted({p.player_id for p in prefs})
+    song_ids    = sorted({r.song_id for r in requirements})
+    part_ids_by_song: dict[str, list[str]] = {}
+    for r in requirements:
+        part_ids_by_song.setdefault(r.song_id, []).append(r.part_id)
+
+    pref_map        = {(p.player_id, p.song_id, p.part_id): p for p in prefs}
+    ng_set          = {(p.player_id, p.song_id, p.part_id) for p in prefs if p.priority == -1}
+    req_map         = {(r.song_id, r.part_id): r.required_count for r in requirements}
+    req_name_map    = {(r.song_id, r.part_id): (r.song_name, r.part_name, r.instrument_id, r.instrument_name)
+                      for r in requirements}
+    player_name_map = {p.player_id: p.player_name for p in prefs}
+
+    # スコアマップ（希望なし・fallbackは0.5）
+    def _sc(p: str, s: str, t: str) -> float:
+        pref = pref_map.get((p, s, t))
+        if pref is None:
+            return 0.5
+        if pref.priority <= 0:
+            return 0.0
+        return SCORE_MAP.get(pref.priority, 0.5)
+
+    var_index, n_x = _build_var_index(player_ids, song_ids, part_ids_by_song)
+    if n_x == 0:
+        return []
+
+    A_base, blo_base, bhi_base, ub_base = _base_constraints(
+        var_index, n_x, player_ids, song_ids, part_ids_by_song,
+        req_map, absent_players, ng_set,
+    )
+
+    # 全候補で使う評価用 all_player_ids
+    _eval_pids = sorted(set(all_player_ids or []) | set(player_ids))
+
+    results = []
+
+    # ── 候補A: 総スコア最大化 ──────────────────────────────────
+    c_a = np.array([-_sc(p, s, t) for (p, s, t) in var_index])
+    r_a = _run_milp(c_a, A_base, blo_base, bhi_base, ub_base, n_x, time_limit_sec)
+    if r_a.success:
+        sol_a = _extract_assignments(r_a.x, var_index, pref_map, req_name_map, player_name_map)
+        results.append({
+            "label": "候補A：総スコア最大（厳密解）",
+            "assignments": [a.__dict__ for a in sol_a],
+            "stats": _calc_stats(sol_a, pref_map, _eval_pids),
+        })
+
+    # ── 候補B: 公平性（max min_p y_p）─────────────────────────
+    # 変数: [x(n_x), m(1)]  目的: min -m
+    n_b = n_x + 1; m_idx = n_x
+    c_b = np.zeros(n_b); c_b[m_idx] = -1.0
+    ub_b = np.append(ub_base, 1e6)
+    A_b = [np.append(row, 0.0) for row in A_base]
+    blo_b = list(blo_base); bhi_b = list(bhi_base)
+    # m ≤ y_p: -Σ score*x + m ≤ 0
+    for p in player_ids:
+        row = np.zeros(n_b)
+        for s in song_ids:
+            for t in part_ids_by_song.get(s, []):
+                vi = var_index.get((p, s, t))
+                if vi is not None:
+                    row[vi] = -_sc(p, s, t)
+        row[m_idx] = 1.0
+        A_b.append(row); blo_b.append(-1e9); bhi_b.append(0.0)
+    r_b = _run_milp(c_b, A_b, blo_b, bhi_b, ub_b, n_x, time_limit_sec)
+    if r_b.success:
+        sol_b = _extract_assignments(r_b.x[:n_x], var_index, pref_map, req_name_map, player_name_map)
+        results.append({
+            "label": "候補B：公平性重視（厳密解）",
+            "assignments": [a.__dict__ for a in sol_b],
+            "stats": _calc_stats(sol_b, pref_map, _eval_pids),
+        })
+
+    # ── 候補C: 降り番均等（min c_max - c_min）────────────────
+    # 変数: [x(n_x), c_max(1), c_min(1)]  目的: min c_max - c_min
+    n_c = n_x + 2; cmax_i = n_x; cmin_i = n_x + 1
+    c_c = np.zeros(n_c); c_c[cmax_i] = 1.0; c_c[cmin_i] = -1.0
+    n_songs = float(len(song_ids))
+    ub_c = np.append(ub_base, [n_songs, n_songs])
+    A_c = [np.append(row, [0.0, 0.0]) for row in A_base]
+    blo_c = list(blo_base); bhi_c = list(bhi_base)
+    for p in player_ids:
+        row_max = np.zeros(n_c); row_min = np.zeros(n_c)
+        for s in song_ids:
+            for t in part_ids_by_song.get(s, []):
+                vi = var_index.get((p, s, t))
+                if vi is not None:
+                    row_max[vi] = -1.0; row_min[vi] = 1.0
+        row_max[cmax_i] = 1.0; row_min[cmin_i] = -1.0
+        A_c.append(row_max); blo_c.append(0.0); bhi_c.append(1e9)
+        A_c.append(row_min); blo_c.append(0.0); bhi_c.append(1e9)
+    r_c = _run_milp(c_c, A_c, blo_c, bhi_c, ub_c, n_x, time_limit_sec)
+    if r_c.success:
+        sol_c = _extract_assignments(r_c.x[:n_x], var_index, pref_map, req_name_map, player_name_map)
+        results.append({
+            "label": "候補C：降り番均等（厳密解）",
+            "assignments": [a.__dict__ for a in sol_c],
+            "stats": _calc_stats(sol_c, pref_map, _eval_pids),
+        })
+
+    # ── 候補D: 第1希望率最大化 ────────────────────────────────
+    first_choice_set = {(p.player_id, p.song_id, p.part_id) for p in prefs if p.priority == 1}
+    c_d = np.array([-1.0 if (p, s, t) in first_choice_set else 0.0
+                    for (p, s, t) in var_index])
+    r_d = _run_milp(c_d, A_base, blo_base, bhi_base, ub_base, n_x, time_limit_sec)
+    if r_d.success:
+        sol_d = _extract_assignments(r_d.x, var_index, pref_map, req_name_map, player_name_map)
+        results.append({
+            "label": "候補D：第1希望率最大（厳密解）",
+            "assignments": [a.__dict__ for a in sol_d],
+            "stats": _calc_stats(sol_d, pref_map, _eval_pids),
+        })
+
+    return results
