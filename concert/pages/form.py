@@ -17,7 +17,7 @@ from concert.services.keys import (
     PARTDEF_NAME_KEYS, PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS,
     SONG_NAME_KEYS, SONG_CREATOR_KEYS, SONG_CONCERT_REL_KEYS,
     INSTRUMENT_NAME_KEYS,
-    PLAYER_NAME_KEYS, PLAYER_HN_KEYS, PLAYER_EMAIL_KEYS,
+    PLAYER_NAME_KEYS, PLAYER_HN_KEYS, PLAYER_EMAIL_KEYS, PLAYER_RECEIVE_KEYS,
     PLAYER_PHONE_KEYS, PLAYER_LINE_KEYS,
     ATTENDANCE_KEY_KEYS, ATT_RECORD_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
     PI_PARTICIPANT_REL_KEYS, PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
@@ -429,6 +429,21 @@ def render_form(ctx, concert_id: str):
             first_name = col_first.text_input("名 *", placeholder="例：太郎")
             hn         = st.text_input("H.N.（任意）", placeholder="例：酒席ティンパニ奏者")
             email    = st.text_input("メールアドレス（任意）", placeholder="例：yamada@example.com")
+
+            # 前日共有PDF受信設定
+            _sample_url = ctx.get("FORM_PRACTICE_SAMPLE_PDF_URL", "")
+            _caption_parts = ["練習前日（または本番前日）に資料PDFをメールでお送りします。"]
+            if _sample_url:
+                _caption_parts.append(f"[サンプルPDFを見る]({_sample_url})")
+            st.caption(" / ".join(_caption_parts))
+            receive_pdf = st.checkbox(
+                "前日共有PDFをメールで受け取る",
+                value=True,
+                help="チェックを入れると、練習・本番の前日に資料PDFがメールで届きます。メールアドレスの登録が必要です。",
+            )
+            if receive_pdf and not email.strip():
+                st.caption("⚠️ メールアドレスを入力するとPDFを受け取れます。")
+
             phone    = st.text_input("電話番号（任意）", placeholder="例：09012345678")
             line_id  = st.text_input("LINE ID（任意）", placeholder="例：yamada_taro")
             st.divider()
@@ -459,12 +474,13 @@ def render_form(ctx, concert_id: str):
                     player_id = existing.get("id", "")
                     # 連絡先の更新（入力があった場合のみ）
                     t_pl = ctx["get_prop_types"](ctx["CONCERT_DB_PLAYER"])
-                    if t_pl and any([hn.strip(), email.strip(), phone.strip(), line_id.strip()]):
+                    if t_pl and any([hn.strip(), email.strip(), phone.strip(), line_id.strip(), True]):
                         upd: dict = {}
                         if hn.strip():      ctx["put_prop_any"](upd, t_pl, PLAYER_HN_KEYS,    hn.strip())
                         if email.strip():   ctx["put_prop_any"](upd, t_pl, PLAYER_EMAIL_KEYS, email.strip())
                         if phone.strip():   ctx["put_prop_any"](upd, t_pl, PLAYER_PHONE_KEYS, phone.strip())
                         if line_id.strip(): ctx["put_prop_any"](upd, t_pl, PLAYER_LINE_KEYS,  line_id.strip())
+                        ctx["put_prop_any"](upd, t_pl, PLAYER_RECEIVE_KEYS, receive_pdf)
                         ctx["api_request"]("patch",
                             f"https://api.notion.com/v1/pages/{player_id}",
                             json={"properties": upd})
@@ -477,6 +493,7 @@ def render_form(ctx, concert_id: str):
                     if email.strip():   ctx["put_prop_any"](props, t_pl, PLAYER_EMAIL_KEYS, email.strip())
                     if phone.strip():   ctx["put_prop_any"](props, t_pl, PLAYER_PHONE_KEYS, phone.strip())
                     if line_id.strip(): ctx["put_prop_any"](props, t_pl, PLAYER_LINE_KEYS,  line_id.strip())
+                    ctx["put_prop_any"](props, t_pl, PLAYER_RECEIVE_KEYS, receive_pdf)
                     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                                              json={"parent": {"database_id": ctx["CONCERT_DB_PLAYER"]},
                                                    "properties": props})
