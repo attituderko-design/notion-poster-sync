@@ -11,14 +11,16 @@ from concert.services.keys import (
     PRACTICE_VENUE_KEYS, PRACTICE_ADDRESS_KEYS,
     PRACTICE_SONG_REL_KEYS,
     SONG_NAME_KEYS, SONG_CONCERT_REL_KEYS, SONG_COMPOSER_KEYS,
-    INSTRUMENT_NAME_KEYS,
+    INSTRUMENT_NAME_KEYS, INSTRUMENT_CATEGORY_KEYS,
     PARTDEF_KEY_KEYS, PARTDEF_RECORD_KEYS, PARTDEF_CONCERT_REL_KEYS,
     PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS, PARTDEF_NAME_KEYS,
     PARTICIPANT_RECORD_KEYS, PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
     PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_FEE_KEYS,
     PLAYER_NAME_KEYS,
     ATTENDANCE_KEY_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
+    ASSIGN_KEY_KEYS,
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
+    ASSIGN_KEY_KEYS, INSTRUMENT_KEY_KEYS, INSTRUMENT_CATEGORY_KEYS,
     PREFERENCE_KEY_KEYS, PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     EXPENSE_KEY_KEYS, EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS,
     EXPENSE_CONTENT_KEYS, EXPENSE_AMOUNT_KEYS, EXPENSE_CONFIRMED_KEYS,
@@ -91,16 +93,19 @@ def _seed_all(ctx) -> dict:
     tp = _p(ctx, player_db)
     player_ids = []
     player_data = [
-        # Percパート奏者（5名）
+        # Percパート奏者（8名）
         ("テスト奏者A", "Perc-A", "090-0001-0001", "test_line_a"),
         ("テスト奏者B", "Perc-B", "090-0001-0002", "test_line_b"),
         ("テスト奏者C", "Perc-C", "090-0001-0003", "test_line_c"),
         ("テスト奏者D", "Perc-D", "090-0001-0004", ""),
         ("テスト奏者E", "Perc-E", "",              ""),
+        ("テスト奏者F", "Perc-F", "090-0001-0006", ""),
+        ("テスト奏者G", "Perc-G", "",              ""),
+        ("テスト奏者H", "Perc-H", "",              ""),
         # 他パート奏者（3名）
-        ("テスト奏者F", "Vn1-F", "090-0001-0006", ""),
-        ("テスト奏者G", "Vn2-G", "",              ""),
-        ("テスト奏者H", "Va-H",  "",              ""),
+        ("テスト奏者I", "Vn1-I",  "090-0001-0009", ""),
+        ("テスト奏者J", "Vn2-J",  "",              ""),
+        ("テスト奏者K", "Va-K",   "",              ""),
     ]
     for name, hn, phone, line_id in player_data:
         props = {}
@@ -118,9 +123,19 @@ def _seed_all(ctx) -> dict:
     inst_db = ctx["CONCERT_DB_INSTRUMENT"]
     ti = _p(ctx, inst_db)
     instrument_ids = []
-    for name in ["Timpani", "Snare Drum", "Marimba"]:
+    inst_data = [
+        ("Timpani",      "打楽器"),
+        ("Snare Drum",   "打楽器"),
+        ("Marimba",      "打楽器"),
+        ("Bass Drum",    "打楽器"),
+        ("Cymbals",      "打楽器"),
+        ("Xylophone",    "打楽器"),
+    ]
+    for name, category in inst_data:
         props = {}
-        _put(ctx, props, ti, INSTRUMENT_NAME_KEYS, f"{TEST_PREFIX} {name}")
+        ctx["put_key_any"](props, ti, INSTRUMENT_KEY_KEYS, name, prefix="inst")
+        _put(ctx, props, ti, INSTRUMENT_NAME_KEYS,     f"{TEST_PREFIX} {name}")
+        _put(ctx, props, ti, INSTRUMENT_CATEGORY_KEYS, category)
         iid = track(_create(ctx, inst_db, props))
         if iid:
             instrument_ids.append(iid)
@@ -159,8 +174,9 @@ def _seed_all(ctx) -> dict:
         "テスト曲α": "テスト太郎（作曲）",
         "テスト曲β": "テスト次郎（作曲）",
         "テスト曲γ": "テスト三郎（作曲）",
+        "テスト曲δ": "テスト四郎（作曲）",
     }
-    for name in ["テスト曲α", "テスト曲β", "テスト曲γ"]:
+    for name in ["テスト曲α", "テスト曲β", "テスト曲γ", "テスト曲δ"]:
         props = {}
         _put(ctx, props, ts, SONG_NAME_KEYS,        f"{TEST_PREFIX} {name}")
         _put(ctx, props, ts, SONG_CONCERT_REL_KEYS, concert_id)
@@ -207,7 +223,7 @@ def _seed_all(ctx) -> dict:
     partdef_db = ctx["CONCERT_DB_PART_DEFINITION"]
     tpd = _p(ctx, partdef_db)
     partdef_ids = []
-    part_names = ["Part1 Timp.", "Part2 S.D.", "Part3 Mar."]
+    part_names = ["Part1 Timp.", "Part2 S.D.", "Part3 Mar.", "Part4 B.D."]
     # 曲名マップ
     song_name_map = {s.get("id",""): ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or ""
                      for s in ctx["query_all"](ctx["CONCERT_DB_SONG"], None)}
@@ -237,9 +253,9 @@ def _seed_all(ctx) -> dict:
     cast_db = ctx["CONCERT_DB_PARTICIPANT"]
     tcast = _p(ctx, cast_db)
     cast_ids = []
-    parts = ["Perc", "Perc", "Perc", "Perc", "Perc", "Vn1", "Vn2", "Va"]
-    fees  = [5000, 5000, 5000, 5000, 5000, 5000, 5000, 0]
-    roles_ops = ["", "", "", "会計", "広報", "", "", ""]
+    parts = ["Perc"]*8 + ["Vn1", "Vn2", "Va"]
+    fees  = [5000]*8 + [5000, 5000, 0]
+    roles_ops = ["", "", "", "会計", "広報", "", "", "", "", "", ""]
     for i, pid in enumerate(player_ids):
         props = {}
         ctx["put_key_any"](props, tcast, PARTICIPANT_RECORD_KEYS,
@@ -261,10 +277,10 @@ def _seed_all(ctx) -> dict:
     pi_db = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
     tpi = _p(ctx, pi_db)
     pi_count = 0
-    for pid in player_ids[:5]:  # Perc奏者5名分
+    for pid in player_ids[:8]:  # Perc奏者8名分
         for iid in instrument_ids:
             props = {}
-            ctx["put_key_any"](props, tpi, ["record_key", "タイトル", "PK名称"],
+            ctx["put_key_any"](props, tpi, ASSIGN_KEY_KEYS,
                                pid, iid, prefix="assign")
             _put(ctx, props, tpi, PI_CONCERT_REL_KEYS, concert_id)
             _put(ctx, props, tpi, PI_PLAYER_REL_KEYS,  pid)
@@ -276,30 +292,29 @@ def _seed_all(ctx) -> dict:
     summary["PLAYER_INSTRUMENT"] = pi_count
 
     # ── 10. PREFERENCE ────────────────────────────────────
-    # Percパート奏者（cast_ids[:2]=奏者A・B）の全パート定義に希望を登録
-    # 希望分布：各奏者が異なる第1希望を持つようにデザイン
-    #
-    # 奏者A: 曲α Part1=第1希望, Part2=希望なし, Part3=第2希望
-    #        曲β Part1=第2希望, Part2=希望なし, Part3=第1希望
-    # 奏者B: 曲α Part1=希望なし, Part2=第1希望, Part3=第2希望
-    #        曲β Part1=第1希望, Part2=第2希望, Part3=希望なし
-    # partdef_ids = [α_P1, α_P2, α_P3, β_P1, β_P2, β_P3]（2曲×3パート）
     pref_db = ctx["CONCERT_DB_PREFERENCE"]
     tpref = _p(ctx, pref_db)
     pref_count = 0
     NA = "希望なし/降り番でも可"
-    # αP1   αP2   αP3   βP1   βP2   βP3   γP1   γP2   γP3
+    # 4曲×4パート=16列 αP1-4, βP1-4, γP1-4, δP1-4
+    # 各曲で第1希望が2〜3人かぶるよう設計し、候補案ごとに差が出やすくする
     pref_matrix = {
-        #        A独占  B/C競合 D/E競合 B/E競合 C/D競合 A独占  C独占  B独占  A独占
-        0: ["第1希望","第2希望", NA,    "第3希望", NA,    "第1希望","第2希望", NA,    "第1希望"],  # 奏者A
-        1: ["第2希望","第1希望","第2希望","第1希望","第3希望", NA,     NA,    "第1希望","第3希望"],  # 奏者B
-        2: [ NA,    "第1希望", NA,     NA,    "第1希望","第2希望","第1希望","第2希望", NA     ],  # 奏者C
-        3: ["第3希望", NA,    "第1希望", NA,    "第1希望", NA,    "第2希望","第3希望","第2希望"],  # 奏者D
-        4: ["第2希望", NA,    "第1希望","第1希望", NA,    "第3希望", NA,    "第2希望","第3希望"],  # 奏者E
+        # α:P1  P2   P3   P4   β:P1  P2   P3   P4   γ:P1  P2   P3   P4   δ:P1  P2   P3   P4
+        0: ["第1","第2", NA,  NA,  "第2", NA, "第1","第3", NA, "第1","第2", NA, "第3", NA,  NA, "第1"],
+        1: [ NA, "第1","第2", NA, "第1","第3", NA, "第2","第1", NA, "第3","第2", NA, "第1","第2", NA ],
+        2: ["第2", NA, "第1","第3", NA, "第1","第2", NA, "第2","第3", NA, "第1","第1","第2", NA,  NA ],
+        3: ["第1","第3", NA, "第2","第3","第1", NA,  NA,  NA, "第2","第1","第3", NA,  NA, "第1","第2"],
+        4: [ NA,  NA, "第1","第1", NA, "第2","第3","第1","第3", NA,  NA, "第2","第2","第3","第1", NA ],
+        5: ["第2","第1", NA,  NA, "第1", NA, "第2","第3", NA, "第1","第2", NA,  NA, "第2", NA, "第1"],
+        6: [ NA, "第2","第3","第1","第2","第3", NA, "第1","第2","第3","第1", NA,  NA,  NA, "第2","第3"],
+        7: ["第3", NA, "第2","第2","第3", NA, "第1","第2","第1", NA,  NA, "第3","第2","第1","第3", NA ],
     }
-    for i, (pid, cast_id) in enumerate(zip(player_ids[:5], cast_ids[:5])):  # Perc奏者5名のみ
-        for j, pd_id in enumerate(partdef_ids[:9]):
-            priority = pref_matrix[i][j] if j < len(pref_matrix[i]) else NA
+    _pmap = {"第1":"第1希望","第2":"第2希望","第3":"第3希望"}
+    for i, (pid, cast_id) in enumerate(zip(player_ids[:8], cast_ids[:8])):  # Perc奏者8名
+        row = pref_matrix.get(i, {})
+        for j, pd_id in enumerate(partdef_ids[:16]):
+            raw      = row[j] if j < len(row) else NA
+            priority = _pmap.get(raw, raw)
             props = {}
             ctx["put_key_any"](props, tpref, PREFERENCE_KEY_KEYS,
                                cast_id, pd_id, prefix="pref")
@@ -351,7 +366,7 @@ def _seed_all(ctx) -> dict:
     att_db = ctx["CONCERT_DB_ATTENDANCE"]
     tatt = _p(ctx, att_db)
     att_count = 0
-    statuses = ["○", "○", "△", "×", "○", "○", "△", "○"]
+    statuses = ["○", "○", "△", "×", "○", "○", "△", "○", "△", "○", "○"]
     # この時点でpractice_idsに本番当日IDが追加済み
     # concert_day_idも本番当日のIDとして使える
     practice_rel_key = ctx["find_prop_name"](tatt, ATT_PRACTICE_REL_KEYS)
@@ -391,8 +406,8 @@ def _seed_all(ctx) -> dict:
             pid = player_ids[0]
             iid = instrument_ids[0]
             props = {}
-            _put(ctx, props, tpi, ["record_key", "タイトル", "PK名称"],
-                 f"{TEST_PREFIX} bring_{pr_id[:6]}_{pid[:6]}")
+            ctx["put_key_any"](props, tpi, ASSIGN_KEY_KEYS,
+                               pid, iid, pr_id, prefix="bring")
             _put(ctx, props, tpi, PI_CONCERT_REL_KEYS,   concert_id)
             _put(ctx, props, tpi, PI_PLAYER_REL_KEYS,    pid)
             _put(ctx, props, tpi, PI_INST_REL_KEYS,      iid)
@@ -625,16 +640,16 @@ def render(ctx: dict):
 
 | DB | 件数 |
 |---|---|
-| PERFORMER | 8名（Perc×5・Vn1/Vn2/Va×各1） |
-| INSTRUMENT | 3種 |
+| PERFORMER | 11名（Perc×8・Vn1/Vn2/Va×各1） |
+| INSTRUMENT | 5種 |
 | CONCERT | 1件（2099-12-31） |
-| SONG | 3曲 |
+| SONG | 4曲 |
 | PRACTICE | 3回 |
-| PART_DEFINITION | 9件（3曲×3パート） |
-| CONCERT_CAST | 8件 |
+| PART_DEFINITION | 16件（4曲×4パート） |
+| CONCERT_CAST | 11件 |
 | ATTENDANCE | 40件（5回×8名） |
 | PLAYER_INSTRUMENT | 15件（所有：Perc5名×3楽器）+ 2件（持参担当） |
-| PREFERENCE | 45件（Perc5名×9パート定義） |
+| PREFERENCE | 128件（Perc8名×16パート定義） |
 | CONCERT_EXPENSE | 3件 |
 | RENTAL | 2件 |
 | SCHEDULE | 5件（第1回練習のタイムスケジュール） |
