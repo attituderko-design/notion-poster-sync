@@ -78,9 +78,11 @@ def _priority_to_int(v: str) -> int:
     s = (v or "").strip()
     if not s:
         return 0
-    if "絶対" in s and "NG" in s:
+    # NG判定：「絶対NG」「NG」「不可」「無理」等をすべて-1に
+    s_lower = s.lower()
+    if any(kw in s for kw in ("NG", "絶対NG", "不可", "無理")) or s_lower in ("ng",):
         return -1
-    if "降り番" in s:
+    if "降り番" in s or "希望なし" in s:
         return 0
     if "第1" in s:
         return 1
@@ -124,25 +126,41 @@ def _participant_to_player_map(ctx: dict) -> dict[str, str]:
 
 
 def _build_absent_set(ctx: dict, concert_id: str) -> set[str]:
+    """
+    本番当日の出欠が×の奏者のみをabsentに入れる。
+    練習欠席だけではアサイン対象外にしない。
+    本番当日レコードが存在しない場合はabsentなしとして扱う。
+    """
     practice_db = ctx["CONCERT_DB_PRACTICE"]
     attendance_db = ctx["CONCERT_DB_ATTENDANCE"]
     p_types = ctx["get_prop_types"](practice_db)
     p_rel = ctx["find_prop_name"](p_types, PRACTICE_CONCERT_REL_KEYS)
     if not p_rel:
         return set()
-    p_rows = ctx["query_all"](practice_db, {"filter": {"property": p_rel, "relation": {"contains": concert_id}}})
-    practice_ids = {r.get("id", "") for r in p_rows if r.get("id")}
-    if not practice_ids:
+    p_rows = ctx["query_all"](practice_db,
+                              {"filter": {"property": p_rel, "relation": {"contains": concert_id}}})
+
+    # 本番当日レコードのIDだけ取得
+    concert_day_ids: set[str] = set()
+    for r in p_rows:
+        day_flag = (ctx["extract_prop_text_any"](r, ["本番日", "演奏会当日フラグ", "本番フラグ"]) or "").lower()
+        if day_flag in ("true", "1", "yes", "はい", "○"):
+            rid = r.get("id", "")
+            if rid:
+                concert_day_ids.add(rid)
+
+    # 本番当日レコードがなければabsentなし
+    if not concert_day_ids:
         return set()
 
     a_rows = ctx["query_all"](attendance_db)
-    absent = set()
+    absent: set[str] = set()
     participant_map = _participant_to_player_map(ctx)
     for r in a_rows:
         pids = ctx["extract_relation_ids_any"](r, ATT_PRACTICE_REL_KEYS)
-        if not pids or pids[0] not in practice_ids:
+        if not pids or pids[0] not in concert_day_ids:
             continue
-        status = ctx["extract_prop_text_any"](r, ATT_STATUS_KEYS)
+        status = ctx["extract_prop_text_any"](r, ATT_STATUS_KEYS) or ""
         if "×" not in status:
             continue
         p_rel_ids = ctx["extract_relation_ids_any"](r, ATT_PLAYER_REL_KEYS)
@@ -225,7 +243,8 @@ def _load_preferences(ctx: dict, concert_id: str) -> list[Pref]:
         if not (pid and sid and part_id):
             continue
         pr = _priority_to_int(ctx["extract_prop_text_any"](r, PREF_PRIORITY_KEYS))
-        can_bring = ctx["extract_prop_text_any"](r, PREF_CAN_BRING_KEYS) == "True"
+        _cb_raw = ctx["extract_prop_text_any"](r, PREF_CAN_BRING_KEYS) or ""
+        can_bring = _cb_raw.lower() in ("true", "1", "yes", "はい", "○", "true")
         player_ids.add(pid)
         song_ids.add(sid)
         part_ids.add(part_id)
@@ -293,7 +312,12 @@ def greedy_solve(
     prefs: list[Pref],
     requirements: list[Requirement],
     absent_players: set[str],
+    all_participants: list[tuple[str, str]] | None = None,
 ) -> list[Assignment]:
+    """
+    all_participants: [(player_id, player_name), ...] 参加者全員リスト。
+    希望未提出の参加者もfallback候補に含めるために使用。
+    """
     by_req_key: dict[tuple[str, str], list[Pref]] = {}
     ng_map = {(p.player_id, p.song_id, p.part_id) for p in prefs if p.priority == -1}
 
@@ -317,7 +341,12 @@ def greedy_solve(
 
     assigned: list[Assignment] = []
     assigned_song_players: set[tuple[str, str]] = set()
-    all_players = sorted({p.player_id: p.player_name for p in prefs}.items(), key=lambda x: x[1])
+    # fallback候補：希望提出者 + 参加者DB全員（希望未提出も含む）
+    _pref_players = {p.player_id: p.player_name for p in prefs}
+    if all_participants:
+        for pid, pname in all_participants:
+            _pref_players.setdefault(pid, pname)
+    all_players = sorted(_pref_players.items(), key=lambda x: x[1])
 
     for req in requirements:
         slots = max(req.required_count, 1)
@@ -383,12 +412,17 @@ def _first_choice_rate(solution: list[Assignment], pref_map: dict[tuple[str, str
     return n / len(solution)
 
 
-def _min_player_score(solution: list[Assignment], pref_map: dict[tuple[str, str, str], Pref]) -> float:
-    by_player: dict[str, int] = {}
+def _min_player_score(
+    solution: list[Assignment],
+    pref_map: dict[tuple[str, str, str], Pref],
+    all_player_ids: list[str] | None = None,
+) -> float:
+    """全奏者（割当ゼロ含む）を対象にした最低スコア。"""
+    by_player: dict[str, float] = {pid: 0.0 for pid in (all_player_ids or [])}
     for a in solution:
-        by_player.setdefault(a.player_id, 0)
+        by_player.setdefault(a.player_id, 0.0)
         by_player[a.player_id] += max(score_assignment(a, pref_map), 0)
-    return min(by_player.values()) if by_player else 0
+    return min(by_player.values()) if by_player else 0.0
 
 
 def _bring_count(solution: list[Assignment], pref_map: dict[tuple[str, str, str], Pref]) -> int:
@@ -409,10 +443,14 @@ def _rest_std(solution: list[Assignment], all_player_ids: list[str]) -> float:
     return pstdev(arr) if len(arr) > 1 else 0.0
 
 
-def _is_valid(trial: list[Assignment], pref_map: dict) -> bool:
-    """割当リストの重複・NG違反チェック"""
+def _is_valid(trial: list[Assignment], pref_map: dict,
+              absent_players: set[str] | None = None) -> bool:
+    """割当リストの重複・NG違反・欠席者チェック"""
     seen: set = set()
     for x in trial:
+        # 欠席者チェック
+        if absent_players and x.player_id in absent_players:
+            return False
         k = (x.song_id, x.player_id)
         if k in seen:
             return False
@@ -428,17 +466,21 @@ def local_search(
     pref_map: dict[tuple[str, str, str], Pref],
     objective_fn,
     max_iter: int = 250,
+    absent_players: set[str] | None = None,
+    all_player_ids: list[str] | None = None,
 ) -> list[Assignment]:
     """
-    局所探索：2種類の近傍移動を試みる。
+    局所探索：3種類の近傍移動を試みる。
     1. 同一曲内スワップ（奏者AとBのパートを入れ替え）
-    2. 異なる奏者の割当を別の未割当奏者に移す（降り番↔割当の交換）
+    2. 同一曲内差し替え（降り番奏者→割当中奏者を置換）
+    3. 曲またぎ交換：曲Aの奏者Xと曲Bの奏者Y（別曲）のパートを交換
     """
+    absent_players = absent_players or set()
     cur = list(solution)
     cur_score = objective_fn(cur)
 
-    # 全奏者IDセット（pref_mapから取得）
-    all_pids = sorted({p.player_id for p in pref_map.values()})
+    # 全奏者IDセット（渡された全員リスト優先、なければpref_mapから）
+    all_pids = list(all_player_ids) if all_player_ids else sorted({p.player_id for p in pref_map.values()})
 
     improved = True
     it = 0
@@ -459,7 +501,7 @@ def local_search(
                                 b.part_id, b.part_name, b.instrument_id, b.instrument_name, "swap")
                 trial = list(cur)
                 trial[i], trial[j] = na, nb
-                if not _is_valid(trial, pref_map):
+                if not _is_valid(trial, pref_map, absent_players):
                     continue
                 sc = objective_fn(trial)
                 if sc > cur_score:
@@ -496,7 +538,7 @@ def local_search(
                                 a.part_id, a.part_name, a.instrument_id, a.instrument_name, "swap")
                 trial = list(cur)
                 trial[i] = na
-                if not _is_valid(trial, pref_map):
+                if not _is_valid(trial, pref_map, absent_players):
                     continue
                 sc = objective_fn(trial)
                 if sc > cur_score:
@@ -508,48 +550,38 @@ def local_search(
         if improved:
             continue
 
-        # ── 近傍3: 曲またぎ移動（降り番↔割当の入れ替え） ───────
-        # 曲Aで降り番の奏者Xを、曲Bのスロットに追加し
-        # 代わりに曲BのパートYを持っていた奏者Zを降り番にする
-        assigned_by_song2: dict[str, set] = {}
-        for a in cur:
-            assigned_by_song2.setdefault(a.song_id, set()).add(a.player_id)
-
-        player_name_map2 = {}
-        for pref in pref_map.values():
-            player_name_map2[pref.player_id] = pref.player_name
-
-        songs_list = sorted({a.song_id for a in cur})
-        for song_id in songs_list:
-            if improved: break
-            # この曲で降り番の奏者
-            absent_here = [pid for pid in all_pids
-                           if pid not in assigned_by_song2.get(song_id, set())]
-            for x_pid in absent_here:
+        # ── 近傍3: 曲またぎ交換 ────────────────────────────────
+        # 異なる曲に割り当てられた奏者AとBのスロットを交換する。
+        # 曲αのパートPをやっているAと、曲βのパートQをやっているBを交換：
+        # → AがβのQ、BがαのPを担当する。
+        # これにより、各曲単独では改善できない公平性・降り番均等を改善できる。
+        if not improved:
+            n2 = len(cur)
+            for i in range(n2):
                 if improved: break
-                x_name = player_name_map2.get(x_pid, x_pid)
-                # この曲の各スロットにXを入れてZを降り番にする
-                for idx, y_assign in enumerate(cur):
-                    if y_assign.song_id != song_id:
+                for j in range(i + 1, n2):
+                    a, b = cur[i], cur[j]
+                    # 同一曲は近傍1で処理済みなのでスキップ
+                    if a.song_id == b.song_id:
                         continue
-                    # NGチェック
-                    px = pref_map.get((x_pid, song_id, y_assign.part_id))
-                    if px and px.priority == -1:
-                        continue
-                    nx = Assignment(x_pid, x_name, song_id, y_assign.song_name,
-                                    y_assign.part_id, y_assign.part_name,
-                                    y_assign.instrument_id, y_assign.instrument_name, "swap")
+                    # AをbのパートへA, BをaのパートへB（曲またぎ）
+                    na = Assignment(a.player_id, a.player_name,
+                                    b.song_id, b.song_name,
+                                    b.part_id, b.part_name,
+                                    b.instrument_id, b.instrument_name, "swap")
+                    nb = Assignment(b.player_id, b.player_name,
+                                    a.song_id, a.song_name,
+                                    a.part_id, a.part_name,
+                                    a.instrument_id, a.instrument_name, "swap")
                     trial = list(cur)
-                    trial[idx] = nx
-                    if not _is_valid(trial, pref_map):
+                    trial[i], trial[j] = na, nb
+                    if not _is_valid(trial, pref_map, absent_players):
                         continue
                     sc = objective_fn(trial)
                     if sc > cur_score:
                         cur, cur_score = trial, sc
                         improved = True
                         break
-                if improved:
-                    break
 
     return cur
 
@@ -558,7 +590,7 @@ def _calc_stats(solution: list[Assignment], pref_map: dict[tuple[str, str, str],
     return {
         "first_choice_rate": round(_first_choice_rate(solution, pref_map), 4),
         "total_score": _total_score(solution, pref_map),
-        "min_score": _min_player_score(solution, pref_map),
+        "min_score": _min_player_score(solution, pref_map, all_player_ids),  # 全員版
         "rental_count": max(len(solution) - _bring_count(solution, pref_map), 0),
         "rest_std": round(_rest_std(solution, all_player_ids), 4),
     }
@@ -572,9 +604,28 @@ def solve_all(ctx: dict, concert_id: str) -> list[dict]:
     if not prefs or not reqs:
         return []
 
+    # 参加者DB全員（希望未提出も含む）をfallback候補に
+    all_participants: list[tuple[str, str]] = []
+    try:
+        part_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"])
+        p_to_pl = _participant_to_player_map(ctx)
+        pl_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER"])
+        pl_name = {r.get("id",""): ctx["extract_title"](r) or "" for r in pl_rows}
+        for pid in p_to_pl.values():
+            if pid:
+                all_participants.append((pid, pl_name.get(pid, pid)))
+        all_participants = sorted(set(all_participants), key=lambda x: x[1])
+    except Exception:
+        all_participants = []
+
     pref_map = {(p.player_id, p.song_id, p.part_id): p for p in prefs}
-    base = greedy_solve(prefs, reqs, absent)
-    all_player_ids = sorted({p.player_id for p in prefs})
+    base = greedy_solve(prefs, reqs, absent, all_participants)
+
+    # 全員（参加者DB + 希望提出者）のIDリスト
+    _all_pid_set = {p.player_id for p in prefs}
+    for pid, _ in all_participants:
+        _all_pid_set.add(pid)
+    all_player_ids = sorted(_all_pid_set)
 
     def obj_a(sol):  # 第1希望率最大
         return _first_choice_rate(sol, pref_map) * 10000 + _total_score(sol, pref_map)
@@ -582,26 +633,23 @@ def solve_all(ctx: dict, concert_id: str) -> list[dict]:
     def obj_b(sol):  # 総スコア最大
         return _total_score(sol, pref_map)
 
-    def obj_c(sol):  # 公平性
-        return _min_player_score(sol, pref_map) * 1000 + _total_score(sol, pref_map)
+    def obj_c(sol):  # 公平性（全員の最低スコアを最大化）
+        return _min_player_score(sol, pref_map, all_player_ids) * 1000 + _total_score(sol, pref_map)
 
-    def obj_d(sol):  # レンタル最小
-        return _bring_count(sol, pref_map) * 1000 + _total_score(sol, pref_map)
-
-    def obj_e(sol):  # 降り番均等（簡易: 割当分散最小）
+    def obj_d(sol):  # 降り番均等（割当分散最小）
         return int((1000 - (_rest_std(sol, all_player_ids) * 100)) * 100) + _total_score(sol, pref_map)
 
     variants = [
         ("候補A：第1希望率最大", obj_a),
-        ("候補B：総スコア最大", obj_b),
-        ("候補C：公平性重視", obj_c),
-        ("候補D：レンタル最小", obj_d),
-        ("候補E：降り番均等", obj_e),
+        ("候補B：総スコア最大",  obj_b),
+        ("候補C：公平性重視",    obj_c),
+        ("候補D：降り番均等",    obj_d),
     ]
 
     out = []
     for label, fn in variants:
-        sol = local_search(base, pref_map, fn, max_iter=250)
+        sol = local_search(base, pref_map, fn, max_iter=250,
+                          absent_players=absent, all_player_ids=all_player_ids)
         out.append(
             {
                 "label": label,

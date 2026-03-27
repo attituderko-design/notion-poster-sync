@@ -92,6 +92,8 @@ PI_OWN_COUNT_KEYS         = ["所有台数", "持参台数", "持参数"]
 PI_BRING_COUNT_KEYS       = ["持参台数", "持参数"]
 PI_BRING_ASSIGN_KEYS      = ["持参担当", "持参担当フラグ"]
 PI_PRACTICE_REL_KEYS      = ["練習", "FK練習", "Practice"]
+PI_PART_REL_KEYS          = ["パート定義", "パート", "FKパート", "担当パート"]
+PI_SONG_REL_KEYS          = ["演奏曲", "楽曲", "FK楽曲"]
 PI_NOTE_KEYS              = ["備考", "メモ"]
 ASSIGN_KEY_KEYS           = ["assign_key", "assignment_key", "AssignmentKey", "割当キー", "PK割当キー"]
 
