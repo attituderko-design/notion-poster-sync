@@ -27,7 +27,7 @@ from concert.services.keys import (
     PLAYER_HN_KEYS, PLAYER_EMAIL_KEYS, PLAYER_PHONE_KEYS, PLAYER_LINE_KEYS,
     PARTICIPANT_ROLE_OPS_KEYS,
     PRACTICE_CONCERT_DAY_KEYS,
-    PI_BRING_ASSIGN_KEYS, PI_BRING_COUNT_KEYS, PI_PRACTICE_REL_KEYS,
+    PI_PARTICIPANT_REL_KEYS, PI_BRING_ASSIGN_KEYS, PI_BRING_COUNT_KEYS, PI_PRACTICE_REL_KEYS,
     RENTAL_RECORD_KEYS, RENTAL_PRACTICE_REL_KEYS, RENTAL_INST_REL_KEYS,
     RENTAL_ITEM_NAME_KEYS, RENTAL_VENDOR_KEYS, RENTAL_QTY_KEYS,
     RENTAL_UNIT_PRICE_KEYS, RENTAL_CONFIRMED_KEYS, RENTAL_NOTE_KEYS,
@@ -408,12 +408,13 @@ def _seed_all(ctx) -> dict:
             props = {}
             ctx["put_key_any"](props, tpi, ASSIGN_KEY_KEYS,
                                pid, iid, pr_id, prefix="bring")
-            _put(ctx, props, tpi, PI_CONCERT_REL_KEYS,   concert_id)
-            _put(ctx, props, tpi, PI_PLAYER_REL_KEYS,    pid)
-            _put(ctx, props, tpi, PI_INST_REL_KEYS,      iid)
-            _put(ctx, props, tpi, PI_BRING_ASSIGN_KEYS,  True)
-            _put(ctx, props, tpi, PI_BRING_COUNT_KEYS,   1)
-            _put(ctx, props, tpi, PI_PRACTICE_REL_KEYS,  pr_id)
+            _put(ctx, props, tpi, PI_CONCERT_REL_KEYS,     concert_id)
+            _put(ctx, props, tpi, PI_PLAYER_REL_KEYS,     pid)
+            _put(ctx, props, tpi, PI_PARTICIPANT_REL_KEYS, cast_ids[0])  # player_ids[0]のcast_id
+            _put(ctx, props, tpi, PI_INST_REL_KEYS,       iid)
+            _put(ctx, props, tpi, PI_BRING_ASSIGN_KEYS,   True)
+            _put(ctx, props, tpi, PI_BRING_COUNT_KEYS,    1)
+            _put(ctx, props, tpi, PI_PRACTICE_REL_KEYS,   pr_id)
             bid = track(_create(ctx, pi_db, props))
             if bid:
                 bring_count += 1
