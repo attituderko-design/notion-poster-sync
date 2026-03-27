@@ -739,13 +739,7 @@ def generate_assign_report(
                     Spacer(1, 5*mm),
                 ]))
 
-        # 曲別割当の横並び比較
-        story.append(PageBreak())
-        story.append(Paragraph("曲別割当　横並び比較", st["h2"]))
-        story.append(HRFlowable(width="100%", thickness=0.5,
-                                color=colors.HexColor("#CCCCCC")))
-        story.append(Spacer(1, 4*mm))
-
+        # ── ⑤ 曲別割当 横並び比較（候補ごとにページ分割）──────
         cell_s = ParagraphStyle("cs", fontName=font,   fontSize=7, leading=10)
         cell_b = ParagraphStyle("cb", fontName=font_b, fontSize=7, leading=10,
                                 textColor=colors.white)
@@ -781,12 +775,18 @@ def generate_assign_report(
             return t
 
         for r_h, r_e in zip(results, compare_results):
-            label_h = r_h["label"]
-            label_e = r_e["label"]
-            story.append(KeepTogether([
-                Paragraph(f"{label_h.split('：')[0]}", st["h3"]),
-                Spacer(1, 1*mm),
-            ]))
+            label_h   = r_h["label"]
+            cand_short = label_h.split("：")[0] if "：" in label_h else label_h
+            cand_name  = label_h.split("：")[1] if "：" in label_h else ""
+            story.append(PageBreak())
+            story.append(Paragraph("ArteMis HARMONIA  アサイン検討", st["subtitle"]))
+            story.append(Spacer(1, 2*mm))
+            story.append(Paragraph("曲別割当 横並び比較", st["title"]))
+            story.append(Paragraph(f"{cand_short}  {cand_name}", st["subtitle"]))
+            story.append(Spacer(1, 4*mm))
+            story.append(HRFlowable(width="100%", thickness=0.5,
+                                    color=colors.HexColor("#CCCCCC")))
+            story.append(Spacer(1, 4*mm))
             for sid in song_order:
                 sname = song_name_map.get(sid, sid)
                 items_h = [a for a in r_h["assignments"] if a["song_id"] == sid]
@@ -802,14 +802,68 @@ def generate_assign_report(
                     colWidths=[93*mm, 93*mm],
                 )
                 outer.setStyle(TableStyle([
-                    ("FONT",        (0,0), (-1,-1), font, 7),
-                    ("VALIGN",      (0,0), (-1,-1), "TOP"),
-                    ("LEFTPADDING", (0,0), (-1,-1), 2),
-                    ("RIGHTPADDING",(0,0), (-1,-1), 2),
-                    ("BOTTOMPADDING",(0,0),(-1,-1), 4),
+                    ("FONT",         (0,0), (-1,-1), font, 7),
+                    ("VALIGN",       (0,0), (-1,-1), "TOP"),
+                    ("LEFTPADDING",  (0,0), (-1,-1), 2),
+                    ("RIGHTPADDING", (0,0), (-1,-1), 2),
+                    ("BOTTOMPADDING",(0,0), (-1,-1), 4),
                 ]))
                 story.append(outer)
+
+        # ── ⑥ 総括 ────────────────────────────────────────────
+        story.append(PageBreak())
+        story.append(Paragraph("ArteMis HARMONIA  アサイン検討 Tips", st["subtitle"]))
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph("総括", st["title"]))
+        story.append(Spacer(1, 4*mm))
+        story.append(HRFlowable(width="100%", thickness=0.5,
+                                color=colors.HexColor("#CCCCCC")))
+        story.append(Spacer(1, 6*mm))
+        story.append(Paragraph("■ ヒューリスティック解の品質評価", st["h2"]))
+        story.append(Spacer(1, 2*mm))
+        if _vfy:
+            all_rates = []
+            for r_h, r_e in zip(results, compare_results):
+                vh = _vfy(r_h["assignments"], r_h["pref_map"])
+                ve = _vfy(r_e["assignments"], r_e["pref_map"])
+                opt = ve["total_score"]
+                cur = vh["total_score"]
+                rate = (cur / opt * 100) if opt > 0 else 100.0
+                all_rates.append((r_h["label"].split("：")[0], rate, cur, opt))
+            avg_rate = sum(r for _, r, _, _ in all_rates) / len(all_rates) if all_rates else 0
+            summ_rows = [["候補", "総スコア（H）", "総スコア（厳密）", "最適解比率"]]
+            for lbl, rate, cur, opt in all_rates:
+                summ_rows.append([lbl, f"{cur:.1f}", f"{opt:.1f}", f"{rate:.1f}%"])
+            summ_rows.append(["平均", "—", "—", f"{avg_rate:.1f}%"])
+            summ_ps = [
+                [Paragraph(str(c), st["cellb_wht"] if ri==0 else st["cell"])
+                 for c in row]
+                for ri, row in enumerate(summ_rows)
+            ]
+            summ_tbl = Table(summ_ps, colWidths=[35*mm, 40*mm, 40*mm, 30*mm])
+            summ_tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0,0),  (-1,0),  colors.HexColor("#2C3E50")),
+                ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#EEF0F4")),
+                ("BACKGROUND", (0,1),  (-1,-2), colors.HexColor("#F8F8F8")),
+                ("GRID",       (0,0),  (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+                ("FONT",       (0,0),  (-1,-1), font,   8),
+                ("FONT",       (0,0),  (-1,0),  font_b, 8),
+                ("FONT",       (0,-1), (-1,-1), font_b, 8),
+                ("TOPPADDING",    (0,0), (-1,-1), 4),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ]))
+            story.append(summ_tbl)
             story.append(Spacer(1, 6*mm))
+            if avg_rate >= 98:
+                comment = "ヒューリスティック解は厳密解とほぼ同等の品質です。高速モードを継続して使用して問題ありません。"
+            elif avg_rate >= 90:
+                comment = "ヒューリスティック解は厳密解の90%以上の品質です。実務上は許容範囲ですが、重要な判断には厳密解の参照を推奨します。"
+            else:
+                comment = "ヒューリスティック解と厳密解に有意な差があります。特に候補C・Dについては厳密解を優先して検討してください。"
+            story.append(Paragraph(comment, st["body"]))
+        else:
+            story.append(Paragraph("（verify_results モジュールが見つからないため総括を省略）",
+                                   st["small"]))
 
     doc.build(story)
     buf.seek(0)
