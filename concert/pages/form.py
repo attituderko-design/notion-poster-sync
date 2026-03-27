@@ -931,6 +931,45 @@ def render_form(ctx, concert_id: str):
         st.markdown(f"**{player_name}** さん、ありがとうございました。")
         st.info("このページを閉じて構いません。")
 
+        # 管理者への変更通知（1回だけ送信）
+        if not st.session_state.get("form_notified"):
+            try:
+                import streamlit as _st
+                from concert.services.mailer import send_pdf_to_all
+                admin_email = _st.secrets.get("SMTP_USER", "")
+                if admin_email:
+                    is_new   = st.session_state.get("form_is_new", False)
+                    action   = "新規登録" if is_new else "内容更新"
+                    att_dict = st.session_state.get("form_att", {})
+                    pref_dict= st.session_state.get("form_pref", {})
+                    lines    = [
+                        f"[ArteMis HARMONIA] フォーム{action}通知",
+                        "",
+                        f"奏者: {player_name}",
+                        f"演奏会: {c_name}",
+                        f"操作: {action}（{ok_n}件登録）",
+                    ]
+                    if att_dict:
+                        lines.append("")
+                        lines.append("【出欠】")
+                        for pr_id, status in att_dict.items():
+                            lines.append(f"  {pr_id[:8]}... : {status}")
+                    if pref_dict:
+                        lines.append("")
+                        lines.append("【希望】")
+                        for pd_id, prio in pref_dict.items():
+                            lines.append(f"  {pd_id[:8]}... : {prio}")
+                    send_pdf_to_all(
+                        ctx,
+                        [{"name": "管理者", "email": admin_email}],
+                        subject=f"[HARMONIA] {player_name} さんが{action}しました",
+                        body="\n".join(lines),
+                        pdf_bytes=None, pdf_filename="",
+                    )
+                    st.session_state["form_notified"] = True
+            except Exception:
+                pass  # 通知失敗はサイレントに（ユーザー体験を壊さない）
+
         # テスト用デバッグ情報（URLにdebug=1がある場合のみ表示）
         if st.query_params.get("debug") == "1" and debug:
             with st.expander("🔧 デバッグ情報", expanded=True):
