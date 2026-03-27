@@ -460,6 +460,62 @@ def _is_valid(trial: list[Assignment], pref_map: dict,
     return True
 
 
+def _perturb(
+    solution: list[Assignment],
+    pref_map: dict,
+    absent_players: set[str],
+    n_swap: int = 3,
+    seed: int = 0,
+) -> list[Assignment]:
+    """
+    局所最適から脱出するための揺さぶり操作（perturbation）。
+    n_swap件のアサインをランダムに入れ替えて初期解の多様性を確保する。
+    """
+    import random as _rnd
+    rng = _rnd.Random(seed)
+    cur = list(solution)
+    n = len(cur)
+    if n < 2:
+        return cur
+
+    attempts = 0
+    swapped = 0
+    while swapped < n_swap and attempts < n_swap * 10:
+        attempts += 1
+        i, j = rng.sample(range(n), 2)
+        a, b = cur[i], cur[j]
+        if a.song_id == b.song_id:
+            # 同一曲内スワップ
+            na = Assignment(b.player_id, b.player_name, a.song_id, a.song_name,
+                            a.part_id, a.part_name, a.instrument_id, a.instrument_name, "swap")
+            nb = Assignment(a.player_id, a.player_name, b.song_id, b.song_name,
+                            b.part_id, b.part_name, b.instrument_id, b.instrument_name, "swap")
+            trial = list(cur); trial[i], trial[j] = na, nb
+        else:
+            # 曲またぎスワップ
+            na = Assignment(a.player_id, a.player_name, b.song_id, b.song_name,
+                            b.part_id, b.part_name, b.instrument_id, b.instrument_name, "swap")
+            nb = Assignment(b.player_id, b.player_name, a.song_id, a.song_name,
+                            a.part_id, a.part_name, a.instrument_id, a.instrument_name, "swap")
+            trial = list(cur); trial[i], trial[j] = na, nb
+
+        # 欠席・NG違反は無視（揺さぶりなので制約を一部緩める）
+        # ただし同一奏者×同一曲の重複だけは弾く
+        seen: set = set()
+        bad = False
+        for x in trial:
+            k = (x.song_id, x.player_id)
+            if k in seen: bad = True; break
+            seen.add(k)
+            p = pref_map.get((x.player_id, x.song_id, x.part_id))
+            if p and p.priority == -1: bad = True; break
+            if x.player_id in absent_players: bad = True; break
+        if not bad:
+            cur = trial
+            swapped += 1
+    return cur
+
+
 def local_search(
     solution: list[Assignment],
     pref_map: dict[tuple[str, str, str], Pref],
@@ -656,6 +712,48 @@ def _calc_stats(solution: list[Assignment], pref_map: dict[tuple[str, str, str],
     }
 
 
+def iterated_local_search(
+    solution: list[Assignment],
+    pref_map: dict,
+    objective_fn,
+    absent_players: set[str],
+    all_player_ids: list[str] | None = None,
+    n_restart: int = 15,
+    max_iter_per_restart: int = 200,
+    n_perturb: int = 3,
+) -> list[Assignment]:
+    """
+    反復局所探索（Iterated Local Search）。
+    局所最適に陥ったら揺さぶりをかけて再探索する。
+    n_restart: 揺さぶりの回数
+    n_perturb: 1回の揺さぶりで入れ替えるアサイン数
+    """
+    best = list(solution)
+    best_score = objective_fn(best)
+
+    cur = best
+    for restart in range(n_restart):
+        # 揺さぶり
+        perturbed = _perturb(cur, pref_map, absent_players,
+                             n_swap=n_perturb, seed=restart)
+        # 局所探索
+        improved = local_search(perturbed, pref_map, objective_fn,
+                                max_iter=max_iter_per_restart,
+                                absent_players=absent_players,
+                                all_player_ids=all_player_ids)
+        # tupleで返ってきた場合（verbose=True時）の対処
+        if isinstance(improved, tuple):
+            improved = improved[0]
+        sc = objective_fn(improved)
+        if sc > best_score:
+            best = improved
+            best_score = sc
+        # 現在解を更新（広域探索のためにacceptする）
+        cur = improved
+
+    return best
+
+
 def solve_all(ctx: dict, concert_id: str) -> list[dict]:
     prefs = _load_preferences(ctx, concert_id)
     reqs = _load_requirements(ctx, concert_id)
@@ -703,8 +801,10 @@ def solve_all(ctx: dict, concert_id: str) -> list[dict]:
 
     out = []
     for label, fn in variants:
-        sol = local_search(base, pref_map, fn, max_iter=250,
-                          absent_players=absent, all_player_ids=all_player_ids)
+        sol = iterated_local_search(base, pref_map, fn,
+                                    absent_players=absent,
+                                    all_player_ids=all_player_ids,
+                                    n_restart=15, max_iter_per_restart=200)
         out.append(
             {
                 "label": label,
