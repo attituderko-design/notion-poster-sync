@@ -586,10 +586,63 @@ def local_search(
                         continue
                     sc = objective_fn(trial)
                     if sc > cur_score:
+                        if verbose:
+                            improve_log.append({"iter": it, "type": "n3_crosssong", "delta": sc - cur_score})
+                            n3_count += 1
                         cur, cur_score = trial, sc
                         improved = True
                         break
 
+        # ── 近傍4: スコア底上げ差し替え ──────────────────────────
+        # 第1希望以外の割当を、同曲でより高スコアの未割当奏者に置換する
+        if not improved:
+            _nm4 = {pref.player_id: pref.player_name for pref in pref_map.values()}
+            abs_by_song4: dict[str, set] = {}
+            for a in cur:
+                abs_by_song4.setdefault(a.song_id, set()).add(a.player_id)
+            for i, a in enumerate(cur):
+                if improved: break
+                sc_a = score_assignment(a, pref_map)
+                if sc_a >= 3.0:
+                    continue
+                absent_here4 = [pid for pid in all_pids
+                                if pid not in abs_by_song4.get(a.song_id, set())]
+                for new_pid in absent_here4:
+                    p_new = pref_map.get((new_pid, a.song_id, a.part_id))
+                    if p_new and p_new.priority == -1:
+                        continue
+                    sc_new = SCORE_MAP.get(p_new.priority, 0.5) if (p_new and p_new.priority > 0) else 0.5
+                    if sc_new <= sc_a:
+                        continue
+                    na = Assignment(new_pid, _nm4.get(new_pid, new_pid),
+                                    a.song_id, a.song_name,
+                                    a.part_id, a.part_name,
+                                    a.instrument_id, a.instrument_name, "swap")
+                    trial = list(cur)
+                    trial[i] = na
+                    if not _is_valid(trial, pref_map, absent_players):
+                        continue
+                    sc = objective_fn(trial)
+                    if sc > cur_score:
+                        if verbose:
+                            improve_log.append({"iter": it, "type": "n4_uplift", "delta": sc - cur_score})
+                        cur, cur_score = trial, sc
+                        improved = True
+                        break
+
+    if verbose:
+        n4_count = sum(1 for e in improve_log if e.get("type") == "n4_uplift")
+        summary = {
+            "total_iterations":    it,
+            "total_improvements":  n1_count + n2_count + n3_count + n4_count,
+            "n1_swap_count":       n1_count,
+            "n2_replace_count":    n2_count,
+            "n3_crosssong_count":  n3_count,
+            "n4_uplift_count":     n4_count,
+            "final_objective":     cur_score,
+            "improve_log":         improve_log,
+        }
+        return cur, summary
     return cur
 
 
