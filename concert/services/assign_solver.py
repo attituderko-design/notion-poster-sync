@@ -465,12 +465,14 @@ def local_search(
     max_iter: int = 250,
     absent_players: set[str] | None = None,
     all_player_ids: list[str] | None = None,
+    verbose: bool = False,
 ) -> list[Assignment]:
     """
     局所探索：3種類の近傍移動を試みる。
     1. 同一曲内スワップ（奏者AとBのパートを入れ替え）
     2. 同一曲内差し替え（降り番奏者→割当中奏者を置換）
     3. 曲またぎ交換：曲Aの奏者Xと曲Bの奏者Y（別曲）のパートを交換
+    verbose=True の場合、改善ログを返す（戻り値がtupleになる）。
     """
     absent_players = absent_players or set()
     cur = list(solution)
@@ -482,6 +484,8 @@ def local_search(
 
     improved = True
     it = 0
+    improve_log: list[dict] = []   # verbose用改善ログ
+    n1_count = n2_count = n3_count = 0  # 近傍タイプ別採用回数
     while improved and it < max_iter:
         improved = False
         it += 1
@@ -540,6 +544,9 @@ def local_search(
                     continue
                 sc = objective_fn(trial)
                 if sc > cur_score:
+                    if verbose:
+                        improve_log.append({"iter": it, "type": "n2_replace", "delta": sc - cur_score})
+                        n2_count += 1
                     cur, cur_score = trial, sc
                     improved = True
                     break
