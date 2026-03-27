@@ -873,14 +873,6 @@ def _render_solver_tab(ctx: dict):
     else:
         results = _e_res_sw
 
-    # デバッグ：pref_mapの中身確認
-    with st.expander("🔍 pref_mapデバッグ（希望データ確認）", expanded=False):
-        if results:
-            pm = results[0]["pref_map"]
-            st.caption(f"登録された希望件数: {len(pm)}件")
-            for k, v in list(pm.items())[:20]:
-                st.caption(f"`{k}` → player:{v.get('player_name','?')} priority:{v.get('priority','?')}")
-
     # 検証：共通再採点で解の品質を比較
     with st.expander("🔬 解の検証（共通再採点）", expanded=False):
         try:
@@ -994,14 +986,13 @@ def _render_solver_tab(ctx: dict):
     except Exception as e:
         col_pdf1.caption(f"PDF生成エラー: {e}")
 
-    # サマリーカード
+    # サマリーカード（verify()ベース）
     cols = st.columns(len(results))
-    for i, (col, r) in enumerate(zip(cols, results)):
-        st._arrow = None
-        s = r["stats"]
-        col.metric(r["label"].split("：")[1],
-                   f"{s['total_score']:.1f}点",
-                   f"第1希望率 {s['first_choice_rate']*100:.0f}%")
+    for col, r in zip(cols, results):
+        v = _vui(r)
+        col.metric(r["label"].split("：")[1] if "：" in r["label"] else r["label"],
+                   f"{v['total_score']:.1f}点",
+                   f"第1希望率 {v['first_choice_rate']*100:.0f}%")
 
     st.divider()
 
@@ -1034,12 +1025,12 @@ def _render_solver_tab(ctx: dict):
             desc = CANDIDATE_DESC.get(result["label"], "")
             if desc:
                 st.caption(desc)
-            s = result["stats"]
+            _vm = _vui(result)
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("総スコア",   f"{s['total_score']:.1f}点")
-            m2.metric("第1希望率",  f"{s['first_choice_rate']*100:.1f}%")
-            m3.metric("最低スコア", f"{s['min_score']:.1f}点")
-            m4.metric("FB件数",     f"{sum(1 for a in result['assignments'] if a['source'] in ('fallback','swap'))}件")
+            m1.metric("総スコア",   f"{_vm['total_score']:.1f}点")
+            m2.metric("第1希望率",  f"{_vm['first_choice_rate']*100:.1f}%")
+            m3.metric("最低スコア", f"{_vm['min_player_score']:.1f}点")
+            m4.metric("補完件数",   f"{_vm['supplemental_count']}件")
 
             # 曲ごとの割当（HTML表示）
             by_song: dict[str, list] = defaultdict(list)
