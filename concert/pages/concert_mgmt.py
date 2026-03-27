@@ -1560,7 +1560,6 @@ def render(ctx: dict):
                     with st.spinner("PDF生成・送信中..."):
                         try:
                             from concert.services.practice_report import generate_practice_report
-                            from concert.services.practice_report import generate_practice_report
                             from concert.services.mailer import get_recipients_from_players, send_pdf_to_all
                             _pdf = generate_practice_report(ctx, p_id_pdf)
                             _fname = f"練習前日共有_{label.replace('/', '-').replace(' ', '_')}.pdf"

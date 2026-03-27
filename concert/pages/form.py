@@ -49,7 +49,7 @@ def _verify_code(entered: str, stored_hash: str) -> bool:
 
 def _send_magic_code(ctx: dict, email: str, code: str, concert_name: str) -> bool:
     try:
-        from concert.services.mailer import send_pdf_to_all
+        from concert.services.mailer import send_text_to_all
         subject = "ArteMis HARMONIA 認証コード: " + code
         body = (
             "ArteMis HARMONIA フォームへのアクセス認証コードです。\n\n"
@@ -58,11 +58,10 @@ def _send_magic_code(ctx: dict, email: str, code: str, concert_name: str) -> boo
             "このコードは" + str(_CODE_EXPIRY_MINUTES) + "分間有効です。\n"
             "心当たりがない場合はこのメールを無視してください。"
         )
-        result = send_pdf_to_all(
+        result = send_text_to_all(
             ctx,
             [{"name": "", "email": email}],
             subject, body,
-            pdf_bytes=None, pdf_filename="",
         )
         return len(result.sent) > 0
     except Exception:
@@ -941,7 +940,7 @@ def render_form(ctx, concert_id: str):
         # 管理者への変更通知（1回だけ送信）
         if not st.session_state.get("form_notified"):
             try:
-                from concert.services.mailer import send_pdf_to_all
+                from concert.services.mailer import send_text_to_all
                 admin_email = st.secrets.get("SMTP_USER", "")
                 if admin_email:
                     is_new   = st.session_state.get("form_is_new", False)
@@ -972,12 +971,11 @@ def render_form(ctx, concert_id: str):
                         lines.append("")
                         lines.append("【希望】（件数のみ）")
                         lines.append(f"  希望登録数: {len(pref_dict)}件")
-                    send_pdf_to_all(
+                    send_text_to_all(
                         ctx,
                         [{"name": "管理者", "email": admin_email}],
                         subject=f"[HARMONIA] {player_name} さんが{action}しました",
                         body="\n".join(lines),
-                        pdf_bytes=None, pdf_filename="",
                     )
                     st.session_state["form_notified"] = True
             except Exception:
