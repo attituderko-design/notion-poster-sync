@@ -851,11 +851,27 @@ def _render_solver_tab(ctx: dict):
                 st.code(traceback.format_exc())
                 return
 
-    results = st.session_state.get(f"assign_result_{concert_id}")
-    if not results:
+    _h_res_sw = st.session_state.get(f"assign_result_heuristic_{concert_id}", [])
+    _e_res_sw = st.session_state.get(f"assign_result_exact_{concert_id}", [])
+
+    if not _h_res_sw and not _e_res_sw:
         return
 
     st.divider()
+
+    # 表示切り替え（両方ある場合のみ）
+    if _h_res_sw and _e_res_sw:
+        _view_mode = st.radio(
+            "表示する解",
+            ["ヒューリスティック解（高速）", "厳密解（整数計画法）"],
+            horizontal=True,
+            key=f"view_mode_{concert_id}",
+        )
+        results = _e_res_sw if "厳密解" in _view_mode else _h_res_sw
+    elif _h_res_sw:
+        results = _h_res_sw
+    else:
+        results = _e_res_sw
 
     # デバッグ：pref_mapの中身確認
     with st.expander("🔍 pref_mapデバッグ（希望データ確認）", expanded=False):
