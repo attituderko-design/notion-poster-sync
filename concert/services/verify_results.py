@@ -66,10 +66,15 @@ def verify(
 
         if pref and pref.get("priority") == 1:
             first_choice_count += 1
-        if source == "fallback":
-            fallback_count += 1
-        elif source == "swap":
-            swap_count += 1
+        # 「補完」= 希望データがない or 希望なし(priority=0) での割当
+        # sourceではなく実態で判定（ILSのswapでも希望がある場合は補完としない）
+        prio = pref.get("priority", None) if pref else None
+        if prio is None or prio <= 0:
+            if source in ("fallback", "swap", "exact"):
+                fallback_count += 1  # 希望外割当（補完）
+            # priority==0は「希望なし/降り番でも可」で割当 → swap_countで別管理
+        if source == "swap" and prio is not None and prio > 0:
+            swap_count += 1  # 希望ありだがILSで交換された（参考値）
 
     n_slots = len(assignments)
     first_choice_rate = (first_choice_count / n_slots) if n_slots > 0 else 0.0

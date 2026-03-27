@@ -922,6 +922,17 @@ def generate_assign_report(
             else:
                 comment = "ヒューリスティック解と厳密解に有意な差があります。特に候補C・Dについては厳密解を優先して検討してください。"
             story.append(Paragraph(comment, st["body"]))
+            story.append(Spacer(1, 4*mm))
+            story.append(Paragraph("■ 候補C・Dを読む際の注意", st["h2"]))
+            story.append(Spacer(1, 2*mm))
+            story.append(Paragraph(
+                "候補C（公平性重視）・候補D（降り番均等）は「総スコアを最大化する」候補ではありません。"
+                "そのため、候補A・Bより総スコアが低くなることは設計上の意図した結果です。"
+                "また主指標（最低スコアや割当数の範囲）が同じ値でも、"
+                "誰がどの曲を担当するかという割当の内容は候補A・Bと大きく異なる場合があります。"
+                "候補C・Dは「公平性や均等性を優先したい場合」の参考案として活用してください。",
+                st["body"]
+            ))
 
 
     doc.build(story)
