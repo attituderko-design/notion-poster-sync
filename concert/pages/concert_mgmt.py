@@ -1563,7 +1563,25 @@ def render(ctx: dict):
                             from concert.services.mailer import get_recipients_from_players, send_pdf_to_all
                             _pdf = generate_practice_report(ctx, p_id_pdf)
                             _fname = f"練習前日共有_{label.replace('/', '-').replace(' ', '_')}.pdf"
-                            _players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"])
+                            _concert_id = (filter_concert_id or "").strip()
+                            if not _concert_id:
+                                st.error("演奏会が選択されていないため、送信対象を確定できません。")
+                                st.stop()
+
+                            _participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"])
+                            _participant_player_ids = set()
+                            for _row in _participant_rows:
+                                _concert_ids = ctx["extract_relation_ids_any"](_row, PARTICIPANT_CONCERT_REL_KEYS)
+                                if _concert_id not in _concert_ids:
+                                    continue
+                                _player_ids = ctx["extract_relation_ids_any"](_row, PARTICIPANT_PLAYER_REL_KEYS)
+                                if _player_ids:
+                                    _participant_player_ids.add(_player_ids[0])
+
+                            _players = [
+                                _p for _p in ctx["query_all"](ctx["CONCERT_DB_PLAYER"])
+                                if _p.get("id", "") in _participant_player_ids
+                            ]
                             _recipients = get_recipients_from_players(ctx, _players)
                             _with_email = [r for r in _recipients if r["email"]]
                             _no_email   = [r for r in _recipients if not r["email"]]
