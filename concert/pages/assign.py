@@ -1014,8 +1014,11 @@ def _render_assignment_html(items: list[dict], pref_map: dict) -> str:
         elif pref and pref["priority"] == 0:
             hope = "希望なし/降り番でも可"
             sc   = 0.0
-        elif a["source"] in ("fallback", "swap"):
+        elif a["source"] == "fallback":
             hope = "フォールバック"
+            sc   = 0.5
+        elif a["source"] in ("swap", "exact"):
+            hope = "補完"
             sc   = 0.5
         else:
             hope = "希望なし/降り番でも可"
