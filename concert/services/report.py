@@ -880,59 +880,141 @@ def generate_assign_report(
         story.append(Spacer(1, 6*mm))
         story.append(Paragraph("■ ヒューリスティック解の品質評価", st["h2"]))
         story.append(Spacer(1, 2*mm))
-        if True:
-            all_rates = []
-            for r_h, r_e in zip(results, compare_results):
-                vh = _v(r_h)
-                ve = _v(r_e)
-                opt = ve["total_score"]
-                cur = vh["total_score"]
-                rate = (cur / opt * 100) if opt > 0 else 100.0
-                all_rates.append((r_h["label"].split("：")[0], rate, cur, opt))
-            avg_rate = sum(r for _, r, _, _ in all_rates) / len(all_rates) if all_rates else 0
-            summ_rows = [["候補", "総スコア（H）", "総スコア（厳密）", "最適解比率"]]
-            for lbl, rate, cur, opt in all_rates:
-                is_ab_s = lbl in ("候補A", "候補B")
-                rate_str = f"{rate:.1f}%" if is_ab_s else "—（目的関数が異なる）"
-                summ_rows.append([lbl, f"{cur:.1f}", f"{opt:.1f}", rate_str])
-            summ_rows.append(["平均", "—", "—", f"{avg_rate:.1f}%"])
-            summ_ps = [
-                [Paragraph(str(c), st["cellb_wht"] if ri==0 else st["cell"])
-                 for c in row]
-                for ri, row in enumerate(summ_rows)
-            ]
-            summ_tbl = Table(summ_ps, colWidths=[35*mm, 40*mm, 40*mm, 30*mm])
-            summ_tbl.setStyle(TableStyle([
-                ("BACKGROUND", (0,0),  (-1,0),  colors.HexColor("#2C3E50")),
-                ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#EEF0F4")),
-                ("BACKGROUND", (0,1),  (-1,-2), colors.HexColor("#F8F8F8")),
-                ("GRID",       (0,0),  (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
-                ("FONT",       (0,0),  (-1,-1), font,   8),
-                ("FONT",       (0,0),  (-1,0),  font_b, 8),
-                ("FONT",       (0,-1), (-1,-1), font_b, 8),
-                ("TOPPADDING",    (0,0), (-1,-1), 4),
-                ("BOTTOMPADDING", (0,0), (-1,-1), 4),
-            ]))
-            story.append(summ_tbl)
-            story.append(Spacer(1, 6*mm))
-            if avg_rate >= 98:
-                comment = "ヒューリスティック解は厳密解とほぼ同等の品質です。高速モードを継続して使用して問題ありません。"
-            elif avg_rate >= 90:
-                comment = "ヒューリスティック解は厳密解の90%以上の品質です。実務上は許容範囲ですが、重要な判断には厳密解の参照を推奨します。"
+
+        # 候補ごとの主目的・指標・比較結果を構築
+        CAND_OBJECTIVE = {
+            "候補A": "第1希望率最大（同率なら総スコア）",
+            "候補B": "総スコア最大",
+            "候補C": "最低スコア最大（公平性）",
+            "候補D": "割当数の範囲最小（降り番均等）",
+        }
+        summ_rows = [["候補", "主目的", "H値", "厳密解値", "比較結果"]]
+        ab_rates = []
+        for r_h, r_e in zip(results, compare_results):
+            vh = _v(r_h)
+            ve = _v(r_e)
+            lbl = r_h["label"].split("：")[0]
+            obj = CAND_OBJECTIVE.get(lbl, "—")
+            if lbl in ("候補A", "候補B"):
+                h_val  = f"{vh['total_score']:.1f}"
+                e_val  = f"{ve['total_score']:.1f}"
+                rate   = (vh['total_score'] / ve['total_score'] * 100
+                          if ve['total_score'] > 0 else 100.0)
+                ab_rates.append(rate)
+                result_str = f"{rate:.1f}%"
+            elif lbl == "候補C":
+                h_val  = f"{vh['min_player_score']:.1f}点"
+                e_val  = f"{ve['min_player_score']:.1f}点"
+                result_str = ("同等" if abs(vh['min_player_score'] - ve['min_player_score']) < 0.01
+                              else "Hは厳密解未満")
+            elif lbl == "候補D":
+                h_cnt  = vh.get("assignment_count_by_player", {})
+                e_cnt  = ve.get("assignment_count_by_player", {})
+                h_rng  = (max(h_cnt.values()) - min(h_cnt.values())) if h_cnt else 0
+                e_rng  = (max(e_cnt.values()) - min(e_cnt.values())) if e_cnt else 0
+                h_val  = f"{h_rng}曲差"
+                e_val  = f"{e_rng}曲差"
+                result_str = "同等" if h_rng == e_rng else ("Hが劣る" if h_rng > e_rng else "Hが優る")
             else:
-                comment = "ヒューリスティック解と厳密解に有意な差があります。特に候補C・Dについては厳密解を優先して検討してください。"
-            story.append(Paragraph(comment, st["body"]))
-            story.append(Spacer(1, 4*mm))
-            story.append(Paragraph("■ 候補C・Dを読む際の注意", st["h2"]))
-            story.append(Spacer(1, 2*mm))
-            story.append(Paragraph(
-                "候補C（公平性重視）・候補D（降り番均等）は「総スコアを最大化する」候補ではありません。"
-                "そのため、候補A・Bより総スコアが低くなることは設計上の意図した結果です。"
-                "また主指標（最低スコアや割当数の範囲）が同じ値でも、"
-                "誰がどの曲を担当するかという割当の内容は候補A・Bと大きく異なる場合があります。"
-                "候補C・Dは「公平性や均等性を優先したい場合」の参考案として活用してください。",
-                st["body"]
-            ))
+                h_val = e_val = "—"; result_str = "—"
+            summ_rows.append([lbl, obj, h_val, e_val, result_str])
+
+        summ_ps = [
+            [Paragraph(str(c), st["cellb_wht"] if ri==0 else st["cell"])
+             for c in row]
+            for ri, row in enumerate(summ_rows)
+        ]
+        summ_tbl = Table(summ_ps, colWidths=[18*mm, 55*mm, 22*mm, 22*mm, 28*mm])
+        summ_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0),  colors.HexColor("#2C3E50")),
+            ("BACKGROUND", (0,1), (-1,-1), colors.HexColor("#F8F8F8")),
+            ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+            ("FONT",       (0,0), (-1,-1), font,   8),
+            ("FONT",       (0,0), (-1,0),  font_b, 8),
+            ("VALIGN",     (0,0), (-1,-1), "TOP"),
+            ("TOPPADDING",    (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ]))
+        story.append(summ_tbl)
+        story.append(Spacer(1, 6*mm))
+
+        # ── 総評：A/B・C・Dを別判定して4文連結 ──────────────
+        # 判定値を収集
+        ab_ratio_vals = []
+        c_fair_ratio  = None
+        d_rest_equal  = None
+        d_h_rng = d_e_rng = 0
+        for r_h2, r_e2 in zip(results, compare_results):
+            vh2 = _v(r_h2); ve2 = _v(r_e2)
+            lbl2 = r_h2["label"].split("：")[0]
+            if lbl2 in ("候補A", "候補B"):
+                if ve2["total_score"] > 0:
+                    ab_ratio_vals.append(vh2["total_score"] / ve2["total_score"])
+            elif lbl2 == "候補C":
+                if ve2["min_player_score"] > 0:
+                    c_fair_ratio = vh2["min_player_score"] / ve2["min_player_score"]
+                elif ve2["min_player_score"] == 0 and vh2["min_player_score"] == 0:
+                    c_fair_ratio = 1.0
+            elif lbl2 == "候補D":
+                h_cnt2 = vh2.get("assignment_count_by_player", {})
+                e_cnt2 = ve2.get("assignment_count_by_player", {})
+                d_h_rng = (max(h_cnt2.values()) - min(h_cnt2.values())) if h_cnt2 else 0
+                d_e_rng = (max(e_cnt2.values()) - min(e_cnt2.values())) if e_cnt2 else 0
+                d_rest_equal = (d_h_rng == d_e_rng)
+
+        avg_ab = sum(ab_ratio_vals) / len(ab_ratio_vals) if ab_ratio_vals else 0
+
+        # 1文目：候補A/B
+        if avg_ab >= 0.98:
+            s1 = f"ヒューリスティック解は候補A/Bにおいて厳密解の{avg_ab*100:.1f}%の水準を示し、希望充足の観点では厳密解に非常に近い品質を確保した。"
+        elif avg_ab >= 0.95:
+            s1 = f"ヒューリスティック解は候補A/Bにおいて厳密解の{avg_ab*100:.1f}%の水準を示し、希望充足の観点では厳密解に概ね近い品質を示した。"
+        elif avg_ab >= 0.90:
+            s1 = f"ヒューリスティック解は候補A/Bにおいて厳密解の{avg_ab*100:.1f}%の水準を示し、一定の品質を確保しているが改善余地がある。"
+        else:
+            s1 = f"ヒューリスティック解は候補A/Bで厳密解の{avg_ab*100:.1f}%にとどまり、希望充足において厳密解との差が確認された。"
+
+        # 2文目：候補C
+        if c_fair_ratio is None:
+            s2 = ""
+        elif c_fair_ratio >= 1.0:
+            s2 = "候補Cでは公平性指標（最低スコア）は厳密解と同等であった。"
+        elif c_fair_ratio >= 0.80:
+            s2 = f"候補Cでは公平性指標（最低スコア）が厳密解の{c_fair_ratio*100:.0f}%であり、厳密解に近い水準を示した。"
+        else:
+            s2 = f"一方、候補Cでは公平性指標（最低スコア）が厳密解の{c_fair_ratio*100:.0f}%にとどまり、公平性を重視する場合は厳密解を推奨する。"
+
+        # 3文目：候補D
+        if d_rest_equal is None:
+            s3 = ""
+        elif d_rest_equal:
+            s3 = "候補Dでは均等性指標（割当数の範囲）は厳密解と同等であったが、実際の割当内容は大きく異なり得るため参考案として扱うことが適切である。"
+        elif abs(d_h_rng - d_e_rng) <= 1:
+            s3 = f"候補Dでは均等性指標の差は{abs(d_h_rng - d_e_rng)}曲差にとどまり、厳密解に近い結果を示した。"
+        else:
+            s3 = f"候補Dでは均等性指標が厳密解と{abs(d_h_rng - d_e_rng)}曲差あり、均等配置を重視する場合は厳密解を推奨する。"
+
+        # 4文目：運用推奨
+        if avg_ab >= 0.98 and (c_fair_ratio is None or c_fair_ratio >= 0.80) and (d_rest_equal is None or d_rest_equal):
+            s4 = "総合的には、通常運用ではヒューリスティック解を迅速な候補生成に用い、最終確認に厳密解を参照する運用が妥当である。"
+        elif avg_ab >= 0.90:
+            s4 = "総合的には、候補A/B中心の運用であれば高速モードでも実用的であるが、候補C/Dを重視する場合は厳密解を優先することが望ましい。"
+        else:
+            s4 = "総合的には、最終判断には厳密解を優先することが望ましい。高速モードは迅速な方向性確認に有用であるが、採用可否の判断は厳密解を基準とすることを推奨する。"
+
+        full_comment = " ".join(s for s in [s1, s2, s3, s4] if s)
+        story.append(Paragraph(full_comment, st["body"]))
+        story.append(Spacer(1, 4*mm))
+        story.append(Paragraph("■ 候補C・Dを読む際の注意", st["h2"]))
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph(
+            "候補C（公平性重視）・候補D（降り番均等）は「総スコアを最大化する」候補ではありません。"
+            "そのため、候補A・Bより総スコアが低くなることは設計上の意図した結果です。"
+            "また主指標（最低スコアや割当数の範囲）が同じ値でも、"
+            "誰がどの曲を担当するかという割当の内容は候補A・Bと大きく異なる場合があります。"
+            "候補C・Dは「公平性や均等性を優先したい場合」の参考案として活用してください。",
+            st["body"]
+        ))
 
 
     doc.build(story)
