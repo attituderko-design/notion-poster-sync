@@ -620,8 +620,62 @@ def generate_assign_report(
 
     # ── 比較ページ（compare_resultsが指定された場合）────────────
     if compare_results:
+        # ── 違いの解説ページ ──────────────────────────────────
         story.append(PageBreak())
-        story.append(Paragraph("ヒューリスティック vs 厳密解　比較", st["h2"]))
+        story.append(Paragraph("ArtéMis HARMONIA　アサイン検討 Tips", st["subtitle"]))
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph("ヒューリスティック解 vs 厳密解", st["title"]))
+        story.append(Spacer(1, 4*mm))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CCCCCC")))
+        story.append(Spacer(1, 6*mm))
+
+        diff_data = [
+            ["", "⚡ ヒューリスティック解", "🎯 厳密解"],
+            ["手法", "貪欲法 + 反復局所探索（ILS）", "整数計画法（MILP / HiGHSソルバー）"],
+            ["速度", "◎ 瞬時（0.1秒以下）", "○ 数秒（規模による）"],
+            ["最適性", "△ 局所最適（保証なし）", "◎ 数学的最適解を保証"],
+            ["使いどころ",
+             "速さ優先・大規模演奏会・結果をすぐ確認したい場合",
+             "正確さ優先・小規模確認・H解との差を検証したい場合"],
+            ["候補数", "A〜D（4案）", "A〜D（4案）"],
+        ]
+        diff_tbl = Table(
+            [[Paragraph(str(c), st["cellb_wht"] if (ri==0 or ci==0) else st["cell"])
+              for ci, c in enumerate(row)]
+             for ri, row in enumerate(diff_data)],
+            colWidths=[25*mm, 75*mm, 75*mm],
+            repeatRows=1,
+        )
+        diff_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0),  colors.HexColor("#2C3E50")),
+            ("BACKGROUND", (0,0), (0,-1),  colors.HexColor("#34495E")),
+            ("BACKGROUND", (1,1), (-1,-1), colors.HexColor("#F8F8F8")),
+            ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+            ("FONT",       (0,0), (-1,-1), font,   8),
+            ("FONT",       (0,0), (-1,0),  font_b, 8),
+            ("FONT",       (0,0), (0,-1),  font_b, 8),
+            ("VALIGN",     (0,0), (-1,-1), "TOP"),
+            ("TOPPADDING",    (0,0), (-1,-1), 5),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+        ]))
+        story.append(diff_tbl)
+        story.append(Spacer(1, 6*mm))
+
+        story.append(Paragraph("■ 読み方のポイント", st["h2"]))
+        story.append(Spacer(1, 2*mm))
+        points = [
+            "総スコアが一致 → ヒューリスティック解は最適解と同じ結果が出せている。自信を持って採用できる。",
+            "総スコアに差がある → 厳密解の方が良い割当が存在する。差が小さければ（1〜2点）実務上は許容範囲。",
+            "第1希望本数が一致・総スコアに差 → 第2希望以下の詰めが厳密解の方が上手い。",
+            "候補C（公平性）・候補D（降り番均等）は厳密解と大きく異なる場合がある。これらを重視するなら厳密解を推奨。",
+        ]
+        for i, p in enumerate(points, 1):
+            story.append(Paragraph(f"{i}. {p}", st["body"]))
+            story.append(Spacer(1, 2*mm))
+
+        # ── スコア比較ページ ────────────────────────────────
+        story.append(PageBreak())
+        story.append(Paragraph("ヒューリスティック vs 厳密解　スコア比較", st["h2"]))
         story.append(HRFlowable(width="100%", thickness=0.5,
                                 color=colors.HexColor("#CCCCCC")))
         story.append(Spacer(1, 4*mm))
