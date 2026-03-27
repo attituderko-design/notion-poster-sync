@@ -730,7 +730,8 @@ def _render_solver_tab(ctx: dict):
         with st.spinner("アルゴリズム実行中..."):
             try:
                 from concert.services.assign_solver import (
-                    greedy_solve, local_search, _calc_stats, _build_absent_set,
+                    greedy_solve, local_search, iterated_local_search,
+                    _calc_stats, _build_absent_set,
                     _first_choice_rate, _total_score, score_assignment,
                     _min_player_score, _bring_count, _rest_std,
                     solve_exact,
@@ -822,9 +823,17 @@ def _render_solver_tab(ctx: dict):
                             _name_map[_pid] = _pname
                     results = []
                     for label, fn in variants:
-                        _ls_ret = local_search(base, pref_map, fn, max_iter=250,
-                                                absent_players=absent, all_player_ids=all_pids,
-                                                verbose=True)
+                        # ILSで広域探索（揺さぶり付き反復局所探索）
+                        sol = iterated_local_search(
+                            base, pref_map, fn,
+                            absent_players=absent,
+                            all_player_ids=all_pids,
+                            n_restart=15, max_iter_per_restart=200,
+                        )
+                        # verboseログは最終解に対して1回だけ局所探索で取得
+                        _ls_ret = local_search(sol, pref_map, fn, max_iter=50,
+                                               absent_players=absent, all_player_ids=all_pids,
+                                               verbose=True)
                         sol, _ls_log = _ls_ret if isinstance(_ls_ret, tuple) else (_ls_ret, {})
                         stats = _calc_stats(sol, pref_map, all_pids)
                         stats["_ls_log"] = _ls_log  # 改善ログをstatsに付帯
@@ -907,26 +916,69 @@ def _render_solver_tab(ctx: dict):
             _show_verify("⚡ ヒューリスティック解", _h_results, "#1A3D7C")
             if _h_results and _e_results:
                 st.divider()
+                # 乖離率の比較サマリ
+                st.markdown("**📊 ヒューリスティック vs 厳密解 比較**")
+                from concert.services.verify_results import verify as _vf
+                _cmp_cols = st.columns(len(_h_results))
+                for ci, (hr, er) in enumerate(zip(_h_results, _e_results)):
+                    hv = _vf(hr["assignments"], hr["pref_map"], _v_pids)
+                    ev = _vf(er["assignments"], er["pref_map"], _v_pids)
+                    opt = ev["total_score"]
+                    cur = hv["total_score"]
+                    gap = opt - cur
+                    rate = (cur / opt * 100) if opt > 0 else 100.0
+                    label_short = hr["label"].replace("候補", "").split("：")[0]
+                    _cmp_cols[ci].metric(
+                        label_short,
+                        f"{rate:.1f}%",
+                        f"差 {gap:+.1f}点",
+                        delta_color="inverse" if gap > 0 else "normal"
+                    )
+                st.caption("最適解比率：厳密解を100%としたときのヒューリスティック解の総スコア比率。")
+                st.divider()
             _show_verify("🎯 厳密解", _e_results, "#5A1A7C")
         except Exception as _ve:
             st.warning(f"検証エラー: {_ve}")
 
     # PDFダウンロードボタン
-    col_title, col_pdf = st.columns([6, 2])
+    col_title, col_pdf1, col_pdf2 = st.columns([5, 1, 2])
     col_title.subheader("候補案比較")
     try:
         from concert.services.report import generate_assign_report
         concert_name = ctx.get("SELECTED_CONCERT_NAME", "演奏会")
+        _h_res = st.session_state.get(f"assign_result_heuristic_{concert_id}", [])
+        _e_res = st.session_state.get(f"assign_result_exact_{concert_id}", [])
+
+        # 通常PDF（現在表示中のモード）
         pdf_bytes = generate_assign_report(concert_name, results, songs, players, ctx)
-        col_pdf.download_button(
-            "📄 PDF出力",
+        col_pdf1.download_button(
+            "📄 PDF",
             data=pdf_bytes,
             file_name=f"アサイン候補案_{concert_name}.pdf",
             mime="application/pdf",
             use_container_width=True,
+            help="現在のモードの候補案PDF",
         )
+
+        # 比較PDF（ヒューリスティック+厳密解が両方ある場合）
+        if _h_res and _e_res:
+            _base = _h_res; _cmp = _e_res; _cmp_lbl = "厳密解"
+            if results == _e_res:  # 現在厳密解を表示中
+                _base = _e_res; _cmp = _h_res; _cmp_lbl = "ヒューリスティック"
+            pdf_cmp = generate_assign_report(
+                concert_name, _base, songs, players, ctx,
+                compare_results=_cmp, compare_label=_cmp_lbl,
+            )
+            col_pdf2.download_button(
+                "📊 比較PDF",
+                data=pdf_cmp,
+                file_name=f"アサイン比較_{concert_name}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                help="ヒューリスティック解と厳密解を横並びで比較したPDF",
+            )
     except Exception as e:
-        col_pdf.caption(f"PDF生成エラー: {e}")
+        col_pdf1.caption(f"PDF生成エラー: {e}")
 
     # サマリーカード
     cols = st.columns(len(results))
