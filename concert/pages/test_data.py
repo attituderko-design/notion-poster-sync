@@ -277,15 +277,18 @@ def _seed_all(ctx) -> dict:
     pi_db = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
     tpi = _p(ctx, pi_db)
     pi_count = 0
-    for pid in player_ids[:8]:  # Perc奏者8名分
+    for i, pid in enumerate(player_ids[:8]):  # 全8名分
+        cast_id_pi = cast_ids[i] if i < len(cast_ids) else ""
         for iid in instrument_ids:
             props = {}
             ctx["put_key_any"](props, tpi, ASSIGN_KEY_KEYS,
                                pid, iid, prefix="assign")
-            _put(ctx, props, tpi, PI_CONCERT_REL_KEYS, concert_id)
-            _put(ctx, props, tpi, PI_PLAYER_REL_KEYS,  pid)
-            _put(ctx, props, tpi, PI_INST_REL_KEYS,    iid)
-            _put(ctx, props, tpi, PI_OWN_COUNT_KEYS,   1)
+            _put(ctx, props, tpi, PI_CONCERT_REL_KEYS,     concert_id)
+            _put(ctx, props, tpi, PI_PLAYER_REL_KEYS,      pid)
+            if cast_id_pi:
+                _put(ctx, props, tpi, PI_PARTICIPANT_REL_KEYS, cast_id_pi)
+            _put(ctx, props, tpi, PI_INST_REL_KEYS,        iid)
+            _put(ctx, props, tpi, PI_OWN_COUNT_KEYS,       1)
             pi_id = track(_create(ctx, pi_db, props))
             if pi_id:
                 pi_count += 1
