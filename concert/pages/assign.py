@@ -762,6 +762,7 @@ def _render_solver_tab(ctx: dict):
                             _pname = _player_name(_pobj2, ctx) if _pobj2 else _pid
                         _part_to_pl[_pid] = _pname
                 _all_participants = sorted(_part_to_pl.items(), key=lambda x: x[1])
+                st.session_state[f"assign_all_participants_{concert_id}"] = _all_participants
 
                 # 公平性・降り番評価は参加者DB全員（希望未提出も含む）を対象に
                 all_pids = sorted({pid for pid, _ in _all_participants} |
@@ -962,9 +963,11 @@ def _render_solver_tab(ctx: dict):
 
         # 比較PDF（ヒューリスティック+厳密解が両方ある場合）
         if _h_res and _e_res:
-            _base = _h_res; _cmp = _e_res; _cmp_lbl = "厳密解"
-            if results == _e_res:  # 現在厳密解を表示中
-                _base = _e_res; _cmp = _h_res; _cmp_lbl = "ヒューリスティック"
+            _is_exact_mode = st.session_state.get(f"solve_mode_{concert_id}", "").count("厳密") > 0
+            if _is_exact_mode:
+                _base = _h_res; _cmp = _e_res; _cmp_lbl = "厳密解"
+            else:
+                _base = _h_res; _cmp = _e_res; _cmp_lbl = "厳密解"
             pdf_cmp = generate_assign_report(
                 concert_name, _base, songs, players, ctx,
                 compare_results=_cmp, compare_label=_cmp_lbl,
@@ -1061,8 +1064,9 @@ def _render_solver_tab(ctx: dict):
                 _pid = _p.get("id","")
                 if _pid:
                     player_names[_pid] = _player_name(_p, ctx)
-            # _all_participantsにある名前も補完
-            for _pid, _pname in _all_participants:
+            # session_stateから_all_participantsを取得して名前を補完
+            _ap = st.session_state.get(f"assign_all_participants_{concert_id}", [])
+            for _pid, _pname in _ap:
                 if _pid and _pname and _pid not in player_names:
                     player_names[_pid] = _pname
 
