@@ -271,7 +271,10 @@ def generate_assign_report(
                 if pref and pref["priority"] > 0:
                     hope = {1:"第1希望",2:"第2希望",3:"第3希望"}.get(pref["priority"],"—")
                     sc   = {1:3.0,2:2.0,3:1.0}.get(pref["priority"],0.0)
-                elif a["source"] == "fallback":
+                elif pref and pref["priority"] == 0:
+                    hope = "降り番"
+                    sc   = 0.0
+                elif a["source"] in ("fallback", "swap"):
                     hope = "FB"
                     sc   = 0.5
                 else:

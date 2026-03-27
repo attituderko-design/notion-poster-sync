@@ -341,11 +341,8 @@ def greedy_solve(
 
     assigned: list[Assignment] = []
     assigned_song_players: set[tuple[str, str]] = set()
-    # fallback候補：希望提出者 + 参加者DB全員（希望未提出も含む）
+    # fallback候補：希望を提出した奏者のみ（未提出者は除外）
     _pref_players = {p.player_id: p.player_name for p in prefs}
-    if all_participants:
-        for pid, pname in all_participants:
-            _pref_players.setdefault(pid, pname)
     all_players = sorted(_pref_players.items(), key=lambda x: x[1])
 
     for req in requirements:
@@ -479,8 +476,9 @@ def local_search(
     cur = list(solution)
     cur_score = objective_fn(cur)
 
-    # 全奏者IDセット（渡された全員リスト優先、なければpref_mapから）
-    all_pids = list(all_player_ids) if all_player_ids else sorted({p.player_id for p in pref_map.values()})
+    # 差し替え候補：希望提出者のみ（未提出者は近傍探索でも投入しない）
+    _pref_pids = sorted({p.player_id for p in pref_map.values()})
+    all_pids = _pref_pids
 
     improved = True
     it = 0
