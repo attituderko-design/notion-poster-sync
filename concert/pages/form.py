@@ -74,40 +74,6 @@ def _is_code_valid() -> bool:
         return False
     return datetime.now() < expires
 
-# ── マジックコード認証 ──────────────────────────────────────────
-
-_CODE_EXPIRY_MINUTES = 10
-_CODE_MAX_ATTEMPTS   = 3
-
-def _send_magic_code(ctx: dict, email: str, code: str, concert_name: str) -> bool:
-    """認証コードをメールで送信する。成功したらTrue。"""
-    try:
-        from concert.services.mailer import send_pdf_to_all
-        subject = "ArteMis HARMONIA 認証コード: " + code
-        body = (
-            "ArteMis HARMONIA フォームへのアクセス認証コードです。\n\n"
-            "演奏会: " + concert_name + "\n\n"
-            "認証コード: " + code + "\n\n"
-            "このコードは" + str(_CODE_EXPIRY_MINUTES) + "分間有効です。\n"
-            "心当たりがない場合はこのメールを無視してください。"
-        )
-        result = send_pdf_to_all(
-            ctx,
-            [{"name": "", "email": email}],
-            subject, body,
-            pdf_bytes=None, pdf_filename="",
-        )
-        return len(result.sent) > 0
-    except Exception:
-        return False
-
-def _is_code_valid() -> bool:
-    """セッションのコードが期限内かチェック。"""
-    expires = st.session_state.get("auth_code_expires")
-    if not expires:
-        return False
-    return datetime.now() < expires
-
 # ── トークン ──────────────────────────────────────────────────
 
 def make_form_token(concert_id: str) -> str:
@@ -515,7 +481,7 @@ def render_form(ctx, concert_id: str):
                 email_input = auth_email.strip().lower()
                 # レート制限: 同一セッションで10秒以内の連続送信を禁止
                 last_sent = st.session_state.get("auth_last_sent")
-                if last_sent and (datetime.now() - last_sent).seconds < 10:
+                if last_sent and (datetime.now() - last_sent).total_seconds() < 10:
                     st.warning("少し時間をおいてから再試行してください。")
                     return
                 # DB照合
@@ -568,8 +534,8 @@ def render_form(ctx, concert_id: str):
         if submitted_resend:
             # レート制限: 60秒以内の再送を禁止
             last_sent = st.session_state.get("auth_last_sent")
-            if last_sent and (datetime.now() - last_sent).seconds < 60:
-                remaining_sec = 60 - (datetime.now() - last_sent).seconds
+            if last_sent and (datetime.now() - last_sent).total_seconds() < 60:
+                remaining_sec = int(60 - (datetime.now() - last_sent).total_seconds())
                 st.warning(f"再送信は{remaining_sec}秒後に行えます。")
                 return
             code = _generate_code()
@@ -960,12 +926,16 @@ def render_form(ctx, concert_id: str):
         st.markdown(f"**{player_name}** さん、ありがとうございました。")
         st.info("このページを閉じて構いません。")
 
+        # 認証情報・入力データをクリア（完了後は不要）
+        for _k in ["form_auth_email", "form_auth_verified", "auth_player_id",
+                   "auth_is_existing", "form_att", "form_pref", "form_own"]:
+            st.session_state.pop(_k, None)
+
         # 管理者への変更通知（1回だけ送信）
         if not st.session_state.get("form_notified"):
             try:
-                import streamlit as _st
                 from concert.services.mailer import send_pdf_to_all
-                admin_email = _st.secrets.get("SMTP_USER", "")
+                admin_email = st.secrets.get("SMTP_USER", "")
                 if admin_email:
                     is_new   = st.session_state.get("form_is_new", False)
                     action   = "新規登録" if is_new else "内容更新"
