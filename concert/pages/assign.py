@@ -843,7 +843,6 @@ def _render_solver_tab(ctx: dict):
                 st.session_state[f"assign_result_exact_{concert_id}"] = e_results
 
                 # 表示用はヒューリスティックをデフォルトに
-                st.session_state[f"assign_result_{concert_id}"] = h_results
                 st.success("✅ 候補案を生成しました。")
             except Exception as e:
                 import traceback
@@ -987,6 +986,10 @@ def _render_solver_tab(ctx: dict):
         col_pdf1.caption(f"PDF生成エラー: {e}")
 
     # サマリーカード（verify()ベース）
+    from concert.services.verify_results import verify as _verify_ui
+    def _vui(r):
+        return _verify_ui(r["assignments"], r["pref_map"])
+
     cols = st.columns(len(results))
     for col, r in zip(cols, results):
         v = _vui(r)
