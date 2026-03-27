@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from statistics import pstdev
+from concert.services.score_constants import SCORE_MAP, SUPPLEMENTAL_SCORE, NG_PRIORITY
 
 
 @dataclass
@@ -50,7 +51,6 @@ class Assignment:
     source: str  # "preference" / "fallback"
 
 
-SCORE_MAP = {1: 3.0, 2: 2.0, 3: 1.0, 0: 0.0}
 
 PREF_PLAYER_REL_KEYS = ["奏者", "出演者", "FK奏者", "演奏会参加者"]
 PREF_SONG_REL_KEYS = ["楽曲", "演奏曲", "FK楽曲", "作品楽章", "作品マスタ"]
@@ -282,7 +282,7 @@ def score_assignment(a: Assignment, pref_map: dict[tuple[str, str, str], Pref]) 
     if not p:
         # 希望データ自体が存在しない = フォールバック割当
         return 0.5
-    if p.priority == -1:
+    if p.priority == NG_PRIORITY:
         return -9999.0
     if p.priority == 0:
         # 降り番希望 → 降り番 = 0点（割当がある場合はフォールバック扱いで0.5）
@@ -321,7 +321,7 @@ def greedy_solve(
     shuffle_seed: Noneなら決定的（デフォルト）、整数ならその乱数でreqの走査順をシャッフル。
     """
     by_req_key: dict[tuple[str, str], list[Pref]] = {}
-    ng_map = {(p.player_id, p.song_id, p.part_id) for p in prefs if p.priority == -1}
+    ng_map = {(p.player_id, p.song_id, p.part_id) for p in prefs if p.priority == NG_PRIORITY}
 
     # 奏者ごとの有効希望数（priority > 0 のもの）をカウント
     # 希望数が少ない = 集中投票しているほど同点時に優先される
@@ -455,7 +455,7 @@ def _is_valid(trial: list[Assignment], pref_map: dict,
             return False
         seen.add(k)
         p = pref_map.get((x.player_id, x.song_id, x.part_id))
-        if p and p.priority == -1:
+        if p and p.priority == NG_PRIORITY:
             return False
     return True
 
@@ -508,7 +508,7 @@ def _perturb(
             if k in seen: bad = True; break
             seen.add(k)
             p = pref_map.get((x.player_id, x.song_id, x.part_id))
-            if p and p.priority == -1: bad = True; break
+            if p and p.priority == NG_PRIORITY: bad = True; break
             if x.player_id in absent_players: bad = True; break
         if not bad:
             cur = trial
@@ -592,7 +592,7 @@ def local_search(
             for new_pid in absent_pids:
                 # new_pidがこのパートにNGでないか確認
                 p = pref_map.get((new_pid, a.song_id, a.part_id))
-                if p and p.priority == -1:
+                if p and p.priority == NG_PRIORITY:
                     continue
                 # new_pidの名前を取得
                 new_name = next(
@@ -670,7 +670,7 @@ def local_search(
                                 if pid not in abs_by_song4.get(a.song_id, set())]
                 for new_pid in absent_here4:
                     p_new = pref_map.get((new_pid, a.song_id, a.part_id))
-                    if p_new and p_new.priority == -1:
+                    if p_new and p_new.priority == NG_PRIORITY:
                         continue
                     sc_new = SCORE_MAP.get(p_new.priority, 0.5) if (p_new and p_new.priority > 0) else 0.5
                     if sc_new <= sc_a:
@@ -967,7 +967,7 @@ def solve_exact(
         part_ids_by_song.setdefault(r.song_id, []).append(r.part_id)
 
     pref_map        = {(p.player_id, p.song_id, p.part_id): p for p in prefs}
-    ng_set          = {(p.player_id, p.song_id, p.part_id) for p in prefs if p.priority == -1}
+    ng_set          = {(p.player_id, p.song_id, p.part_id) for p in prefs if p.priority == NG_PRIORITY}
     req_map         = {(r.song_id, r.part_id): r.required_count for r in requirements}
     req_name_map    = {(r.song_id, r.part_id): (r.song_name, r.part_name, r.instrument_id, r.instrument_name)
                       for r in requirements}

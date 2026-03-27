@@ -9,9 +9,7 @@ report.pyのstats表示とは独立して動作する。
 - pref_mapのキー形式を明示的に扱い、暗黙の前提を排除する
 """
 from __future__ import annotations
-
-# スコア定数（assign_solver.pyのSCORE_MAPと同じ値）
-_SCORE_MAP: dict[int, float] = {1: 3.0, 2: 2.0, 3: 1.0}
+from concert.services.score_constants import SCORE_MAP as _SCORE_MAP, SUPPLEMENTAL_SCORE
 
 # pref_mapのキーを生成する唯一の関数
 # str((pid, sid, part_id)) 形式に統一
@@ -27,7 +25,7 @@ def _pref_score(pref: dict | None, source: str) -> float:
     """
     if pref is None:
         # 希望データなし → 補完割当なら0.5、それ以外は0.0
-        return 0.5 if source in ("fallback", "swap", "exact") else 0.0
+        return SUPPLEMENTAL_SCORE if source in ("fallback", "swap", "exact") else 0.0
     prio = pref.get("priority", 0)
     if prio > 0:
         return _SCORE_MAP.get(prio, 0.0)
