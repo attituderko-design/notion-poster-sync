@@ -40,6 +40,13 @@ _CODE_MAX_ATTEMPTS   = 3
 def _generate_code() -> str:
     return "".join(random.choices(string.digits, k=6))
 
+def _hash_code(code: str) -> str:
+    """認証コードをSHA-256ハッシュ化して返す。平文をsession_stateに持たない。"""
+    return hashlib.sha256(code.encode()).hexdigest()
+
+def _verify_code(entered: str, stored_hash: str) -> bool:
+    return hmac.compare_digest(_hash_code(entered.strip()), stored_hash)
+
 def _send_magic_code(ctx: dict, email: str, code: str, concert_name: str) -> bool:
     try:
         from concert.services.mailer import send_pdf_to_all
@@ -71,10 +78,6 @@ def _is_code_valid() -> bool:
 
 _CODE_EXPIRY_MINUTES = 10
 _CODE_MAX_ATTEMPTS   = 3
-
-def _generate_code() -> str:
-    """6桁の数字コードを生成する。"""
-    return "".join(random.choices(string.digits, k=6))
 
 def _send_magic_code(ctx: dict, email: str, code: str, concert_name: str) -> bool:
     """認証コードをメールで送信する。成功したらTrue。"""
@@ -510,6 +513,11 @@ def render_form(ctx, concert_id: str):
                     st.error("メールアドレスを入力してください。")
                     return
                 email_input = auth_email.strip().lower()
+                # レート制限: 同一セッションで10秒以内の連続送信を禁止
+                last_sent = st.session_state.get("auth_last_sent")
+                if last_sent and (datetime.now() - last_sent).seconds < 10:
+                    st.warning("少し時間をおいてから再試行してください。")
+                    return
                 # DB照合
                 with st.spinner("確認中..."):
                     players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
@@ -524,11 +532,13 @@ def render_form(ctx, concert_id: str):
                 if ok:
                     st.session_state.update({
                         "auth_email":        email_input,
-                        "auth_code":         code,
+                        "auth_code_hash":    _hash_code(code),  # ハッシュのみ保存
                         "auth_code_expires": datetime.now() + timedelta(minutes=_CODE_EXPIRY_MINUTES),
                         "auth_attempts":     0,
                         "auth_code_sent":    True,
-                        "auth_player":       matched,   # None なら新規
+                        "auth_last_sent":    datetime.now(),     # レート制限用
+                        "auth_player_id":    matched.get("id","") if matched else None,  # IDのみ
+                        "auth_is_existing":  matched is not None,
                     })
                     st.rerun()
                 else:
@@ -543,7 +553,8 @@ def render_form(ctx, concert_id: str):
 
         if not _is_code_valid():
             st.warning("確認コードの有効期限が切れました。最初からやり直してください。")
-            for k in ["auth_code_sent","auth_code","auth_code_expires","auth_attempts"]:
+            for k in ["auth_code_sent","auth_code_hash","auth_code_expires",
+                        "auth_attempts","auth_last_sent","auth_player_id","auth_is_existing"]:
                 st.session_state.pop(k, None)
             st.rerun()
             return
@@ -555,13 +566,20 @@ def render_form(ctx, concert_id: str):
             submitted_resend = col_resend.form_submit_button("再送信", use_container_width=True)
 
         if submitted_resend:
+            # レート制限: 60秒以内の再送を禁止
+            last_sent = st.session_state.get("auth_last_sent")
+            if last_sent and (datetime.now() - last_sent).seconds < 60:
+                remaining_sec = 60 - (datetime.now() - last_sent).seconds
+                st.warning(f"再送信は{remaining_sec}秒後に行えます。")
+                return
             code = _generate_code()
             ok   = _send_magic_code(ctx, auth_email, code, c_name)
             if ok:
                 st.session_state.update({
-                    "auth_code":         code,
+                    "auth_code_hash":    _hash_code(code),
                     "auth_code_expires": datetime.now() + timedelta(minutes=_CODE_EXPIRY_MINUTES),
                     "auth_attempts":     0,
+                    "auth_last_sent":    datetime.now(),
                 })
                 st.success("確認コードを再送しました。")
             else:
@@ -569,20 +587,31 @@ def render_form(ctx, concert_id: str):
             return
 
         if submitted_code:
-            if entered_code.strip() == st.session_state.get("auth_code"):
-                # 認証成功
-                matched_player = st.session_state.get("auth_player")
+            stored_hash = st.session_state.get("auth_code_hash", "")
+            if _verify_code(entered_code, stored_hash):
+                # 認証成功: IDのみから奏者情報を取得
+                existing_pid = st.session_state.get("auth_player_id")
+                is_existing  = st.session_state.get("auth_is_existing", False)
                 st.session_state["form_auth_verified"] = True
                 st.session_state["form_auth_email"]    = auth_email
-                if matched_player:
-                    # 既存奏者: player_idをセット
-                    st.session_state["form_player_id"]   = matched_player.get("id", "")
-                    st.session_state["form_player_name"] = ext(matched_player, PLAYER_NAME_KEYS) or ""
-                    st.session_state["form_is_new"]      = False
+                # コードは認証後に破棄
+                for k in ["auth_code_hash","auth_code_expires","auth_attempts",
+                           "auth_code_sent","auth_last_sent"]:
+                    st.session_state.pop(k, None)
+                if is_existing and existing_pid:
+                    # 既存奏者: DBから名前のみ取得
+                    players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+                    matched_player = next(
+                        (p for p in players if p.get("id") == existing_pid), None
+                    )
+                    st.session_state["form_player_id"]   = existing_pid
+                    st.session_state["form_player_name"] = (
+                        ext(matched_player, PLAYER_NAME_KEYS) if matched_player else ""
+                    )
+                    st.session_state["form_is_new"]           = False
                     st.session_state["form_is_existing_auth"] = True
                 else:
-                    # 新規奏者: 名前入力へ
-                    st.session_state["form_is_new"]      = True
+                    st.session_state["form_is_new"]           = True
                     st.session_state["form_is_existing_auth"] = False
                 st.rerun()
             else:
@@ -591,7 +620,9 @@ def render_form(ctx, concert_id: str):
                 remaining = _CODE_MAX_ATTEMPTS - attempts
                 if remaining <= 0:
                     st.error("確認コードを3回間違えました。最初からやり直してください。")
-                    for k in ["auth_code_sent","auth_code","auth_code_expires","auth_attempts"]:
+                    for k in ["auth_code_hash","auth_code_expires","auth_attempts",
+                               "auth_code_sent","auth_last_sent","auth_player_id",
+                               "auth_is_existing"]:
                         st.session_state.pop(k, None)
                     st.rerun()
                 else:
@@ -613,10 +644,8 @@ def render_form(ctx, concert_id: str):
             # 基本情報表示
             with st.expander("登録情報", expanded=True):
                 _email = ext(player, PLAYER_EMAIL_KEYS) or "未登録"
-                _phone = ext(player, PLAYER_PHONE_KEYS) or "未登録"
                 _hn    = ext(player, PLAYER_HN_KEYS)    or "未登録"
                 st.caption(f"メールアドレス: {_email}")
-                st.caption(f"電話番号: {_phone}")
                 st.caption(f"H.N.: {_hn}")
 
             # 出欠状況表示
@@ -952,13 +981,20 @@ def render_form(ctx, concert_id: str):
                     if att_dict:
                         lines.append("")
                         lines.append("【出欠】")
+                        # 練習名をIDから逆引き
+                        pr_name_map = {
+                            pr.get("id",""): (
+                                ext(pr, PRACTICE_DATE_KEYS) or ext(pr, PRACTICE_NAME_KEYS) or "練習"
+                            )[:10]
+                            for pr in (st.session_state.get("form_practices") or [])
+                        }
                         for pr_id, status in att_dict.items():
-                            lines.append(f"  {pr_id[:8]}... : {status}")
+                            pr_label = pr_name_map.get(pr_id, "練習")
+                            lines.append(f"  {pr_label} : {status}")
                     if pref_dict:
                         lines.append("")
-                        lines.append("【希望】")
-                        for pd_id, prio in pref_dict.items():
-                            lines.append(f"  {pd_id[:8]}... : {prio}")
+                        lines.append("【希望】（件数のみ）")
+                        lines.append(f"  希望登録数: {len(pref_dict)}件")
                     send_pdf_to_all(
                         ctx,
                         [{"name": "管理者", "email": admin_email}],
