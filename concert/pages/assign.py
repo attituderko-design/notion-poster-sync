@@ -1025,33 +1025,9 @@ def _render_solver_tab(ctx: dict):
     song_name_map = {s.get("id"): _song_name(s, ctx) for s in songs}
     song_order    = [s.get("id") for s in sorted(songs, key=lambda x: _song_name(x, ctx))]
 
-    CANDIDATE_DESC = {
-        "候補A：第1希望率最大": (
-            "第1希望が叶う人数を最大化する案。"
-            "「絶対にこれがやりたい」という強い希望をできるだけ通す。"
-            "第2・第3希望は後回しになりやすい。"
-        ),
-        "候補B：総スコア最大": (
-            "全員の希望スコア合計を最大化する案。"
-            "第1希望×3点・第2希望×2点・第3希望×1点の総和を最大にする。"
-            "全体として最も「満足度の総量」が高い割当。"
-        ),
-        "候補C：公平性重視": (
-            "最も不満な人のスコアを底上げする案。"
-            "「誰か一人が割を食う」状況を避けることを優先する。"
-            "希望を出したのに乗れなかった曲数（希望不成立）も最小化しようとする。"
-        ),
-        "候補D：降り番均等": (
-            "降り番（割当なし）の偏りを最小化する案。"
-            "特定の人だけ多くの曲で降り番にならないよう、"
-            "割当件数の標準偏差を小さくすることを優先する。"
-        ),
-        "候補E：降り番均等": (
-            "降り番（割当なし）の偏りを最小化する案。"
-            "特定の人だけ多くの曲で降り番にならないよう、"
-            "割当件数の標準偏差を小さくすることを優先する。"
-        ),
-    }
+    from concert.services.score_constants import CANDIDATE_DESC as _CAND_DESC_RAW
+    # UI では long 説明を使用
+    CANDIDATE_DESC = {k: v["long"] for k, v in _CAND_DESC_RAW.items()}
 
     for tab, result in zip(tabs, results):
         with tab:
