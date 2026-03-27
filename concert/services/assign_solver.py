@@ -313,10 +313,12 @@ def greedy_solve(
     requirements: list[Requirement],
     absent_players: set[str],
     all_participants: list[tuple[str, str]] | None = None,
+    shuffle_seed: int | None = None,
 ) -> list[Assignment]:
     """
     all_participants: 現在は未使用（将来の拡張用に引数として残す）。
     fallback候補は prefs 由来の希望提出者のみ。
+    shuffle_seed: Noneなら決定的（デフォルト）、整数ならその乱数でreqの走査順をシャッフル。
     """
     by_req_key: dict[tuple[str, str], list[Pref]] = {}
     ng_map = {(p.player_id, p.song_id, p.part_id) for p in prefs if p.priority == -1}
@@ -611,7 +613,18 @@ def solve_all(ctx: dict, concert_id: str) -> list[dict]:
 
     # fallback候補は希望提出者のみ（greedy_solve内で prefs から構築）
     pref_map = {(p.player_id, p.song_id, p.part_id): p for p in prefs}
+
+    # 複数初期解を生成して最良（総スコア最大）を採用
+    def _total_sc(sol):
+        return sum(max(score_assignment(a, pref_map), 0) for a in sol)
     base = greedy_solve(prefs, reqs, absent)
+    best_base_score = _total_sc(base)
+    for _seed in range(1, 8):  # 7通りの走査順で試す
+        _cand = greedy_solve(prefs, reqs, absent, shuffle_seed=_seed)
+        _cand_sc = _total_sc(_cand)
+        if _cand_sc > best_base_score:
+            base = _cand
+            best_base_score = _cand_sc
 
     # 評価対象：希望提出者のみ（solve_allは参加者DBにアクセスしない）
     all_player_ids = sorted({p.player_id for p in prefs})
