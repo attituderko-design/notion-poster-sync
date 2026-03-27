@@ -989,6 +989,21 @@ def _render_solver_tab(ctx: dict):
 
     st.divider()
 
+    # ── グラフ表示（希望充足・担当数分布）────────────────────
+    try:
+        from concert.services.report import make_stacked_bar, make_dist_bar
+        _gcol1, _gcol2 = st.columns(2)
+        with _gcol1:
+            st.markdown("**希望充足の内訳**")
+            st.image(make_stacked_bar(results), use_container_width=True)
+        with _gcol2:
+            st.markdown("**担当曲数の分布**")
+            st.image(make_dist_bar(results), use_container_width=True)
+    except Exception as _ge:
+        st.caption(f"グラフ生成エラー: {_ge}")
+
+    st.divider()
+
     # 各候補の詳細
     tabs = st.tabs([r["label"] for r in results])
     song_name_map = {s.get("id"): _song_name(s, ctx) for s in songs}
