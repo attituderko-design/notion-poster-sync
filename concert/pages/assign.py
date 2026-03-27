@@ -731,7 +731,7 @@ def _render_solver_tab(ctx: dict):
             try:
                 from concert.services.assign_solver import (
                     greedy_solve, local_search, _calc_stats, _build_absent_set,
-                    _first_choice_rate, _total_score,
+                    _first_choice_rate, _total_score, score_assignment,
                     _min_player_score, _bring_count, _rest_std,
                     solve_exact,
                 )
@@ -765,8 +765,20 @@ def _render_solver_tab(ctx: dict):
                 # 公平性・降り番評価は参加者DB全員（希望未提出も含む）を対象に
                 all_pids = sorted({pid for pid, _ in _all_participants} |
                                   {p.player_id for p in prefs})
+                st.session_state[f"assign_all_pids_{concert_id}"] = all_pids
                 pref_map = {(p.player_id, p.song_id, p.part_id): p for p in prefs}
-                base     = greedy_solve(prefs, requirements, absent, _all_participants)
+                # 複数初期解で最良を採用（走査順ランダム化）
+                def _total_sc_v(sol):
+                    return sum(max(score_assignment(a, pref_map), 0) for a in sol)
+                base = greedy_solve(prefs, requirements, absent, _all_participants)
+                _best_sc = _total_sc_v(base)
+                for _seed in range(1, 8):
+                    _cand = greedy_solve(prefs, requirements, absent,
+                                         _all_participants, shuffle_seed=_seed)
+                    _cand_sc = _total_sc_v(_cand)
+                    if _cand_sc > _best_sc:
+                        base = _cand
+                        _best_sc = _cand_sc
 
                 def obj_a(sol):
                     return _first_choice_rate(sol, pref_map) * 10000 + _total_score(sol, pref_map)
@@ -830,6 +842,11 @@ def _render_solver_tab(ctx: dict):
                             "pref_map":    {str(k): v.__dict__ for k, v in pref_map.items()},
                         })
                 st.session_state[f"assign_result_{concert_id}"] = results
+                # モード別に保存（検証用に両方保持）
+                if use_exact:
+                    st.session_state[f"assign_result_exact_{concert_id}"] = results
+                else:
+                    st.session_state[f"assign_result_heuristic_{concert_id}"] = results
                 st.success("✅ 候補案を生成しました。")
             except Exception as e:
                 import traceback
@@ -853,33 +870,46 @@ def _render_solver_tab(ctx: dict):
 
     # 検証：共通再採点で解の品質を比較
     with st.expander("🔬 解の検証（共通再採点）", expanded=False):
-        if results:
-            try:
-                from concert.services.verify_results import verify, format_compare
-                pm0 = results[0]["pref_map"]
-                st.caption("全候補を同じ採点基準で再評価します。")
-                for r in results:
-                    v = verify(r["assignments"], r["pref_map"], all_pids)
-                    st.markdown(f"**{r['label']}**")
+        try:
+            from concert.services.verify_results import verify
+            _v_pids = st.session_state.get(f"assign_all_pids_{concert_id}")
+            _h_results = st.session_state.get(f"assign_result_heuristic_{concert_id}", [])
+            _e_results = st.session_state.get(f"assign_result_exact_{concert_id}", [])
+
+            def _show_verify(label, rlist, color):
+                if not rlist:
+                    return
+                st.markdown(f"**{label}**")
+                for r in rlist:
+                    v = verify(r["assignments"], r["pref_map"], _v_pids)
+                    st.markdown(f"<span style='color:{color}'>{r['label']}</span>",
+                                unsafe_allow_html=True)
                     col1, col2, col3, col4 = st.columns(4)
                     col1.metric("総スコア",    f"{v['total_score']:.1f}")
                     col2.metric("第1希望本数", f"{v['first_choice_count']}件")
                     col3.metric("第1希望率",   f"{v['first_choice_rate']:.1%}")
                     col4.metric("最低スコア",  f"{v['min_player_score']:.1f}")
-                    # local_searchの改善ログ
+                    # 局所探索改善ログ
                     ls_log = r.get("stats", {}).get("_ls_log", {})
                     if ls_log:
                         st.caption(
-                            f"局所探索: {ls_log.get('total_iterations',0)}回反復、"
+                            f"局所探索: {ls_log.get('total_iterations',0)}回反復 / "
                             f"改善{ls_log.get('total_improvements',0)}回 "
-                            f"（N1スワップ:{ls_log.get('n1_swap_count',0)} "
-                            f"N2差替:{ls_log.get('n2_replace_count',0)} "
-                            f"N3曲またぎ:{ls_log.get('n3_crosssong_count',0)}）"
+                            f"（N1:{ls_log.get('n1_swap_count',0)} "
+                            f"N2:{ls_log.get('n2_replace_count',0)} "
+                            f"N3:{ls_log.get('n3_crosssong_count',0)} "
+                            f"N4:{ls_log.get('n4_uplift_count',0)}）"
                             f"　最終目的値: {ls_log.get('final_objective',0):.2f}"
                         )
-                    st.divider()
-            except Exception as _ve:
-                st.warning(f"検証エラー: {_ve}")
+
+            if not _h_results and not _e_results:
+                st.caption("候補案を生成すると検証結果が表示されます。")
+            _show_verify("⚡ ヒューリスティック解", _h_results, "#1A3D7C")
+            if _h_results and _e_results:
+                st.divider()
+            _show_verify("🎯 厳密解", _e_results, "#5A1A7C")
+        except Exception as _ve:
+            st.warning(f"検証エラー: {_ve}")
 
     # PDFダウンロードボタン
     col_title, col_pdf = st.columns([6, 2])
