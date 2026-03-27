@@ -94,6 +94,47 @@ def generate_assign_report(
     player_name_map= {p.get("id"): (extract(p, ["氏名","名前","表示名","タイトル"]) or p.get("id","")) for p in players}
     song_order     = [s.get("id") for s in sorted(songs, key=lambda x: song_name_map.get(x.get("id",""),""))]
 
+    # 共通採点関数（全PDFでこれだけを使う）
+    try:
+        from concert.services.verify_results import verify as _verify
+    except ImportError:
+        _verify = None
+
+    def _v(r):
+        """1つのresultをverify()で採点して返す。"""
+        if _verify:
+            return _verify(r["assignments"], r["pref_map"])
+        s = r.get("stats", {})
+        return {
+            "total_score":              s.get("total_score", 0),
+            "first_choice_count":       0,
+            "first_choice_rate":        s.get("first_choice_rate", 0),
+            "min_player_score":         s.get("min_score", 0),
+            "fallback_count":           sum(1 for a in r["assignments"] if a.get("source")=="fallback"),
+            "swap_count":               0,
+            "assignment_count_by_player": {},
+        }
+
+    # 共通採点関数（全PDFでこれだけを使う）
+    try:
+        from concert.services.verify_results import verify as _verify
+    except ImportError:
+        _verify = None
+
+    def _v(r):
+        """1つのresultをverify()で採点して返す。verify未使用時はstatsからフォールバック。"""
+        if _verify:
+            return _verify(r["assignments"], r["pref_map"])
+        s = r.get("stats", {})
+        return {
+            "total_score":        s.get("total_score", 0),
+            "first_choice_count": 0,
+            "first_choice_rate":  s.get("first_choice_rate", 0),
+            "min_player_score":   s.get("min_score", 0),
+            "fallback_count":     sum(1 for a in r["assignments"] if a.get("source")=="fallback"),
+            "swap_count":         0,
+        }
+
     # ── 表紙 ──────────────────────────────────────────────────
     story.append(Spacer(1, 20*mm))
     story.append(Paragraph("ArtéMis HARMONIA", st["subtitle"]))
@@ -116,18 +157,18 @@ def generate_assign_report(
         # ── 候補案サマリー比較表 ──────────────────────────────────
         story.append(Paragraph("■ 候補案 比較サマリー", st["h2"]))
     
-        header = ["候補", "説明", "総スコア", "第1希望率", "最低スコア", "FB件数"]
+        header = ["候補", "説明", "総スコア", "第1希望率", "最低スコア", "FB+補完"]
         rows = [header]
         for r in results:
-            s = r["stats"]
-            fb = sum(1 for a in r["assignments"] if a["source"] == "fallback")
+            vr = _v(r)
+            fb = vr.get("fallback_count", 0) + vr.get("swap_count", 0)
             desc = CANDIDATE_DESC.get(r["label"], "")
             rows.append([
-                r["label"].split("：")[0],   # 候補A / 候補B ...
+                r["label"].split("：")[0],
                 Paragraph(desc, st["small"]),
-                f"{s['total_score']:.1f}点",
-                f"{s['first_choice_rate']*100:.0f}%",
-                f"{s['min_score']:.1f}点",
+                f"{vr['total_score']:.1f}点",
+                f"{vr['first_choice_rate']*100:.0f}%",
+                f"{vr['min_player_score']:.1f}点",
                 f"{fb}件",
             ])
     
@@ -702,6 +743,11 @@ def generate_assign_report(
                 cur = vh["total_score"]
                 gap = opt - cur
                 rate = (cur / opt * 100) if opt > 0 else 100.0
+                label_a = r_h["label"]
+                # 候補ごとに適切な比較指標を選択
+                is_ab  = any(x in label_a for x in ["候補A", "候補B"])
+                is_c   = "候補C" in label_a
+                is_d   = "候補D" in label_a
                 cmp_rows = [
                     ["指標", "ヒューリスティック", "厳密解", "差"],
                     ["総スコア",
@@ -711,11 +757,24 @@ def generate_assign_report(
                      f"{ve['first_choice_count']-vh['first_choice_count']:+d}"],
                     ["第1希望率",
                      f"{vh['first_choice_rate']:.1%}", f"{ve['first_choice_rate']:.1%}", "—"],
-                    ["最低スコア",
+                    ["最低スコア（公平性）",
                      f"{vh['min_player_score']:.1f}", f"{ve['min_player_score']:.1f}",
                      f"{ve['min_player_score']-vh['min_player_score']:+.1f}"],
-                    ["最適解比率", f"{rate:.1f}%", "100%", "—"],
                 ]
+                # 最適解比率はA/Bのみ（総スコア最大化が目的の候補）
+                if is_ab:
+                    cmp_rows.append(["最適解比率（総スコア）", f"{rate:.1f}%", "100%", "—"])
+                elif is_c:
+                    cmp_rows.append(["主指標（最低スコア）", f"{vh['min_player_score']:.1f}",
+                                     f"{ve['min_player_score']:.1f}",
+                                     f"{ve['min_player_score']-vh['min_player_score']:+.1f}"])
+                elif is_d:
+                    h_cnt = vh.get("assignment_count_by_player", {})
+                    e_cnt = ve.get("assignment_count_by_player", {})
+                    h_rng = (max(h_cnt.values()) - min(h_cnt.values())) if h_cnt else 0
+                    e_rng = (max(e_cnt.values()) - min(e_cnt.values())) if e_cnt else 0
+                    cmp_rows.append(["主指標（割当数の範囲）",
+                                     f"{h_rng}曲差", f"{e_rng}曲差", f"{e_rng-h_rng:+d}"])
                 cmp_ps = [
                     [Paragraph(str(c), st["cellb_wht"] if ri == 0 else st["cell"])
                      for c in row]
@@ -821,11 +880,11 @@ def generate_assign_report(
         story.append(Spacer(1, 6*mm))
         story.append(Paragraph("■ ヒューリスティック解の品質評価", st["h2"]))
         story.append(Spacer(1, 2*mm))
-        if _vfy:
+        if True:
             all_rates = []
             for r_h, r_e in zip(results, compare_results):
-                vh = _vfy(r_h["assignments"], r_h["pref_map"])
-                ve = _vfy(r_e["assignments"], r_e["pref_map"])
+                vh = _v(r_h)
+                ve = _v(r_e)
                 opt = ve["total_score"]
                 cur = vh["total_score"]
                 rate = (cur / opt * 100) if opt > 0 else 100.0
@@ -833,7 +892,9 @@ def generate_assign_report(
             avg_rate = sum(r for _, r, _, _ in all_rates) / len(all_rates) if all_rates else 0
             summ_rows = [["候補", "総スコア（H）", "総スコア（厳密）", "最適解比率"]]
             for lbl, rate, cur, opt in all_rates:
-                summ_rows.append([lbl, f"{cur:.1f}", f"{opt:.1f}", f"{rate:.1f}%"])
+                is_ab_s = lbl in ("候補A", "候補B")
+                rate_str = f"{rate:.1f}%" if is_ab_s else "—（目的関数が異なる）"
+                summ_rows.append([lbl, f"{cur:.1f}", f"{opt:.1f}", rate_str])
             summ_rows.append(["平均", "—", "—", f"{avg_rate:.1f}%"])
             summ_ps = [
                 [Paragraph(str(c), st["cellb_wht"] if ri==0 else st["cell"])
@@ -861,9 +922,7 @@ def generate_assign_report(
             else:
                 comment = "ヒューリスティック解と厳密解に有意な差があります。特に候補C・Dについては厳密解を優先して検討してください。"
             story.append(Paragraph(comment, st["body"]))
-        else:
-            story.append(Paragraph("（verify_results モジュールが見つからないため総括を省略）",
-                                   st["small"]))
+
 
     doc.build(story)
     buf.seek(0)
