@@ -56,7 +56,7 @@ def _build_message(
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
-    if pdf_bytes:
+    if pdf_bytes and len(pdf_bytes) > 0:
         part = MIMEBase("application", "octet-stream")
         part.set_payload(pdf_bytes)
         encoders.encode_base64(part)
