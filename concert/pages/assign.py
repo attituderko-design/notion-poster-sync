@@ -742,9 +742,14 @@ def _render_solver_tab(ctx: dict):
                     _pids = ctx["extract_relation_ids_any"](_r, PARTICIPANT_PLAYER_REL_KEYS)
                     if _pids:
                         _pid = _pids[0]
-                        _part_to_pl[_pid] = _player_name(
-                            next((p for p in players if p.get("id","") == _pid), {}), ctx
-                        )
+                        _pobj = next((p for p in players if p.get("id","") == _pid), None)
+                        _pname = _player_name(_pobj, ctx) if _pobj else ""
+                        # playersリストにない場合はPERFORMER DBから直接取得
+                        if not _pname:
+                            _all_pl = _load_players(ctx)
+                            _pobj2 = next((p for p in _all_pl if p.get("id","") == _pid), None)
+                            _pname = _player_name(_pobj2, ctx) if _pobj2 else _pid
+                        _part_to_pl[_pid] = _pname
                 _all_participants = sorted(_part_to_pl.items(), key=lambda x: x[1])
 
                 # 公平性・降り番評価は参加者DB全員（希望未提出も含む）を対象に
@@ -773,9 +778,20 @@ def _render_solver_tab(ctx: dict):
                     sol   = local_search(base, pref_map, fn, max_iter=250,
                                            absent_players=absent, all_player_ids=all_pids)
                     stats = _calc_stats(sol, pref_map, all_pids)
+                    # player_nameがIDになっている場合をplayer_name_mapで補完
+                    _name_map = {p.get("id",""): _player_name(p, ctx) for p in players}
+                    for _pid, _pname in _all_participants:
+                        if _pid not in _name_map or not _name_map[_pid]:
+                            _name_map[_pid] = _pname
+                    _assignments_fixed = []
+                    for _a in sol:
+                        _d = _a.__dict__.copy()
+                        if not _d.get("player_name") or _d["player_name"] == _d["player_id"]:
+                            _d["player_name"] = _name_map.get(_d["player_id"], _d["player_id"])
+                        _assignments_fixed.append(_d)
                     results.append({
                         "label":       label,
-                        "assignments": [a.__dict__ for a in sol],
+                        "assignments": _assignments_fixed,
                         "stats":       stats,
                         "pref_map":    {str(k): v.__dict__ for k, v in pref_map.items()},
                     })
@@ -872,7 +888,7 @@ def _render_solver_tab(ctx: dict):
             m1.metric("総スコア",   f"{s['total_score']:.1f}点")
             m2.metric("第1希望率",  f"{s['first_choice_rate']*100:.1f}%")
             m3.metric("最低スコア", f"{s['min_score']:.1f}点")
-            m4.metric("FB件数",     f"{sum(1 for a in result['assignments'] if a['source']=='fallback')}件")
+            m4.metric("FB件数",     f"{sum(1 for a in result['assignments'] if a['source'] in ('fallback','swap'))}件")
 
             # 曲ごとの割当（HTML表示）
             by_song: dict[str, list] = defaultdict(list)
@@ -894,6 +910,16 @@ def _render_solver_tab(ctx: dict):
             player_names: dict[str, str]       = {}
             player_unassigned: dict[str, int]  = defaultdict(int)
 
+            # まず全奏者の名前をplayersリストから初期化（希望未提出者も含む）
+            for _p in players:
+                _pid = _p.get("id","")
+                if _pid:
+                    player_names[_pid] = _player_name(_p, ctx)
+            # _all_participantsにある名前も補完
+            for _pid, _pname in _all_participants:
+                if _pid and _pname and _pid not in player_names:
+                    player_names[_pid] = _pname
+
             # 割当済みスコアと曲セットを集計
             assigned_songs_per_player: dict[str, set] = defaultdict(set)
             for a in result["assignments"]:
@@ -902,7 +928,7 @@ def _render_solver_tab(ctx: dict):
                 sc   = ({1:3.0,2:2.0,3:1.0}.get(pref["priority"],0.0)
                         if pref and pref["priority"] > 0 else 0.5)
                 player_scores[a["player_id"]] += sc
-                if a["source"] == "fallback":
+                if a["source"] in ("fallback", "swap"):
                     player_fb[a["player_id"]] += 1
                 player_names[a["player_id"]] = a["player_name"]
                 assigned_songs_per_player[a["player_id"]].add(a["song_id"])
@@ -954,7 +980,10 @@ def _render_assignment_html(items: list[dict], pref_map: dict) -> str:
         if pref and pref["priority"] > 0:
             hope = INT_TO_PRIORITY.get(pref["priority"], "—")
             sc   = {1: 3.0, 2: 2.0, 3: 1.0}.get(pref["priority"], 0.0)
-        elif a["source"] == "fallback":
+        elif pref and pref["priority"] == 0:
+            hope = "希望なし/降り番でも可"
+            sc   = 0.0
+        elif a["source"] in ("fallback", "swap"):
             hope = "フォールバック"
             sc   = 0.5
         else:
