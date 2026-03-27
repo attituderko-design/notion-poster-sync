@@ -478,7 +478,10 @@ def generate_assign_report(
         story.append(Spacer(1, 1.5*mm))
 
     # 厳密解モードの場合のみ追加Tipsページ
-    is_exact = any("厳密解" in r.get("label", "") for r in results)
+    is_exact = (
+        any("厳密解" in r.get("label", "") for r in results) or
+        any("厳密解" in r.get("label", "") for r in (compare_results or []))
+    )
     if is_exact:
         story.append(PageBreak())
         story.append(Paragraph("ArtéMis HARMONIA　アサイン検討 Tips", st["subtitle"]))
