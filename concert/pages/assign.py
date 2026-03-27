@@ -810,9 +810,12 @@ def _render_solver_tab(ctx: dict):
                             _name_map[_pid] = _pname
                     results = []
                     for label, fn in variants:
-                        sol   = local_search(base, pref_map, fn, max_iter=250,
-                                               absent_players=absent, all_player_ids=all_pids)
+                        _ls_ret = local_search(base, pref_map, fn, max_iter=250,
+                                                absent_players=absent, all_player_ids=all_pids,
+                                                verbose=True)
+                        sol, _ls_log = _ls_ret if isinstance(_ls_ret, tuple) else (_ls_ret, {})
                         stats = _calc_stats(sol, pref_map, all_pids)
+                        stats["_ls_log"] = _ls_log  # 改善ログをstatsに付帯
                         # player_nameがIDになっている場合をplayer_name_mapで補完
                         _assignments_fixed = []
                         for _a in sol:
@@ -847,6 +850,36 @@ def _render_solver_tab(ctx: dict):
             st.caption(f"登録された希望件数: {len(pm)}件")
             for k, v in list(pm.items())[:20]:
                 st.caption(f"`{k}` → player:{v.get('player_name','?')} priority:{v.get('priority','?')}")
+
+    # 検証：共通再採点で解の品質を比較
+    with st.expander("🔬 解の検証（共通再採点）", expanded=False):
+        if results:
+            try:
+                from concert.services.verify_results import verify, format_compare
+                pm0 = results[0]["pref_map"]
+                st.caption("全候補を同じ採点基準で再評価します。")
+                for r in results:
+                    v = verify(r["assignments"], r["pref_map"], all_pids)
+                    st.markdown(f"**{r['label']}**")
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("総スコア",    f"{v['total_score']:.1f}")
+                    col2.metric("第1希望本数", f"{v['first_choice_count']}件")
+                    col3.metric("第1希望率",   f"{v['first_choice_rate']:.1%}")
+                    col4.metric("最低スコア",  f"{v['min_player_score']:.1f}")
+                    # local_searchの改善ログ
+                    ls_log = r.get("stats", {}).get("_ls_log", {})
+                    if ls_log:
+                        st.caption(
+                            f"局所探索: {ls_log.get('total_iterations',0)}回反復、"
+                            f"改善{ls_log.get('total_improvements',0)}回 "
+                            f"（N1スワップ:{ls_log.get('n1_swap_count',0)} "
+                            f"N2差替:{ls_log.get('n2_replace_count',0)} "
+                            f"N3曲またぎ:{ls_log.get('n3_crosssong_count',0)}）"
+                            f"　最終目的値: {ls_log.get('final_objective',0):.2f}"
+                        )
+                    st.divider()
+            except Exception as _ve:
+                st.warning(f"検証エラー: {_ve}")
 
     # PDFダウンロードボタン
     col_title, col_pdf = st.columns([6, 2])
