@@ -315,8 +315,8 @@ def greedy_solve(
     all_participants: list[tuple[str, str]] | None = None,
 ) -> list[Assignment]:
     """
-    all_participants: [(player_id, player_name), ...] 参加者全員リスト。
-    希望未提出の参加者もfallback候補に含めるために使用。
+    all_participants: 現在は未使用（将来の拡張用に引数として残す）。
+    fallback候補は prefs 由来の希望提出者のみ。
     """
     by_req_key: dict[tuple[str, str], list[Pref]] = {}
     ng_map = {(p.player_id, p.song_id, p.part_id) for p in prefs if p.priority == -1}
@@ -602,28 +602,12 @@ def solve_all(ctx: dict, concert_id: str) -> list[dict]:
     if not prefs or not reqs:
         return []
 
-    # 参加者DB全員（希望未提出も含む）をfallback候補に
-    all_participants: list[tuple[str, str]] = []
-    try:
-        part_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"])
-        p_to_pl = _participant_to_player_map(ctx)
-        pl_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER"])
-        pl_name = {r.get("id",""): ctx["extract_title"](r) or "" for r in pl_rows}
-        for pid in p_to_pl.values():
-            if pid:
-                all_participants.append((pid, pl_name.get(pid, pid)))
-        all_participants = sorted(set(all_participants), key=lambda x: x[1])
-    except Exception:
-        all_participants = []
-
+    # fallback候補は希望提出者のみ（greedy_solve内で prefs から構築）
     pref_map = {(p.player_id, p.song_id, p.part_id): p for p in prefs}
-    base = greedy_solve(prefs, reqs, absent, all_participants)
+    base = greedy_solve(prefs, reqs, absent)
 
-    # 全員（参加者DB + 希望提出者）のIDリスト
-    _all_pid_set = {p.player_id for p in prefs}
-    for pid, _ in all_participants:
-        _all_pid_set.add(pid)
-    all_player_ids = sorted(_all_pid_set)
+    # 評価対象：希望提出者のみ（solve_allは参加者DBにアクセスしない）
+    all_player_ids = sorted({p.player_id for p in prefs})
 
     def obj_a(sol):  # 第1希望率最大
         return _first_choice_rate(sol, pref_map) * 10000 + _total_score(sol, pref_map)
@@ -797,7 +781,7 @@ def solve_exact(
     if not prefs or not requirements:
         return []
 
-    # 希望提出者のみをfallback候補に（未提出者は割当対象外）
+    # fallback候補：希望提出者のみ（希望未提出者は割当対象外）
     player_ids  = sorted({p.player_id for p in prefs})
     song_ids    = sorted({r.song_id for r in requirements})
     part_ids_by_song: dict[str, list[str]] = {}
@@ -834,18 +818,38 @@ def solve_exact(
 
     results = []
 
-    # ── 候補A: 総スコア最大化 ──────────────────────────────────
-    c_a = np.array([-_sc(p, s, t) for (p, s, t) in var_index])
+    # ── 候補A: 第1希望率最大 + 同率なら総スコア最大（高速Aと完全一致）
+    # 高速モード: _first_choice_rate×10000 + _total_score
+    # 第1希望割当 = 10000点、それ以外はスコアそのまま（最大3点）
+    # 10000 >> 3 なので単一目的関数として正しく優先順位を反映できる
+    first_choice_set = {(p.player_id, p.song_id, p.part_id) for p in prefs if p.priority == 1}
+    n_first = sum(1 for k in first_choice_set if k in var_index)  # 第1希望変数数（正規化用）
+    def _sc_a(p, s, t):
+        if (p, s, t) in first_choice_set:
+            return 10000.0 + _sc(p, s, t)  # 第1希望 = 最優先 + スコア
+        return _sc(p, s, t)                 # それ以外はスコアのみ
+    c_a = np.array([-_sc_a(p, s, t) for (p, s, t) in var_index])
     r_a = _run_milp(c_a, A_base, blo_base, bhi_base, ub_base, n_x, time_limit_sec)
     if r_a.success:
         sol_a = _extract_assignments(r_a.x, var_index, pref_map, req_name_map, player_name_map)
         results.append({
-            "label": "候補A：総スコア最大（厳密解）",
+            "label": "候補A：第1希望率最大（厳密解）",
             "assignments": [a.__dict__ for a in sol_a],
             "stats": _calc_stats(sol_a, pref_map, _eval_pids),
         })
 
-    # ── 候補B: 公平性（max min_p y_p）─────────────────────────
+    # ── 候補B: 総スコア最大化（高速モードのBと対応）──────────
+    c_b_score = np.array([-_sc(p, s, t) for (p, s, t) in var_index])
+    r_b_score = _run_milp(c_b_score, A_base, blo_base, bhi_base, ub_base, n_x, time_limit_sec)
+    if r_b_score.success:
+        sol_b_score = _extract_assignments(r_b_score.x, var_index, pref_map, req_name_map, player_name_map)
+        results.append({
+            "label": "候補B：総スコア最大（厳密解）",
+            "assignments": [a.__dict__ for a in sol_b_score],
+            "stats": _calc_stats(sol_b_score, pref_map, _eval_pids),
+        })
+
+    # ── 候補C: 公平性（max min_p y_p）（高速モードのCと対応）──
     # 変数: [x(n_x), m(1)]  目的: min -m
     n_b = n_x + 1; m_idx = n_x
     c_b = np.zeros(n_b); c_b[m_idx] = -1.0
@@ -866,7 +870,7 @@ def solve_exact(
     if r_b.success:
         sol_b = _extract_assignments(r_b.x[:n_x], var_index, pref_map, req_name_map, player_name_map)
         results.append({
-            "label": "候補B：公平性重視（厳密解）",
+            "label": "候補C：公平性重視（厳密解）",
             "assignments": [a.__dict__ for a in sol_b],
             "stats": _calc_stats(sol_b, pref_map, _eval_pids),
         })
@@ -893,22 +897,9 @@ def solve_exact(
     if r_c.success:
         sol_c = _extract_assignments(r_c.x[:n_x], var_index, pref_map, req_name_map, player_name_map)
         results.append({
-            "label": "候補C：降り番均等（厳密解）",
+            "label": "候補D：降り番均等（厳密解）",
             "assignments": [a.__dict__ for a in sol_c],
             "stats": _calc_stats(sol_c, pref_map, _eval_pids),
-        })
-
-    # ── 候補D: 第1希望率最大化 ────────────────────────────────
-    first_choice_set = {(p.player_id, p.song_id, p.part_id) for p in prefs if p.priority == 1}
-    c_d = np.array([-1.0 if (p, s, t) in first_choice_set else 0.0
-                    for (p, s, t) in var_index])
-    r_d = _run_milp(c_d, A_base, blo_base, bhi_base, ub_base, n_x, time_limit_sec)
-    if r_d.success:
-        sol_d = _extract_assignments(r_d.x, var_index, pref_map, req_name_map, player_name_map)
-        results.append({
-            "label": "候補D：第1希望率最大（厳密解）",
-            "assignments": [a.__dict__ for a in sol_d],
-            "stats": _calc_stats(sol_d, pref_map, _eval_pids),
         })
 
     return results

@@ -463,6 +463,144 @@ def generate_assign_report(
         story.append(Paragraph(f"{i}. {tip}", st["body"]))
         story.append(Spacer(1, 1.5*mm))
 
+    # 厳密解モードの場合のみ追加Tipsページ
+    is_exact = any("厳密解" in r.get("label", "") for r in results)
+    if is_exact:
+        story.append(PageBreak())
+        story.append(Paragraph("ArtéMis HARMONIA　アサイン検討 Tips", st["subtitle"]))
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph("厳密解モードについて", st["title"]))
+        story.append(Spacer(1, 4*mm))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CCCCCC")))
+        story.append(Spacer(1, 6*mm))
+
+        # 厳密解の仕組み
+        story.append(Paragraph("■ 厳密解とは", st["h2"]))
+        story.append(Spacer(1, 2*mm))
+        exact_algo_data = [
+            ["手法", "説明"],
+            ["整数計画法\n(MILP)",
+             "「すべての可能な割当の組み合わせ」の中から、\n"
+             "数学的に証明された最良の解を求める手法。\n"
+             "高速モード（ヒューリスティック）が「良い解」を\n"
+             "素早く出すのに対し、厳密解は「最良の解」を保証する。\n"
+             "scipy.optimize.milp（HiGHSソルバー）を使用。"],
+        ]
+        exact_algo_tbl = Table(
+            [[Paragraph(str(c), st["cellb_wht"] if i==0 else st["cell"])
+              for c in row]
+             for i, row in enumerate(exact_algo_data)],
+            colWidths=[28*mm, _tips_W - 28*mm],
+            repeatRows=1,
+        )
+        exact_algo_tbl.hAlign = "LEFT"
+        exact_algo_tbl.setStyle(TableStyle([
+            ("FONT",          (0,0), (-1,-1), font,   8),
+            ("FONT",          (0,0), (-1, 0), font_b, 8),
+            ("BACKGROUND",    (0,0), (-1, 0), colors.HexColor("#2C2C6C")),
+            ("TEXTCOLOR",     (0,0), (-1, 0), colors.white),
+            ("GRID",          (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+            ("VALIGN",        (0,0), (-1,-1), "TOP"),
+            ("TOPPADDING",    (0,0), (-1,-1), 3),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+            ("LEFTPADDING",   (0,0), (-1,-1), 4),
+        ]))
+        story.append(exact_algo_tbl)
+        story.append(Spacer(1, 6*mm))
+
+        # 数式定義
+        story.append(Paragraph("■ 問題の数式定義", st["h2"]))
+        story.append(Spacer(1, 2*mm))
+        math_data = [
+            ["要素", "定義"],
+            ["決定変数",
+             "x[p, s, t] ∈ {0, 1}\n"
+             "奏者pを曲sのパートtに割り当てるなら1、そうでなければ0"],
+            ["制約 C1\n（必要数充足）",
+             "Σ_p x[p,s,t] = req[s,t]　　各パートの必要人数を満たす"],
+            ["制約 C2\n（1奏者1曲1パート）",
+             "Σ_t x[p,s,t] ≤ 1　　同じ奏者は同じ曲で複数パートを掛け持ちしない"],
+            ["制約 C3\n（欠席・NG除外）",
+             "x[p,s,t] = 0　（欠席者、またはNGを指定した組み合わせ）"],
+        ]
+        math_tbl = Table(
+            [[Paragraph(str(c), st["cellb_wht"] if i==0 else st["cell"])
+              for c in row]
+             for i, row in enumerate(math_data)],
+            colWidths=[32*mm, _tips_W - 32*mm],
+            repeatRows=1,
+        )
+        math_tbl.hAlign = "LEFT"
+        math_tbl.setStyle(TableStyle([
+            ("FONT",          (0,0), (-1,-1), font,   8),
+            ("FONT",          (0,0), (-1, 0), font_b, 8),
+            ("BACKGROUND",    (0,0), (-1, 0), colors.HexColor("#2C2C6C")),
+            ("TEXTCOLOR",     (0,0), (-1, 0), colors.white),
+            ("GRID",          (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+            ("VALIGN",        (0,0), (-1,-1), "TOP"),
+            ("TOPPADDING",    (0,0), (-1,-1), 3),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+            ("LEFTPADDING",   (0,0), (-1,-1), 4),
+            ("ROWBACKGROUNDS",(0,1), (-1,-1), [colors.white, colors.HexColor("#F5F5F5")]),
+        ]))
+        story.append(math_tbl)
+        story.append(Spacer(1, 6*mm))
+
+        # 候補ごとの目的関数
+        story.append(Paragraph("■ 各候補の目的関数（厳密解）", st["h2"]))
+        story.append(Spacer(1, 2*mm))
+        obj_data = [
+            ["候補", "目的関数", "高速モードとの対応"],
+            ["候補A\n第1希望率最大",
+             "max Σ (10000 + score[p,s,t]) × x[p,s,t]\n（第1希望の割当に10000点ボーナス）",
+             "完全一致\n第1希望率最大→同率なら総スコアで決定"],
+            ["候補B\n総スコア最大",
+             "max Σ score[p,s,t] × x[p,s,t]",
+             "完全一致"],
+            ["候補C\n公平性重視",
+             "max m × 1000 + Σ score × x\nただし m ≤ y_p（全奏者）\ny_p = 奏者pの総得点",
+             "完全一致\n最低スコア最大→同率なら総スコアで決定"],
+            ["候補D\n降り番均等",
+             "min 100 × (c_max − c_min) − Σ score × x\nc_max/c_min = 割当数の最大/最小",
+             "近似一致\n割当数の範囲最小→同率なら総スコアで決定"],
+        ]
+        obj_tbl = Table(
+            [[Paragraph(str(c), st["cellb_wht"] if i==0 else st["cell"])
+              for c in row]
+             for i, row in enumerate(obj_data)],
+            colWidths=[26*mm, 72*mm, _tips_W - 98*mm],
+            repeatRows=1,
+        )
+        obj_tbl.hAlign = "LEFT"
+        obj_tbl.setStyle(TableStyle([
+            ("FONT",          (0,0), (-1,-1), font,   8),
+            ("FONT",          (0,0), (-1, 0), font_b, 8),
+            ("BACKGROUND",    (0,0), (-1, 0), colors.HexColor("#2C2C6C")),
+            ("TEXTCOLOR",     (0,0), (-1, 0), colors.white),
+            ("GRID",          (0,0), (-1,-1), 0.5, colors.HexColor("#BBBBBB")),
+            ("VALIGN",        (0,0), (-1,-1), "TOP"),
+            ("TOPPADDING",    (0,0), (-1,-1), 3),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+            ("LEFTPADDING",   (0,0), (-1,-1), 4),
+            ("ROWBACKGROUNDS",(0,1), (-1,-1), [colors.white, colors.HexColor("#F5F5F5")]),
+        ]))
+        story.append(obj_tbl)
+        story.append(Spacer(1, 6*mm))
+
+        # 厳密解の使い方Tips
+        story.append(Paragraph("■ 厳密解モードの使い方", st["h2"]))
+        story.append(Spacer(1, 2*mm))
+        exact_tips = [
+            "厳密解は「数学的に最良の解」を保証する。高速モードの結果と比較することで、ヒューリスティックの精度を確認できる。",
+            "目的値（スコア合計など）が高速モードと一致すれば、高速モードが最適解を出せていた証拠。差がある場合は厳密解を採用する。",
+            "奏者数×パート定義数が200以下なら数秒以内で解ける。それより大きい場合は時間がかかることがある（上限60秒）。",
+            "候補Dの降り番均等は「割当数の範囲最小化」で近似しているため、高速モードの標準偏差最小化と完全一致しない場合がある。",
+            "制約（欠席・NG・必要数）は厳密解でも完全に守られる。フォールバック割当は発生しない（希望提出者のみが対象）。",
+        ]
+        for i, tip in enumerate(exact_tips, 1):
+            story.append(Paragraph(f"{i}. {tip}", st["body"]))
+            story.append(Spacer(1, 1.5*mm))
+
     doc.build(story)
     buf.seek(0)
     return buf.read()
