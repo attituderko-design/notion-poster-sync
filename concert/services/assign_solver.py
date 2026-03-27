@@ -281,13 +281,13 @@ def score_assignment(a: Assignment, pref_map: dict[tuple[str, str, str], Pref]) 
     p = pref_map.get(k)
     if not p:
         # 希望データ自体が存在しない = フォールバック割当
-        return 0.5
+        return SUPPLEMENTAL_SCORE
     if p.priority == NG_PRIORITY:
         return -9999.0
     if p.priority == 0:
         # 降り番希望 → 降り番 = 0点（割当がある場合はフォールバック扱いで0.5）
-        return 0.5 if a.source in ("fallback", "swap") else 0.0
-    base = SCORE_MAP.get(p.priority, 0.5)
+        return SUPPLEMENTAL_SCORE if a.source in ("fallback", "swap") else 0.0
+    base = SCORE_MAP.get(p.priority, SUPPLEMENTAL_SCORE)
     return base
 
 
@@ -977,10 +977,10 @@ def solve_exact(
     def _sc(p: str, s: str, t: str) -> float:
         pref = pref_map.get((p, s, t))
         if pref is None:
-            return 0.5
+            return SUPPLEMENTAL_SCORE
         if pref.priority <= 0:
             return 0.0
-        return SCORE_MAP.get(pref.priority, 0.5)
+        return SCORE_MAP.get(pref.priority, SUPPLEMENTAL_SCORE)
 
     var_index, n_x = _build_var_index(player_ids, song_ids, part_ids_by_song)
     if n_x == 0:
