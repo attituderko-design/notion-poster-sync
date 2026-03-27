@@ -444,7 +444,7 @@ def generate_assign_report(
         rows = [header]
         for r in results:
             vr = _v(r)
-            fb = vr.get("fallback_count", 0) + vr.get("swap_count", 0)
+            fb = vr.get("supplemental_count", vr.get("fallback_count", 0))
             desc = CANDIDATE_DESC.get(r["label"], "")
             rows.append([
                 r["label"].split("：")[0],
