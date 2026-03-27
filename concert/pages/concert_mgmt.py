@@ -1527,8 +1527,10 @@ def render(ctx: dict):
                     else:
                         st.error("❌ 保存に失敗しました。")
                 st.divider()
-                col_pdf, _ = st.columns([3, 5])
-                if col_pdf.button("📄 前日共有PDFを出力",
+                col_pdf, col_mail, _ = st.columns([2, 2, 4])
+
+                # ── PDF出力 ────────────────────────────────────
+                if col_pdf.button("📄 前日共有PDF",
                                   key=f"practice_pdf_{p_id_pdf}",
                                   use_container_width=True):
                     with st.spinner("PDF生成中..."):
@@ -1536,15 +1538,59 @@ def render(ctx: dict):
                             from concert.services.practice_report import generate_practice_report
                             pdf_bytes = generate_practice_report(ctx, p_id_pdf)
                             fname_pdf = f"練習前日共有_{label.replace('/', '-').replace(' ', '_')}.pdf"
-                            st.download_button(
-                                label="⬇️ ダウンロード",
-                                data=pdf_bytes,
-                                file_name=fname_pdf,
-                                mime="application/pdf",
-                                key=f"practice_pdf_dl_{p_id_pdf}",
-                            )
+                            st.session_state[f"practice_pdf_bytes_{p_id_pdf}"] = pdf_bytes
+                            st.session_state[f"practice_pdf_fname_{p_id_pdf}"] = fname_pdf
                         except Exception as e:
                             st.error(f"PDF生成に失敗しました: {e}")
+
+                _pdf_ready = st.session_state.get(f"practice_pdf_bytes_{p_id_pdf}")
+                if _pdf_ready:
+                    st.download_button(
+                        label="⬇️ ダウンロード",
+                        data=_pdf_ready,
+                        file_name=st.session_state.get(f"practice_pdf_fname_{p_id_pdf}", "practice.pdf"),
+                        mime="application/pdf",
+                        key=f"practice_pdf_dl_{p_id_pdf}",
+                    )
+
+                # ── メール一括送信 ──────────────────────────────
+                if col_mail.button("✉️ メール送信",
+                                   key=f"practice_mail_{p_id_pdf}",
+                                   use_container_width=True):
+                    with st.spinner("PDF生成・送信中..."):
+                        try:
+                            from concert.services.practice_report import generate_practice_report
+                            from concert.services.practice_report import generate_practice_report
+                            from concert.services.mailer import get_recipients_from_players, send_pdf_to_all
+                            _pdf = generate_practice_report(ctx, p_id_pdf)
+                            _fname = f"練習前日共有_{label.replace('/', '-').replace(' ', '_')}.pdf"
+                            _players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"])
+                            _recipients = get_recipients_from_players(ctx, _players)
+                            _with_email = [r for r in _recipients if r["email"]]
+                            _no_email   = [r for r in _recipients if not r["email"]]
+                            _concert_name = st.session_state.get("SELECTED_CONCERT_NAME", "演奏会")
+                            _subject = f"【ArtéMis HARMONIA】{label} 前日共有資料"
+                            _body = (
+                                "{name} さん" + "\n\n"
+                                + f"{_concert_name} の練習（{label}）前日共有資料をお送りします。\n"
+                                + "添付PDFをご確認ください。\n\nArtéMis HARMONIA"
+                            )
+                            result = send_pdf_to_all(
+                                ctx, _with_email, _subject, _body, _pdf, _fname
+                            )
+                            if result.sent:
+                                st.success(f"✅ {len(result.sent)}件送信完了")
+                            if _no_email:
+                                st.warning(f"メール未登録: {', '.join(r['name'] for r in _no_email)}")
+                            if result.failed:
+                                st.error(f"送信失敗: {', '.join(result.failed)}")
+                            if result.errors:
+                                for err in result.errors:
+                                    st.caption(f"⚠️ {err}")
+                        except Exception as e:
+                            import traceback
+                            st.error(f"送信エラー: {e}")
+                            st.code(traceback.format_exc())
 
     st.divider()
     with st.expander("📅 スケジュール管理", expanded=False):
