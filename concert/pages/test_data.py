@@ -288,13 +288,14 @@ def _seed_all(ctx) -> dict:
     tpref = _p(ctx, pref_db)
     pref_count = 0
     NA = "希望なし/降り番でも可"
-    # αP1 αP2 αP3 βP1 βP2 βP3 γP1 γP2 γP3（3曲×3パート=9列）
+    # αP1   αP2   αP3   βP1   βP2   βP3   γP1   γP2   γP3
     pref_matrix = {
-        0: ["第1希望","第2希望",NA,       "第3希望",NA,       "第1希望","第2希望",NA,       "第1希望"],  # 奏者A
-        1: [NA,       "第1希望","第2希望","第1希望","第3希望",NA,       NA,       "第1希望","第2希望"],  # 奏者B
-        2: ["第2希望","第1希望",NA,       NA,       "第1希望","第2希望","第1希望","第2希望",NA      ],  # 奏者C
-        3: [NA,       "第2希望","第1希望",NA,       "第1希望","第3希望","第3希望",NA,       "第1希望"],  # 奏者D
-        4: ["第3希望",NA,       "第1希望","第1希望",NA,       "第2希望",NA,       "第1希望","第3希望"],  # 奏者E
+        #        A独占  B/C競合 D/E競合 B/E競合 C/D競合 A独占  C独占  B独占  A独占
+        0: ["第1希望","第2希望", NA,    "第3希望", NA,    "第1希望","第2希望", NA,    "第1希望"],  # 奏者A
+        1: ["第2希望","第1希望","第2希望","第1希望","第3希望", NA,     NA,    "第1希望","第3希望"],  # 奏者B
+        2: [ NA,    "第1希望", NA,     NA,    "第1希望","第2希望","第1希望","第2希望", NA     ],  # 奏者C
+        3: ["第3希望", NA,    "第1希望", NA,    "第1希望", NA,    "第2希望","第3希望","第2希望"],  # 奏者D
+        4: ["第2希望", NA,    "第1希望","第1希望", NA,    "第3希望", NA,    "第2希望","第3希望"],  # 奏者E
     }
     for i, (pid, cast_id) in enumerate(zip(player_ids[:5], cast_ids[:5])):  # Perc奏者5名のみ
         for j, pd_id in enumerate(partdef_ids[:9]):
@@ -441,7 +442,8 @@ def _seed_all(ctx) -> dict:
         ]
         for order, stype, start, end, content in sched_items:
             props = {}
-            _put(ctx, props, tsched, SCHEDULE_KEY_KEYS,          f"{TEST_PREFIX} sched_{start}")
+            ctx["put_key_any"](props, tsched, SCHEDULE_KEY_KEYS,
+                               pr_id, start, prefix="sched")
             _put(ctx, props, tsched, SCHEDULE_PRACTICE_REL_KEYS, practice_ids[0])
             _put(ctx, props, tsched, SCHEDULE_TYPE_KEYS,         stype)
             _put(ctx, props, tsched, SCHEDULE_START_KEYS,        start)
@@ -502,32 +504,107 @@ def _delete_all_test_data(ctx) -> dict:
     if cast_count > 0:
         summary["PARTICIPANT"] = cast_count
 
-    db_map = [
-        ("CONCERT_DB_ATTENDANCE",        ["record_key", "タイトル", "PK"]),
-        ("CONCERT_DB_PREFERENCE",        ["record_key", "タイトル", "PK"]),
-        ("CONCERT_DB_PLAYER_INSTRUMENT", ["record_key", "タイトル", "PK名称"]),
-        ("CONCERT_DB_CONCERT_EXPENSE",   EXPENSE_KEY_KEYS),
-        ("CONCERT_DB_PART_DEFINITION",   PARTDEF_NAME_KEYS),
-        ("CONCERT_DB_PRACTICE",          PRACTICE_NAME_KEYS),
-        ("CONCERT_DB_SONG",              SONG_NAME_KEYS),
-        ("CONCERT_DB_CONCERT",           CONCERT_NAME_KEYS),
-        ("CONCERT_DB_INSTRUMENT",        INSTRUMENT_NAME_KEYS),
-        ("CONCERT_DB_PLAYER",            PLAYER_NAME_KEYS),
+    # 演奏会IDに紐づくレコードを全て削除
+    # （ATTENDANCE/PREFERENCE/PLAYER_INSTRUMENT等はキーに[TEST]がないためリレーション経由で削除）
+    if test_concert_ids:
+        # 練習IDを取得（ATTENDANCE/SCHEDULE/RENTALはPRACTICEリレーション経由）
+        test_practice_ids: set[str] = set()
+        prac_rows = ctx["query_all"](ctx.get("CONCERT_DB_PRACTICE",""), None)
+        for r in prac_rows:
+            if any(cid in ctx["extract_relation_ids_any"](r, PRACTICE_CONCERT_REL_KEYS)
+                   for cid in test_concert_ids):
+                test_practice_ids.add(r.get("id",""))
+
+        # 曲IDを取得（PART_DEFINITION/PREFERENCE紐づき）
+        test_song_ids: set[str] = set()
+        song_rows = ctx["query_all"](ctx.get("CONCERT_DB_SONG",""), None)
+        for r in song_rows:
+            if any(cid in ctx["extract_relation_ids_any"](r, SONG_CONCERT_REL_KEYS)
+                   for cid in test_concert_ids):
+                test_song_ids.add(r.get("id",""))
+
+        # ATTENDANCE（練習リレーション経由）
+        att_count = 0
+        for r in ctx["query_all"](ctx.get("CONCERT_DB_ATTENDANCE",""), None):
+            if any(pid in ctx["extract_relation_ids_any"](r, ATT_PRACTICE_REL_KEYS)
+                   for pid in test_practice_ids):
+                if _archive(ctx, r.get("id","")): att_count += 1
+        if att_count: summary["ATTENDANCE"] = att_count
+
+        # PREFERENCE（パート定義→曲→演奏会経由）
+        test_partdef_ids: set[str] = set()
+        for r in ctx["query_all"](ctx.get("CONCERT_DB_PART_DEFINITION",""), None):
+            if any(sid in ctx["extract_relation_ids_any"](r, PARTDEF_SONG_REL_KEYS)
+                   for sid in test_song_ids):
+                test_partdef_ids.add(r.get("id",""))
+
+        pref_count = 0
+        for r in ctx["query_all"](ctx.get("CONCERT_DB_PREFERENCE",""), None):
+            if any(pid in ctx["extract_relation_ids_any"](r, PREF_PART_REL_KEYS)
+                   for pid in test_partdef_ids):
+                if _archive(ctx, r.get("id","")): pref_count += 1
+        if pref_count: summary["PREFERENCE"] = pref_count
+
+        # PLAYER_INSTRUMENT（演奏会リレーション経由）
+        pi_count2 = 0
+        for r in ctx["query_all"](ctx.get("CONCERT_DB_PLAYER_INSTRUMENT",""), None):
+            if any(cid in ctx["extract_relation_ids_any"](r, PI_CONCERT_REL_KEYS)
+                   for cid in test_concert_ids):
+                if _archive(ctx, r.get("id","")): pi_count2 += 1
+        if pi_count2: summary["PLAYER_INSTRUMENT"] = pi_count2
+
+        # RENTAL（練習リレーション経由）
+        rent_count = 0
+        for r in ctx["query_all"](ctx.get("CONCERT_DB_RENTAL",""), None):
+            if any(pid in ctx["extract_relation_ids_any"](r, RENTAL_PRACTICE_REL_KEYS)
+                   for pid in test_practice_ids):
+                if _archive(ctx, r.get("id","")): rent_count += 1
+        if rent_count: summary["RENTAL"] = rent_count
+
+        # SCHEDULE（練習リレーション経由）
+        sched_count = 0
+        for r in ctx["query_all"](ctx.get("CONCERT_DB_SCHEDULE",""), None):
+            if any(pid in ctx["extract_relation_ids_any"](r, SCHEDULE_PRACTICE_REL_KEYS)
+                   for pid in test_practice_ids):
+                if _archive(ctx, r.get("id","")): sched_count += 1
+        if sched_count: summary["SCHEDULE"] = sched_count
+
+        # PART_DEFINITION（曲リレーション経由）
+        pd_count = 0
+        for r in ctx["query_all"](ctx.get("CONCERT_DB_PART_DEFINITION",""), None):
+            if any(sid in ctx["extract_relation_ids_any"](r, PARTDEF_SONG_REL_KEYS)
+                   for sid in test_song_ids):
+                if _archive(ctx, r.get("id","")): pd_count += 1
+        if pd_count: summary["PART_DEFINITION"] = pd_count
+
+        # CONCERT_EXPENSE（演奏会リレーション経由）
+        exp_count = 0
+        for r in ctx["query_all"](ctx.get("CONCERT_DB_CONCERT_EXPENSE",""), None):
+            if any(cid in ctx["extract_relation_ids_any"](r, EXPENSE_CONCERT_REL_KEYS)
+                   for cid in test_concert_ids):
+                if _archive(ctx, r.get("id","")): exp_count += 1
+        if exp_count: summary["CONCERT_EXPENSE"] = exp_count
+
+    # [TEST]プレフィックスで検索できるDB（タイトルにプレフィックスが付くもの）
+    prefix_db_map = [
+        ("CONCERT_DB_PRACTICE",  PRACTICE_NAME_KEYS),
+        ("CONCERT_DB_SONG",      SONG_NAME_KEYS),
+        ("CONCERT_DB_CONCERT",   CONCERT_NAME_KEYS),
+        ("CONCERT_DB_INSTRUMENT",INSTRUMENT_NAME_KEYS),
+        ("CONCERT_DB_PLAYER",    PLAYER_NAME_KEYS),
     ]
-    for db_key, title_keys in db_map:
+    for db_key, title_keys in prefix_db_map:
         db_id = ctx.get(db_key, "")
-        if not db_id:
-            continue
-        rows = ctx["query_all"](db_id, None)
+        if not db_id: continue
         count = 0
-        for r in rows:
+        for r in ctx["query_all"](db_id, None):
             name = (ctx["extract_prop_text_any"](r, title_keys) or
                     ctx["extract_title"](r) or "")
             if name.startswith(TEST_PREFIX):
-                if _archive(ctx, r.get("id", "")):
-                    count += 1
+                if _archive(ctx, r.get("id","")): count += 1
         if count > 0:
             summary[db_key.replace("CONCERT_DB_", "")] = count
+
     return summary
 
 

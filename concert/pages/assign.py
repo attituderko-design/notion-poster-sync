@@ -721,10 +721,11 @@ def _render_solver_tab(ctx: dict):
         with st.spinner("アルゴリズム実行中..."):
             try:
                 from concert.services.assign_solver import (
-                    greedy_solve, local_search, _calc_stats,
+                    greedy_solve, local_search, _calc_stats, _build_absent_set,
                     _first_choice_rate, _total_score,
                     _min_player_score, _bring_count, _rest_std,
                 )
+                absent   = _build_absent_set(ctx, concert_id)
                 prefs, requirements = _build_solver_input(ctx, concert_id, songs, players)
                 if not prefs:
                     st.warning("希望データがありません。先に希望入力を行ってください。")
@@ -733,16 +734,31 @@ def _render_solver_tab(ctx: dict):
                     st.warning("必要楽器が登録されていません。楽曲・楽器管理から登録してください。")
                     return
 
-                all_pids = sorted({p.player_id for p in prefs})
+                # 参加者DB全員リスト（希望未提出も含む）をfallback候補に
+                # ※ all_pidsより先に定義する必要がある
+                _all_cast = _load_participants(ctx, concert_id)
+                _part_to_pl = {}
+                for _r in _all_cast:
+                    _pids = ctx["extract_relation_ids_any"](_r, PARTICIPANT_PLAYER_REL_KEYS)
+                    if _pids:
+                        _pid = _pids[0]
+                        _part_to_pl[_pid] = _player_name(
+                            next((p for p in players if p.get("id","") == _pid), {}), ctx
+                        )
+                _all_participants = sorted(_part_to_pl.items(), key=lambda x: x[1])
+
+                # 公平性・降り番評価は参加者DB全員（希望未提出も含む）を対象に
+                all_pids = sorted({pid for pid, _ in _all_participants} |
+                                  {p.player_id for p in prefs})
                 pref_map = {(p.player_id, p.song_id, p.part_id): p for p in prefs}
-                base     = greedy_solve(prefs, requirements, set())
+                base     = greedy_solve(prefs, requirements, absent, _all_participants)
 
                 def obj_a(sol):
                     return _first_choice_rate(sol, pref_map) * 10000 + _total_score(sol, pref_map)
                 def obj_b(sol):
                     return _total_score(sol, pref_map)
                 def obj_c(sol):
-                    return _min_player_score(sol, pref_map) * 1000 + _total_score(sol, pref_map)
+                    return _min_player_score(sol, pref_map, all_pids) * 1000 + _total_score(sol, pref_map)
                 def obj_d(sol):
                     return int((1000 - _rest_std(sol, all_pids) * 100) * 100) + _total_score(sol, pref_map)
 
@@ -754,7 +770,8 @@ def _render_solver_tab(ctx: dict):
                 ]
                 results = []
                 for label, fn in variants:
-                    sol   = local_search(base, pref_map, fn, max_iter=250)
+                    sol   = local_search(base, pref_map, fn, max_iter=250,
+                                           absent_players=absent, all_player_ids=all_pids)
                     stats = _calc_stats(sol, pref_map, all_pids)
                     results.append({
                         "label":       label,
@@ -1063,15 +1080,19 @@ def _render_player_score_html(scores: dict, fb_counts: dict, names: dict,
 
 
 def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: dict):
-    """採用した割当をPlayerInstrumentの担当フラグに書き込む。"""
+    """採用した割当をPlayerInstrumentの担当フラグに書き込む。
+    レコードの一意キー：演奏会 + 奏者 + パート定義（曲+楽器+パートを包含）
+    同一奏者が同一楽器で複数曲を担当する場合も正しく区別できる。
+    """
     db_id    = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
     type_map = ctx["get_prop_types"](db_id)
     if not type_map:
         st.error("PlayerInstrument DBのプロパティ取得に失敗しました。")
         return
 
-    # 書き込み前に既存の担当フラグを全リセット（前回の採用結果を消す）
     concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+
+    # 書き込み前に既存の担当フラグを全リセット
     if concert_id:
         existing = ctx["query_all"](db_id)
         with st.spinner("既存の担当フラグをリセット中..."):
@@ -1086,39 +1107,58 @@ def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: d
                 ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{r.get('id','')}",
                                    json={"properties": props})
 
+    # 既存レコードを「奏者+パート定義」で引ける辞書を構築
+    all_pi = ctx["query_all"](db_id)
+    # key: (player_id, part_id) → row
+    existing_map: dict[tuple[str, str], dict] = {}
+    for r in all_pi:
+        c_ids = ctx["extract_relation_ids_any"](r, PI_CONCERT_REL_KEYS)
+        if concert_id and concert_id not in (c_ids or []):
+            continue
+        p_ids   = ctx["extract_relation_ids_any"](r, PI_PLAYER_REL_KEYS)
+        pt_ids  = ctx["extract_relation_ids_any"](r, PI_PART_REL_KEYS)
+        if p_ids and pt_ids:
+            existing_map[(p_ids[0], pt_ids[0])] = r
+
     ok = fail = 0
     with st.spinner("Notionに書き込み中..."):
         for a in assignments:
-            # 奏者×楽器種別×演奏会でPlayerInstrumentレコードを特定
-            t_player = ctx["find_prop_name"](type_map, PI_PLAYER_REL_KEYS)
-            t_inst   = ctx["find_prop_name"](type_map, PI_INST_REL_KEYS)
-            filters  = []
-            if t_player: filters.append({"property": t_player, "relation": {"contains": a["player_id"]}})
-            if t_inst:   filters.append({"property": t_inst,   "relation": {"contains": a["instrument_id"]}})
-
-            pi_rows = ctx["query_all"](db_id, {"filter": {"and": filters}} if filters else None)
+            player_id = a["player_id"]
+            part_id   = a["part_id"]
+            song_id   = a.get("song_id", "")
+            inst_id   = a.get("instrument_id", "")
 
             props: dict = {}
             ctx["put_prop_any"](props, type_map, PI_ASSIGN_KEYS, True)
             ctx["put_prop_any"](props, type_map, PI_NOTE_KEYS, a.get("part_name", ""))
 
-            if pi_rows:
-                rid = pi_rows[0].get("id", "")
+            existing_row = existing_map.get((player_id, part_id))
+            if existing_row:
+                # 既存レコードを更新
+                rid = existing_row.get("id", "")
                 res = ctx["api_request"]("patch",
                                          f"https://api.notion.com/v1/pages/{rid}",
                                          json={"properties": props})
             else:
-                # レコードがなければ新規作成
+                # 新規作成：奏者+パート定義+演奏会+楽器+演奏曲を保存
+                ctx["put_key_any"](props, type_map, ASSIGN_KEY_KEYS,
+                                   concert_id, player_id, part_id, prefix="assign")
                 ctx["put_prop_any"](props, type_map, PI_RECORD_KEYS,
                                     f"{a['player_name']} × {a['song_name']} × {a['part_name']}")
-                ctx["put_prop_any"](props, type_map, PI_PLAYER_REL_KEYS, a["player_id"])
-                ctx["put_prop_any"](props, type_map, PI_INST_REL_KEYS,   a["instrument_id"])
-                ctx["put_prop_any"](props, type_map, PI_CONCERT_REL_KEYS,
-                                    (ctx.get("SELECTED_CONCERT_ID") or ""))
+                ctx["put_prop_any"](props, type_map, PI_PLAYER_REL_KEYS,  player_id)
+                ctx["put_prop_any"](props, type_map, PI_INST_REL_KEYS,    inst_id)
+                ctx["put_prop_any"](props, type_map, PI_CONCERT_REL_KEYS, concert_id)
+                ctx["put_prop_any"](props, type_map, PI_PART_REL_KEYS,    part_id)
+                ctx["put_prop_any"](props, type_map, PI_SONG_REL_KEYS,    song_id)
                 res = ctx["api_request"]("post",
                                          "https://api.notion.com/v1/pages",
                                          json={"parent": {"database_id": db_id},
                                                "properties": props})
+                if res and res.status_code == 200:
+                    # 新規作成したレコードをexisting_mapに追加
+                    new_id = res.json().get("id", "")
+                    if new_id:
+                        existing_map[(player_id, part_id)] = {"id": new_id}
             if res and res.status_code == 200:
                 ok += 1
             else:
@@ -1187,7 +1227,12 @@ def _render_result_tab(ctx: dict):
         # リセットボタン
         if st.button("🗑️ 全担当フラグをリセット", key="reset_assign", type="secondary"):
             with st.spinner("リセット中..."):
-                all_rows = [r for r in pi_rows if ext_any(r, PI_ASSIGN_KEYS) == "True"]
+                # 必ずこの演奏会のレコードのみに絞る
+                all_rows = [
+                    r for r in pi_rows
+                    if ext_any(r, PI_ASSIGN_KEYS) == "True"
+                    and (not concert_id or concert_id in ext_rel(r, PI_CONCERT_REL_KEYS))
+                ]
                 ok = fail = 0
                 for r in all_rows:
                     rid = r.get("id","")
@@ -1212,22 +1257,33 @@ def _render_result_tab(ctx: dict):
             partdef_to_song[pdid] = s_ids[0]
 
     # 曲ごとにまとめて表示＋手動修正フォーム
+    # PI_SONG_REL_KEYSに演奏曲が保存されているので直接参照
+    # フォールバック：パート定義経由で楽器→曲を特定
     by_song: dict[str, list] = defaultdict(list)
     for r in assigned_rows:
-        # PLAYER_INSTRUMENTの楽器からPART_DEFINITIONを経由して曲を特定
-        # 楽曲フィールドが廃止されたのでパート定義経由で判断
-        i_ids = ext_rel(r, PI_INST_REL_KEYS)
-        # 楽器IDが演奏会の曲のどれかに属するか確認
-        matched_sid = ""
-        for sid in song_id_set:
-            for pd in pd_all:
-                pd_sids = ctx["extract_relation_ids_any"](pd, PARTDEF_SONG_REL_KEYS)
-                pd_iids = ctx["extract_relation_ids_any"](pd, PARTDEF_INST_REL_KEYS)
-                if sid in pd_sids and i_ids and i_ids[0] in pd_iids:
-                    matched_sid = sid
+        # 優先1: 演奏曲リレーションから直接取得
+        s_ids = ext_rel(r, PI_SONG_REL_KEYS)
+        matched_sid = s_ids[0] if s_ids and s_ids[0] in song_id_set else ""
+
+        # フォールバック: パート定義リレーション経由
+        if not matched_sid:
+            pt_ids = ext_rel(r, PI_PART_REL_KEYS)
+            if pt_ids:
+                matched_sid = partdef_to_song.get(pt_ids[0], "")
+
+        # 最終フォールバック: 楽器→パート定義→曲（旧ロジック、最も精度が低い）
+        if not matched_sid:
+            i_ids = ext_rel(r, PI_INST_REL_KEYS)
+            for sid in song_id_set:
+                for pd in pd_all:
+                    pd_sids = ctx["extract_relation_ids_any"](pd, PARTDEF_SONG_REL_KEYS)
+                    pd_iids = ctx["extract_relation_ids_any"](pd, PARTDEF_INST_REL_KEYS)
+                    if sid in pd_sids and i_ids and i_ids[0] in pd_iids:
+                        matched_sid = sid
+                        break
+                if matched_sid:
                     break
-            if matched_sid:
-                break
+
         if matched_sid:
             by_song[matched_sid].append(r)
 
