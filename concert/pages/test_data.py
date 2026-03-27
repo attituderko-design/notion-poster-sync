@@ -276,6 +276,11 @@ def _seed_all(ctx) -> dict:
     # ── 9. PLAYER_INSTRUMENT ──────────────────────────────
     pi_db = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
     tpi = _p(ctx, pi_db)
+    # デバッグ：フィールド一覧を確認
+    import streamlit as _st
+    _participant_field = ctx["find_prop_name"](tpi, PI_PARTICIPANT_REL_KEYS)
+    _st.caption(f"🔍 PI_PARTICIPANT_REL_KEYS検索結果: '{_participant_field}' (候補: {PI_PARTICIPANT_REL_KEYS})")
+    _st.caption(f"🔍 tpiのrelationフィールド: {[k for k,v in (tpi or {}).items() if v=='relation']}")
     pi_count = 0
     for i, pid in enumerate(player_ids[:8]):  # 全8名分
         cast_id_pi = cast_ids[i] if i < len(cast_ids) else ""
