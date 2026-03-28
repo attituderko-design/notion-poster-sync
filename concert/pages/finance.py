@@ -4,6 +4,7 @@ concert/pages/finance.py
 """
 import streamlit as st
 import pandas as pd
+import math
 from concert.services.keys import (
     CONCERT_NAME_KEYS, CONCERT_CONFIRMED_FEE_KEYS,
     PRACTICE_CONCERT_REL_KEYS,
