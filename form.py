@@ -7,11 +7,6 @@ st.set_page_config(
     layout="wide",
 )
 
-st.markdown(
-    "<style>div.block-container{padding-top:1.0rem;}</style>",
-    unsafe_allow_html=True,
-)
-
 try:
     from concert.pages.form import verify_form_token, render_form
     from concert.services.notion_client import build_concert_ctx

@@ -38,7 +38,7 @@ def _render_brand_logo() -> None:
     """フォーム上部ロゴを安全に1枚だけ表示。"""
     logo_path = Path(__file__).resolve().parents[2] / "assets" / "logo.png"
     logo_src = str(logo_path) if logo_path.exists() else "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/logo.png"
-    st.image(logo_src, width=360)
+    st.image(logo_src, width=320)
 
 # ── マジックコード認証 ──────────────────────────────────────────
 
