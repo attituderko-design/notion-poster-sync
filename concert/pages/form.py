@@ -497,6 +497,27 @@ def render_form(ctx, concert_id: str):
 
     # form.py を直接 entrypoint にしていない場合でもロゴを表示
     _render_brand_logo()
+    st.markdown(
+        """
+        <div style="
+            margin: .35rem 0 1.0rem 0;
+            font-size: 0.95rem;
+            line-height: 1.7;
+            color: #BFC7D5;
+        ">
+            <span style="font-weight:700; color:#ffffff;">HARMONIA</span> :
+            <span style="color:#d14b4b; font-weight:700;">H</span>armonized
+            <span style="color:#d14b4b; font-weight:700;">A</span>ssignment and
+            <span style="color:#d14b4b; font-weight:700;">R</span>esource
+            <span style="color:#d14b4b; font-weight:700;">M</span>anagement for
+            <span style="color:#d14b4b; font-weight:700;">O</span>rchestral
+            <span style="color:#d14b4b; font-weight:700;">N</span>eeds,
+            <span style="color:#d14b4b; font-weight:700;">I</span>nstruments, and
+            <span style="color:#d14b4b; font-weight:700;">A</span>ttendance
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # 初回のみデータ一括取得
     if not st.session_state.get("form_data_loaded"):
