@@ -1,6 +1,8 @@
 import re
 import json
 import tomllib
+import hashlib
+import hmac
 from collections.abc import Mapping
 import requests
 import time
@@ -66,6 +68,12 @@ RAKUTEN_APP_ID = st.secrets.get("RAKUTEN_APP_ID", "")
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"]
 IGDB_CLIENT_ID     = st.secrets.get("IGDB_CLIENT_ID", "")
 IGDB_CLIENT_SECRET = st.secrets.get("IGDB_CLIENT_SECRET", "")
+
+# ── Admin Authentication（app.py 側のみ）─────────────────────
+ADMIN_AUTH_ENABLED = str(st.secrets.get("ADMIN_AUTH_ENABLED", "true")).strip().lower() in {"1", "true", "yes", "on"}
+ADMIN_USERNAME = str(st.secrets.get("ADMIN_USERNAME", "")).strip()
+ADMIN_PASSWORD = str(st.secrets.get("ADMIN_PASSWORD", ""))
+ADMIN_PASSWORD_SHA256 = str(st.secrets.get("ADMIN_PASSWORD_SHA256", "")).strip().lower()
 
 NOTION_HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -8285,6 +8293,47 @@ st.caption(
 )
 st.caption("MUSE collects. ATLAS archives. APOLLO performs. HARMONIA orchestrates.")
 st.caption(f"v{APP_VERSION}")
+
+# ── 管理者認証（admin app専用）───────────────────────────────
+def _verify_admin_password(raw_password: str) -> bool:
+    pw = str(raw_password or "")
+    if ADMIN_PASSWORD_SHA256:
+        digest = hashlib.sha256(pw.encode("utf-8")).hexdigest().lower()
+        return hmac.compare_digest(digest, ADMIN_PASSWORD_SHA256)
+    return hmac.compare_digest(pw, ADMIN_PASSWORD)
+
+
+def _require_admin_auth():
+    if not ADMIN_AUTH_ENABLED:
+        return
+    if not ADMIN_USERNAME or (not ADMIN_PASSWORD and not ADMIN_PASSWORD_SHA256):
+        st.error("管理者認証の設定が不足しています。`ADMIN_USERNAME` と `ADMIN_PASSWORD`（または `ADMIN_PASSWORD_SHA256`）をsecretsに設定してください。")
+        st.stop()
+
+    if st.session_state.get("admin_authed", False):
+        with st.sidebar:
+            st.caption(f"管理者: {ADMIN_USERNAME}")
+            if st.button("ログアウト", key="admin_logout_btn"):
+                st.session_state["admin_authed"] = False
+                st.rerun()
+        return
+
+    st.subheader("管理者ログイン")
+    with st.form("admin_login_form", clear_on_submit=False):
+        in_user = st.text_input("管理者ID", key="admin_login_id")
+        in_pw = st.text_input("パスワード", type="password", key="admin_login_pw")
+        submitted = st.form_submit_button("ログイン")
+    if submitted:
+        ok_user = hmac.compare_digest((in_user or "").strip(), ADMIN_USERNAME)
+        ok_pw = _verify_admin_password(in_pw)
+        if ok_user and ok_pw:
+            st.session_state["admin_authed"] = True
+            st.rerun()
+        st.error("IDまたはパスワードが正しくありません。")
+    st.stop()
+
+
+_require_admin_auth()
 
 # ============================================================
 # システム切替（通常 / Concert）
