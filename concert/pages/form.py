@@ -207,16 +207,16 @@ def _get_form_cast_and_att_map(ctx, concert_id: str, player_id: str) -> tuple[st
     if not t_att:
         return cast_id, att_map
 
-    player_rel_key = _find_rel(
-        t_att,
-        ATT_PLAYER_REL_KEYS,
-        ["奏者", "出演者", "participant", "player"],
-    )
     practice_rel_key = _find_rel(
         t_att,
         ATT_PRACTICE_REL_KEYS,
         ["練習", "practice"],
-        exclude={player_rel_key} if player_rel_key else set(),
+    )
+    player_rel_key = _find_rel(
+        t_att,
+        ATT_PLAYER_REL_KEYS,
+        ["奏者", "出演者", "participant", "player"],
+        exclude={practice_rel_key} if practice_rel_key else set(),
     )
     status_key = ctx["find_prop_name"](t_att, ATT_STATUS_KEYS)
     note_key = ctx["find_prop_name"](t_att, ATT_NOTE_KEYS)
@@ -239,6 +239,19 @@ def _get_form_cast_and_att_map(ctx, concert_id: str, player_id: str) -> tuple[st
                 "status": ext_txt(row, [status_key]) or "未回答",
                 "comment": ext_txt(row, [note_key]) or "",
             }
+
+    if st.query_params.get("debug") == "1":
+        st.session_state["form_att_debug"] = {
+            "concert_id": concert_id,
+            "player_id": player_id,
+            "cast_id": cast_id,
+            "player_rel_key": player_rel_key,
+            "practice_rel_key": practice_rel_key,
+            "status_key": status_key,
+            "note_key": note_key,
+            "att_map_size": len(att_map),
+            "att_map": att_map,
+        }
 
     return cast_id, att_map
 
@@ -517,6 +530,9 @@ def render_form(ctx, concert_id: str):
             f"{ext(s, SONG_NAME_KEYS) or ''}（{ext(s, SONG_CREATOR_KEYS) or ''}）".strip("（）")
             for s in songs
         ))
+    if st.query_params.get("debug") == "1" and st.session_state.get("form_att_debug"):
+        with st.expander("🔧 出欠読込デバッグ", expanded=False):
+            st.json(st.session_state.get("form_att_debug"))
     st.divider()
 
     step = st.session_state.get("form_step", 1)
@@ -707,7 +723,8 @@ def render_form(ctx, concert_id: str):
             my_part = ""
             for row in participant_rows:
                 p_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
-                if pid in p_ids:
+                c_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_CONCERT_REL_KEYS)
+                if pid in p_ids and concert_id in c_ids:
                     my_part = ext(row, PARTICIPANT_PART_KEYS) or ""
                     break
             if not my_part:
