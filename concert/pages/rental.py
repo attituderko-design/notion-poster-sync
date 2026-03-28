@@ -602,15 +602,24 @@ def _render_estimate_tab(ctx: dict, tax_rate_percent: float):
                 note_v      = str(row.get("備考") or "").strip()
 
                 is_instrument = (cost_type_v == "楽器レンタル")
-                if is_instrument and not inst_sel_v:
-                    skip_n += 1
-                    continue
-                if not is_instrument and not item_name_v:
-                    skip_n += 1
-                    continue
 
                 inst_id_v   = inst_opts.get(inst_sel_v, "") if is_instrument else ""
                 existing_id = row_ids[idx] if idx < len(row_ids) else ""
+
+                # 既存行の更新は費用種別に関係なく必ず通す（ここが今回の不具合対策）
+                # 新規行のみ、実質空行はスキップする
+                if not existing_id:
+                    has_any_payload = any([
+                        bool(inst_sel_v),
+                        bool(item_name_v),
+                        bool(vendor_v),
+                        bool(note_v),
+                        int(qty_v) > 0,
+                        int(price_v) > 0,
+                    ])
+                    if not has_any_payload:
+                        skip_n += 1
+                        continue
 
                 if existing_id:
                     ok = _update_rental(
