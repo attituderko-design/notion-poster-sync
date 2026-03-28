@@ -11,6 +11,7 @@ st.markdown(
     "<style>div.block-container{padding-top:1.0rem;}</style>",
     unsafe_allow_html=True,
 )
+st.image("assets/logo.png", width=320)
 st.title("ArtéMis HARMONIA")
 st.caption("奏者入力フォーム")
 

@@ -47,7 +47,7 @@ ATT_RECORD_KEYS           = ["attendance_key", "タイトル", "PK出欠"]
 ATT_PLAYER_REL_KEYS       = ["演奏会参加者", "奏者", "出演者", "FK奏者"]
 ATT_PRACTICE_REL_KEYS     = ["練習", "FK練習"]
 ATT_STATUS_KEYS           = ["参加可否", "出欠", "ステータス", "Status"]
-ATT_NOTE_KEYS             = ["備考", "メモ"]
+ATT_NOTE_KEYS             = ["コメント", "備考", "メモ"]
 ATTENDANCE_KEY_KEYS       = ["attendance_key", "AttendanceKey", "出欠キー", "PK出欠キー"]
 
 # ── APOLLO（演奏曲）DB ───────────────────────────────────────

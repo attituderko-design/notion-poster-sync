@@ -20,7 +20,7 @@ from concert.services.keys import (
     INSTRUMENT_NAME_KEYS,
     PLAYER_NAME_KEYS, PLAYER_HN_KEYS, PLAYER_EMAIL_KEYS, PLAYER_RECEIVE_KEYS,
     PLAYER_PHONE_KEYS, PLAYER_LINE_KEYS,
-    ATTENDANCE_KEY_KEYS, ATT_RECORD_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
+    ATTENDANCE_KEY_KEYS, ATT_RECORD_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS, ATT_NOTE_KEYS,
     PI_PARTICIPANT_REL_KEYS, PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
     PREFERENCE_KEY_KEYS, PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     CONCERT_CONFIRMED_FEE_KEYS,
@@ -188,7 +188,7 @@ def _find_rel(type_map: dict, candidates: list, keywords: list,
 
 def _submit_all(ctx, concert_id: str, concert_name: str,
                 player_id: str, player_name: str,
-                att: dict, pref: dict, own: dict) -> tuple[int, list[str], dict]:
+                att: dict, att_comment: dict, pref: dict, own: dict) -> tuple[int, list[str], dict]:
     """全データをNotionに送信。(成功件数, エラーリスト, デバッグ情報)を返す。"""
     ext_rel  = ctx["extract_relation_ids_any"]
     ok_n     = 0
@@ -263,6 +263,7 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                                      ["奏者", "出演者", "participant", "player"],
                                      exclude={practice_rel_key} if practice_rel_key else set())
         status_key = ctx["find_prop_name"](t_att, ATT_STATUS_KEYS)
+        note_key = ctx["find_prop_name"](t_att, ATT_NOTE_KEYS)
         rel_target = cast_id if cast_id else player_id
 
         att_ids: list[str] = []
@@ -288,6 +289,9 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
                 ctx["put_prop"](props, t_att, practice_rel_key, pr_id)
             if status_key:
                 ctx["put_prop"](props, t_att, status_key, status)
+            if note_key:
+                cmt = (att_comment.get(pr_id, "") or "").strip()
+                ctx["put_prop"](props, t_att, note_key, cmt)
             if existing_id:
                 res = ctx["api_request"]("patch",
                     f"https://api.notion.com/v1/pages/{existing_id}",
@@ -438,7 +442,10 @@ def render_form(ctx, concert_id: str):
     c_conductor = ext(concert, CONCERT_CONDUCTOR_KEYS) or ""
     c_soloist   = ext(concert, CONCERT_SOLOIST_KEYS) or ""
 
-    st.title(f"🎵 {c_name}")
+    st.markdown(
+        f"<p style='font-size:1.28rem;font-weight:700;margin:0 0 .25rem 0;'>🎵 {c_name} 情報入力フォーム</p>",
+        unsafe_allow_html=True,
+    )
     if c_date:      st.caption(f"📅 本番日：{c_date}")
     if c_venue:     st.caption(f"📍 会場：{c_venue}")
     if c_conductor: st.caption(f"🎼 指揮：{c_conductor}")
@@ -624,11 +631,18 @@ def render_form(ctx, concert_id: str):
             if practices:
                 with st.expander("現在の出欠登録状況", expanded=True):
                     att_rows = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], None)
+                    participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+                    cast_ids: set[str] = set()
+                    for row in participant_rows:
+                        p_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+                        c_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_CONCERT_REL_KEYS)
+                        if pid in p_ids and concert_id in c_ids:
+                            cast_ids.add(row.get("id", ""))
                     p_to_att = {}
                     for a in att_rows:
                         p_ids = ctx["extract_relation_ids_any"](a, ATT_PLAYER_REL_KEYS)
                         pr_ids = ctx["extract_relation_ids_any"](a, ATT_PRACTICE_REL_KEYS)
-                        if pid in p_ids and pr_ids:
+                        if pr_ids and (pid in p_ids or bool(cast_ids.intersection(set(p_ids)))):
                             p_to_att[pr_ids[0]] = ext(a, ATT_STATUS_KEYS) or "未回答"
                     for pr in practices:
                         pr_id   = pr.get("id","")
@@ -655,6 +669,7 @@ def render_form(ctx, concert_id: str):
                          use_container_width=True, key="existing_to_step2"):
                 st.session_state.update({
                     "form_att":  {},
+                    "form_att_comment": {},
                     "form_pref": {},
                     "form_own":  {},
                     "form_step": 2,
@@ -752,6 +767,7 @@ def render_form(ctx, concert_id: str):
                 "form_player_name": name,
                 "form_player_part": actual_part,
                 "form_att":  {},
+                "form_att_comment": {},
                 "form_pref": {},
                 "form_own":  {},
                 "form_step": 2,
@@ -777,8 +793,31 @@ def render_form(ctx, concert_id: str):
                 st.rerun()
             return
 
+        existing_att: dict[str, dict] = {}
+        current_pid = st.session_state.get("form_player_id", "")
+        if current_pid:
+            participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+            cast_ids: set[str] = set()
+            for row in participant_rows:
+                p_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+                c_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_CONCERT_REL_KEYS)
+                if current_pid in p_ids and concert_id in c_ids:
+                    cast_ids.add(row.get("id", ""))
+            att_rows = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], None)
+            for a in att_rows:
+                p_ids = ctx["extract_relation_ids_any"](a, ATT_PLAYER_REL_KEYS)
+                pr_ids = ctx["extract_relation_ids_any"](a, ATT_PRACTICE_REL_KEYS)
+                if not pr_ids:
+                    continue
+                if current_pid in p_ids or bool(cast_ids.intersection(set(p_ids))):
+                    existing_att[pr_ids[0]] = {
+                        "status": ext(a, ATT_STATUS_KEYS) or "△",
+                        "comment": ext(a, ATT_NOTE_KEYS) or "",
+                    }
+
         with st.form("step2"):
             att: dict[str, str] = {}
+            att_comment: dict[str, str] = {}
             for p in practices:
                 pr_id    = p.get("id","")
                 pr_name  = ext(p, PRACTICE_NAME_KEYS) or pr_id
@@ -790,14 +829,23 @@ def render_form(ctx, concert_id: str):
                 if time_disp: label += f" {time_disp}"
                 if pr_venue:  label += f"　📍 {pr_venue}"
                 st.markdown(label)
-                val = st.radio("　", ATT_OPTS, index=1, horizontal=True,
+                cur = existing_att.get(pr_id, {})
+                cur_status = cur.get("status", "△")
+                idx = ATT_OPTS.index(cur_status) if cur_status in ATT_OPTS else 1
+                val = st.radio("　", ATT_OPTS, index=idx, horizontal=True,
                                key=f"att_{pr_id}", label_visibility="collapsed")
                 att[pr_id] = val
+                att_comment[pr_id] = st.text_input(
+                    "コメント（任意）",
+                    value=cur.get("comment", ""),
+                    key=f"att_note_{pr_id}",
+                )
                 st.divider()
             submitted = st.form_submit_button("次へ →", type="primary",
                                               use_container_width=True)
         if submitted:
             st.session_state["form_att"]  = att
+            st.session_state["form_att_comment"] = att_comment
             st.session_state["form_step"] = 3 if IS_PERC(part) else 5
             st.rerun()
 
@@ -872,6 +920,7 @@ def render_form(ctx, concert_id: str):
         player_name  = st.session_state.get("form_player_name","")
         part         = st.session_state.get("form_player_part","")
         att          = st.session_state.get("form_att",  {})
+        att_comment  = st.session_state.get("form_att_comment", {})
         pref         = st.session_state.get("form_pref", {})
         own          = st.session_state.get("form_own",  {})
         concert_name = ext(concert, CONCERT_NAME_KEYS) or ""
@@ -884,6 +933,9 @@ def render_form(ctx, concert_id: str):
                 prac_map = {p.get("id",""): ext(p, PRACTICE_NAME_KEYS) or "" for p in practices}
                 for pr_id, status in att.items():
                     st.write(f"{prac_map.get(pr_id, pr_id)}：**{status}**")
+                    cmt = (att_comment.get(pr_id, "") or "").strip()
+                    if cmt:
+                        st.caption(f"　コメント: {cmt}")
                 st.caption("※ 本番当日は自動で○が登録されます。")
 
         if pref:
@@ -907,7 +959,7 @@ def render_form(ctx, concert_id: str):
             with st.spinner("送信中..."):
                 ok_n, errors, debug = _submit_all(
                     ctx, concert_id, concert_name,
-                    player_id, player_name, att, pref, own
+                    player_id, player_name, att, att_comment, pref, own
                 )
             st.session_state["form_submit_count"] = ok_n
             st.session_state["form_submit_errors"] = errors
@@ -932,9 +984,14 @@ def render_form(ctx, concert_id: str):
         st.markdown(f"**{player_name}** さん、ありがとうございました。")
         st.info("このページを閉じて構いません。")
 
+        # 通知用に入力内容を退避（この後 session_state をクリアするため）
+        att_dict_snapshot = dict(st.session_state.get("form_att", {}) or {})
+        att_comment_snapshot = dict(st.session_state.get("form_att_comment", {}) or {})
+        pref_dict_snapshot = dict(st.session_state.get("form_pref", {}) or {})
+
         # 認証情報・入力データをクリア（完了後は不要）
         for _k in ["form_auth_email", "form_auth_verified", "auth_player_id",
-                   "auth_is_existing", "form_att", "form_pref", "form_own"]:
+                   "auth_is_existing", "form_att", "form_att_comment", "form_pref", "form_own"]:
             st.session_state.pop(_k, None)
 
         # 管理者への変更通知（1回だけ送信）
@@ -945,8 +1002,8 @@ def render_form(ctx, concert_id: str):
                 if admin_email:
                     is_new   = st.session_state.get("form_is_new", False)
                     action   = "新規登録" if is_new else "内容更新"
-                    att_dict = st.session_state.get("form_att", {})
-                    pref_dict= st.session_state.get("form_pref", {})
+                    att_dict = att_dict_snapshot
+                    pref_dict= pref_dict_snapshot
                     lines    = [
                         f"[ArteMis HARMONIA] フォーム{action}通知",
                         "",
@@ -967,6 +1024,9 @@ def render_form(ctx, concert_id: str):
                         for pr_id, status in att_dict.items():
                             pr_label = pr_name_map.get(pr_id, "練習")
                             lines.append(f"  {pr_label} : {status}")
+                            cmt = (att_comment_snapshot.get(pr_id, "") or "").strip()
+                            if cmt:
+                                lines.append(f"    コメント: {cmt}")
                     if pref_dict:
                         lines.append("")
                         lines.append("【希望】（件数のみ）")
