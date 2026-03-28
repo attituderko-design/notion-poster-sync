@@ -954,6 +954,32 @@ def render(ctx: dict):
         step=0.1,
         key="rental_tax_rate",
     )
+    col_sync_l, col_sync_r = st.columns([4, 3])
+    with col_sync_r:
+        if st.button("🔁 収支同期を全練習で再実行", key="rental_expense_resync_all", use_container_width=True):
+            practices_for_sync = _load_practices(ctx, global_concert_id)
+            ok_n = ng_n = 0
+            with st.spinner("収支同期を再実行中..."):
+                for p in practices_for_sync:
+                    pid = p.get("id", "")
+                    if not pid:
+                        continue
+                    plabel = _practice_name(p, ctx)
+                    ok, _msg = _auto_sync_rental_expense_for_practice(
+                        ctx=ctx,
+                        concert_id=global_concert_id,
+                        practice_id=pid,
+                        practice_label=plabel,
+                        tax_rate_percent=tax_rate_percent,
+                    )
+                    if ok:
+                        ok_n += 1
+                    else:
+                        ng_n += 1
+            if ng_n == 0:
+                st.success(f"✅ 全練習の収支同期を更新しました（{ok_n}件）")
+            else:
+                st.warning(f"⚠️ 収支同期: 成功 {ok_n} / 失敗 {ng_n}")
 
     tab_calc, tab_estimate, tab_summary = st.tabs(["レンタル試算", "見積登録", "費用集計"])
 
