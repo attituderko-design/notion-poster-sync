@@ -203,80 +203,114 @@ def _auto_sync_rental_expense_for_practice(
     practice_label: str,
     tax_rate_percent: float,
 ) -> tuple[bool, str]:
-    """レンタル見積を収支DBへ自動同期する（練習日単位で1行）。"""
+    """レンタル見積を収支DBへ自動同期する（練習日単位で確定/見積を分離）。"""
     expense_db_id = (ctx.get("CONCERT_DB_CONCERT_EXPENSE") or "").strip()
     if not expense_db_id:
         return False, "収支DB未設定"
 
-    # 対象練習日の税込合計を算出
+    # 対象練習日の税抜合計を算出（確定/見積中で分離）
     rental_rows = _load_rentals(ctx, practice_id)
-    subtotal = 0
+    subtotal_confirmed = 0
+    subtotal_estimating = 0
     for row in rental_rows:
         qty_str = ctx["extract_prop_text_any"](row, RENTAL_QTY_KEYS)
         price_str = ctx["extract_prop_text_any"](row, RENTAL_UNIT_PRICE_KEYS)
         qty = int(float(qty_str)) if qty_str else 0
         price = int(float(price_str)) if price_str else 0
-        subtotal += qty * price
-    tax = int(round(subtotal * (tax_rate_percent / 100.0)))
-    total_incl = subtotal + tax
+        subtotal = qty * price
+        confirmed = (ctx["extract_prop_text_any"](row, RENTAL_CONFIRMED_KEYS) == "True")
+        if confirmed:
+            subtotal_confirmed += subtotal
+        else:
+            subtotal_estimating += subtotal
 
     expense_type_map = ctx["get_prop_types"](expense_db_id)
     if not expense_type_map:
         return False, "収支DBのプロパティ取得失敗"
 
-    marker = f"[AUTO_RENTAL_SYNC:{practice_id}]"
-    expense_key = ctx["make_key"](concert_id, practice_id, "rental", prefix="expense")
-
-    # 同一練習日の既存自動行を探索（同演奏会の経費から絞る）
+    # 同一演奏会の経費を取得して、同一練習日の自動同期行を探索
     rel_name = ctx["find_prop_name"](expense_type_map, EXPENSE_CONCERT_REL_KEYS)
     filter_payload = {"filter": {"property": rel_name, "relation": {"contains": concert_id}}} if rel_name else None
     expense_rows = ctx["query_all"](expense_db_id, filter_payload)
-
-    existing_id = ""
+    existing_ids: dict[str, str] = {"confirmed": "", "estimating": ""}
+    legacy_ids: list[str] = []
+    legacy_key = ctx["make_key"](concert_id, practice_id, "rental", prefix="expense")
     for e in expense_rows:
         e_note = (ctx["extract_prop_text_any"](e, EXPENSE_NOTE_KEYS) or "")
         e_key = (ctx["extract_prop_text_any"](e, EXPENSE_KEY_KEYS) or "")
-        if marker in e_note or e_key == expense_key:
-            existing_id = e.get("id", "")
-            break
+        eid = e.get("id", "")
+        if f"[AUTO_RENTAL_SYNC:{practice_id}:confirmed]" in e_note:
+            existing_ids["confirmed"] = eid
+        elif f"[AUTO_RENTAL_SYNC:{practice_id}:estimating]" in e_note:
+            existing_ids["estimating"] = eid
+        elif f"[AUTO_RENTAL_SYNC:{practice_id}]" in e_note or e_key == legacy_key:
+            # 旧実装（単一行）を検出
+            legacy_ids.append(eid)
 
-    # 金額0なら自動行を消す（見積が空になったケース）
-    if total_incl <= 0:
+    # 旧実装（単一行）はアーカイブしてから新仕様（2行）へ移行
+    for lid in legacy_ids:
+        if lid:
+            ok = _archive_page(ctx, lid)
+            if not ok:
+                return False, "収支同期削除失敗"
+
+    def _sync_bucket(kind: str, subtotal_excl: int, confirmed_flag: bool) -> tuple[bool, str]:
+        marker = f"[AUTO_RENTAL_SYNC:{practice_id}:{kind}]"
+        expense_key = ctx["make_key"](concert_id, practice_id, kind, prefix="expense")
+        tax = int(round(subtotal_excl * (tax_rate_percent / 100.0)))
+        total_incl = subtotal_excl + tax
+
+        existing_id = existing_ids.get(kind, "")
+        if total_incl <= 0:
+            if existing_id:
+                ok = _archive_page(ctx, existing_id)
+                return (ok, "deleted" if ok else "delete_failed")
+            return True, "noop"
+
+        content_suffix = "（確定分）" if confirmed_flag else "（見積分）"
+        expense_content = f"{practice_label}分楽器レンタル{content_suffix} {total_incl:,}円"
+        expense_note = f"{marker} レンタル管理から自動同期（税率 {tax_rate_percent:.1f}%）"
+
+        props: dict = {}
+        key_prop = ctx["put_key_any"](
+            props, expense_type_map, EXPENSE_KEY_KEYS,
+            concert_id, practice_id, kind, prefix="expense"
+        )
+        if not key_prop:
+            ctx["put_prop_any"](props, expense_type_map, EXPENSE_KEY_KEYS, expense_key)
+        ctx["put_prop_any"](props, expense_type_map, EXPENSE_CONCERT_REL_KEYS, concert_id)
+        ctx["put_prop_any"](props, expense_type_map, EXPENSE_TYPE_KEYS, "楽器レンタル")
+        ctx["put_prop_any"](props, expense_type_map, EXPENSE_CONTENT_KEYS, expense_content)
+        ctx["put_prop_any"](props, expense_type_map, EXPENSE_AMOUNT_KEYS, total_incl)
+        ctx["put_prop_any"](props, expense_type_map, EXPENSE_CONFIRMED_KEYS, confirmed_flag)
+        ctx["put_prop_any"](props, expense_type_map, EXPENSE_NOTE_KEYS, expense_note)
+
         if existing_id:
-            ok = _archive_page(ctx, existing_id)
-            return (ok, "収支同期削除" if ok else "収支同期削除失敗")
+            res = ctx["api_request"](
+                "patch",
+                f"https://api.notion.com/v1/pages/{existing_id}",
+                json={"properties": props},
+            )
+        else:
+            res = ctx["api_request"](
+                "post",
+                "https://api.notion.com/v1/pages",
+                json={"parent": {"database_id": expense_db_id}, "properties": props},
+            )
+        ok = res is not None and res.status_code == 200
+        return (ok, "updated" if ok else "update_failed")
+
+    ok_c, res_c = _sync_bucket("confirmed", subtotal_confirmed, True)
+    ok_e, res_e = _sync_bucket("estimating", subtotal_estimating, False)
+    if not ok_c or not ok_e:
+        return False, "収支同期失敗"
+
+    results = {res_c, res_e}
+    if results <= {"noop"} and not legacy_ids:
         return True, "収支同期不要"
-
-    expense_content = f"{practice_label}分楽器レンタル {total_incl:,}円"
-    expense_note = f"{marker} レンタル管理から自動同期（税率 {tax_rate_percent:.1f}%）"
-
-    props: dict = {}
-    # PKは共通ルールで投入（expence_key綴りにも対応）
-    key_prop = ctx["put_key_any"](props, expense_type_map, EXPENSE_KEY_KEYS, concert_id, practice_id, "rental", prefix="expense")
-    if not key_prop:
-        # 念のため最終フォールバック
-        ctx["put_prop_any"](props, expense_type_map, EXPENSE_KEY_KEYS, expense_key)
-    ctx["put_prop_any"](props, expense_type_map, EXPENSE_CONCERT_REL_KEYS, concert_id)
-    ctx["put_prop_any"](props, expense_type_map, EXPENSE_TYPE_KEYS, "楽器レンタル")
-    ctx["put_prop_any"](props, expense_type_map, EXPENSE_CONTENT_KEYS, expense_content)
-    ctx["put_prop_any"](props, expense_type_map, EXPENSE_AMOUNT_KEYS, total_incl)
-    ctx["put_prop_any"](props, expense_type_map, EXPENSE_CONFIRMED_KEYS, False)
-    ctx["put_prop_any"](props, expense_type_map, EXPENSE_NOTE_KEYS, expense_note)
-
-    if existing_id:
-        res = ctx["api_request"](
-            "patch",
-            f"https://api.notion.com/v1/pages/{existing_id}",
-            json={"properties": props},
-        )
-    else:
-        res = ctx["api_request"](
-            "post",
-            "https://api.notion.com/v1/pages",
-            json={"parent": {"database_id": expense_db_id}, "properties": props},
-        )
-    ok = res is not None and res.status_code == 200
-    return (ok, "収支同期更新" if ok else "収支同期失敗")
+    if "updated" in results:
+        return True, "収支同期更新"
+    return True, "収支同期削除"
 
 
 # ============================================================
