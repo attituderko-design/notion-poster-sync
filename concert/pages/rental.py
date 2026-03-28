@@ -296,7 +296,9 @@ def _render_calc_tab(ctx: dict):
                     iid = r["instrument_id"]
                     already = iid in rented_ids
                     c1, c2, c3, c4 = st.columns([4, 2, 2, 3])
-                    c1.markdown(f"🔴 {r['instrument_name']}")
+                    status_icon = "🟢" if already else "🔴"
+                    status_text = "（見積反映済）" if already else ""
+                    c1.markdown(f"{status_icon} {r['instrument_name']} {status_text}")
                     c2.caption(f"必要 {r['required']}台")
                     c3.caption(f"持参 {r['bring_available']}台")
                     if already:
