@@ -1067,7 +1067,7 @@ def render_url_generator(ctx: dict, concert_id: str, concert_name: str):
         st.caption("演奏会を選択するとURLが生成されます。")
         return
     token    = make_form_token(concert_id)
-    base_url = st.secrets.get("FORM_BASE_URL", "https://artemis-cers.streamlit.app")
+    base_url = (st.secrets.get("FORM_BASE_URL", "https://artemis-form.streamlit.app") or "").strip().rstrip("/")
     long_url = f"{base_url}/?concert={token}&cid={concert_id}"
 
     st.code(long_url, language=None)
