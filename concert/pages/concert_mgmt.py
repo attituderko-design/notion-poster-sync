@@ -1585,11 +1585,29 @@ def render(ctx: dict):
                             _recipients = get_recipients_from_players(ctx, _players)
                             _with_email = [r for r in _recipients if r["email"]]
                             _no_email   = [r for r in _recipients if not r["email"]]
-                            _concert_name = st.session_state.get("SELECTED_CONCERT_NAME", "演奏会")
+                            _concert_name = (st.session_state.get("SELECTED_CONCERT_NAME", "") or "").strip()
+                            if not _concert_name or _concert_name in {"演奏会", "— 演奏会を選択してください —"}:
+                                try:
+                                    _cres = ctx["api_request"](
+                                        "get",
+                                        f"https://api.notion.com/v1/pages/{_concert_id}",
+                                        headers=ctx["NOTION_HEADERS"],
+                                    )
+                                    if _cres is not None and _cres.status_code == 200:
+                                        _cpage = _cres.json() or {}
+                                        _concert_name = (
+                                            ctx["extract_prop_text_any"](_cpage, CONCERT_NAME_KEYS)
+                                            or ctx["extract_title"](_cpage)
+                                            or "演奏会"
+                                        )
+                                    else:
+                                        _concert_name = "演奏会"
+                                except Exception:
+                                    _concert_name = "演奏会"
                             _subject = f"【ArtéMis HARMONIA】{label} 前日共有資料"
                             _body = (
                                 "{name} さん" + "\n\n"
-                                + f"{_concert_name} の練習（{label}）前日共有資料をお送りします。\n"
+                                + f"{_concert_name} の{label}前日共有資料をお送りします。\n"
                                 + "添付PDFをご確認ください。\n\nArtéMis HARMONIA"
                             )
                             result = send_pdf_to_all(
