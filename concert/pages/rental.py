@@ -320,14 +320,30 @@ def _render_calc_tab(ctx: dict):
                             key=f"add_rental_{pid}_{iid}",
                             use_container_width=True,
                         ):
-                            st.session_state["est_prefill"] = {
-                                "practice_id":    pid,
-                                "practice_label": prac_label,
-                                "inst_name":      r["instrument_name"],
-                                "qty":            qty_input,
-                            }
-                            st.session_state["rental_active_tab"] = 1
-                            st.rerun()
+                            if already:
+                                st.info("この楽器は既に見積へ反映済みです。")
+                            else:
+                                ok = _create_rental(
+                                    ctx=ctx,
+                                    practice_id=pid,
+                                    practice_label=prac_label,
+                                    instrument_id=iid,
+                                    instrument_name=r["instrument_name"],
+                                    item_name=r["instrument_name"],
+                                    vendor="",
+                                    qty=int(qty_input),
+                                    unit_price=0,
+                                    confirmed=False,
+                                    note="試算画面から自動追加",
+                                    cost_type="楽器レンタル",
+                                )
+                                if ok:
+                                    st.success("✅ 見積へ追加しました。見積登録タブで業者名・単価を入力してください。")
+                                    _clear_rental_cache()
+                                    st.session_state["rental_active_tab"] = 1
+                                    st.rerun()
+                                else:
+                                    st.error("見積への追加に失敗しました。")
 
             # ── 持参可能 ──────────────────────────────────────
             if bring_reqs:
@@ -359,14 +375,30 @@ def _render_calc_tab(ctx: dict):
                             key=f"switch_rental_{pid}_{iid}",
                             use_container_width=True,
                         ):
-                            st.session_state["est_prefill"] = {
-                                "practice_id":    pid,
-                                "practice_label": prac_label,
-                                "inst_name":      r["instrument_name"],
-                                "qty":            switch_qty,
-                            }
-                            st.session_state["rental_active_tab"] = 1
-                            st.rerun()
+                            if already:
+                                st.info("この楽器は既に見積へ反映済みです。")
+                            else:
+                                ok = _create_rental(
+                                    ctx=ctx,
+                                    practice_id=pid,
+                                    practice_label=prac_label,
+                                    instrument_id=iid,
+                                    instrument_name=r["instrument_name"],
+                                    item_name=r["instrument_name"],
+                                    vendor="",
+                                    qty=int(switch_qty),
+                                    unit_price=0,
+                                    confirmed=False,
+                                    note="持参可能からレンタルへ振り替え（試算画面）",
+                                    cost_type="楽器レンタル",
+                                )
+                                if ok:
+                                    st.success("✅ レンタル見積へ振り替えました。見積登録タブで業者名・単価を入力してください。")
+                                    _clear_rental_cache()
+                                    st.session_state["rental_active_tab"] = 1
+                                    st.rerun()
+                                else:
+                                    st.error("レンタルへの振り替えに失敗しました。")
 
     if not has_any_rental:
         st.success("すべての練習日でレンタルは不要です。")
@@ -378,9 +410,6 @@ def _render_calc_tab(ctx: dict):
 
 def _render_estimate_tab(ctx: dict):
     st.caption("明細形式で見積を入力し、まとめて登録・更新できます。")
-
-    # 逆算タブからのプリフィル情報を受け取る
-    prefill = st.session_state.pop("est_prefill", None)
 
     concerts = _load_concerts(ctx)
     if not concerts:
@@ -407,12 +436,7 @@ def _render_estimate_tab(ctx: dict):
     practice_opts = {_practice_name(p, ctx): p.get("id", "")
                      for p in sorted(practices, key=_prac_date)}
 
-    # プリフィルがあれば対象の練習日を自動選択
-    prefill_practice_id = prefill.get("practice_id", "") if prefill else ""
-    default_practice = next(
-        (label for label, pid in practice_opts.items() if pid == prefill_practice_id),
-        list(practice_opts.keys())[0] if practice_opts else None,
-    )
+    default_practice = list(practice_opts.keys())[0] if practice_opts else None
     selected_practice = st.selectbox(
         "練習日", list(practice_opts.keys()),
         index=list(practice_opts.keys()).index(default_practice) if default_practice in practice_opts else 0,
@@ -421,10 +445,6 @@ def _render_estimate_tab(ctx: dict):
     practice_id = practice_opts.get(selected_practice, "")
     if not practice_id:
         return
-
-    # プリフィル通知
-    if prefill and prefill.get("inst_name"):
-        st.info(f"「{prefill['inst_name']}」を明細の先頭行にセットしました。業者名・単価を入力して保存してください。")
 
     instruments = _load_instruments(ctx)
     inst_names  = [_instrument_name(i, ctx) for i in
@@ -455,22 +475,6 @@ def _render_estimate_tab(ctx: dict):
             "備考":       ext_any(r, RENTAL_NOTE_KEYS) or "",
         })
         row_ids.append(r.get("id", ""))
-
-    # プリフィル行を先頭に差し込む（逆算タブからの振り替え）
-    if prefill and prefill.get("inst_name"):
-        prefill_inst = prefill["inst_name"]
-        prefill_qty  = prefill.get("qty", 1)
-        existing.insert(0, {
-            "費用種別": "楽器レンタル",
-            "楽器種別": prefill_inst if prefill_inst in inst_names else (inst_names[0] if inst_names else ""),
-            "品目名":   prefill_inst,
-            "業者名":   "",
-            "台数":     prefill_qty,
-            "単価（円）": 0,
-            "確定":     False,
-            "備考":     "",
-        })
-        row_ids.insert(0, "")  # 新規行
 
     # 空行は追加しない（data_editorのnum_rows="dynamic"で行追加させる）
     # 既存0件のときだけ1行だけ空行を追加してUIを分かりやすくする
