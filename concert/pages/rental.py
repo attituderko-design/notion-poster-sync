@@ -709,20 +709,27 @@ def _render_summary_tab(ctx: dict, tax_rate_percent: float):
             subtotal  = qty * price
             confirmed = ctx["extract_prop_text_any"](row, RENTAL_CONFIRMED_KEYS) == "True"
 
+            cost_type = (ctx["extract_prop_text_any"](row, RENTAL_COST_TYPE_KEYS) or "").strip() or "楽器レンタル"
+            item_name = (ctx["extract_prop_text_any"](row, RENTAL_ITEM_NAME_KEYS) or "").strip()
             inst_ids  = ctx["extract_relation_ids_any"](row, RENTAL_INST_REL_KEYS)
             inst_id   = inst_ids[0] if inst_ids else ""
             inst_rows = _load_instruments(ctx)
             inst_name = next(
                 (_instrument_name(i, ctx) for i in inst_rows if i.get("id") == inst_id),
-                "不明"
+                ""
             )
+            if cost_type == "楽器レンタル":
+                display_item = inst_name or item_name or "不明"
+            else:
+                display_item = item_name or cost_type
 
             tax = int(round(subtotal * (tax_rate_percent / 100.0)))
             total_with_tax = subtotal + tax
 
             rows_for_table.append({
                 "練習日":     prac_label,
-                "楽器":       inst_name,
+                "品目":       display_item,
+                "費用種別":   cost_type,
                 "業者":       ctx["extract_prop_text_any"](row, RENTAL_VENDOR_KEYS) or "—",
                 "台数":       qty,
                 "単価":       price,
