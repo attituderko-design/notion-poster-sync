@@ -5,6 +5,8 @@ concert/pages/finance.py
 import streamlit as st
 import pandas as pd
 import math
+import io
+from datetime import date, timedelta
 from concert.services.keys import (
     CONCERT_NAME_KEYS, CONCERT_CONFIRMED_FEE_KEYS,
     PRACTICE_CONCERT_REL_KEYS,
@@ -350,56 +352,156 @@ def _render_budget_tab(ctx, concert_id: str):
 
 
 def _render_billing_tab(ctx, concert_id: str):
-    st.caption("管理代行費の見積計算（収支計算とは分離）")
+    st.caption("管理代行費の見積・請求（収支計算とは分離）")
     st.info("このタブの金額は請求用です。演奏会の収支・参加費には反映しません。")
+    st.caption("料金式: 基本料 5,000円 + 参加者数 × 100円 + 練習回数 × 800円 + オプション実費")
 
-    cast_rows = _load_cast(ctx, concert_id)
-    n_members = len(cast_rows)
-    practice_count = _count_practices(ctx, concert_id)
+    def _calc(member_count: int, practice_count: int, option_actual: int, discount: int) -> dict:
+        base_fee = 5000
+        participant_fee_unit = 100
+        practice_fee_unit = 800
+        subtotal = (
+            base_fee
+            + (int(member_count) * participant_fee_unit)
+            + (int(practice_count) * practice_fee_unit)
+            + int(option_actual)
+        )
+        discount_applied = min(int(discount), max(subtotal, 0))
+        taxable = max(subtotal - discount_applied, 0)
+        tax = int(round(taxable * 0.10))
+        total = taxable + tax
+        return {
+            "base_fee": base_fee,
+            "participant_fee": int(member_count) * participant_fee_unit,
+            "practice_fee": int(practice_count) * practice_fee_unit,
+            "option_actual": int(option_actual),
+            "subtotal": subtotal,
+            "discount_applied": discount_applied,
+            "tax": tax,
+            "total": total,
+            "member_count": int(member_count),
+            "practice_count": int(practice_count),
+        }
 
-    st.markdown("### 料金式")
-    st.caption("基本料 5,000円 + 参加者数 × 100円 + 練習回数 × 800円 + オプション実費")
+    def _build_billing_pdf(doc_title: str, concert_name: str, issue_on: date, due_on: date, calc: dict) -> bytes:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfgen import canvas
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("参加者数", f"{n_members}人")
-    c2.metric("練習回数", f"{practice_count}回")
-    c3.metric("税率", "10%")
+        font_regular = "Helvetica"
+        font_bold = "Helvetica-Bold"
+        for f in [
+            "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+            "C:/Windows/Fonts/msgothic.ttc",
+        ]:
+            try:
+                pdfmetrics.registerFont(TTFont("JPRegular", f))
+                pdfmetrics.registerFont(TTFont("JPBold", f))
+                font_regular = "JPRegular"
+                font_bold = "JPBold"
+                break
+            except Exception:
+                pass
 
-    base_fee = 5000
-    participant_fee_unit = 100
-    practice_fee_unit = 800
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=A4)
+        w, h = A4
+        y = h - 18 * mm
 
-    option_actual = st.number_input(
-        "オプション実費（円）",
-        min_value=0,
-        step=1000,
-        value=0,
-        key="billing_option_actual",
-    )
-    discount = st.number_input(
-        "出精値引き（円）",
-        min_value=0,
-        step=1000,
-        value=0,
-        key="billing_dedication_discount",
-    )
+        c.setFont(font_bold, 16)
+        c.drawString(18 * mm, y, doc_title)
+        y -= 10 * mm
+        c.setFont(font_regular, 10)
+        c.drawString(18 * mm, y, f"対象演奏会: {concert_name or '-'}")
+        y -= 6 * mm
+        c.drawString(18 * mm, y, f"発行日: {issue_on.isoformat()}    支払期限: {due_on.isoformat()}")
+        y -= 10 * mm
 
-    subtotal = (
-        base_fee
-        + (n_members * participant_fee_unit)
-        + (practice_count * practice_fee_unit)
-        + int(option_actual)
-    )
-    discount_applied = min(int(discount), max(subtotal, 0))
-    taxable = max(subtotal - discount_applied, 0)
-    tax = int(round(taxable * 0.10))
-    total = taxable + tax
+        lines = [
+            ("基本料", calc["base_fee"]),
+            (f"参加者数×100円 ({calc['member_count']}人)", calc["participant_fee"]),
+            (f"練習回数×800円 ({calc['practice_count']}回)", calc["practice_fee"]),
+            ("オプション実費", calc["option_actual"]),
+            ("税抜小計", calc["subtotal"]),
+            ("出精値引き", -calc["discount_applied"]),
+            ("消費税(10%)", calc["tax"]),
+            ("税込合計", calc["total"]),
+        ]
 
-    r1, r2, r3, r4 = st.columns(4)
-    r1.metric("税抜小計", f"¥{subtotal:,}")
-    r2.metric("値引き", f"-¥{discount_applied:,}")
-    r3.metric("消費税(10%)", f"¥{tax:,}")
-    r4.metric("税込合計", f"¥{total:,}")
+        for label, amount in lines:
+            c.setFont(font_regular if label != "税込合計" else font_bold, 11)
+            c.drawString(22 * mm, y, label)
+            c.drawRightString(w - 18 * mm, y, f"¥{amount:,}")
+            y -= 7 * mm
+
+        c.showPage()
+        c.save()
+        return buf.getvalue()
+
+    linked_members = len(_load_cast(ctx, concert_id))
+    linked_practices = _count_practices(ctx, concert_id)
+    issue_default = date.today()
+    due_default = issue_default + timedelta(days=14)
+
+    tab_est, tab_inv = st.tabs(["見積（自由入力）", "請求（実績連動）"])
+
+    with tab_est:
+        st.markdown("#### 見積（自由入力）")
+        c1, c2, c3 = st.columns(3)
+        est_members = c1.number_input("見積参加者数", min_value=0, value=max(linked_members, 0), step=1, key="billing_est_members")
+        est_practices = c2.number_input("見積練習回数", min_value=0, value=max(linked_practices, 0), step=1, key="billing_est_practices")
+        c3.number_input("税率(%)", min_value=10, max_value=10, value=10, step=1, key="billing_est_tax", disabled=True)
+        est_option = st.number_input("オプション実費（円）", min_value=0, step=1000, value=0, key="billing_est_option")
+        est_discount = st.number_input("出精値引き（円）", min_value=0, step=1000, value=0, key="billing_est_discount")
+        est_issue = st.date_input("発行日", value=issue_default, key="billing_est_issue")
+        est_due = st.date_input("支払期限", value=due_default, key="billing_est_due")
+
+        est_calc = _calc(est_members, est_practices, est_option, est_discount)
+        e1, e2, e3, e4 = st.columns(4)
+        e1.metric("税抜小計", f"¥{est_calc['subtotal']:,}")
+        e2.metric("値引き", f"-¥{est_calc['discount_applied']:,}")
+        e3.metric("消費税(10%)", f"¥{est_calc['tax']:,}")
+        e4.metric("税込合計", f"¥{est_calc['total']:,}")
+
+        pdf_est = _build_billing_pdf("見積書", ctx.get("SELECTED_CONCERT_NAME", ""), est_issue, est_due, est_calc)
+        st.download_button(
+            "📄 見積書PDFを出力",
+            data=pdf_est,
+            file_name=f"見積書_{(ctx.get('SELECTED_CONCERT_NAME') or concert_id)}.pdf",
+            mime="application/pdf",
+            key="billing_est_pdf",
+            use_container_width=True,
+        )
+
+    with tab_inv:
+        st.markdown("#### 請求（実績連動）")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("参加者数（実績）", f"{linked_members}人")
+        c2.metric("練習回数（実績）", f"{linked_practices}回")
+        c3.metric("税率", "10%")
+        inv_option = st.number_input("オプション実費（円）", min_value=0, step=1000, value=0, key="billing_inv_option")
+        inv_discount = st.number_input("出精値引き（円）", min_value=0, step=1000, value=0, key="billing_inv_discount")
+        inv_issue = st.date_input("発行日", value=issue_default, key="billing_inv_issue")
+        inv_due = st.date_input("支払期限", value=due_default, key="billing_inv_due")
+
+        inv_calc = _calc(linked_members, linked_practices, inv_option, inv_discount)
+        i1, i2, i3, i4 = st.columns(4)
+        i1.metric("税抜小計", f"¥{inv_calc['subtotal']:,}")
+        i2.metric("値引き", f"-¥{inv_calc['discount_applied']:,}")
+        i3.metric("消費税(10%)", f"¥{inv_calc['tax']:,}")
+        i4.metric("税込合計", f"¥{inv_calc['total']:,}")
+
+        pdf_inv = _build_billing_pdf("請求書", ctx.get("SELECTED_CONCERT_NAME", ""), inv_issue, inv_due, inv_calc)
+        st.download_button(
+            "🧾 請求書PDFを出力",
+            data=pdf_inv,
+            file_name=f"請求書_{(ctx.get('SELECTED_CONCERT_NAME') or concert_id)}.pdf",
+            mime="application/pdf",
+            key="billing_inv_pdf",
+            use_container_width=True,
+        )
 
 
 # ============================================================
