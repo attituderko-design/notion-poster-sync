@@ -210,6 +210,17 @@ def _get_rented_inst_ids(ctx: dict, practice_id: str) -> set[str]:
     return ids
 
 
+def _get_rented_item_names(ctx: dict, practice_id: str) -> set[str]:
+    """この練習日に見積登録済みの品目名セット（小文字）を返す。"""
+    rental_rows = _load_rentals(ctx, practice_id)
+    names: set[str] = set()
+    for r in rental_rows:
+        item_name = (ctx["extract_prop_text_any"](r, RENTAL_ITEM_NAME_KEYS) or "").strip().lower()
+        if item_name:
+            names.add(item_name)
+    return names
+
+
 def _render_calc_tab(ctx: dict):
     st.caption("奏者の出欠・持参可フラグをもとに、各練習日のレンタル必要台数を自動算出します。")
 
@@ -270,6 +281,7 @@ def _render_calc_tab(ctx: dict):
         else:
             prac_label = f"{_name}（{_date}）" if _name and _date else (_name or pid)
         rented_ids   = _get_rented_inst_ids(ctx, pid)
+        rented_items = _get_rented_item_names(ctx, pid)
 
         if rental_reqs:
             has_any_rental = True
@@ -294,7 +306,9 @@ def _render_calc_tab(ctx: dict):
                 st.markdown("**レンタル必要**")
                 for r in rental_reqs:
                     iid = r["instrument_id"]
-                    already = iid in rented_ids
+                    in_id = bool(iid) and (iid in rented_ids)
+                    in_name = (r["instrument_name"] or "").strip().lower() in rented_items
+                    already = in_id or in_name
                     c1, c2, c3, c4 = st.columns([4, 2, 2, 3])
                     status_icon = "🟢" if already else "🔴"
                     status_text = "（見積反映済）" if already else ""
@@ -340,6 +354,8 @@ def _render_calc_tab(ctx: dict):
                                 if ok:
                                     st.success("✅ 見積へ追加しました。見積登録タブで業者名・単価を入力してください。")
                                     _clear_rental_cache()
+                                    st.session_state["rental_est_practice_id"] = pid
+                                    st.session_state["rental_est_notice"] = f"「{r['instrument_name']}」を追加済みです。"
                                     st.session_state["rental_active_tab"] = 1
                                     st.rerun()
                                 else:
@@ -352,7 +368,9 @@ def _render_calc_tab(ctx: dict):
                 st.markdown("**持参可能**")
                 for r in bring_reqs:
                     iid = r["instrument_id"]
-                    already = iid in rented_ids
+                    in_id = bool(iid) and (iid in rented_ids)
+                    in_name = (r["instrument_name"] or "").strip().lower() in rented_items
+                    already = in_id or in_name
                     c1, c2, c3, c4 = st.columns([4, 2, 2, 3])
                     c1.markdown(f"🟢 {r['instrument_name']}")
                     c2.caption(f"必要 {r['required']}台")
@@ -395,6 +413,8 @@ def _render_calc_tab(ctx: dict):
                                 if ok:
                                     st.success("✅ レンタル見積へ振り替えました。見積登録タブで業者名・単価を入力してください。")
                                     _clear_rental_cache()
+                                    st.session_state["rental_est_practice_id"] = pid
+                                    st.session_state["rental_est_notice"] = f"「{r['instrument_name']}」を振り替え済みです。"
                                     st.session_state["rental_active_tab"] = 1
                                     st.rerun()
                                 else:
@@ -436,7 +456,11 @@ def _render_estimate_tab(ctx: dict):
     practice_opts = {_practice_name(p, ctx): p.get("id", "")
                      for p in sorted(practices, key=_prac_date)}
 
-    default_practice = list(practice_opts.keys())[0] if practice_opts else None
+    target_pid = (st.session_state.get("rental_est_practice_id") or "").strip()
+    default_practice = next(
+        (label for label, pid in practice_opts.items() if pid == target_pid),
+        list(practice_opts.keys())[0] if practice_opts else None,
+    )
     selected_practice = st.selectbox(
         "練習日", list(practice_opts.keys()),
         index=list(practice_opts.keys()).index(default_practice) if default_practice in practice_opts else 0,
@@ -445,6 +469,9 @@ def _render_estimate_tab(ctx: dict):
     practice_id = practice_opts.get(selected_practice, "")
     if not practice_id:
         return
+    est_notice = st.session_state.pop("rental_est_notice", "")
+    if est_notice:
+        st.success(est_notice)
 
     instruments = _load_instruments(ctx)
     inst_names  = [_instrument_name(i, ctx) for i in
