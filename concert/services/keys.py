@@ -99,7 +99,8 @@ PI_NOTE_KEYS              = ["備考", "メモ"]
 ASSIGN_KEY_KEYS           = ["assign_key", "assignment_key", "AssignmentKey", "割当キー", "PK割当キー"]
 
 # ── RENTAL（レンタル見積）DB ─────────────────────────────────
-RENTAL_RECORD_KEYS        = ["rental_key", "レコード名", "タイトル"]
+# 表示用のレコード名（見積キーとは分離）
+RENTAL_RECORD_KEYS        = ["レコード名", "タイトル", "見積名", "名称"]
 RENTAL_PRACTICE_REL_KEYS  = ["練習", "FK練習"]
 RENTAL_INST_REL_KEYS      = ["楽器種別", "楽器", "FK楽器種別"]
 RENTAL_ITEM_NAME_KEYS     = ["品目名", "item_name", "品目"]
