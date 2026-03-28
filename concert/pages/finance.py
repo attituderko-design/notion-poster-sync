@@ -266,7 +266,6 @@ def _render_budget_tab(ctx, concert_id: str):
 
     expenses  = _load_expenses(ctx, concert_id)
     cast_rows = _load_cast(ctx, concert_id)
-    practice_count = _count_practices(ctx, concert_id)
     ext = ctx["extract_prop_text_any"]
 
     # 経費合計
@@ -286,96 +285,6 @@ def _render_budget_tab(ctx, concert_id: str):
 
     # 参加人数
     n_members = len(cast_rows)
-
-    st.markdown("### 料金式（HARMONIA）")
-    st.caption("基本料 5,000円 + 参加者数 × 100円 + 練習回数 × 800円 + オプション実費（税率10%）")
-    c_formula_1, c_formula_2, c_formula_3 = st.columns(3)
-    c_formula_1.metric("参加者数", f"{n_members}人")
-    c_formula_2.metric("練習回数", f"{practice_count}回")
-    c_formula_3.metric("税率", "10%")
-
-    base_fee = 5000
-    participant_fee_unit = 100
-    practice_fee_unit = 800
-    option_actual = st.number_input(
-        "オプション実費（円）",
-        min_value=0,
-        step=1000,
-        value=0,
-        key="budget_option_actual",
-    )
-    discount = st.number_input(
-        "出精値引き（円）",
-        min_value=0,
-        step=1000,
-        value=0,
-        key="budget_dedication_discount",
-    )
-
-    base_subtotal = (
-        base_fee
-        + (n_members * participant_fee_unit)
-        + (practice_count * practice_fee_unit)
-        + int(option_actual)
-    )
-    discount_applied = min(int(discount), max(base_subtotal, 0))
-    taxable_subtotal = max(base_subtotal - discount_applied, 0)
-    tax_amount = int(round(taxable_subtotal * 0.10))
-    total_formula = taxable_subtotal + tax_amount
-
-    cf1, cf2, cf3, cf4 = st.columns(4)
-    cf1.metric("税抜小計", f"¥{base_subtotal:,}")
-    cf2.metric("値引き", f"-¥{discount_applied:,}")
-    cf3.metric("消費税(10%)", f"¥{tax_amount:,}")
-    cf4.metric("税込合計", f"¥{total_formula:,}")
-
-    manual_members_formula = st.number_input(
-        "料金式の試算人数（変更可）",
-        min_value=1,
-        value=max(n_members, 1),
-        step=1,
-        key="budget_formula_members",
-    )
-    round_unit_formula = st.selectbox(
-        "料金式の端数処理（円単位）",
-        [100, 500, 1000, 5000],
-        index=2,
-        key="budget_formula_round",
-    )
-    import math
-    per_person_formula_raw = total_formula / manual_members_formula if manual_members_formula > 0 else 0
-    per_person_formula = math.ceil(per_person_formula_raw / round_unit_formula) * round_unit_formula
-
-    cff1, cff2, cff3 = st.columns(3)
-    cff1.metric("1人あたり（料金式）", f"¥{per_person_formula:,}")
-    cff2.metric("徴収総額（料金式）", f"¥{per_person_formula * manual_members_formula:,}")
-    cff3.metric("差額（徴収-税込合計）", f"¥{(per_person_formula * manual_members_formula) - total_formula:,}")
-
-    if st.button(
-        f"💸 料金式の参加費（¥{per_person_formula:,}）を全員へ設定",
-        key="budget_apply_formula",
-        use_container_width=True,
-    ):
-        ok_n = ng_n = 0
-        with st.spinner("設定中..."):
-            for r in cast_rows:
-                rid  = r.get("id", "")
-                part = ext(r, PARTICIPANT_PART_KEYS) or ""
-                role = ext(r, PARTICIPANT_ROLE_KEYS) or ""
-                paid = ext(r, PARTICIPANT_PAID_KEYS) == "True"
-                ok   = _update_cast_finance(ctx, rid, part, role, per_person_formula, paid)
-                ok_n += 1 if ok else 0
-                ng_n += 0 if ok else 1
-        if ng_n == 0:
-            _write_concert_fee(ctx, concert_id, per_person_formula)
-            st.session_state[f"confirmed_fee_{concert_id}"] = per_person_formula
-            st.success(f"✅ {ok_n}人の参加費を ¥{per_person_formula:,} に設定しました。")
-        else:
-            st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
-        _clear_finance_cache(concert_id)
-        st.rerun()
-
-    st.divider()
 
     st.markdown("### 経費内訳")
     if by_type:
@@ -437,6 +346,59 @@ def _render_budget_tab(ctx, concert_id: str):
             st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
         _clear_finance_cache(concert_id)
         st.rerun()
+
+
+def _render_billing_tab(ctx, concert_id: str):
+    st.caption("管理代行費の見積計算（収支計算とは分離）")
+    st.info("このタブの金額は請求用です。演奏会の収支・参加費には反映しません。")
+
+    cast_rows = _load_cast(ctx, concert_id)
+    n_members = len(cast_rows)
+    practice_count = _count_practices(ctx, concert_id)
+
+    st.markdown("### 料金式")
+    st.caption("基本料 5,000円 + 参加者数 × 100円 + 練習回数 × 800円 + オプション実費")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("参加者数", f"{n_members}人")
+    c2.metric("練習回数", f"{practice_count}回")
+    c3.metric("税率", "10%")
+
+    base_fee = 5000
+    participant_fee_unit = 100
+    practice_fee_unit = 800
+
+    option_actual = st.number_input(
+        "オプション実費（円）",
+        min_value=0,
+        step=1000,
+        value=0,
+        key="billing_option_actual",
+    )
+    discount = st.number_input(
+        "出精値引き（円）",
+        min_value=0,
+        step=1000,
+        value=0,
+        key="billing_dedication_discount",
+    )
+
+    subtotal = (
+        base_fee
+        + (n_members * participant_fee_unit)
+        + (practice_count * practice_fee_unit)
+        + int(option_actual)
+    )
+    discount_applied = min(int(discount), max(subtotal, 0))
+    taxable = max(subtotal - discount_applied, 0)
+    tax = int(round(taxable * 0.10))
+    total = taxable + tax
+
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("税抜小計", f"¥{subtotal:,}")
+    r2.metric("値引き", f"-¥{discount_applied:,}")
+    r3.metric("消費税(10%)", f"¥{tax:,}")
+    r4.metric("税込合計", f"¥{total:,}")
 
 
 # ============================================================
@@ -584,12 +546,16 @@ def render(ctx: dict):
         return
     st.caption(f"対象演奏会: {concert_name or concert_id}")
 
-    tab_expense, tab_budget, tab_payment, tab_pdf = st.tabs(["経費管理", "予算計算機", "振込管理", "収支報告PDF"])
+    tab_expense, tab_budget, tab_billing, tab_payment, tab_pdf = st.tabs(
+        ["経費管理", "予算計算機", "見積・請求計算", "振込管理", "収支報告PDF"]
+    )
 
     with tab_expense:
         _render_expense_tab(ctx, concert_id, concert_name)
     with tab_budget:
         _render_budget_tab(ctx, concert_id)
+    with tab_billing:
+        _render_billing_tab(ctx, concert_id)
     with tab_payment:
         _render_payment_tab(ctx, concert_id)
     with tab_pdf:
