@@ -33,6 +33,13 @@ ATT_OPTS      = ["○", "△", "×"]
 OTHER_PART    = "一覧にない（管理者に連絡）"
 IS_PERC       = lambda p: (p or "").lower() in ("perc", "percussion", "打楽器")
 
+
+def _render_brand_logo() -> None:
+    """フォーム上部ロゴを安全に1枚だけ表示。"""
+    logo_path = Path(__file__).resolve().parents[2] / "assets" / "logo.png"
+    logo_src = str(logo_path) if logo_path.exists() else "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/logo.png"
+    st.image(logo_src, width=360)
+
 # ── マジックコード認証 ──────────────────────────────────────────
 
 _CODE_EXPIRY_MINUTES = 10
@@ -489,9 +496,7 @@ def render_form(ctx, concert_id: str):
     ext = ctx["extract_prop_text_any"]
 
     # form.py を直接 entrypoint にしていない場合でもロゴを表示
-    _logo = Path(__file__).resolve().parents[2] / "assets" / "logo.png"
-    if _logo.exists():
-        st.image(str(_logo), width=320)
+    _render_brand_logo()
 
     # 初回のみデータ一括取得
     if not st.session_state.get("form_data_loaded"):
