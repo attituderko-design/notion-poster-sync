@@ -6,6 +6,7 @@ import streamlit as st
 import hashlib, hmac, random, string
 import requests as _requests
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from concert.services.keys import (
     CONCERT_NAME_KEYS, CONCERT_DATE_KEYS, CONCERT_VENUE_KEYS,
@@ -184,6 +185,62 @@ def _find_rel(type_map: dict, candidates: list, keywords: list,
         if t == "relation" and k not in exclude:
             return k
     return ""
+
+
+def _get_form_cast_and_att_map(ctx, concert_id: str, player_id: str) -> tuple[str, dict[str, dict]]:
+    """この演奏会におけるcast_id と、練習ID -> {status, comment} を返す。"""
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+
+    cast_id = ""
+    all_cast = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+    for r in all_cast:
+        pids = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
+        cids = ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)
+        if player_id in pids and concert_id in cids:
+            cast_id = r.get("id", "")
+            break
+
+    att_map: dict[str, dict] = {}
+    att_db = ctx["CONCERT_DB_ATTENDANCE"]
+    t_att = ctx["get_prop_types"](att_db)
+    if not t_att:
+        return cast_id, att_map
+
+    player_rel_key = _find_rel(
+        t_att,
+        ATT_PLAYER_REL_KEYS,
+        ["奏者", "出演者", "participant", "player"],
+    )
+    practice_rel_key = _find_rel(
+        t_att,
+        ATT_PRACTICE_REL_KEYS,
+        ["練習", "practice"],
+        exclude={player_rel_key} if player_rel_key else set(),
+    )
+    status_key = ctx["find_prop_name"](t_att, ATT_STATUS_KEYS)
+    note_key = ctx["find_prop_name"](t_att, ATT_NOTE_KEYS)
+
+    if not player_rel_key or not practice_rel_key:
+        return cast_id, att_map
+
+    rel_targets = {player_id}
+    if cast_id:
+        rel_targets.add(cast_id)
+
+    all_att = ctx["query_all"](att_db, None)
+    for row in all_att:
+        rel_ids = ext_rel(row, [player_rel_key])
+        pr_ids = ext_rel(row, [practice_rel_key])
+        if not rel_ids or not pr_ids:
+            continue
+        if any(rid in rel_targets for rid in rel_ids):
+            att_map[pr_ids[0]] = {
+                "status": ext_txt(row, [status_key]) or "未回答",
+                "comment": ext_txt(row, [note_key]) or "",
+            }
+
+    return cast_id, att_map
 
 
 def _submit_all(ctx, concert_id: str, concert_name: str,
@@ -418,6 +475,11 @@ attituderko@gmail.com
 def render_form(ctx, concert_id: str):
     ext = ctx["extract_prop_text_any"]
 
+    # form.py を直接 entrypoint にしていない場合でもロゴを表示
+    _logo = Path(__file__).resolve().parents[2] / "assets" / "logo.png"
+    if _logo.exists():
+        st.image(str(_logo), width=320)
+
     # 初回のみデータ一括取得
     if not st.session_state.get("form_data_loaded"):
         with st.spinner("読み込み中..."):
@@ -630,25 +692,12 @@ def render_form(ctx, concert_id: str):
             # 出欠状況表示
             if practices:
                 with st.expander("現在の出欠登録状況", expanded=True):
-                    att_rows = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], None)
-                    participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
-                    cast_ids: set[str] = set()
-                    for row in participant_rows:
-                        p_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
-                        c_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_CONCERT_REL_KEYS)
-                        if pid in p_ids and concert_id in c_ids:
-                            cast_ids.add(row.get("id", ""))
-                    p_to_att = {}
-                    for a in att_rows:
-                        p_ids = ctx["extract_relation_ids_any"](a, ATT_PLAYER_REL_KEYS)
-                        pr_ids = ctx["extract_relation_ids_any"](a, ATT_PRACTICE_REL_KEYS)
-                        if pr_ids and (pid in p_ids or bool(cast_ids.intersection(set(p_ids)))):
-                            p_to_att[pr_ids[0]] = ext(a, ATT_STATUS_KEYS) or "未回答"
+                    _, p_to_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
                     for pr in practices:
                         pr_id   = pr.get("id","")
                         pr_name = ext(pr, PRACTICE_NAME_KEYS) or ext(pr, PRACTICE_DATE_KEYS) or pr_id
                         pr_date = ext(pr, PRACTICE_DATE_KEYS) or ""
-                        status  = p_to_att.get(pr_id, "未回答")
+                        status  = (p_to_att_map.get(pr_id, {}) or {}).get("status", "未回答")
                         label   = f"{pr_date[:10] if pr_date else ''} {pr_name}".strip()
                         st.caption(f"{label}：**{status}**")
 
@@ -796,24 +845,7 @@ def render_form(ctx, concert_id: str):
         existing_att: dict[str, dict] = {}
         current_pid = st.session_state.get("form_player_id", "")
         if current_pid:
-            participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
-            cast_ids: set[str] = set()
-            for row in participant_rows:
-                p_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
-                c_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_CONCERT_REL_KEYS)
-                if current_pid in p_ids and concert_id in c_ids:
-                    cast_ids.add(row.get("id", ""))
-            att_rows = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], None)
-            for a in att_rows:
-                p_ids = ctx["extract_relation_ids_any"](a, ATT_PLAYER_REL_KEYS)
-                pr_ids = ctx["extract_relation_ids_any"](a, ATT_PRACTICE_REL_KEYS)
-                if not pr_ids:
-                    continue
-                if current_pid in p_ids or bool(cast_ids.intersection(set(p_ids))):
-                    existing_att[pr_ids[0]] = {
-                        "status": ext(a, ATT_STATUS_KEYS) or "△",
-                        "comment": ext(a, ATT_NOTE_KEYS) or "",
-                    }
+            _, existing_att = _get_form_cast_and_att_map(ctx, concert_id, current_pid)
 
         with st.form("step2"):
             att: dict[str, str] = {}

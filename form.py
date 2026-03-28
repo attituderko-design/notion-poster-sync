@@ -1,4 +1,5 @@
 import streamlit as st
+from pathlib import Path
 
 
 st.set_page_config(
@@ -11,7 +12,11 @@ st.markdown(
     "<style>div.block-container{padding-top:1.0rem;}</style>",
     unsafe_allow_html=True,
 )
-st.image("assets/logo.png", width=320)
+_logo_local = Path(__file__).resolve().parent / "assets" / "logo.png"
+if _logo_local.exists():
+    st.image(str(_logo_local), width=320)
+else:
+    st.image("https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/logo.png", width=320)
 st.title("ArtéMis HARMONIA")
 st.caption("奏者入力フォーム")
 
