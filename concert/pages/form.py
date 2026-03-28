@@ -518,7 +518,17 @@ def render_form(ctx, concert_id: str):
     c_soloist   = ext(concert, CONCERT_SOLOIST_KEYS) or ""
 
     st.markdown(
-        f"<p style='font-size:1.28rem;font-weight:700;margin:0 0 .25rem 0;'>🎵 {c_name} 情報入力フォーム</p>",
+        f"""
+        <h1 style="
+            margin: 0 0 .35rem 0;
+            font-size: 1.8rem;
+            font-weight: 700;
+            line-height: 1.35;
+        ">
+            ArtéMis HARMONIA<br>
+            <span style="font-size: 0.95em;">🎵 {c_name} 奏者入力フォーム</span>
+        </h1>
+        """,
         unsafe_allow_html=True,
     )
     if c_date:      st.caption(f"📅 本番日：{c_date}")
