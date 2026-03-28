@@ -172,6 +172,7 @@ BILLING_SUBTOTAL_KEYS     = ["税抜小計", "Subtotal"]
 BILLING_TAX_KEYS          = ["消費税", "Tax"]
 BILLING_TOTAL_KEYS        = ["税込合計", "Total"]
 BILLING_MODE_KEYS         = ["算出モード", "Mode", "連動モード"]
+BILLING_NOTE_KEYS         = ["備考", "メモ", "Note"]
 
 # ── CONCERT_CAST 追加フィールド ───────────────────────────────
 PARTICIPANT_PART_KEYS     = ["パート", "Part"]

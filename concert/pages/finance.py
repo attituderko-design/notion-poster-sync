@@ -21,7 +21,7 @@ from concert.services.keys import (
     BILLING_ISSUE_DATE_KEYS, BILLING_DUE_DATE_KEYS, BILLING_MEMBER_COUNT_KEYS,
     BILLING_PRACTICE_COUNT_KEYS, BILLING_OPTION_KEYS, BILLING_DISCOUNT_KEYS,
     BILLING_TAX_RATE_KEYS, BILLING_SUBTOTAL_KEYS, BILLING_TAX_KEYS,
-    BILLING_TOTAL_KEYS, BILLING_MODE_KEYS,
+    BILLING_TOTAL_KEYS, BILLING_MODE_KEYS, BILLING_NOTE_KEYS,
 )
 
 
@@ -129,6 +129,7 @@ def _save_billing_record(
     issue_on: date,
     due_on: date,
     calc: dict,
+    note: str = "",
 ) -> bool:
     db_id = (ctx.get("CONCERT_DB_BILLING") or "").strip()
     if not db_id:
@@ -161,6 +162,7 @@ def _save_billing_record(
     ctx["put_prop_any"](props, t, BILLING_SUBTOTAL_KEYS, int(calc.get("subtotal", 0)))
     ctx["put_prop_any"](props, t, BILLING_TAX_KEYS, int(calc.get("tax", 0)))
     ctx["put_prop_any"](props, t, BILLING_TOTAL_KEYS, int(calc.get("total", 0)))
+    ctx["put_prop_any"](props, t, BILLING_NOTE_KEYS, note)
 
     if target_id:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{target_id}",
@@ -172,6 +174,124 @@ def _save_billing_record(
     if ok:
         _clear_billing_cache(concert_id)
     return ok
+
+
+def _build_billing_pdf(doc_title: str, concert_name: str, issue_on: date, due_on: date, calc: dict) -> bytes:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfgen import canvas
+
+    font_regular = "Helvetica"
+    font_bold = "Helvetica-Bold"
+    for f in [
+        "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        "C:/Windows/Fonts/msgothic.ttc",
+    ]:
+        try:
+            pdfmetrics.registerFont(TTFont("JPRegular", f))
+            pdfmetrics.registerFont(TTFont("JPBold", f))
+            font_regular = "JPRegular"
+            font_bold = "JPBold"
+            break
+        except Exception:
+            pass
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+    y = h - 18 * mm
+
+    c.setFont(font_bold, 16)
+    c.drawString(18 * mm, y, doc_title)
+    y -= 10 * mm
+    c.setFont(font_regular, 10)
+    c.drawString(18 * mm, y, f"対象演奏会: {concert_name or '-'}")
+    y -= 6 * mm
+    c.drawString(18 * mm, y, f"発行日: {issue_on.isoformat()}    支払期限: {due_on.isoformat()}")
+    y -= 10 * mm
+
+    lines = [
+        ("基本料", calc["base_fee"]),
+        (f"参加者数×100円 ({calc['member_count']}人)", calc["participant_fee"]),
+        (f"練習回数×800円 ({calc['practice_count']}回)", calc["practice_fee"]),
+        ("オプション実費", calc["option_actual"]),
+        ("税抜小計", calc["subtotal"]),
+        ("出精値引き", -calc["discount_applied"]),
+        ("消費税(10%)", calc["tax"]),
+        ("税込合計", calc["total"]),
+    ]
+
+    for label, amount in lines:
+        c.setFont(font_regular if label != "税込合計" else font_bold, 11)
+        c.drawString(22 * mm, y, label)
+        c.drawRightString(w - 18 * mm, y, f"¥{amount:,}")
+        y -= 7 * mm
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def _build_receipt_pdf(
+    concert_name: str,
+    receipt_date: date,
+    amount_total: int,
+    addressee: str,
+    item_label: str,
+    payment_method: str,
+    issuer_name: str,
+) -> bytes:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfgen import canvas
+
+    font_regular = "Helvetica"
+    font_bold = "Helvetica-Bold"
+    for f in [
+        "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        "C:/Windows/Fonts/msgothic.ttc",
+    ]:
+        try:
+            pdfmetrics.registerFont(TTFont("JPRegular", f))
+            pdfmetrics.registerFont(TTFont("JPBold", f))
+            font_regular = "JPRegular"
+            font_bold = "JPBold"
+            break
+        except Exception:
+            pass
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+    y = h - 20 * mm
+    c.setFont(font_bold, 20)
+    c.drawString(18 * mm, y, "領収書")
+    y -= 10 * mm
+
+    c.setFont(font_regular, 11)
+    if addressee.strip():
+        c.drawString(18 * mm, y, f"{addressee.strip()} 御中")
+        y -= 8 * mm
+
+    c.setFont(font_bold, 14)
+    c.drawString(18 * mm, y, f"¥ {int(amount_total):,}")
+    y -= 8 * mm
+    c.setFont(font_regular, 10)
+    c.drawString(18 * mm, y, f"但し、{item_label.strip() or '管理代行費として'}")
+    y -= 8 * mm
+    c.drawString(18 * mm, y, f"対象演奏会: {concert_name or '-'}")
+    y -= 6 * mm
+    c.drawString(18 * mm, y, f"受領日: {receipt_date.isoformat()}    受領方法: {payment_method}")
+    y -= 10 * mm
+    c.drawString(18 * mm, y, f"発行者: {issuer_name.strip() or 'ArtéMis HARMONIA'}")
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
 
 
 # ============================================================
@@ -427,11 +547,11 @@ def _render_budget_tab(ctx, concert_id: str):
 
 
 def _render_billing_tab(ctx, concert_id: str):
-    st.caption("管理代行費の見積・請求（収支計算とは分離）")
+    st.caption("管理代行費の見積・請求・領収（収支計算とは分離）")
     st.info("このタブの金額は請求用です。演奏会の収支・参加費には反映しません。")
     st.caption("料金式: 基本料 5,000円 + 参加者数 × 100円 + 練習回数 × 800円 + オプション実費")
     if not (ctx.get("CONCERT_DB_BILLING") or "").strip():
-        st.warning("ℹ️ 見積/請求DB未設定のため、保存は無効です。secrets.toml に `CONCERT_DB_BILLING` を追加してください。")
+        st.warning("ℹ️ 見積/請求/領収DB未設定のため、保存は無効です。secrets.toml に `CONCERT_DB_BILLING` を追加してください。")
 
     def _calc(member_count: int, practice_count: int, option_actual: int, discount: int) -> dict:
         base_fee = 5000
@@ -460,62 +580,11 @@ def _render_billing_tab(ctx, concert_id: str):
             "practice_count": int(practice_count),
         }
 
-    def _build_billing_pdf(doc_title: str, concert_name: str, issue_on: date, due_on: date, calc: dict) -> bytes:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.units import mm
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
-        from reportlab.pdfgen import canvas
-
-        font_regular = "Helvetica"
-        font_bold = "Helvetica-Bold"
-        for f in [
-            "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
-            "C:/Windows/Fonts/msgothic.ttc",
-        ]:
-            try:
-                pdfmetrics.registerFont(TTFont("JPRegular", f))
-                pdfmetrics.registerFont(TTFont("JPBold", f))
-                font_regular = "JPRegular"
-                font_bold = "JPBold"
-                break
-            except Exception:
-                pass
-
-        buf = io.BytesIO()
-        c = canvas.Canvas(buf, pagesize=A4)
-        w, h = A4
-        y = h - 18 * mm
-
-        c.setFont(font_bold, 16)
-        c.drawString(18 * mm, y, doc_title)
-        y -= 10 * mm
-        c.setFont(font_regular, 10)
-        c.drawString(18 * mm, y, f"対象演奏会: {concert_name or '-'}")
-        y -= 6 * mm
-        c.drawString(18 * mm, y, f"発行日: {issue_on.isoformat()}    支払期限: {due_on.isoformat()}")
-        y -= 10 * mm
-
-        lines = [
-            ("基本料", calc["base_fee"]),
-            (f"参加者数×100円 ({calc['member_count']}人)", calc["participant_fee"]),
-            (f"練習回数×800円 ({calc['practice_count']}回)", calc["practice_fee"]),
-            ("オプション実費", calc["option_actual"]),
-            ("税抜小計", calc["subtotal"]),
-            ("出精値引き", -calc["discount_applied"]),
-            ("消費税(10%)", calc["tax"]),
-            ("税込合計", calc["total"]),
-        ]
-
-        for label, amount in lines:
-            c.setFont(font_regular if label != "税込合計" else font_bold, 11)
-            c.drawString(22 * mm, y, label)
-            c.drawRightString(w - 18 * mm, y, f"¥{amount:,}")
-            y -= 7 * mm
-
-        c.showPage()
-        c.save()
-        return buf.getvalue()
+    def _to_int(v, default=0):
+        try:
+            return int(float(v))
+        except Exception:
+            return int(default)
 
     linked_members = len(_load_cast(ctx, concert_id))
     linked_practices = _count_practices(ctx, concert_id)
@@ -533,7 +602,7 @@ def _render_billing_tab(ctx, concert_id: str):
     est_saved = _find_doc_row("見積")
     inv_saved = _find_doc_row("請求")
 
-    tab_est, tab_inv = st.tabs(["見積（自由入力）", "請求（実績連動）"])
+    tab_est, tab_inv, tab_rec = st.tabs(["見積（自由入力）", "請求（実績連動）", "領収書（請求連動）"])
 
     with tab_est:
         st.markdown("#### 見積（自由入力）")
@@ -545,13 +614,10 @@ def _render_billing_tab(ctx, concert_id: str):
         est_issue_default = issue_default
         est_due_default = due_default
         if est_saved:
-            try:
-                est_members_default = int(float(ext(est_saved, BILLING_MEMBER_COUNT_KEYS) or est_members_default))
-                est_practices_default = int(float(ext(est_saved, BILLING_PRACTICE_COUNT_KEYS) or est_practices_default))
-                est_option_default = int(float(ext(est_saved, BILLING_OPTION_KEYS) or 0))
-                est_discount_default = int(float(ext(est_saved, BILLING_DISCOUNT_KEYS) or 0))
-            except Exception:
-                pass
+            est_members_default = _to_int(ext(est_saved, BILLING_MEMBER_COUNT_KEYS), est_members_default)
+            est_practices_default = _to_int(ext(est_saved, BILLING_PRACTICE_COUNT_KEYS), est_practices_default)
+            est_option_default = _to_int(ext(est_saved, BILLING_OPTION_KEYS), 0)
+            est_discount_default = _to_int(ext(est_saved, BILLING_DISCOUNT_KEYS), 0)
             try:
                 d1 = (ext(est_saved, BILLING_ISSUE_DATE_KEYS) or "")[:10]
                 d2 = (ext(est_saved, BILLING_DUE_DATE_KEYS) or "")[:10]
@@ -604,11 +670,8 @@ def _render_billing_tab(ctx, concert_id: str):
         inv_issue_default = issue_default
         inv_due_default = due_default
         if inv_saved:
-            try:
-                inv_option_default = int(float(ext(inv_saved, BILLING_OPTION_KEYS) or 0))
-                inv_discount_default = int(float(ext(inv_saved, BILLING_DISCOUNT_KEYS) or 0))
-            except Exception:
-                pass
+            inv_option_default = _to_int(ext(inv_saved, BILLING_OPTION_KEYS), 0)
+            inv_discount_default = _to_int(ext(inv_saved, BILLING_DISCOUNT_KEYS), 0)
             try:
                 d1 = (ext(inv_saved, BILLING_ISSUE_DATE_KEYS) or "")[:10]
                 d2 = (ext(inv_saved, BILLING_DUE_DATE_KEYS) or "")[:10]
@@ -634,6 +697,8 @@ def _render_billing_tab(ctx, concert_id: str):
             ok = _save_billing_record(ctx, concert_id, "請求", "実績連動", inv_issue, inv_due, inv_calc)
             if ok:
                 st.success("✅ 請求データをDBに保存しました。")
+                _clear_billing_cache(concert_id)
+                st.rerun()
             else:
                 st.warning("⚠️ 請求データ保存に失敗しました。（CONCERT_DB_BILLING を確認）")
 
@@ -644,6 +709,95 @@ def _render_billing_tab(ctx, concert_id: str):
             file_name=f"請求書_{(ctx.get('SELECTED_CONCERT_NAME') or concert_id)}.pdf",
             mime="application/pdf",
             key="billing_inv_pdf",
+            use_container_width=True,
+        )
+
+    with tab_rec:
+        st.markdown("#### 領収書（請求データ連動）")
+        rec_saved = _find_doc_row("領収")
+        if not inv_saved:
+            st.warning("先に『請求（実績連動）』で請求データを保存してください。領収書は請求データに連動します。")
+            return
+
+        inv_total = _to_int(ext(inv_saved, BILLING_TOTAL_KEYS), 0)
+        inv_issue_str = (ext(inv_saved, BILLING_ISSUE_DATE_KEYS) or "")[:10]
+        rec_date_default = issue_default
+        if inv_issue_str:
+            try:
+                y, m, d = map(int, inv_issue_str.split("-"))
+                rec_date_default = date(y, m, d)
+            except Exception:
+                pass
+        if rec_saved:
+            ds = (ext(rec_saved, BILLING_ISSUE_DATE_KEYS) or "")[:10]
+            if ds:
+                try:
+                    y, m, d = map(int, ds.split("-"))
+                    rec_date_default = date(y, m, d)
+                except Exception:
+                    pass
+
+        addressee_default = ""
+        item_default = "管理代行費として"
+        pay_methods = ["銀行振込", "現金", "その他"]
+        pay_method_default = "銀行振込"
+        issuer_default = "ArtéMis HARMONIA"
+        if rec_saved:
+            note_text = ext(rec_saved, BILLING_NOTE_KEYS) or ""
+            for piece in [x.strip() for x in note_text.split("/") if x.strip()]:
+                if piece.startswith("宛名:"):
+                    addressee_default = piece.replace("宛名:", "", 1).strip()
+                elif piece.startswith("但し書き:"):
+                    item_default = piece.replace("但し書き:", "", 1).strip() or item_default
+                elif piece.startswith("受領方法:"):
+                    pm = piece.replace("受領方法:", "", 1).strip()
+                    if pm in pay_methods:
+                        pay_method_default = pm
+                elif piece.startswith("発行者:"):
+                    issuer_default = piece.replace("発行者:", "", 1).strip() or issuer_default
+
+        st.metric("請求連動金額", f"¥{inv_total:,}")
+        rec_date = st.date_input("受領日", value=rec_date_default, key="billing_rec_date")
+        addressee = st.text_input("宛名", value=addressee_default, key="billing_rec_addressee", placeholder="例: Happy Hour Orchestre 御中")
+        item_label = st.text_input("但し書き", value=item_default, key="billing_rec_item")
+        payment_method = st.selectbox("受領方法", pay_methods, index=pay_methods.index(pay_method_default), key="billing_rec_method")
+        issuer_name = st.text_input("発行者", value=issuer_default, key="billing_rec_issuer")
+
+        rec_calc = {
+            "member_count": _to_int(ext(inv_saved, BILLING_MEMBER_COUNT_KEYS), 0),
+            "practice_count": _to_int(ext(inv_saved, BILLING_PRACTICE_COUNT_KEYS), 0),
+            "option_actual": _to_int(ext(inv_saved, BILLING_OPTION_KEYS), 0),
+            "discount_applied": _to_int(ext(inv_saved, BILLING_DISCOUNT_KEYS), 0),
+            "subtotal": _to_int(ext(inv_saved, BILLING_SUBTOTAL_KEYS), 0),
+            "tax": _to_int(ext(inv_saved, BILLING_TAX_KEYS), 0),
+            "total": inv_total,
+            "base_fee": 5000,
+            "participant_fee": _to_int(ext(inv_saved, BILLING_MEMBER_COUNT_KEYS), 0) * 100,
+            "practice_fee": _to_int(ext(inv_saved, BILLING_PRACTICE_COUNT_KEYS), 0) * 800,
+        }
+        if st.button("💾 領収データを保存", key="billing_rec_save", use_container_width=True):
+            note = f"宛名:{addressee} / 但し書き:{item_label} / 受領方法:{payment_method} / 発行者:{issuer_name}"
+            ok = _save_billing_record(ctx, concert_id, "領収", "請求連動", rec_date, rec_date, rec_calc, note=note)
+            if ok:
+                st.success("✅ 領収データをDBに保存しました。")
+            else:
+                st.warning("⚠️ 領収データ保存に失敗しました。（CONCERT_DB_BILLING を確認）")
+
+        pdf_rec = _build_receipt_pdf(
+            concert_name=ctx.get("SELECTED_CONCERT_NAME", ""),
+            receipt_date=rec_date,
+            amount_total=inv_total,
+            addressee=addressee,
+            item_label=item_label,
+            payment_method=payment_method,
+            issuer_name=issuer_name,
+        )
+        st.download_button(
+            "🧾 領収書PDFを出力",
+            data=pdf_rec,
+            file_name=f"領収書_{(ctx.get('SELECTED_CONCERT_NAME') or concert_id)}.pdf",
+            mime="application/pdf",
+            key="billing_rec_pdf",
             use_container_width=True,
         )
 
