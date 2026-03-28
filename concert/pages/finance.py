@@ -17,6 +17,11 @@ from concert.services.keys import (
     EXPENSE_KEY_KEYS, EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS,
     EXPENSE_CONTENT_KEYS, EXPENSE_AMOUNT_KEYS, EXPENSE_CONFIRMED_KEYS,
     EXPENSE_NOTE_KEYS, EXPENSE_TYPE_OPTIONS,
+    BILLING_KEY_KEYS, BILLING_CONCERT_REL_KEYS, BILLING_DOC_TYPE_KEYS,
+    BILLING_ISSUE_DATE_KEYS, BILLING_DUE_DATE_KEYS, BILLING_MEMBER_COUNT_KEYS,
+    BILLING_PRACTICE_COUNT_KEYS, BILLING_OPTION_KEYS, BILLING_DISCOUNT_KEYS,
+    BILLING_TAX_RATE_KEYS, BILLING_SUBTOTAL_KEYS, BILLING_TAX_KEYS,
+    BILLING_TOTAL_KEYS, BILLING_MODE_KEYS,
 )
 
 
@@ -97,6 +102,76 @@ def _count_practices(ctx, concert_id: str) -> int:
         return 0
     rows = ctx["query_all"](db_id, {"filter": {"property": rel, "relation": {"contains": concert_id}}})
     return len(rows or [])
+
+
+def _load_billing_rows(ctx, concert_id: str) -> list[dict]:
+    db_id = (ctx.get("CONCERT_DB_BILLING") or "").strip()
+    if not db_id:
+        return []
+    key = f"billing_list_{concert_id}"
+    if key not in st.session_state:
+        t = ctx["get_prop_types"](db_id)
+        rel = ctx["find_prop_name"](t, BILLING_CONCERT_REL_KEYS) if t else None
+        f = {"filter": {"property": rel, "relation": {"contains": concert_id}}} if rel else None
+        st.session_state[key] = ctx["query_all"](db_id, f)
+    return st.session_state.get(key, [])
+
+
+def _clear_billing_cache(concert_id: str):
+    st.session_state.pop(f"billing_list_{concert_id}", None)
+
+
+def _save_billing_record(
+    ctx,
+    concert_id: str,
+    doc_type: str,
+    mode: str,
+    issue_on: date,
+    due_on: date,
+    calc: dict,
+) -> bool:
+    db_id = (ctx.get("CONCERT_DB_BILLING") or "").strip()
+    if not db_id:
+        return False
+    t = ctx["get_prop_types"](db_id)
+    if not t:
+        return False
+
+    # 同一キー（演奏会×書類種別）で上書き
+    rows = _load_billing_rows(ctx, concert_id)
+    ext = ctx["extract_prop_text_any"]
+    target_id = ""
+    for r in rows:
+        if (ext(r, BILLING_DOC_TYPE_KEYS) or "").strip() == doc_type:
+            target_id = r.get("id", "")
+            break
+
+    props: dict = {}
+    ctx["put_key_any"](props, t, BILLING_KEY_KEYS, concert_id, doc_type, prefix="billing")
+    ctx["put_prop_any"](props, t, BILLING_CONCERT_REL_KEYS, concert_id)
+    ctx["put_prop_any"](props, t, BILLING_DOC_TYPE_KEYS, doc_type)
+    ctx["put_prop_any"](props, t, BILLING_MODE_KEYS, mode)
+    ctx["put_prop_any"](props, t, BILLING_ISSUE_DATE_KEYS, issue_on.isoformat())
+    ctx["put_prop_any"](props, t, BILLING_DUE_DATE_KEYS, due_on.isoformat())
+    ctx["put_prop_any"](props, t, BILLING_MEMBER_COUNT_KEYS, int(calc.get("member_count", 0)))
+    ctx["put_prop_any"](props, t, BILLING_PRACTICE_COUNT_KEYS, int(calc.get("practice_count", 0)))
+    ctx["put_prop_any"](props, t, BILLING_OPTION_KEYS, int(calc.get("option_actual", 0)))
+    ctx["put_prop_any"](props, t, BILLING_DISCOUNT_KEYS, int(calc.get("discount_applied", 0)))
+    ctx["put_prop_any"](props, t, BILLING_TAX_RATE_KEYS, 10)
+    ctx["put_prop_any"](props, t, BILLING_SUBTOTAL_KEYS, int(calc.get("subtotal", 0)))
+    ctx["put_prop_any"](props, t, BILLING_TAX_KEYS, int(calc.get("tax", 0)))
+    ctx["put_prop_any"](props, t, BILLING_TOTAL_KEYS, int(calc.get("total", 0)))
+
+    if target_id:
+        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{target_id}",
+                                 json={"properties": props})
+    else:
+        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
+                                 json={"parent": {"database_id": db_id}, "properties": props})
+    ok = res is not None and res.status_code == 200
+    if ok:
+        _clear_billing_cache(concert_id)
+    return ok
 
 
 # ============================================================
@@ -355,6 +430,8 @@ def _render_billing_tab(ctx, concert_id: str):
     st.caption("管理代行費の見積・請求（収支計算とは分離）")
     st.info("このタブの金額は請求用です。演奏会の収支・参加費には反映しません。")
     st.caption("料金式: 基本料 5,000円 + 参加者数 × 100円 + 練習回数 × 800円 + オプション実費")
+    if not (ctx.get("CONCERT_DB_BILLING") or "").strip():
+        st.warning("ℹ️ 見積/請求DB未設定のため、保存は無効です。secrets.toml に `CONCERT_DB_BILLING` を追加してください。")
 
     def _calc(member_count: int, practice_count: int, option_actual: int, discount: int) -> dict:
         base_fee = 5000
@@ -444,19 +521,53 @@ def _render_billing_tab(ctx, concert_id: str):
     linked_practices = _count_practices(ctx, concert_id)
     issue_default = date.today()
     due_default = issue_default + timedelta(days=14)
+    ext = ctx["extract_prop_text_any"]
+    billing_rows = _load_billing_rows(ctx, concert_id)
+
+    def _find_doc_row(doc_type: str) -> dict | None:
+        for r in billing_rows:
+            if (ext(r, BILLING_DOC_TYPE_KEYS) or "").strip() == doc_type:
+                return r
+        return None
+
+    est_saved = _find_doc_row("見積")
+    inv_saved = _find_doc_row("請求")
 
     tab_est, tab_inv = st.tabs(["見積（自由入力）", "請求（実績連動）"])
 
     with tab_est:
         st.markdown("#### 見積（自由入力）")
         c1, c2, c3 = st.columns(3)
-        est_members = c1.number_input("見積参加者数", min_value=0, value=max(linked_members, 0), step=1, key="billing_est_members")
-        est_practices = c2.number_input("見積練習回数", min_value=0, value=max(linked_practices, 0), step=1, key="billing_est_practices")
+        est_members_default = max(linked_members, 0)
+        est_practices_default = max(linked_practices, 0)
+        est_option_default = 0
+        est_discount_default = 0
+        est_issue_default = issue_default
+        est_due_default = due_default
+        if est_saved:
+            try:
+                est_members_default = int(float(ext(est_saved, BILLING_MEMBER_COUNT_KEYS) or est_members_default))
+                est_practices_default = int(float(ext(est_saved, BILLING_PRACTICE_COUNT_KEYS) or est_practices_default))
+                est_option_default = int(float(ext(est_saved, BILLING_OPTION_KEYS) or 0))
+                est_discount_default = int(float(ext(est_saved, BILLING_DISCOUNT_KEYS) or 0))
+            except Exception:
+                pass
+            try:
+                d1 = (ext(est_saved, BILLING_ISSUE_DATE_KEYS) or "")[:10]
+                d2 = (ext(est_saved, BILLING_DUE_DATE_KEYS) or "")[:10]
+                if d1:
+                    y, m, d = map(int, d1.split("-")); est_issue_default = date(y, m, d)
+                if d2:
+                    y, m, d = map(int, d2.split("-")); est_due_default = date(y, m, d)
+            except Exception:
+                pass
+        est_members = c1.number_input("見積参加者数", min_value=0, value=est_members_default, step=1, key="billing_est_members")
+        est_practices = c2.number_input("見積練習回数", min_value=0, value=est_practices_default, step=1, key="billing_est_practices")
         c3.number_input("税率(%)", min_value=10, max_value=10, value=10, step=1, key="billing_est_tax", disabled=True)
-        est_option = st.number_input("オプション実費（円）", min_value=0, step=1000, value=0, key="billing_est_option")
-        est_discount = st.number_input("出精値引き（円）", min_value=0, step=1000, value=0, key="billing_est_discount")
-        est_issue = st.date_input("発行日", value=issue_default, key="billing_est_issue")
-        est_due = st.date_input("支払期限", value=due_default, key="billing_est_due")
+        est_option = st.number_input("オプション実費（円）", min_value=0, step=1000, value=est_option_default, key="billing_est_option")
+        est_discount = st.number_input("出精値引き（円）", min_value=0, step=1000, value=est_discount_default, key="billing_est_discount")
+        est_issue = st.date_input("発行日", value=est_issue_default, key="billing_est_issue")
+        est_due = st.date_input("支払期限", value=est_due_default, key="billing_est_due")
 
         est_calc = _calc(est_members, est_practices, est_option, est_discount)
         e1, e2, e3, e4 = st.columns(4)
@@ -464,6 +575,13 @@ def _render_billing_tab(ctx, concert_id: str):
         e2.metric("値引き", f"-¥{est_calc['discount_applied']:,}")
         e3.metric("消費税(10%)", f"¥{est_calc['tax']:,}")
         e4.metric("税込合計", f"¥{est_calc['total']:,}")
+
+        if st.button("💾 見積データを保存", key="billing_est_save", use_container_width=True):
+            ok = _save_billing_record(ctx, concert_id, "見積", "自由入力", est_issue, est_due, est_calc)
+            if ok:
+                st.success("✅ 見積データをDBに保存しました。")
+            else:
+                st.warning("⚠️ 見積データ保存に失敗しました。（CONCERT_DB_BILLING を確認）")
 
         pdf_est = _build_billing_pdf("見積書", ctx.get("SELECTED_CONCERT_NAME", ""), est_issue, est_due, est_calc)
         st.download_button(
@@ -481,10 +599,29 @@ def _render_billing_tab(ctx, concert_id: str):
         c1.metric("参加者数（実績）", f"{linked_members}人")
         c2.metric("練習回数（実績）", f"{linked_practices}回")
         c3.metric("税率", "10%")
-        inv_option = st.number_input("オプション実費（円）", min_value=0, step=1000, value=0, key="billing_inv_option")
-        inv_discount = st.number_input("出精値引き（円）", min_value=0, step=1000, value=0, key="billing_inv_discount")
-        inv_issue = st.date_input("発行日", value=issue_default, key="billing_inv_issue")
-        inv_due = st.date_input("支払期限", value=due_default, key="billing_inv_due")
+        inv_option_default = 0
+        inv_discount_default = 0
+        inv_issue_default = issue_default
+        inv_due_default = due_default
+        if inv_saved:
+            try:
+                inv_option_default = int(float(ext(inv_saved, BILLING_OPTION_KEYS) or 0))
+                inv_discount_default = int(float(ext(inv_saved, BILLING_DISCOUNT_KEYS) or 0))
+            except Exception:
+                pass
+            try:
+                d1 = (ext(inv_saved, BILLING_ISSUE_DATE_KEYS) or "")[:10]
+                d2 = (ext(inv_saved, BILLING_DUE_DATE_KEYS) or "")[:10]
+                if d1:
+                    y, m, d = map(int, d1.split("-")); inv_issue_default = date(y, m, d)
+                if d2:
+                    y, m, d = map(int, d2.split("-")); inv_due_default = date(y, m, d)
+            except Exception:
+                pass
+        inv_option = st.number_input("オプション実費（円）", min_value=0, step=1000, value=inv_option_default, key="billing_inv_option")
+        inv_discount = st.number_input("出精値引き（円）", min_value=0, step=1000, value=inv_discount_default, key="billing_inv_discount")
+        inv_issue = st.date_input("発行日", value=inv_issue_default, key="billing_inv_issue")
+        inv_due = st.date_input("支払期限", value=inv_due_default, key="billing_inv_due")
 
         inv_calc = _calc(linked_members, linked_practices, inv_option, inv_discount)
         i1, i2, i3, i4 = st.columns(4)
@@ -492,6 +629,13 @@ def _render_billing_tab(ctx, concert_id: str):
         i2.metric("値引き", f"-¥{inv_calc['discount_applied']:,}")
         i3.metric("消費税(10%)", f"¥{inv_calc['tax']:,}")
         i4.metric("税込合計", f"¥{inv_calc['total']:,}")
+
+        if st.button("💾 請求データを保存", key="billing_inv_save", use_container_width=True):
+            ok = _save_billing_record(ctx, concert_id, "請求", "実績連動", inv_issue, inv_due, inv_calc)
+            if ok:
+                st.success("✅ 請求データをDBに保存しました。")
+            else:
+                st.warning("⚠️ 請求データ保存に失敗しました。（CONCERT_DB_BILLING を確認）")
 
         pdf_inv = _build_billing_pdf("請求書", ctx.get("SELECTED_CONCERT_NAME", ""), inv_issue, inv_due, inv_calc)
         st.download_button(

@@ -51,6 +51,7 @@ _DEFAULT_CONCERT_DB_IDS = {
     "rental": "32c6e5f3-8885-8072-9131-ceaff635b895",       # レンタル見積 Rental
     "part_definition": "32c4532d7d56803ba3e1c8c87d1cd0dc",  # パート定義DB
     "preference": "32c4532d7d5680b1902dce3555590db3",       # 希望入力DB
+    "billing": "",                                           # 見積/請求DB（任意）
 }
 
 _NOTION_ID_PATTERN = re.compile(
@@ -137,6 +138,10 @@ def get_concert_secrets() -> dict:
         or st.secrets.get("CONCERT_DB_CONCERT_EXPENCE", "")
         or _DEFAULT_CONCERT_DB_IDS.get("expense", "")
     )
+    db_billing = (
+        st.secrets.get("CONCERT_DB_BILLING", "")
+        or _DEFAULT_CONCERT_DB_IDS.get("billing", "")
+    )
     required_db = {
         "演奏会DB": db_concert,
         "練習DB": db_practice,
@@ -175,6 +180,7 @@ def get_concert_secrets() -> dict:
         "db_schedule":         normalized_required_db["スケジュールDB"],
         "db_pi_master":        _normalize_notion_id(db_pi_master),
         "db_expense":          _normalize_notion_id(db_expense),
+        "db_billing":          _normalize_notion_id(db_billing),
     }
 
 
@@ -729,6 +735,7 @@ def build_concert_ctx() -> dict:
         "CONCERT_DB_PREFERENCE":       secrets["db_preference"],
         "CONCERT_DB_SCHEDULE":         secrets["db_schedule"],
         "CONCERT_DB_CONCERT_EXPENSE":  secrets["db_expense"],
+        "CONCERT_DB_BILLING":          secrets["db_billing"],
         "query_all":                   _query_all,
         "get_prop_types":              _get_prop_types,
         "get_db_schema":               _get_db_schema,

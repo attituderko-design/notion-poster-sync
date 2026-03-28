@@ -157,6 +157,22 @@ EXPENSE_TYPE_OPTIONS = [
     "印刷物・プログラム", "フライヤー", "謝礼", "その他"
 ]
 
+# ── BILLING（見積/請求）DB ───────────────────────────────────
+BILLING_KEY_KEYS          = ["billing_key", "BillingKey", "請求キー", "見積キー", "PK請求キー", "タイトル"]
+BILLING_CONCERT_REL_KEYS  = ["演奏会", "FK演奏会", "出演"]
+BILLING_DOC_TYPE_KEYS     = ["書類種別", "種別", "DocType", "区分"]
+BILLING_ISSUE_DATE_KEYS   = ["発行日", "IssueDate"]
+BILLING_DUE_DATE_KEYS     = ["支払期限", "DueDate", "期限"]
+BILLING_MEMBER_COUNT_KEYS = ["参加者数", "人数", "MemberCount"]
+BILLING_PRACTICE_COUNT_KEYS = ["練習回数", "PracticeCount"]
+BILLING_OPTION_KEYS       = ["オプション実費", "OptionActual", "オプション"]
+BILLING_DISCOUNT_KEYS     = ["出精値引き", "DedicationDiscount", "値引き"]
+BILLING_TAX_RATE_KEYS     = ["税率", "TaxRate"]
+BILLING_SUBTOTAL_KEYS     = ["税抜小計", "Subtotal"]
+BILLING_TAX_KEYS          = ["消費税", "Tax"]
+BILLING_TOTAL_KEYS        = ["税込合計", "Total"]
+BILLING_MODE_KEYS         = ["算出モード", "Mode", "連動モード"]
+
 # ── CONCERT_CAST 追加フィールド ───────────────────────────────
 PARTICIPANT_PART_KEYS     = ["パート", "Part"]
 PARTICIPANT_ROLE_KEYS     = ["役職_音楽", "役職", "Role"]
