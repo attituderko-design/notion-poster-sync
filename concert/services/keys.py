@@ -144,7 +144,7 @@ MASTER_OWN_COUNT_KEYS     = ["所有台数", "台数", "Count"]
 MASTER_NOTE_KEYS          = ["備考", "メモ", "Note"]
 
 # ── CONCERT_EXPENSE（経費明細）DB ────────────────────────────
-EXPENSE_KEY_KEYS          = ["expense_key", "タイトル"]
+EXPENSE_KEY_KEYS          = ["expense_key", "expence_key", "ExpenseKey", "経費キー", "PK経費キー", "タイトル"]
 EXPENSE_CONCERT_REL_KEYS  = ["演奏会", "FK演奏会"]
 EXPENSE_TYPE_KEYS         = ["種別", "Type"]
 EXPENSE_CONTENT_KEYS      = ["内容", "Content"]

@@ -98,7 +98,8 @@ def _upsert_expense(ctx, concert_id: str, concert_name: str,
     if not t:
         return False
     props: dict = {}
-    ctx["put_prop_any"](props, t, EXPENSE_KEY_KEYS,         f"{concert_name} / {type_} / {content}")
+    # PKは共通ルール（put_key_any）で必ず投入する
+    ctx["put_key_any"](props, t, EXPENSE_KEY_KEYS, concert_id, type_, content, prefix="expense")
     ctx["put_prop_any"](props, t, EXPENSE_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, EXPENSE_TYPE_KEYS,        type_)
     ctx["put_prop_any"](props, t, EXPENSE_CONTENT_KEYS,     content)

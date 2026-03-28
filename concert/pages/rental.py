@@ -251,7 +251,11 @@ def _auto_sync_rental_expense_for_practice(
     expense_note = f"{marker} レンタル管理から自動同期（税率 {tax_rate_percent:.1f}%）"
 
     props: dict = {}
-    ctx["put_prop_any"](props, expense_type_map, EXPENSE_KEY_KEYS, expense_key)
+    # PKは共通ルールで投入（expence_key綴りにも対応）
+    key_prop = ctx["put_key_any"](props, expense_type_map, EXPENSE_KEY_KEYS, concert_id, practice_id, "rental", prefix="expense")
+    if not key_prop:
+        # 念のため最終フォールバック
+        ctx["put_prop_any"](props, expense_type_map, EXPENSE_KEY_KEYS, expense_key)
     ctx["put_prop_any"](props, expense_type_map, EXPENSE_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, expense_type_map, EXPENSE_TYPE_KEYS, "楽器レンタル")
     ctx["put_prop_any"](props, expense_type_map, EXPENSE_CONTENT_KEYS, expense_content)
