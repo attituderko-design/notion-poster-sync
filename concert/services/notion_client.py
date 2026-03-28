@@ -724,6 +724,7 @@ def build_concert_ctx() -> dict:
         "CONCERT_DB_PART_DEFINITION":  secrets["db_part_definition"],
         "CONCERT_DB_PREFERENCE":       secrets["db_preference"],
         "CONCERT_DB_SCHEDULE":         secrets["db_schedule"],
+        "CONCERT_DB_CONCERT_EXPENSE":  secrets["db_expense"],
         "query_all":                   _query_all,
         "get_prop_types":              _get_prop_types,
         "get_db_schema":               _get_db_schema,

@@ -196,6 +196,85 @@ def _archive_page(ctx: dict, page_id: str) -> bool:
     return res is not None and res.status_code == 200
 
 
+def _auto_sync_rental_expense_for_practice(
+    ctx: dict,
+    concert_id: str,
+    practice_id: str,
+    practice_label: str,
+    tax_rate_percent: float,
+) -> tuple[bool, str]:
+    """レンタル見積を収支DBへ自動同期する（練習日単位で1行）。"""
+    expense_db_id = (ctx.get("CONCERT_DB_CONCERT_EXPENSE") or "").strip()
+    if not expense_db_id:
+        return False, "収支DB未設定"
+
+    # 対象練習日の税込合計を算出
+    rental_rows = _load_rentals(ctx, practice_id)
+    subtotal = 0
+    for row in rental_rows:
+        qty_str = ctx["extract_prop_text_any"](row, RENTAL_QTY_KEYS)
+        price_str = ctx["extract_prop_text_any"](row, RENTAL_UNIT_PRICE_KEYS)
+        qty = int(float(qty_str)) if qty_str else 0
+        price = int(float(price_str)) if price_str else 0
+        subtotal += qty * price
+    tax = int(round(subtotal * (tax_rate_percent / 100.0)))
+    total_incl = subtotal + tax
+
+    expense_type_map = ctx["get_prop_types"](expense_db_id)
+    if not expense_type_map:
+        return False, "収支DBのプロパティ取得失敗"
+
+    marker = f"[AUTO_RENTAL_SYNC:{practice_id}]"
+    expense_key = ctx["make_key"](concert_id, practice_id, "rental", prefix="expense")
+
+    # 同一練習日の既存自動行を探索（同演奏会の経費から絞る）
+    rel_name = ctx["find_prop_name"](expense_type_map, EXPENSE_CONCERT_REL_KEYS)
+    filter_payload = {"filter": {"property": rel_name, "relation": {"contains": concert_id}}} if rel_name else None
+    expense_rows = ctx["query_all"](expense_db_id, filter_payload)
+
+    existing_id = ""
+    for e in expense_rows:
+        e_note = (ctx["extract_prop_text_any"](e, EXPENSE_NOTE_KEYS) or "")
+        e_key = (ctx["extract_prop_text_any"](e, EXPENSE_KEY_KEYS) or "")
+        if marker in e_note or e_key == expense_key:
+            existing_id = e.get("id", "")
+            break
+
+    # 金額0なら自動行を消す（見積が空になったケース）
+    if total_incl <= 0:
+        if existing_id:
+            ok = _archive_page(ctx, existing_id)
+            return (ok, "収支同期削除" if ok else "収支同期削除失敗")
+        return True, "収支同期不要"
+
+    expense_content = f"{practice_label}分楽器レンタル {total_incl:,}円"
+    expense_note = f"{marker} レンタル管理から自動同期（税率 {tax_rate_percent:.1f}%）"
+
+    props: dict = {}
+    ctx["put_prop_any"](props, expense_type_map, EXPENSE_KEY_KEYS, expense_key)
+    ctx["put_prop_any"](props, expense_type_map, EXPENSE_CONCERT_REL_KEYS, concert_id)
+    ctx["put_prop_any"](props, expense_type_map, EXPENSE_TYPE_KEYS, "楽器レンタル")
+    ctx["put_prop_any"](props, expense_type_map, EXPENSE_CONTENT_KEYS, expense_content)
+    ctx["put_prop_any"](props, expense_type_map, EXPENSE_AMOUNT_KEYS, total_incl)
+    ctx["put_prop_any"](props, expense_type_map, EXPENSE_CONFIRMED_KEYS, False)
+    ctx["put_prop_any"](props, expense_type_map, EXPENSE_NOTE_KEYS, expense_note)
+
+    if existing_id:
+        res = ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{existing_id}",
+            json={"properties": props},
+        )
+    else:
+        res = ctx["api_request"](
+            "post",
+            "https://api.notion.com/v1/pages",
+            json={"parent": {"database_id": expense_db_id}, "properties": props},
+        )
+    ok = res is not None and res.status_code == 200
+    return (ok, "収支同期更新" if ok else "収支同期失敗")
+
+
 # ============================================================
 # 逆算タブ
 # ============================================================
@@ -353,6 +432,13 @@ def _render_calc_tab(ctx: dict):
                                     cost_type="楽器レンタル",
                                 )
                                 if ok:
+                                    _auto_sync_rental_expense_for_practice(
+                                        ctx=ctx,
+                                        concert_id=concert_id,
+                                        practice_id=pid,
+                                        practice_label=prac_label,
+                                        tax_rate_percent=float(st.session_state.get("rental_tax_rate", DEFAULT_TAX_RATE)),
+                                    )
                                     st.success("✅ 見積へ追加しました。見積登録タブで業者名・単価を入力してください。")
                                     _clear_rental_cache()
                                     st.session_state["rental_est_practice_id"] = pid
@@ -412,6 +498,13 @@ def _render_calc_tab(ctx: dict):
                                     cost_type="楽器レンタル",
                                 )
                                 if ok:
+                                    _auto_sync_rental_expense_for_practice(
+                                        ctx=ctx,
+                                        concert_id=concert_id,
+                                        practice_id=pid,
+                                        practice_label=prac_label,
+                                        tax_rate_percent=float(st.session_state.get("rental_tax_rate", DEFAULT_TAX_RATE)),
+                                    )
                                     st.success("✅ レンタル見積へ振り替えました。見積登録タブで業者名・単価を入力してください。")
                                     _clear_rental_cache()
                                     st.session_state["rental_est_practice_id"] = pid
@@ -585,6 +678,8 @@ def _render_estimate_tab(ctx: dict, tax_rate_percent: float):
     # ── 保存ボタン ──
     if st.button("💾 まとめて保存", type="primary", use_container_width=True, key="est_save"):
         ok_n = fail_n = skip_n = 0
+        sync_ok = False
+        sync_msg = ""
         with st.spinner("保存中..."):
             saved_existing_ids: set[str] = set()
             # インデックスをリセットして行番号とrow_idsを確実に対応させる
@@ -650,10 +745,25 @@ def _render_estimate_tab(ctx: dict, tax_rate_percent: float):
                 if rid and rid not in saved_existing_ids:
                     _archive_page(ctx, rid)
 
+            # レンタル見積 → 収支・振込管理（経費DB）へ自動同期
+            sync_ok, sync_msg = _auto_sync_rental_expense_for_practice(
+                ctx=ctx,
+                concert_id=concert_id,
+                practice_id=practice_id,
+                practice_label=selected_practice,
+                tax_rate_percent=tax_rate_percent,
+            )
+
         if fail_n == 0:
             st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
         else:
             st.warning(f"⚠️ 成功 {ok_n} / 失敗 {fail_n} / スキップ {skip_n}")
+        if sync_msg == "収支DB未設定":
+            st.info("ℹ️ 収支DB未設定のため、収支・振込管理への自動反映はスキップしました。")
+        elif sync_msg and not sync_ok:
+            st.warning(f"⚠️ 収支・振込管理の自動反映に失敗しました（{sync_msg}）。")
+        elif sync_msg in ("収支同期更新", "収支同期削除"):
+            st.success("✅ 収支・振込管理へ自動反映しました。")
         _clear_rental_cache()
         st.rerun()
 
