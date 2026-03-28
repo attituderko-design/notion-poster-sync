@@ -10,6 +10,7 @@ COST_TYPE_OPTIONS = ["楽器レンタル", "運送費", "管理費", "その他"
 import pandas as pd
 from concert.services.rental_calc import calc_rental_requirements, calc_rental_for_all_practices
 
+DEFAULT_TAX_RATE = 10.0
 
 
 
@@ -428,7 +429,7 @@ def _render_calc_tab(ctx: dict):
 # 見積登録タブ
 # ============================================================
 
-def _render_estimate_tab(ctx: dict):
+def _render_estimate_tab(ctx: dict, tax_rate_percent: float):
     st.caption("明細形式で見積を入力し、まとめて登録・更新できます。")
 
     concerts = _load_concerts(ctx)
@@ -571,11 +572,13 @@ def _render_estimate_tab(ctx: dict):
         hide_index=True,
     )
 
-    # 小計表示
+    # 小計表示（税抜/税込）
     if not edited_df.empty:
         try:
             subtotal = int((edited_df["台数"] * edited_df["単価（円）"]).sum())
-            st.caption(f"小計：¥{subtotal:,}")
+            tax = int(round(subtotal * (tax_rate_percent / 100.0)))
+            total_with_tax = subtotal + tax
+            st.caption(f"税抜小計：¥{subtotal:,} / 消費税（{tax_rate_percent:.1f}%）：¥{tax:,} / 税込小計：¥{total_with_tax:,}")
         except Exception:
             pass
 
@@ -650,7 +653,7 @@ def _render_estimate_tab(ctx: dict):
 # 費用集計タブ
 # ============================================================
 
-def _render_summary_tab(ctx: dict):
+def _render_summary_tab(ctx: dict, tax_rate_percent: float):
     st.caption("演奏会全体のレンタル費用を集計します。")
 
     concerts = _load_concerts(ctx)
@@ -675,8 +678,8 @@ def _render_summary_tab(ctx: dict):
         return
 
     # 全練習日の見積を集計
-    total_all       = 0
-    total_confirmed = 0
+    total_all_excl       = 0
+    total_confirmed_excl = 0
     rows_for_table: list[dict] = []
 
     def _prac_date(p):
@@ -705,25 +708,38 @@ def _render_summary_tab(ctx: dict):
                 "不明"
             )
 
+            tax = int(round(subtotal * (tax_rate_percent / 100.0)))
+            total_with_tax = subtotal + tax
+
             rows_for_table.append({
                 "練習日":     prac_label,
                 "楽器":       inst_name,
                 "業者":       ctx["extract_prop_text_any"](row, RENTAL_VENDOR_KEYS) or "—",
                 "台数":       qty,
                 "単価":       price,
-                "小計":       subtotal,
+                "税抜小計":   subtotal,
+                "消費税":     tax,
+                "税込小計":   total_with_tax,
                 "確定":       "✅" if confirmed else "📋",
             })
             prac_total       += subtotal
-            total_all        += subtotal
+            total_all_excl   += subtotal
             if confirmed:
-                total_confirmed += subtotal
+                total_confirmed_excl += subtotal
 
     # サマリーカード
+    total_all_tax = int(round(total_all_excl * (tax_rate_percent / 100.0)))
+    total_confirmed_tax = int(round(total_confirmed_excl * (tax_rate_percent / 100.0)))
+    total_all_incl = total_all_excl + total_all_tax
+    total_confirmed_incl = total_confirmed_excl + total_confirmed_tax
+    total_estimating_incl = total_all_incl - total_confirmed_incl
     col1, col2, col3 = st.columns(3)
-    col1.metric("合計（全見積）", f"¥{total_all:,}")
-    col2.metric("確定済み合計", f"¥{total_confirmed:,}")
-    col3.metric("見積中", f"¥{total_all - total_confirmed:,}")
+    col1.metric("合計（全見積・税込）", f"¥{total_all_incl:,}")
+    col2.metric("確定済み合計（税込）", f"¥{total_confirmed_incl:,}")
+    col3.metric("見積中（税込）", f"¥{total_estimating_incl:,}")
+    st.caption(
+        f"税抜合計：¥{total_all_excl:,} / 消費税（{tax_rate_percent:.1f}%）：¥{total_all_tax:,}"
+    )
 
     st.divider()
 
@@ -737,7 +753,9 @@ def _render_summary_tab(ctx: dict):
         use_container_width=True,
         column_config={
             "単価":  st.column_config.NumberColumn(format="¥%d"),
-            "小計":  st.column_config.NumberColumn(format="¥%d"),
+            "税抜小計":  st.column_config.NumberColumn(format="¥%d"),
+            "消費税":    st.column_config.NumberColumn(format="¥%d"),
+            "税込小計":  st.column_config.NumberColumn(format="¥%d"),
         },
         hide_index=True,
     )
@@ -746,9 +764,9 @@ def _render_summary_tab(ctx: dict):
     st.subheader("練習日別小計")
     prac_totals: dict[str, int] = {}
     for r in rows_for_table:
-        prac_totals[r["練習日"]] = prac_totals.get(r["練習日"], 0) + r["小計"]
+        prac_totals[r["練習日"]] = prac_totals.get(r["練習日"], 0) + int(r["税込小計"])
     for label, total in prac_totals.items():
-        st.write(f"- {label}：**¥{total:,}**")
+        st.write(f"- {label}：**¥{total:,}（税込）**")
 
 
 # ============================================================
@@ -764,6 +782,14 @@ def render(ctx: dict):
 
     # 逆算タブの「見積に追加」「レンタルに振り替え」ボタンでタブを切り替える
     active_tab = st.session_state.pop("rental_active_tab", 0)
+    tax_rate_percent = st.number_input(
+        "消費税率（%）",
+        min_value=0.0,
+        max_value=30.0,
+        value=float(st.session_state.get("rental_tax_rate", DEFAULT_TAX_RATE)),
+        step=0.1,
+        key="rental_tax_rate",
+    )
 
     tab_calc, tab_estimate, tab_summary = st.tabs(["レンタル試算", "見積登録", "費用集計"])
 
@@ -772,10 +798,10 @@ def render(ctx: dict):
 
     with tab_estimate:
         # プリフィル情報があれば見積登録タブに渡す
-        _render_estimate_tab(ctx)
+        _render_estimate_tab(ctx, tax_rate_percent)
 
     with tab_summary:
-        _render_summary_tab(ctx)
+        _render_summary_tab(ctx, tax_rate_percent)
 
     # タブ切り替えはJSで実現（streamlitのタブはindex指定不可のため）
     if active_tab == 1:
