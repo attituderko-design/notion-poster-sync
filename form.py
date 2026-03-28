@@ -1,7 +1,11 @@
 import streamlit as st
 
 
-st.set_page_config(page_title="ArtéMis HARMONIA Form", layout="wide")
+st.set_page_config(
+    page_title="ArtéMis HARMONIA Form",
+    page_icon="assets/favicon.png",
+    layout="wide",
+)
 
 st.markdown(
     "<style>div.block-container{padding-top:1.0rem;}</style>",
