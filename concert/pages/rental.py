@@ -98,8 +98,10 @@ def _load_instruments(ctx) -> list[dict]:
     return st.session_state.get("instrument_list", [])
 
 
-def _load_rentals(ctx, practice_id: str) -> list[dict]:
+def _load_rentals(ctx, practice_id: str, force_refresh: bool = False) -> list[dict]:
     key = f"rental_list_{practice_id}"
+    if force_refresh:
+        st.session_state.pop(key, None)
     if key not in st.session_state:
         f = None
         type_map = ctx["get_prop_types"](ctx["CONCERT_DB_RENTAL"])
@@ -202,6 +204,7 @@ def _auto_sync_rental_expense_for_practice(
     practice_id: str,
     practice_label: str,
     tax_rate_percent: float,
+    force_refresh_rentals: bool = True,
 ) -> tuple[bool, str]:
     """レンタル見積を収支DBへ自動同期する（練習日単位で確定/見積を分離）。"""
     expense_db_id = (ctx.get("CONCERT_DB_CONCERT_EXPENSE") or "").strip()
@@ -209,7 +212,7 @@ def _auto_sync_rental_expense_for_practice(
         return False, "収支DB未設定"
 
     # 対象練習日の税抜合計を算出（確定/見積中で分離）
-    rental_rows = _load_rentals(ctx, practice_id)
+    rental_rows = _load_rentals(ctx, practice_id, force_refresh=force_refresh_rentals)
     subtotal_confirmed = 0
     subtotal_estimating = 0
     for row in rental_rows:
@@ -784,12 +787,14 @@ def _render_estimate_tab(ctx: dict, tax_rate_percent: float):
                     _archive_page(ctx, rid)
 
             # レンタル見積 → 収支・振込管理（経費DB）へ自動同期
+            _clear_rental_cache()
             sync_ok, sync_msg = _auto_sync_rental_expense_for_practice(
                 ctx=ctx,
                 concert_id=concert_id,
                 practice_id=practice_id,
                 practice_label=selected_practice,
                 tax_rate_percent=tax_rate_percent,
+                force_refresh_rentals=True,
             )
 
         if fail_n == 0:
@@ -957,6 +962,7 @@ def render(ctx: dict):
     col_sync_l, col_sync_r = st.columns([4, 3])
     with col_sync_r:
         if st.button("🔁 収支同期を全練習で再実行", key="rental_expense_resync_all", use_container_width=True):
+            _clear_rental_cache()
             practices_for_sync = _load_practices(ctx, global_concert_id)
             ok_n = ng_n = 0
             with st.spinner("収支同期を再実行中..."):
@@ -971,6 +977,7 @@ def render(ctx: dict):
                         practice_id=pid,
                         practice_label=plabel,
                         tax_rate_percent=tax_rate_percent,
+                        force_refresh_rentals=True,
                     )
                     if ok:
                         ok_n += 1
