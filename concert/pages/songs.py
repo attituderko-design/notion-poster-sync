@@ -81,23 +81,38 @@ def _resolve_apollo_song_ids(ctx, concert_id: str, atlas_song_id: str) -> list[s
     """
     if not atlas_song_id:
         return []
+    def _norm_id(v: str) -> str:
+        return (v or "").replace("-", "").strip().lower()
+
+    target_norm = _norm_id(atlas_song_id)
     out = []
     seen = set()
     link_keys = list(dict.fromkeys((CONCERT_SONG_SONG_REL_KEYS or []) + (PARTDEF_SONG_REL_KEYS or [])))
-    for row in _load_songs(ctx, concert_id):
+    # 1) 対象演奏会で先に探索
+    rows = _load_songs(ctx, concert_id)
+    # 2) 演奏会relation欠落データ救済のため全件も探索対象に追加
+    if concert_id:
+        rows = rows + [r for r in _load_songs(ctx, "") if r.get("id", "") not in {x.get("id", "") for x in rows}]
+
+    for row in rows:
         rid = row.get("id", "")
+        rid_norm = _norm_id(rid)
         # 既に APOLLO 行ID が選択されているケース（旧/新フロー混在の救済）
-        if rid == atlas_song_id:
+        if rid_norm and rid_norm == target_norm:
             if rid and rid not in seen:
                 seen.add(rid)
                 out.append(rid)
             continue
 
         rel_ids = ctx["extract_relation_ids_any"](row, link_keys)
-        if atlas_song_id in rel_ids:
+        rel_norm = {_norm_id(x) for x in rel_ids if x}
+        if target_norm in rel_norm:
             if rid and rid not in seen:
                 seen.add(rid)
                 out.append(rid)
+    # 3) それでも不明なら現行選択IDを最終救済として返す
+    if not out and atlas_song_id:
+        out = [atlas_song_id]
     return out
 
 
