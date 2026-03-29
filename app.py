@@ -8362,6 +8362,18 @@ if system_mode == "HARMONIA":
     st.sidebar.caption("ArtéMis HARMONIA")
     st.sidebar.divider()
 
+    _UNSELECTED = "— 演奏会を選択してください —"
+
+    # widget生成前にだけ pending 値を適用する
+    _pending_page = st.session_state.pop("_harmonia_pending_page", None)
+    if _pending_page is not None:
+        st.session_state["concert_page_radio"] = _pending_page
+
+    _pending_name = st.session_state.pop("_harmonia_pending_concert_name", None)
+    if _pending_name is not None:
+        st.session_state["harmonia_global_concert_name"] = _pending_name
+        st.session_state["harmonia_global_concert_name_widget"] = _pending_name
+
     concert_page = st.sidebar.radio(
         "ページ",
         [
@@ -8717,16 +8729,6 @@ if system_mode == "HARMONIA":
             st.markdown("- 奏者・出欠・持参楽器で参加者を確定する")
             st.markdown("- アサイン検討で希望入力と割当候補を確認する")
             st.markdown("- レンタル管理と収支・振込管理で費用を確定する")
-
-    _UNSELECTED = "— 演奏会を選択してください —"
-
-    _pending_name = st.session_state.pop("_harmonia_pending_concert_name", None)
-    if _pending_name is not None:
-        st.session_state["harmonia_global_concert_name"] = _pending_name
-        st.session_state["harmonia_global_concert_name_widget"] = _pending_name
-    _pending_page = st.session_state.pop("_harmonia_pending_page", None)
-    if _pending_page is not None:
-        st.session_state["concert_page_radio"] = _pending_page
 
     concert_rows = _load_harmonia_concerts(
         concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
