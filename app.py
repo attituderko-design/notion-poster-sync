@@ -8405,10 +8405,14 @@ if system_mode == "HARMONIA":
             "archived_atlas": 0,
             "archived_apollo": 0,
             "archived_assign": 0,
+            "archived_cast": 0,
+            "archived_performer": 0,
             "failed": 0,
             "atlas_target_ids": [],
             "apollo_target_ids": [],
             "assign_target_ids": [],
+            "cast_target_ids": [],
+            "performer_target_ids": [],
         }
 
         def _archive_page(page_id: str) -> bool:
@@ -8420,9 +8424,12 @@ if system_mode == "HARMONIA":
             )
             return res is not None and res.status_code == 200
 
-        # ATLAS
-        all_pages = query_notion_database_all(NOTION_DB_ID) or []
-        for pg in all_pages:
+        def _collect_targets(db_id: str) -> list[dict]:
+            if not db_id:
+                return []
+            return query_notion_database_all(db_id) or []
+
+        for pg in _collect_targets(NOTION_DB_ID):
             props = pg.get("properties", {}) or {}
             title, _, _ = get_title(props)
             if not str(title or "").startswith("[SMOKETEST] "):
@@ -8436,39 +8443,63 @@ if system_mode == "HARMONIA":
             else:
                 result["failed"] += 1
 
-        # APOLLO（演奏曲DB）
-        if NOTION_SCORE_DB_ID:
-            score_pages = query_notion_database_all(NOTION_SCORE_DB_ID) or []
-            for pg in score_pages:
-                props = pg.get("properties", {}) or {}
-                title, _, _ = get_title(props)
-                if not str(title or "").startswith("[SMOKETEST] "):
-                    continue
-                pid = pg.get("id", "")
-                if not pid:
-                    continue
-                result["apollo_target_ids"].append(pid)
-                if _archive_page(pid):
-                    result["archived_apollo"] += 1
-                else:
-                    result["failed"] += 1
+        for pg in _collect_targets(NOTION_SCORE_DB_ID):
+            props = pg.get("properties", {}) or {}
+            title, _, _ = get_title(props)
+            if not str(title or "").startswith("[SMOKETEST] "):
+                continue
+            pid = pg.get("id", "")
+            if not pid:
+                continue
+            result["apollo_target_ids"].append(pid)
+            if _archive_page(pid):
+                result["archived_apollo"] += 1
+            else:
+                result["failed"] += 1
 
-        # 楽曲別担当者DB（念のため）
-        if NOTION_SONG_ASSIGN_DB_ID:
-            assign_pages = query_notion_database_all(NOTION_SONG_ASSIGN_DB_ID) or []
-            for pg in assign_pages:
-                props = pg.get("properties", {}) or {}
-                title, _, _ = get_title(props)
-                if not str(title or "").startswith("[SMOKETEST] "):
-                    continue
-                pid = pg.get("id", "")
-                if not pid:
-                    continue
-                result["assign_target_ids"].append(pid)
-                if _archive_page(pid):
-                    result["archived_assign"] += 1
-                else:
-                    result["failed"] += 1
+        for pg in _collect_targets(NOTION_SONG_ASSIGN_DB_ID):
+            props = pg.get("properties", {}) or {}
+            title, _, _ = get_title(props)
+            if not str(title or "").startswith("[SMOKETEST] "):
+                continue
+            pid = pg.get("id", "")
+            if not pid:
+                continue
+            result["assign_target_ids"].append(pid)
+            if _archive_page(pid):
+                result["archived_assign"] += 1
+            else:
+                result["failed"] += 1
+
+        for pg in _collect_targets(NOTION_PERFORMANCE_CAST_DB_ID):
+            props = pg.get("properties", {}) or {}
+            title, _, _ = get_title(props)
+            title = title or plain_text_join(((props.get("タイトル") or {}).get("title") or []))
+            if not str(title or "").startswith("[SMOKETEST] "):
+                continue
+            pid = pg.get("id", "")
+            if not pid:
+                continue
+            result["cast_target_ids"].append(pid)
+            if _archive_page(pid):
+                result["archived_cast"] += 1
+            else:
+                result["failed"] += 1
+
+        for pg in _collect_targets(NOTION_PERFORMER_DB_ID):
+            props = pg.get("properties", {}) or {}
+            title, _, _ = get_title(props)
+            title = title or extract_name_title(pg) or ""
+            if not str(title or "").startswith("[SMOKETEST] "):
+                continue
+            pid = pg.get("id", "")
+            if not pid:
+                continue
+            result["performer_target_ids"].append(pid)
+            if _archive_page(pid):
+                result["archived_performer"] += 1
+            else:
+                result["failed"] += 1
 
         return result
 
@@ -8478,12 +8509,15 @@ if system_mode == "HARMONIA":
         1) ATLAS に演奏曲ページを作成
         2) ATLAS に出演演奏会ページを作成（演奏曲 relation 付き）
         3) APOLLO 演奏曲DB作成を実行
+        4) 演奏会参加者DBを1件作成
+        5) 楽曲別担当者DBを1件作成できるか確認
         """
         result = {
             "ok": False,
             "error": "",
             "score_page_id": "",
             "performance_page_id": "",
+            "performer_name": "",
             "selected_scores": [],
             "main_items": [],
             "encore_items": [],
@@ -8491,6 +8525,13 @@ if system_mode == "HARMONIA":
             "failed_setlist": 0,
             "setlist_reason": "",
             "created_rows": [],
+            "created_cast": 0,
+            "failed_cast": 0,
+            "cast_reason": "",
+            "cast_row_map": {},
+            "created_assign": 0,
+            "failed_assign": 0,
+            "assign_reason": "",
             "title": "",
             "score_title": "",
         }
@@ -8498,10 +8539,11 @@ if system_mode == "HARMONIA":
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         perf_title = f"[SMOKETEST] HARMONIA E2E {stamp}"
         score_title = f"[SMOKETEST] Test Piece {stamp}"
+        performer_name = f"[SMOKETEST] Player {stamp}"
         result["title"] = perf_title
         result["score_title"] = score_title
+        result["performer_name"] = performer_name
 
-        # --- 1) ATLAS 演奏曲ページ作成 ---
         score_ok = create_notion_page(
             jp_title=score_title,
             en_title=score_title,
@@ -8526,7 +8568,6 @@ if system_mode == "HARMONIA":
             result["error"] = "ATLAS 演奏曲ページIDを取得できませんでした。"
             return result
 
-        # --- 2) ATLAS 出演演奏会ページ作成 ---
         perf_ok = create_notion_page(
             jp_title=perf_title,
             en_title=perf_title,
@@ -8564,9 +8605,9 @@ if system_mode == "HARMONIA":
         main_items = [{
             "title": score_title,
             "order": 1,
-            "part": "",
-            "played": False,
-            "players": [],
+            "part": "Timpani",
+            "played": True,
+            "players": [performer_name],
             "section": "本編",
             "composer": "Igor Stravinsky",
             "composer_country": "",
@@ -8594,53 +8635,44 @@ if system_mode == "HARMONIA":
         result["failed_setlist"] = failed_setlist
         result["setlist_reason"] = setlist_reason
         result["created_rows"] = created_rows
-        result["ok"] = (created_setlist > 0 and failed_setlist == 0)
+
+        participants = [{
+            "name": performer_name,
+            "instruments": "Timpani",
+            "memo": "[SMOKETEST] cast seed",
+        }]
+        created_cast, failed_cast, cast_reason, cast_row_map = create_performance_participant_rows(
+            performance_page_id=performance_page_id,
+            performance_title=perf_title,
+            participants=participants,
+        )
+        result["created_cast"] = created_cast
+        result["failed_cast"] = failed_cast
+        result["cast_reason"] = cast_reason
+        result["cast_row_map"] = cast_row_map
+
+        created_assign = 0
+        failed_assign = 0
+        assign_reason = ""
+        if created_rows and cast_row_map:
+            created_assign, failed_assign, assign_reason = create_song_assignment_rows(
+                score_rows=created_rows,
+                cast_row_map=cast_row_map,
+            )
+        result["created_assign"] = created_assign
+        result["failed_assign"] = failed_assign
+        result["assign_reason"] = assign_reason
+
+        result["ok"] = (
+            created_setlist > 0
+            and failed_setlist == 0
+            and created_cast > 0
+            and failed_cast == 0
+            and created_assign > 0
+            and failed_assign == 0
+        )
         return result
 
-    # Concert DB専用DBなので媒体フィルタは不要（全件対象）
-    concert_rows = _load_harmonia_concerts(
-        concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
-        concert_ctx["CONCERT_DB_CONCERT"],
-    )
-    concert_opt_map = {_harmony_concert_name(r): r.get("id", "") for r in concert_rows if r.get("id")}
-
-    st.sidebar.markdown("### 演奏会フィルタ")
-    harmony_query = st.sidebar.text_input(
-        "演奏会検索",
-        value=st.session_state.get("harmonia_global_concert_query", ""),
-        key="harmonia_global_concert_query",
-        placeholder="例: Happy Hour / 2026 / 定期",
-    ).strip().lower()
-
-    if not concert_opt_map:
-        st.sidebar.info("演奏会がまだ登録されていません。")
-        concert_ctx["SELECTED_CONCERT_ID"] = ""
-        concert_ctx["SELECTED_CONCERT_NAME"] = ""
-    else:
-        if harmony_query:
-            filtered_map = {k: v for k, v in concert_opt_map.items() if harmony_query in k.lower()}
-            if not filtered_map:
-                st.sidebar.warning(f"「{harmony_query}」に一致する演奏会がありません。")
-                concert_ctx["SELECTED_CONCERT_ID"] = ""
-                concert_ctx["SELECTED_CONCERT_NAME"] = ""
-            else:
-                concert_opt_map = filtered_map
-        if concert_opt_map:
-            # 先頭に「未選択」を追加して、起動時は必ず未選択から始める
-            _UNSELECTED = "— 演奏会を選択してください —"
-            opts_with_empty = [_UNSELECTED] + list(concert_opt_map.keys())
-            selected_name = st.sidebar.selectbox(
-                "対象演奏会",
-                opts_with_empty,
-                index=0,  # 常に未選択から始まる
-                key="harmonia_global_concert_name",
-            )
-            if selected_name == _UNSELECTED:
-                concert_ctx["SELECTED_CONCERT_ID"] = ""
-                concert_ctx["SELECTED_CONCERT_NAME"] = ""
-            else:
-                concert_ctx["SELECTED_CONCERT_ID"] = concert_opt_map.get(selected_name, "")
-                concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
 
     selected_concert_id = concert_ctx.get("SELECTED_CONCERT_ID", "").strip()
     selected_concert_row = next((r for r in concert_rows if r.get("id", "") == selected_concert_id), None)
@@ -8677,9 +8709,9 @@ if system_mode == "HARMONIA":
                 clean = _cleanup_harmonia_smoketest_pages()
                 st.session_state["harmonia_e2e_smoketest_cleanup_result"] = clean
                 if clean.get("failed", 0) == 0:
-                    st.success(f"✅ SMOKETESTデータをアーカイブしました（ATLAS {clean.get('archived_atlas', 0)} / APOLLO {clean.get('archived_apollo', 0)} / ASSIGN {clean.get('archived_assign', 0)}）")
+                    st.success(f"✅ SMOKETESTデータをアーカイブしました（ATLAS {clean.get('archived_atlas', 0)} / APOLLO {clean.get('archived_apollo', 0)} / ASSIGN {clean.get('archived_assign', 0)} / CAST {clean.get('archived_cast', 0)} / PERFORMER {clean.get('archived_performer', 0)}）")
                 else:
-                    st.warning(f"⚠️ アーカイブ（ATLAS {clean.get('archived_atlas', 0)} / APOLLO {clean.get('archived_apollo', 0)} / ASSIGN {clean.get('archived_assign', 0)}） / 失敗 {clean.get('failed', 0)} 件")
+                    st.warning(f"⚠️ アーカイブ（ATLAS {clean.get('archived_atlas', 0)} / APOLLO {clean.get('archived_apollo', 0)} / ASSIGN {clean.get('archived_assign', 0)} / CAST {clean.get('archived_cast', 0)} / PERFORMER {clean.get('archived_performer', 0)}） / 失敗 {clean.get('failed', 0)} 件")
 
             smoke_result = st.session_state.get("harmonia_e2e_smoketest_result") or {}
             if smoke_result:
