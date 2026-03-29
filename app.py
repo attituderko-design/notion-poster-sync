@@ -8848,6 +8848,458 @@ if system_mode == "HARMONIA":
         if selected_concert_row:
             st.markdown("### 現在選択中の演奏会")
             st.markdown(f"**{_harmony_concert_name(selected_concert_row)}**")
+            c_date = concert_ctx["extract_prop_text_any"](selected_concert_row, ["日時", "日付", "出演日", "体験日", "リリース日"])
+            c_loc = concert_ctx["extract_prop_text_any"](selected_concert_row, ["ロケーション", "会場", "会場名", "場所"])
+            if c_date:
+                st.caption(f"📅 {c_date[:10]}")
+            if c_loc:
+                st.caption(f"📍 {c_loc}")
+            stats = _build_harmonia_progress(selected_concert_row)
+            st.markdown("### 作業の流れ")
+            _render_harmonia_progress_cards(stats)
+        else:
+            st.info("サイドバーの『演奏会フィルタ』で演奏会を選択してください。")
+        st.stop()
+
+    if concert_page == "🧪 テストデータ管理":
+        st.header("🧪 テストデータ管理")
+        st.caption("演奏会未選択でも利用できます。")
+        with st.expander("🧪 出演登録E2Eテスト", expanded=False):
+            st.caption("既存の『出演』登録フローを最小構成で1ボタン実行し、ATLASの出演演奏会/演奏曲と APOLLO 演奏曲DBの同時登録を確認します。")
+            col_run, col_run_rich, col_cleanup = st.columns(3)
+            if col_run.button("▶ E2Eテスト(基本)", type="primary", use_container_width=True, key="harmonia_e2e_smoketest_run_basic"):
+                smoke = _run_performance_registration_e2e_smoketest(rich_mode=False)
+                st.session_state["harmonia_e2e_smoketest_result"] = smoke
+                if smoke.get("ok"):
+                    st.success(f"✅ E2Eテスト成功: APOLLO {smoke.get('created_setlist', 0)} 件 / CAST {smoke.get('created_cast', 0)} 件 / ASSIGN {smoke.get('created_assign', 0)} 件")
+                else:
+                    st.warning(
+                        f"⚠️ E2Eテスト: APOLLO created={smoke.get('created_setlist', 0)} / failed={smoke.get('failed_setlist', 0)}"
+                        + (f" / {smoke.get('setlist_reason','')}" if smoke.get('setlist_reason') else "")
+                    )
+                    if smoke.get("error"):
+                        st.error(smoke["error"])
+            if col_run_rich.button("▶ E2Eテスト(厚め)", use_container_width=True, key="harmonia_e2e_smoketest_run_rich"):
+                smoke = _run_performance_registration_e2e_smoketest(rich_mode=True)
+                st.session_state["harmonia_e2e_smoketest_result"] = smoke
+                if smoke.get("ok"):
+                    st.success(f"✅ E2Eテスト成功: APOLLO {smoke.get('created_setlist', 0)} 件 / CAST {smoke.get('created_cast', 0)} 件 / ASSIGN {smoke.get('created_assign', 0)} 件")
+                else:
+                    st.warning(
+                        f"⚠️ E2Eテスト: APOLLO created={smoke.get('created_setlist', 0)} / failed={smoke.get('failed_setlist', 0)}"
+                        + (f" / {smoke.get('setlist_reason','')}" if smoke.get('setlist_reason') else "")
+                    )
+                    if smoke.get("error"):
+                        st.error(smoke["error"])
+            if col_cleanup.button("🧹 SMOKETESTデータ削除", use_container_width=True, key="harmonia_e2e_smoketest_cleanup"):
+                clean = _cleanup_harmonia_smoketest_pages()
+                st.session_state["harmonia_e2e_smoketest_cleanup_result"] = clean
+                if clean.get("failed", 0) == 0:
+                    st.success(f"✅ SMOKETESTデータをアーカイブしました（ATLAS {clean.get('archived_atlas', 0)} / APOLLO {clean.get('archived_apollo', 0)} / ASSIGN {clean.get('archived_assign', 0)} / CAST {clean.get('archived_cast', 0)} / PERFORMER {clean.get('archived_performer', 0)}）")
+                else:
+                    st.warning(f"⚠️ アーカイブ（ATLAS {clean.get('archived_atlas', 0)} / APOLLO {clean.get('archived_apollo', 0)} / ASSIGN {clean.get('archived_assign', 0)} / CAST {clean.get('archived_cast', 0)} / PERFORMER {clean.get('archived_performer', 0)}） / 失敗 {clean.get('failed', 0)} 件")
+
+            smoke_result = st.session_state.get("harmonia_e2e_smoketest_result") or {}
+            if smoke_result:
+                st.json(smoke_result)
+            cleanup_result = st.session_state.get("harmonia_e2e_smoketest_cleanup_result") or {}
+            if cleanup_result:
+                with st.expander("SMOKETEST削除結果", expanded=False):
+                    st.json(cleanup_result)
+
+        test_data.render(concert_ctx)
+        st.stop()
+
+    if not selected_concert_id:
+        st.info("サイドバーの「演奏会フィルタ」で演奏会を選択してください。")
+        st.stop()
+
+    concert_mgmt.render_sidebar_summary_pdf(concert_ctx)
+    try:
+        from concert.pages.form import render_url_generator
+        with st.sidebar.expander("📋 奏者フォームURL", expanded=False):
+            render_url_generator(concert_ctx, concert_ctx.get("SELECTED_CONCERT_ID",""), concert_ctx.get("SELECTED_CONCERT_NAME",""))
+    except Exception:
+        pass
+
+    if concert_page == "練習管理":
+        concert_mgmt.render(concert_ctx)
+    elif concert_page == "楽曲・楽器管理":
+        songs.render(concert_ctx)
+    elif concert_page == "奏者・出欠・持参楽器":
+        players.render(concert_ctx)
+    elif concert_page == "アサイン検討":
+        assign.render(concert_ctx)
+    elif concert_page == "レンタル管理":
+        rental.render(concert_ctx)
+    elif concert_page == "収支・振込管理":
+        finance.render(concert_ctx)
+
+    st.stop()
+
+            if not title:
+                title = (
+                    plain_text_join(((props.get("名前") or {}).get("title") or []))
+                    or plain_text_join(((props.get("Name") or {}).get("title") or []))
+                    or plain_text_join(((props.get("タイトル") or {}).get("title") or []))
+                    or ""
+                )
+            if not str(title or "").startswith("[SMOKETEST] "):
+                continue
+            pid = pg.get("id", "")
+            if not pid:
+                continue
+            result["performer_target_ids"].append(pid)
+            if _archive_page(pid):
+                result["archived_performer"] += 1
+            else:
+                result["failed"] += 1
+
+        return result
+
+    def _run_performance_registration_e2e_smoketest(rich_mode: bool = False) -> dict:
+        result = {
+            "ok": False,
+            "mode": "rich" if rich_mode else "basic",
+            "error": "",
+            "score_page_id": "",
+            "performance_page_id": "",
+            "performer_name": "",
+            "selected_scores": [],
+            "main_items": [],
+            "encore_items": [],
+            "created_setlist": 0,
+            "failed_setlist": 0,
+            "setlist_reason": "",
+            "created_rows": [],
+            "created_cast": 0,
+            "failed_cast": 0,
+            "cast_reason": "",
+            "cast_row_map": {},
+            "created_assign": 0,
+            "failed_assign": 0,
+            "assign_reason": "",
+            "apollo_rows_debug": [],
+            "cast_rows_debug": [],
+            "assign_rows_debug": [],
+            "title": "",
+            "score_title": "",
+        }
+
+        def _read_pages_by_ids(ids: list[str]) -> list[dict]:
+            out = []
+            for pid in ids:
+                if not pid:
+                    continue
+                res = api_request("get", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS)
+                if res is not None and res.status_code == 200:
+                    out.append(res.json() or {})
+            return out
+
+        def _extract_relation_ids_local(page: dict, keys: list[str]) -> list[str]:
+            props = (page.get("properties") or {}) if isinstance(page, dict) else {}
+            ids = []
+            seen = set()
+            for k in keys:
+                meta = props.get(k) or {}
+                if (meta.get("type") or "") != "relation":
+                    continue
+                for rel in (meta.get("relation") or []):
+                    rid = (rel or {}).get("id")
+                    if rid and rid not in seen:
+                        seen.add(rid)
+                        ids.append(rid)
+            return ids
+
+        def _extract_checkbox_local(page: dict, keys: list[str]):
+            props = (page.get("properties") or {}) if isinstance(page, dict) else {}
+            for k in keys:
+                meta = props.get(k) or {}
+                if (meta.get("type") or "") == "checkbox":
+                    return bool(meta.get("checkbox"))
+            return None
+
+        def _extract_text_local(page: dict, keys: list[str]) -> str:
+            props = (page.get("properties") or {}) if isinstance(page, dict) else {}
+            for k in keys:
+                meta = props.get(k) or {}
+                ptype = meta.get("type")
+                if ptype == "title":
+                    return plain_text_join(meta.get("title") or [])
+                if ptype == "rich_text":
+                    return plain_text_join(meta.get("rich_text") or [])
+                if ptype == "select":
+                    return ((meta.get("select") or {}).get("name") or "").strip()
+                if ptype == "multi_select":
+                    vals = [((x or {}).get("name") or "").strip() for x in (meta.get("multi_select") or [])]
+                    return ", ".join([v for v in vals if v])
+                if ptype == "number":
+                    n = meta.get("number")
+                    return "" if n is None else str(n)
+                if ptype == "date":
+                    return (((meta.get("date") or {}).get("start")) or "").strip()
+            return ""
+
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        perf_title = f"[SMOKETEST] HARMONIA E2E {stamp}"
+        score_title = f"[SMOKETEST] Test Piece {stamp}"
+        performer_name = f"[SMOKETEST] Player {stamp}"
+        result["title"] = perf_title
+        result["score_title"] = score_title
+        result["performer_name"] = performer_name
+
+        composer_name = "Igor Stravinsky"
+        composer_country = "RU" if rich_mode else ""
+        movement_name = "Introduction" if rich_mode else ""
+        movement_no = 1 if rich_mode else None
+        movement_order = 1 if rich_mode else None
+        movement_roman = "I" if rich_mode else ""
+
+        score_ok = create_notion_page(
+            jp_title=score_title,
+            en_title=score_title,
+            media_type_label="演奏曲",
+            tmdb_id=None,
+            media_type="score",
+            cover_url=get_media_icon_url("演奏曲"),
+            tmdb_release="1913-05-29",
+            details={"genres": [], "cast": "", "director": composer_name, "score": None},
+            wlflg=False,
+            watched_date=None,
+            rating=None,
+            memo="[SMOKETEST] score seed",
+        )
+        if not score_ok:
+            result["error"] = "ATLAS 演奏曲ページの作成に失敗しました。"
+            return result
+
+        score_page_id = st.session_state.get("last_created_page_id", "")
+        result["score_page_id"] = score_page_id
+        if not score_page_id:
+            result["error"] = "ATLAS 演奏曲ページIDを取得できませんでした。"
+            return result
+
+        perf_ok = create_notion_page(
+            jp_title=perf_title,
+            en_title=perf_title,
+            media_type_label="出演",
+            tmdb_id=None,
+            media_type="event",
+            cover_url=get_media_icon_url("出演"),
+            tmdb_release="2099-12-31",
+            details={"genres": ["テスト"], "cast": "", "director": "HARMONIA SmokeTest", "score": None},
+            wlflg=False,
+            watched_date="2099-12-31",
+            rating=None,
+            event_end="2099-12-31",
+            location={"name": "HARMONIA SmokeTest Hall", "lat": None, "lon": None},
+            memo="[SMOKETEST] performance seed",
+            relation_prop="演奏曲",
+            relation_ids=[score_page_id],
+        )
+        if not perf_ok:
+            result["error"] = "ATLAS 出演演奏会ページの作成に失敗しました。"
+            return result
+
+        performance_page_id = st.session_state.get("last_created_page_id", "")
+        result["performance_page_id"] = performance_page_id
+        if not performance_page_id:
+            result["error"] = "ATLAS 出演演奏会ページIDを取得できませんでした。"
+            return result
+
+        selected_scores = [{
+            "id": score_page_id,
+            "title": score_title,
+            "composer": composer_name,
+            "composer_country": composer_country,
+        }]
+        main_items = [{
+            "title": score_title,
+            "order": 1,
+            "part": "Timpani",
+            "played": True,
+            "players": [performer_name],
+            "section": "本編",
+            "composer": composer_name,
+            "composer_country": composer_country,
+            "movement_name": movement_name,
+            "movement_no": movement_no,
+            "movement_order": movement_order,
+            "movement_roman": movement_roman,
+        }]
+        encore_items = [{
+            "title": score_title,
+            "order": 2,
+            "part": "Timpani" if rich_mode else "",
+            "played": bool(rich_mode),
+            "players": [performer_name] if rich_mode else [],
+            "section": "Encore",
+            "composer": composer_name,
+            "composer_country": composer_country,
+            "movement_name": "",
+            "movement_no": None,
+            "movement_order": None,
+            "movement_roman": "",
+        }] if rich_mode else []
+
+        result["selected_scores"] = selected_scores
+        result["main_items"] = main_items
+        result["encore_items"] = encore_items
+
+        created_setlist, failed_setlist, setlist_reason, created_rows = create_setlist_rows_for_performance(
+            performance_page_id=performance_page_id,
+            performance_title=perf_title,
+            performance_date="2099-12-31",
+            main_items=main_items,
+            encore_items=encore_items,
+            selected_scores=selected_scores,
+            score_pages=[],
+        )
+        result["created_setlist"] = created_setlist
+        result["failed_setlist"] = failed_setlist
+        result["setlist_reason"] = setlist_reason
+        result["created_rows"] = created_rows
+
+        participants = [{
+            "name": performer_name,
+            "instruments": "Timpani",
+            "memo": "[SMOKETEST] cast seed",
+        }]
+        created_cast, failed_cast, cast_reason, cast_row_map = create_performance_participant_rows(
+            performance_page_id=performance_page_id,
+            performance_title=perf_title,
+            participants=participants,
+        )
+        result["created_cast"] = created_cast
+        result["failed_cast"] = failed_cast
+        result["cast_reason"] = cast_reason
+        result["cast_row_map"] = cast_row_map
+
+        created_assign = 0
+        failed_assign = 0
+        assign_reason = ""
+        if created_rows and cast_row_map:
+            created_assign, failed_assign, assign_reason = create_song_assignment_rows(
+                score_rows=created_rows,
+                cast_row_map=cast_row_map,
+            )
+        result["created_assign"] = created_assign
+        result["failed_assign"] = failed_assign
+        result["assign_reason"] = assign_reason
+
+        apollo_pages = _read_pages_by_ids([r.get("id", "") for r in created_rows])
+        for pg in apollo_pages:
+            result["apollo_rows_debug"].append({
+                "id": pg.get("id", ""),
+                "title": _extract_text_local(pg, ["タイトル", "Name"]),
+                "creator": _extract_text_local(pg, ["クリエイター", "Creator", "作曲家"]),
+                "country_code": _extract_text_local(pg, ["国コード", "CountryCode"]),
+                "section": _extract_text_local(pg, ["区分"]),
+                "order": _extract_text_local(pg, ["曲順"]),
+                "instruments": _extract_text_local(pg, ["担当楽器", "楽器"]),
+                "playflg": _extract_checkbox_local(pg, ["Playflg", "PlayFlg", "演奏した"]),
+                "performance_rel": _extract_relation_ids_local(pg, ["出演", "演奏会", "公演"]),
+                "atlas_score_rel": _extract_relation_ids_local(pg, ["演奏曲", "Score", "スコア", "関連演奏曲"]),
+                "work_rel": _extract_relation_ids_local(pg, ["作品マスタ", "作品", "Work"]),
+                "movement_rel": _extract_relation_ids_local(pg, ["作品楽章", "作品楽章マスタ", "楽章マスタ", "Movement"]),
+                "country_master_rel": _extract_relation_ids_local(pg, ["国名マスタ", "CountryMaster", "国マスタ"]),
+            })
+
+        cast_pages = _read_pages_by_ids(list(cast_row_map.values()))
+        for pg in cast_pages:
+            result["cast_rows_debug"].append({
+                "id": pg.get("id", ""),
+                "title": _extract_text_local(pg, ["タイトル", "Name"]),
+                "performance_rel": _extract_relation_ids_local(pg, ["出演", "演奏会", "公演"]),
+                "performer_rel": _extract_relation_ids_local(pg, ["出演者", "奏者", "演奏者"]),
+                "instruments": _extract_text_local(pg, ["担当楽器", "楽器"]),
+            })
+
+        assign_pages = []
+        if NOTION_SONG_ASSIGN_DB_ID:
+            created_score_ids = {r.get("id", "") for r in created_rows if r.get("id")}
+            all_assign = query_notion_database_all(NOTION_SONG_ASSIGN_DB_ID) or []
+            for pg in all_assign:
+                score_rel_ids = _extract_relation_ids_local(pg, ["演奏曲", "演奏曲DB", "曲", "楽曲"])
+                if created_score_ids.intersection(set(score_rel_ids)):
+                    assign_pages.append(pg)
+                    continue
+                props = pg.get("properties", {}) or {}
+                title, _, _ = get_title(props)
+                title = title or plain_text_join(((props.get("タイトル") or {}).get("title") or []))
+                if str(title or "").startswith("[SMOKETEST] "):
+                    assign_pages.append(pg)
+        for pg in assign_pages:
+            result["assign_rows_debug"].append({
+                "id": pg.get("id", ""),
+                "title": _extract_text_local(pg, ["タイトル", "Name"]),
+                "score_rel": _extract_relation_ids_local(pg, ["演奏曲", "演奏曲DB", "曲", "楽曲"]),
+                "cast_rel": _extract_relation_ids_local(pg, ["演奏会出演者", "出演者", "参加者", "演奏会参加者"]),
+                "instruments": _extract_text_local(pg, ["担当楽器", "楽器"]),
+            })
+
+        result["ok"] = (
+            created_setlist > 0
+            and failed_setlist == 0
+            and created_cast > 0
+            and failed_cast == 0
+            and created_assign > 0
+            and failed_assign == 0
+        )
+        return result
+
+    concert_rows = _load_harmonia_concerts(
+        concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
+        concert_ctx["CONCERT_DB_CONCERT"],
+    )
+    concert_opt_map = {_harmony_concert_name(r): r.get("id", "") for r in concert_rows if r.get("id")}
+
+    st.sidebar.markdown("### 演奏会フィルタ")
+    harmony_query = st.sidebar.text_input(
+        "演奏会検索",
+        value=st.session_state.get("harmonia_global_concert_query", ""),
+        key="harmonia_global_concert_query",
+        placeholder="例: Happy Hour / 2026 / 定期",
+    ).strip().lower()
+
+    if not concert_opt_map:
+        st.sidebar.info("演奏会がまだ登録されていません。")
+        concert_ctx["SELECTED_CONCERT_ID"] = ""
+        concert_ctx["SELECTED_CONCERT_NAME"] = ""
+    else:
+        if harmony_query:
+            filtered_map = {k: v for k, v in concert_opt_map.items() if harmony_query in k.lower()}
+            if not filtered_map:
+                st.sidebar.warning(f"「{harmony_query}」に一致する演奏会がありません。")
+                concert_ctx["SELECTED_CONCERT_ID"] = ""
+                concert_ctx["SELECTED_CONCERT_NAME"] = ""
+            else:
+                concert_opt_map = filtered_map
+        if concert_opt_map:
+            _UNSELECTED = "— 演奏会を選択してください —"
+            opts_with_empty = [_UNSELECTED] + list(concert_opt_map.keys())
+            selected_name = st.sidebar.selectbox(
+                "対象演奏会",
+                opts_with_empty,
+                index=0,
+                key="harmonia_global_concert_name",
+            )
+            if selected_name == _UNSELECTED:
+                concert_ctx["SELECTED_CONCERT_ID"] = ""
+                concert_ctx["SELECTED_CONCERT_NAME"] = ""
+            else:
+                concert_ctx["SELECTED_CONCERT_ID"] = concert_opt_map.get(selected_name, "")
+                concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
+
+    selected_concert_id = concert_ctx.get("SELECTED_CONCERT_ID", "").strip()
+    selected_concert_row = next((r for r in concert_rows if r.get("id", "") == selected_concert_id), None)
+
+    if concert_page == "🏠 ホーム":
+        st.header("🏠 HARMONIAホーム")
+        st.caption("演奏会の選択・変更はサイドバーで行います。")
+        if selected_concert_row:
+            st.markdown("### 現在選択中の演奏会")
+            st.markdown(f"**{_harmony_concert_name(selected_concert_row)}**")
         else:
             st.info("サイドバーの『演奏会フィルタ』で演奏会を選択してください。")
         st.stop()
