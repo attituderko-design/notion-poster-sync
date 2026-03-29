@@ -41,6 +41,7 @@ from concert.services.keys import (
 TEST_PREFIX = "[TEST]"
 ATLAS_SCORE_REL_KEYS = ["演奏曲"]
 ATLAS_SCORE_HISTORY_REL_KEYS = ["出演履歴"]
+ATLAS_CREATOR_KEYS = ["クリエイター"]
 
 
 def _clear_cache():
@@ -182,7 +183,7 @@ def _seed_all(ctx) -> dict:
         props = {}
         # ATLAS内の「演奏曲」ページを作る
         _put(ctx, props, tc, CONCERT_NAME_KEYS, f"{TEST_PREFIX} {name}")
-        _put(ctx, props, tc, CONCERT_CREATOR_KEYS, song_composers[name])
+        _put(ctx, props, tc, ATLAS_CREATOR_KEYS, song_composers[name])
         media_key = ctx["find_prop_name"](tc, ["媒体", "Media"])
         if media_key:
             mtype = tc.get(media_key, "")
