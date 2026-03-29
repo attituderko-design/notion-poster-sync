@@ -8762,8 +8762,8 @@ if system_mode == "HARMONIA":
     st.session_state["harmonia_global_concert_name"] = selected_name
     if st.sidebar.button("選択をクリア", key="harmonia_clear_selected"):
         st.session_state["_harmonia_pending_concert_name"] = _UNSELECTED
+        st.session_state["_harmonia_pending_page"] = "🏠 ホーム"
         st.session_state["harmonia_global_concert_name"] = _UNSELECTED
-        st.session_state["harmonia_global_concert_name_widget"] = _UNSELECTED
         st.rerun()
 
     if selected_name == _UNSELECTED:
