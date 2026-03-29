@@ -119,6 +119,32 @@ def _get_concert_song_row(ctx, concert_id: str, song_id: str) -> dict | None:
     return rows[0] if rows else None
 
 
+def _load_apollo_songs(ctx, concert_id: str = "") -> list[dict]:
+    key = f"apollo_song_list_{concert_id}"
+    if key not in st.session_state:
+        rows = ctx["query_all"](ctx["CONCERT_DB_SONG"])
+        if concert_id:
+            rows = [r for r in rows if concert_id in ctx["extract_relation_ids_any"](r, SONG_CONCERT_REL_KEYS)]
+        st.session_state[key] = rows
+    return st.session_state.get(key, [])
+
+
+def _resolve_apollo_song_ids(ctx, concert_id: str, atlas_song_id: str) -> list[str]:
+    """
+    HARMONIA/CONCERT_SONG の曲（ATLAS演奏曲）に対応する APOLLO 演奏曲DB行IDを返す。
+    """
+    if not atlas_song_id:
+        return []
+    out = []
+    for row in _load_apollo_songs(ctx, concert_id):
+        rels = ctx["extract_relation_ids_any"](row, PARTDEF_SONG_REL_KEYS)
+        if atlas_song_id in rels:
+            rid = row.get("id", "")
+            if rid:
+                out.append(rid)
+    return out
+
+
 def _upsert_concert_song(
     ctx: dict,
     concert_id: str,
@@ -204,15 +230,31 @@ def _load_partdefs(ctx, concert_id: str = "", song_id: str = "") -> list[dict]:
         t = ctx["get_prop_types"](ctx["CONCERT_DB_PART_DEFINITION"])
         c_rel = ctx["find_prop_name"](t, PARTDEF_CONCERT_REL_KEYS)
         s_rel = ctx["find_prop_name"](t, PARTDEF_SONG_REL_KEYS)
+
+        # PART_DEFINITION.演奏曲 は APOLLO 向き。
+        # 画面上で選ばれている曲は ATLAS 演奏曲なので、対応する APOLLO 行IDへ変換する。
+        target_song_ids = set()
+        if song_id:
+            target_song_ids.update(_resolve_apollo_song_ids(ctx, concert_id, song_id))
+            # 旧実装互換: 既に APOLLO ID が渡されている可能性も残す
+            target_song_ids.add(song_id)
+
         out = []
         for r in rows:
             ok = True
             if concert_id and c_rel:
                 ok = concert_id in ctx["extract_relation_ids"](r, c_rel)
-            if ok and song_id and s_rel:
-                ok = song_id in ctx["extract_relation_ids"](r, s_rel)
+            if ok and target_song_ids and s_rel:
+                ok = bool(target_song_ids.intersection(set(ctx["extract_relation_ids"](r, s_rel))))
             if ok:
                 out.append(r)
+
+        # 旧データ互換: 演奏会relationが無い定義も、曲が一致していれば拾う
+        if not out and target_song_ids and s_rel:
+            for r in rows:
+                if bool(target_song_ids.intersection(set(ctx["extract_relation_ids"](r, s_rel)))):
+                    out.append(r)
+
         st.session_state[key] = out
     return st.session_state.get(key, [])
 
@@ -603,11 +645,18 @@ def _upsert_partdef(
     if not clean_inst_ids:
         st.error("担当楽器を1つ以上選択してください。")
         return False
+
+    apollo_song_ids = _resolve_apollo_song_ids(ctx, concert_id, song_id)
+    if not apollo_song_ids:
+        st.error("対応する APOLLO 演奏曲が見つかりません。既存の出演登録フローで APOLLO 演奏曲DB行が作成されているか確認してください。")
+        return False
+    target_song_id = apollo_song_ids[0]
+
     inst_label = " / ".join([x for x in (inst_names or []) if x]) or "楽器未設定"
     props = {}
     ctx["put_prop_any"](props, t, PARTDEF_RECORD_KEYS, f"{song_name} / {part_name} / {inst_label}")
     ctx["put_prop_any"](props, t, PARTDEF_CONCERT_REL_KEYS, concert_id)
-    ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS, song_id)
+    ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS, target_song_id)
     ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS, clean_inst_ids)
     ctx["put_prop_any"](props, t, PARTDEF_NOTE_KEYS, note)
     ctx["put_key_any"](
@@ -615,7 +664,7 @@ def _upsert_partdef(
         t,
         PARTDEF_KEY_KEYS,
         concert_id,
-        song_id,
+        target_song_id,
         part_name,
         "|".join(clean_inst_ids),
         prefix="part",
@@ -676,6 +725,12 @@ def _render_partdef_tab(ctx: dict):
     s_name = st.selectbox("楽曲", list(song_opts.keys()), key="partdef_song_sel")
     s = song_opts[s_name]
     s_id = s.get("id", "")
+
+    apollo_song_ids = _resolve_apollo_song_ids(ctx, c_id, s_id)
+    if apollo_song_ids:
+        st.caption(f"対応する APOLLO 演奏曲: {len(apollo_song_ids)} 件")
+    else:
+        st.warning("この曲に対応する APOLLO 演奏曲が見つかりません。出演登録フロー経由の演奏曲DB作成が必要です。")
     cur_order_no, cur_done, cur_cs_note, cur_cs_id = _concert_song_meta(ctx, c_id, s_id)
 
     with st.form(f"concert_song_meta_{c_id}_{s_id}", border=True):
