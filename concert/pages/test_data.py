@@ -13,14 +13,14 @@ from concert.services.keys import (
     SONG_NAME_KEYS, SONG_CONCERT_REL_KEYS, SONG_COMPOSER_KEYS,
     INSTRUMENT_NAME_KEYS, INSTRUMENT_CATEGORY_KEYS,
     PARTDEF_KEY_KEYS, PARTDEF_RECORD_KEYS, PARTDEF_CONCERT_REL_KEYS,
-    PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS, PARTDEF_NAME_KEYS, PART_COUNT_KEYS,
+    PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS, PARTDEF_NAME_KEYS,
     PARTICIPANT_RECORD_KEYS, PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
     PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_FEE_KEYS,
     PLAYER_NAME_KEYS,
     ATTENDANCE_KEY_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
     ASSIGN_KEY_KEYS,
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
-    INSTRUMENT_KEY_KEYS,
+    ASSIGN_KEY_KEYS, INSTRUMENT_KEY_KEYS, INSTRUMENT_CATEGORY_KEYS,
     PREFERENCE_KEY_KEYS, PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     EXPENSE_KEY_KEYS, EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS,
     EXPENSE_CONTENT_KEYS, EXPENSE_AMOUNT_KEYS, EXPENSE_CONFIRMED_KEYS,
@@ -37,6 +37,12 @@ from concert.services.keys import (
 )
 
 TEST_PREFIX = "[TEST]"
+CONCERT_SONG_KEY_KEYS = ["concert_song_key", "CONCERT_SONG_KEY", "key"]
+CONCERT_SONG_CONCERT_REL_KEYS = ["演奏会", "FK演奏会", "concert"]
+CONCERT_SONG_SONG_REL_KEYS = ["曲", "楽曲", "演奏曲", "song"]
+CONCERT_SONG_ORDER_KEYS = ["曲順", "順番", "order"]
+CONCERT_SONG_DONE_KEYS = ["定義完了", "definition_done", "完了"]
+CONCERT_SONG_NOTE_KEYS = ["備考", "メモ", "note"]
 
 
 def _clear_cache():
@@ -186,6 +192,24 @@ def _seed_all(ctx) -> dict:
             song_ids.append(sid)
     summary["SONG"] = len(song_ids)
 
+    # ── 4.5 CONCERT_SONG ───────────────────────────
+    concert_song_db = ctx.get("CONCERT_DB_CONCERT_SONG", "")
+    concert_song_count = 0
+    if concert_song_db:
+        tcs = _p(ctx, concert_song_db)
+        for idx, sid in enumerate(song_ids, start=1):
+            props = {}
+            ctx["put_key_any"](props, tcs, CONCERT_SONG_KEY_KEYS, concert_id, sid, prefix="concert_song")
+            _put(ctx, props, tcs, CONCERT_SONG_CONCERT_REL_KEYS, concert_id)
+            _put(ctx, props, tcs, CONCERT_SONG_SONG_REL_KEYS, sid)
+            _put(ctx, props, tcs, CONCERT_SONG_ORDER_KEYS, idx)
+            _put(ctx, props, tcs, CONCERT_SONG_DONE_KEYS, True)
+            _put(ctx, props, tcs, CONCERT_SONG_NOTE_KEYS, f"{TEST_PREFIX} 定義完了")
+            csid = track(_create(ctx, concert_song_db, props))
+            if csid:
+                concert_song_count += 1
+    summary["CONCERT_SONG"] = concert_song_count
+
     # ── 5. PRACTICE ───────────────────────────────────────
     practice_db = ctx["CONCERT_DB_PRACTICE"]
     tpr = _p(ctx, practice_db)
@@ -241,7 +265,6 @@ def _seed_all(ctx) -> dict:
             _put(ctx, props, tpd, PARTDEF_SONG_REL_KEYS,    sid)
             _put(ctx, props, tpd, PARTDEF_INST_REL_KEYS,    iid)
             _put(ctx, props, tpd, PARTDEF_NAME_KEYS,        f"{TEST_PREFIX} {pname}")
-            _put(ctx, props, tpd, PART_COUNT_KEYS,          1)
             ctx["put_key_any"](props, tpd, PARTDEF_KEY_KEYS,
                                concert_id, sid, part_no, pname, iid, prefix="part")
             part_no += 1
