@@ -8361,6 +8361,7 @@ if system_mode != _prev_mode:
 if system_mode == "HARMONIA":
     st.sidebar.caption("ArtéMis HARMONIA")
     st.sidebar.divider()
+
     concert_page = st.sidebar.radio(
         "ページ",
         [
