@@ -34,6 +34,8 @@ from concert.services.keys import (
     SCHEDULE_KEY_KEYS, SCHEDULE_PRACTICE_REL_KEYS, SCHEDULE_START_KEYS,
     SCHEDULE_END_KEYS, SCHEDULE_TYPE_KEYS, SCHEDULE_CONTENT_KEYS,
     SCHEDULE_ORDER_KEYS,
+    CONCERT_SONG_KEY_KEYS, CONCERT_SONG_CONCERT_REL_KEYS, CONCERT_SONG_SONG_REL_KEYS,
+    CONCERT_SONG_ORDER_KEYS, CONCERT_SONG_DONE_KEYS, CONCERT_SONG_NOTE_KEYS,
 )
 
 TEST_PREFIX = "[TEST]"
@@ -45,7 +47,7 @@ def _clear_cache():
         "practice_list_", "concert_list", "song_list_", "partdef_list_",
         "pi_list_", "attendance_list_", "participant_list_", "instrument_list",
         "schedule_list_", "expense_list_", "cast_list_", "pi_master_",
-        "si_list_", "pi_practice_",
+        "si_list_", "pi_practice_", "concert_song_list_",
     )
     for k in list(st.session_state.keys()):
         if any(k.startswith(p) for p in cache_prefixes):
