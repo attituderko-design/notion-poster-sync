@@ -298,8 +298,13 @@ def _upsert_attendance(
         return False
 
     record_key = ctx["find_prop_name"](t, ATT_RECORD_KEYS) or _first_prop_by_type(t, "title")
-            practice_rel_key = find_relation_prop(t, ATT_PRACTICE_REL_KEYS, ["練習", "practice", "fk"])
-            player_rel_key = find_relation_prop(t, ATT_PLAYER_REL_KEYS, ["奏者", "出演者", "player", "participant"], exclude={practice_rel_key} if practice_rel_key else set())
+    practice_rel_key = find_relation_prop(t, ATT_PRACTICE_REL_KEYS, ["練習", "practice", "fk"])
+    player_rel_key = find_relation_prop(
+        t,
+        ATT_PLAYER_REL_KEYS,
+        ["奏者", "出演者", "player", "participant"],
+        exclude={practice_rel_key} if practice_rel_key else set(),
+    )
     status_key = ctx["find_prop_name"](t, ATT_STATUS_KEYS)
     if not status_key:
         for k, typ in (t or {}).items():
