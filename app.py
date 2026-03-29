@@ -8668,15 +8668,15 @@ if system_mode == "HARMONIA":
             for idx, row in enumerate(recent_rows):
                 label = _harmony_concert_name(row)
                 if cols[idx % 2].button(label, key=f"harmonia_recent_{row.get('id','')}", use_container_width=True):
-                    st.session_state["harmonia_global_concert_name"] = label
-                    st.session_state["concert_page_radio"] = "🏠 ホーム"
+                    st.session_state["_harmonia_pending_concert_name"] = label
+                    st.session_state["_harmonia_pending_page"] = "🏠 ホーム"
                     st.rerun()
         st.markdown("### 演奏会を検索して開く")
         search_opts = ["— 演奏会を選択してください —"] + list(concert_opt_map.keys())
         quick_pick = st.selectbox("演奏会一覧", search_opts, key="harmonia_home_pick")
         if quick_pick != "— 演奏会を選択してください —":
             if st.button("この演奏会を開く", type="primary", key="harmonia_home_open"):
-                st.session_state["harmonia_global_concert_name"] = quick_pick
+                st.session_state["_harmonia_pending_concert_name"] = quick_pick
                 st.rerun()
         st.markdown("### 作業の流れ")
         if concert_ctx.get("SELECTED_CONCERT_ID"):
@@ -8690,6 +8690,14 @@ if system_mode == "HARMONIA":
             st.markdown("- 奏者・出欠・持参楽器で参加者を確定する")
             st.markdown("- アサイン検討で希望入力と割当候補を確認する")
             st.markdown("- レンタル管理と収支・振込管理で費用を確定する")
+
+    _UNSELECTED = "— 演奏会を選択してください —"
+    _pending_name = st.session_state.pop("_harmonia_pending_concert_name", None)
+    if _pending_name is not None:
+        st.session_state["harmonia_global_concert_name"] = _pending_name
+    _pending_page = st.session_state.pop("_harmonia_pending_page", None)
+    if _pending_page is not None:
+        st.session_state["concert_page_radio"] = _pending_page
 
     concert_rows = _load_harmonia_concerts(
         concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
@@ -8713,7 +8721,6 @@ if system_mode == "HARMONIA":
         if not filtered_opt_map:
             st.sidebar.warning(f"「{harmony_query}」に一致する演奏会がありません。")
 
-    _UNSELECTED = "— 演奏会を選択してください —"
     selected_name = st.session_state.get("harmonia_global_concert_name", _UNSELECTED)
     if selected_name not in filtered_opt_map and selected_name not in concert_opt_map:
         selected_name = _UNSELECTED
@@ -8725,7 +8732,7 @@ if system_mode == "HARMONIA":
         key="harmonia_global_concert_name",
     )
     if st.sidebar.button("選択をクリア", key="harmonia_clear_selected"):
-        st.session_state["harmonia_global_concert_name"] = _UNSELECTED
+        st.session_state["_harmonia_pending_concert_name"] = _UNSELECTED
         st.rerun()
 
     if selected_name == _UNSELECTED:
