@@ -8675,6 +8675,14 @@ if system_mode == "HARMONIA":
 
 
     selected_concert_id = concert_ctx.get("SELECTED_CONCERT_ID", "").strip()
+    concert_rows = []
+    try:
+        concert_rows = _load_harmonia_concerts(
+            concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
+            concert_ctx["CONCERT_DB_CONCERT"],
+        )
+    except Exception:
+        concert_rows = []
     selected_concert_row = next((r for r in concert_rows if r.get("id", "") == selected_concert_id), None)
 
     if concert_page == "🏠 ホーム":
