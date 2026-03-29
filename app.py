@@ -8361,23 +8361,9 @@ if system_mode != _prev_mode:
 if system_mode == "HARMONIA":
     st.sidebar.caption("ArtéMis HARMONIA")
     st.sidebar.divider()
-
-    _UNSELECTED = "— 演奏会を選択してください —"
-
-    # widget生成前にだけ pending 値を適用する
-    _pending_page = st.session_state.pop("_harmonia_pending_page", None)
-    if _pending_page is not None:
-        st.session_state["concert_page_radio"] = _pending_page
-
-    _pending_name = st.session_state.pop("_harmonia_pending_concert_name", None)
-    if _pending_name is not None:
-        st.session_state["harmonia_global_concert_name"] = _pending_name
-        st.session_state["harmonia_global_concert_name_widget"] = _pending_name
-
     concert_page = st.sidebar.radio(
         "ページ",
         [
-            "🏠 ホーム",
             "練習管理",
             "楽曲・楽器管理",
             "奏者・出欠・持参楽器",
@@ -8420,8 +8406,11 @@ if system_mode == "HARMONIA":
                 for _m in _contract_warnings:
                     st.write(f"- {_m}")
 
+    # HARMONIA共通: 演奏会を先に1つ選び、各画面はその演奏会だけを対象にする
+
     @st.cache_data(ttl=300, show_spinner=False)
     def _load_harmonia_concerts(_api_key: str, _db_id: str) -> list[dict]:
+        """ATLASから媒体=出演のみをAPI側フィルタで取得（キャッシュ付き）。"""
         from concert.services.notion_client import query_concert_db_all, get_concert_headers
         headers = get_concert_headers(_api_key)
         return query_concert_db_all(_db_id, headers, {
@@ -8439,445 +8428,7 @@ if system_mode == "HARMONIA":
         dt = concert_ctx["extract_prop_text_any"](page, ["日時", "日付", "出演日", "体験日", "リリース日"])
         return f"{name}（{dt[:10] if dt else '日時未設定'}）"
 
-    def _harmonia_parse_datetime(value: str):
-        v = str(value or "").strip()
-        if not v:
-            return None
-        try:
-            if v.endswith('Z'):
-                v = v[:-1] + '+00:00'
-            return datetime.fromisoformat(v)
-        except Exception:
-            try:
-                return datetime.fromisoformat(v[:10])
-            except Exception:
-                return None
-
-    def _harmonia_status_badge(done: bool, partial: bool = False) -> str:
-        if done:
-            return "✅ 完了"
-        if partial:
-            return "🟡 一部未完"
-        return "⚪ 未着手"
-
-    def _build_harmonia_progress(concert_ctx: dict, concert_row: dict | None) -> dict:
-        stats = {
-            "participant_count": 0,
-            "practice_count": 0,
-            "song_count": 0,
-            "song_done_count": 0,
-            "partdef_count": 0,
-            "unanswered_count": 0,
-            "preference_pending_count": 0,
-            "assignment_confirmed": False,
-            "rental_unconfirmed_count": 0,
-            "expense_total": 0,
-            "expense_confirmed_total": 0,
-            "has_concert_day": False,
-            "next_practice_label": "",
-            "bring_assignment_missing_count": 0,
-            "bring_player_missing_count": 0,
-            "owned_player_missing_count": 0,
-            "debug_lines": [],
-        }
-        dbg = stats["debug_lines"]
-
-        if not concert_row:
-            dbg.append("concert_row が空のため進捗集計をスキップ")
-            return stats
-
-        ext = concert_ctx["extract_prop_text_any"]
-        ext_rel = concert_ctx["extract_relation_ids_any"]
-        cid = concert_row.get("id", "")
-        if not cid:
-            dbg.append("演奏会IDが空のため進捗集計をスキップ")
-            return stats
-
-        def _bool_text(page: dict, keys: list[str]) -> tuple[bool, str]:
-            raw = (ext(page, keys) or "").strip()
-            return (raw.lower() == "true", raw)
-
-        now_date = datetime.now().date()
-
-        # ---- 練習 / 本番当日
-        practices = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PRACTICE"], None)
-        regular_practice_ids = []
-        future_candidates = []
-        concert_day_hits = []
-        for p in practices:
-            cids = ext_rel(p, PRACTICE_CONCERT_REL_KEYS)
-            if cid not in cids:
-                continue
-            is_concert_day, raw_flag = _bool_text(p, PRACTICE_CONCERT_DAY_KEYS)
-            pname = ext(p, PRACTICE_NAME_KEYS) or ext(p, ["名称", "タイトル"]) or p.get("id", "")
-            dbg.append(f"[PRACTICE] {pname} / concert_ids={cids} / concert_day_raw={raw_flag!r} / parsed={is_concert_day}")
-            if is_concert_day:
-                stats["has_concert_day"] = True
-                concert_day_hits.append(pname)
-                continue
-            pid = p.get("id", "")
-            if pid:
-                regular_practice_ids.append(pid)
-            pdt_raw = ext(p, PRACTICE_DATE_KEYS)
-            pdt = _harmonia_parse_datetime(pdt_raw)
-            pdate = pdt.date() if pdt else None
-            if pdate and pdate >= now_date:
-                label = f"{(pdt_raw or '')[:10]} {pname}".strip()
-                future_candidates.append((pdate, label))
-        stats["practice_count"] = len(regular_practice_ids)
-        dbg.append(f"[PRACTICE] regular_count={stats['practice_count']} / concert_day_hits={concert_day_hits}")
-        if future_candidates:
-            future_candidates.sort(key=lambda x: x[0])
-            stats["next_practice_label"] = future_candidates[0][1]
-
-        # ---- 演奏会×曲
-        concert_song_rows = []
-        concert_song_db = (concert_ctx.get("CONCERT_DB_CONCERT_SONG") or "").strip()
-        song_ids = set()
-        if concert_song_db:
-            all_cs = concert_ctx["query_all"](concert_song_db, None)
-            for cs in all_cs:
-                cids = ext_rel(cs, CONCERT_SONG_CONCERT_REL_KEYS)
-                if cid not in cids:
-                    continue
-                concert_song_rows.append(cs)
-                for sid in ext_rel(cs, CONCERT_SONG_SONG_REL_KEYS):
-                    if sid:
-                        song_ids.add(sid)
-            done_count = 0
-            for cs in concert_song_rows:
-                done, raw_done = _bool_text(cs, CONCERT_SONG_DONE_KEYS)
-                if done:
-                    done_count += 1
-                dbg.append(
-                    f"[CONCERT_SONG] song_ids={ext_rel(cs, CONCERT_SONG_SONG_REL_KEYS)} / "
-                    f"order={ext(cs, CONCERT_SONG_ORDER_KEYS)!r} / done_raw={raw_done!r} / parsed={done}"
-                )
-            stats["song_count"] = len(song_ids)
-            stats["song_done_count"] = done_count
-            dbg.append(f"[CONCERT_SONG] row_count={len(concert_song_rows)} / song_count={stats['song_count']} / done_count={done_count}")
-        else:
-            songs_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_SONG"], None)
-            for s in songs_rows:
-                if cid in ext_rel(s, SONG_CONCERT_REL_KEYS):
-                    sid = s.get("id", "")
-                    if sid:
-                        song_ids.add(sid)
-            stats["song_count"] = len(song_ids)
-            stats["song_done_count"] = 0
-            dbg.append(f"[CONCERT_SONG] DB未設定のため旧方式でsong_count={stats['song_count']}")
-
-        # ---- パート定義
-        partdefs = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PART_DEFINITION"], None)
-        partdef_ids = set()
-        partdef_song_map = {}
-        for pd in partdefs:
-            sids = set(ext_rel(pd, PARTDEF_SONG_REL_KEYS))
-            if song_ids.intersection(sids):
-                pdid = pd.get("id", "")
-                if pdid:
-                    partdef_ids.add(pdid)
-                for sid in sids:
-                    if sid in song_ids:
-                        partdef_song_map[sid] = partdef_song_map.get(sid, 0) + 1
-        stats["partdef_count"] = len(partdef_ids)
-        dbg.append(f"[PARTDEF] total={stats['partdef_count']} / by_song={partdef_song_map}")
-
-        # ---- 参加者
-        participants = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PARTICIPANT"], None)
-        participant_rows = []
-        participant_ids = set()
-        player_ids = set()
-        player_to_participant = {}
-        for r in participants:
-            if cid in ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS):
-                participant_rows.append(r)
-                rid = r.get("id", "")
-                if rid:
-                    participant_ids.add(rid)
-                rel_players = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
-                for pid in rel_players:
-                    if pid:
-                        player_ids.add(pid)
-                        player_to_participant[pid] = rid
-        stats["participant_count"] = len(participant_rows)
-        dbg.append(f"[PARTICIPANT] count={stats['participant_count']} / participant_ids={list(participant_ids)[:10]}")
-
-        # ---- 出欠
-        attendance_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_ATTENDANCE"], None)
-        answered_pairs = set()
-        for a in attendance_rows:
-            pr_ids = ext_rel(a, ATT_PRACTICE_REL_KEYS)
-            if not pr_ids:
-                continue
-            pr_id = pr_ids[0]
-            if pr_id not in regular_practice_ids:
-                continue
-            rel_ids = set(ext_rel(a, ATT_PLAYER_REL_KEYS))
-            for rid in rel_ids:
-                if rid in participant_ids or rid in player_ids:
-                    answered_pairs.add((rid, pr_id))
-        unanswered = 0
-        for r in participant_rows:
-            targets = {r.get("id", "")}
-            targets.update(ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS))
-            for pr_id in regular_practice_ids:
-                if not any((t, pr_id) in answered_pairs for t in targets if t):
-                    unanswered += 1
-                    break
-        stats["unanswered_count"] = unanswered
-        dbg.append(f"[ATTENDANCE] regular_practice_ids={regular_practice_ids} / unanswered_count={unanswered}")
-
-        # ---- 希望入力
-        pref_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PREFERENCE"], None)
-        preferred_targets = set()
-        for p in pref_rows:
-            rel_ids = ext_rel(p, PREF_PLAYER_REL_KEYS)
-            part_rel = set(ext_rel(p, PREF_PART_REL_KEYS))
-            if not part_rel:
-                continue
-            if not partdef_ids.intersection(part_rel):
-                continue
-            for rid in rel_ids:
-                preferred_targets.add(rid)
-        pref_pending = 0
-        for r in participant_rows:
-            targets = {r.get("id", "")}
-            targets.update(ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS))
-            if not any(t in preferred_targets for t in targets if t):
-                pref_pending += 1
-        stats["preference_pending_count"] = pref_pending
-        dbg.append(f"[PREFERENCE] pending_count={pref_pending}")
-
-        # ---- 割当確定
-        assign_db = (concert_ctx.get("CONCERT_DB_ASSIGNMENT") or concert_ctx.get("CONCERT_DB_PLAYER_INSTRUMENT") or "").strip()
-        assignment_confirmed = False
-        if assign_db:
-            assign_rows = concert_ctx["query_all"](assign_db, None)
-            hit = 0
-            for a in assign_rows:
-                if cid not in ext_rel(a, ["演奏会", "FK演奏会", "concert"]):
-                    continue
-                hit += 1
-            assignment_confirmed = hit > 0
-            dbg.append(f"[ASSIGN] rows_for_concert={hit}")
-        stats["assignment_confirmed"] = assignment_confirmed
-
-        # ---- 所有楽器 / 練習日別持参担当
-        pi_master_db = (concert_ctx.get("CONCERT_DB_PLAYER_INSTRUMENT_MASTER") or "").strip()
-        if pi_master_db:
-            master_rows = concert_ctx["query_all"](pi_master_db, None)
-            owners = set()
-            for m in master_rows:
-                for pid in ext_rel(m, ["奏者", "FK奏者", "Player"]):
-                    if pid in player_ids:
-                        owners.add(pid)
-            stats["owned_player_missing_count"] = max(len(player_ids - owners), 0)
-            dbg.append(f"[PI_MASTER] owners={len(owners)} / missing_players={stats['owned_player_missing_count']}")
-        else:
-            dbg.append("[PI_MASTER] DB未設定")
-
-        bring_db = (concert_ctx.get("CONCERT_DB_PLAYER_INSTRUMENT") or "").strip()
-        if bring_db and regular_practice_ids:
-            bring_rows = concert_ctx["query_all"](bring_db, None)
-            practice_bring_targets = set()
-            practice_bring_assigned = set()
-            practice_player_targets = set()
-            for b in bring_rows:
-                pr_ids = ext_rel(b, ["練習", "FK練習"])
-                if not pr_ids or pr_ids[0] not in regular_practice_ids:
-                    continue
-                pid_rel = ext_rel(b, ["演奏会参加者", "participant", "奏者", "FK奏者"])
-                if not pid_rel:
-                    continue
-                target_id = pid_rel[0]
-                practice_player_targets.add((target_id, pr_ids[0]))
-                raw_assign = ext(b, ["持参担当", "持参担当者", "bring_assign"]) or ""
-                bring_flag = (ext(b, ["持参", "持参可", "bring"]) or "").strip().lower() == "true"
-                if bring_flag:
-                    practice_bring_targets.add((target_id, pr_ids[0]))
-                if raw_assign.strip():
-                    practice_bring_assigned.add((target_id, pr_ids[0]))
-            stats["bring_assignment_missing_count"] = max(len(practice_bring_targets - practice_bring_assigned), 0)
-            stats["bring_player_missing_count"] = max(len(practice_player_targets - practice_bring_targets), 0)
-            dbg.append(
-                f"[PI_PRACTICE] targets={len(practice_player_targets)} / bring_targets={len(practice_bring_targets)} / "
-                f"assigned={len(practice_bring_assigned)} / missing_assign={stats['bring_assignment_missing_count']} / "
-                f"missing_player_flags={stats['bring_player_missing_count']}"
-            )
-        else:
-            dbg.append("[PI_PRACTICE] regular practice またはDBなし")
-
-        # ---- レンタル / 経費
-        rental_db = (concert_ctx.get("CONCERT_DB_RENTAL") or "").strip()
-        if rental_db:
-            rental_rows = concert_ctx["query_all"](rental_db, None)
-            rental_unconfirmed = 0
-            for r in rental_rows:
-                pr_ids = ext_rel(r, ["練習", "演奏会", "出演", "FK練習"])
-                if not pr_ids or pr_ids[0] not in regular_practice_ids:
-                    continue
-                done, raw_done = _bool_text(r, ["確定", "確定フラグ", "confirmed"])
-                if not done:
-                    rental_unconfirmed += 1
-                dbg.append(f"[RENTAL] practice={pr_ids[0]} / confirmed_raw={raw_done!r} / parsed={done}")
-            stats["rental_unconfirmed_count"] = rental_unconfirmed
-
-        expense_db = (concert_ctx.get("CONCERT_DB_CONCERT_EXPENSE") or concert_ctx.get("CONCERT_DB_CONCERT_EXPENCE") or "").strip()
-        if expense_db:
-            expense_rows = concert_ctx["query_all"](expense_db, None)
-            total = confirmed = 0
-            for e in expense_rows:
-                if cid not in ext_rel(e, EXPENSE_CONCERT_REL_KEYS):
-                    continue
-                amt_raw = ext(e, EXPENSE_AMOUNT_KEYS) or "0"
-                try:
-                    amt = int(float(amt_raw))
-                except Exception:
-                    amt = 0
-                total += amt
-                is_confirmed, raw_confirmed = _bool_text(e, EXPENSE_CONFIRMED_KEYS)
-                if is_confirmed:
-                    confirmed += amt
-                dbg.append(f"[EXPENSE] amount={amt} / confirmed_raw={raw_confirmed!r} / parsed={is_confirmed}")
-            stats["expense_total"] = total
-            stats["expense_confirmed_total"] = confirmed
-
-        return stats
-
-    def _render_harmonia_progress_cards(stats: dict):
-        items = [
-            (
-                "練習管理",
-                _harmonia_status_badge(stats["has_concert_day"] and stats["practice_count"] > 0, partial=(stats["has_concert_day"] or stats["practice_count"] > 0)),
-                f"本番当日レコード {'あり' if stats['has_concert_day'] else '未作成'} / 練習 {stats['practice_count']} 回",
-            ),
-            (
-                "楽曲・パート定義",
-                _harmonia_status_badge(
-                    stats["song_count"] > 0 and stats["song_done_count"] == stats["song_count"],
-                    partial=(stats["song_count"] > 0 and stats["song_done_count"] > 0),
-                ),
-                f"楽曲 {stats['song_count']} 曲 / 定義完了 {stats['song_done_count']} 曲 / パート定義 {stats['partdef_count']} 件",
-            ),
-            (
-                "奏者・出欠",
-                _harmonia_status_badge(stats["participant_count"] > 0 and stats["unanswered_count"] == 0, partial=(stats["participant_count"] > 0)),
-                f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人",
-            ),
-            (
-                "所有楽器",
-                _harmonia_status_badge(stats["participant_count"] > 0 and stats["owned_player_missing_count"] == 0, partial=(stats["participant_count"] > 0)),
-                f"所有楽器未登録 {stats['owned_player_missing_count']} 人",
-            ),
-            (
-                "練習日別持参担当",
-                _harmonia_status_badge(
-                    stats["participant_count"] > 0 and stats["bring_player_missing_count"] == 0 and stats["bring_assignment_missing_count"] == 0,
-                    partial=(stats["participant_count"] > 0 and (stats["bring_player_missing_count"] > 0 or stats["bring_assignment_missing_count"] > 0)),
-                ),
-                f"持参可未設定 {stats['bring_player_missing_count']} 件 / 持参担当未設定 {stats['bring_assignment_missing_count']} 件",
-            ),
-            (
-                "希望入力",
-                _harmonia_status_badge(stats["participant_count"] > 0 and stats["preference_pending_count"] == 0, partial=(stats["participant_count"] > 0 and stats["preference_pending_count"] < stats['participant_count'])),
-                f"希望未提出 {stats['preference_pending_count']} 人",
-            ),
-            (
-                "割当確定",
-                _harmonia_status_badge(stats["assignment_confirmed"], partial=(stats["preference_pending_count"] == 0 and stats["participant_count"] > 0)),
-                "割当結果が保存済みです" if stats["assignment_confirmed"] else "割当結果はまだ保存されていません",
-            ),
-            (
-                "レンタル・収支",
-                "ℹ️ 進行中",
-                f"見積中 {stats['rental_unconfirmed_count']} 件 / 経費確定 ¥{stats['expense_confirmed_total']:,}",
-            ),
-        ]
-        for title, badge, desc in items:
-            st.markdown(f"**{title}**　{badge}")
-            st.caption(desc)
-            st.divider()
-
-        with st.expander("暫定デバッグログ", expanded=False):
-            for line in stats.get("debug_lines", []):
-                st.text(line)
-
-
-    def _render_harmonia_common_header(ctx: dict, row: dict | None, page_label: str, stats: dict | None = None):
-        if not row:
-            return
-        ext = ctx["extract_prop_text_any"]
-        title = _harmony_concert_name(row)
-        st.markdown(f"## {page_label}")
-        st.caption(title)
-        if stats:
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("参加者", f"{stats.get('participant_count', 0)}人")
-            c2.metric("出欠未回答", f"{stats.get('unanswered_count', 0)}人")
-            c3.metric("希望未提出", f"{stats.get('preference_pending_count', 0)}人")
-            c4.metric("レンタル未確定", f"{stats.get('rental_unconfirmed_count', 0)}件")
-            if stats.get("next_practice_label"):
-                st.info(f"次回練習: {stats['next_practice_label']}")
-        st.divider()
-
-    def _render_harmonia_home(ctx: dict, concert_rows: list[dict], concert_opt_map: dict[str, str]):
-        st.header("🏠 HARMONIAホーム")
-        st.caption("本画面は状況確認と作業の入口です。演奏会の選択・変更はサイドバーで行ってください。")
-
-        selected_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
-        if not selected_id:
-            st.info("サイドバーで演奏会を選ぶと、ここに概要と進捗が表示されます。")
-            st.markdown("### 使い方")
-            st.markdown("- サイドバーで対象演奏会を選択")
-            st.markdown("- ダッシュボードで進捗と未対応項目を確認")
-            st.markdown("- 各ページで実作業を進める")
-            st.divider()
-            st.markdown("### テストデータ管理")
-            st.caption("テストデータ投入・削除は、サイドバーの「🧪 テストデータ管理」から実行できます。")
-            return
-
-        selected_row = next((r for r in concert_rows if r.get("id", "") == selected_id), None)
-        if not selected_row:
-            st.warning("選択中の演奏会が見つかりません。サイドバーで選び直してください。")
-            return
-
-        ext = ctx["extract_prop_text_any"]
-        title = _harmony_concert_name(selected_row)
-        c_date = (ext(selected_row, ["日時", "日付", "出演日", "体験日", "リリース日"]) or "")[:10]
-        c_venue = ext(selected_row, ["会場", "会場名", "ロケーション", "場所", "Location"]) or ""
-        c_conductor = ext(selected_row, ["指揮", "指揮者", "Conductor"]) or ""
-        c_soloist = ext(selected_row, ["ソリスト", "Soloist"]) or ""
-
-        st.markdown("### 現在選択中の演奏会")
-        st.markdown(f"**{title}**")
-        meta = []
-        if c_date:
-            meta.append(f"📅 本番日: {c_date}")
-        if c_venue:
-            meta.append(f"📍 会場: {c_venue}")
-        if c_conductor:
-            meta.append(f"🎼 指揮: {c_conductor}")
-        if c_soloist:
-            meta.append(f"🌟 ソリスト: {c_soloist}")
-        for line in meta:
-            st.caption(line)
-
-        col_open, col_back = st.columns(2)
-        if col_open.button("ダッシュボードへ", type="primary", use_container_width=True, key="harmonia_home_go_dashboard"):
-            st.session_state["_harmonia_pending_page"] = "ダッシュボード"
-            st.rerun()
-        if col_back.button("演奏会選択に戻る", use_container_width=True, key="harmonia_home_back_to_picker"):
-            st.session_state["_harmonia_pending_concert_name"] = _UNSELECTED
-            st.session_state["_harmonia_pending_page"] = "🏠 ホーム"
-            st.session_state["harmonia_global_concert_name"] = _UNSELECTED
-            st.rerun()
-
-        st.divider()
-        st.markdown("### 作業の流れ")
-        stats = _build_harmonia_progress(ctx, selected_row)
-        _render_harmonia_progress_cards(stats)
-
+    # Concert DB専用DBなので媒体フィルタは不要（全件対象）
     concert_rows = _load_harmonia_concerts(
         concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
         concert_ctx["CONCERT_DB_CONCERT"],
@@ -8892,78 +8443,53 @@ if system_mode == "HARMONIA":
         placeholder="例: Happy Hour / 2026 / 定期",
     ).strip().lower()
 
-    filtered_opt_map = dict(concert_opt_map)
-    if not filtered_opt_map:
+    if not concert_opt_map:
         st.sidebar.info("演奏会がまだ登録されていません。")
-    elif harmony_query:
-        filtered_opt_map = {k: v for k, v in filtered_opt_map.items() if harmony_query in k.lower()}
-        if not filtered_opt_map:
-            st.sidebar.warning(f"「{harmony_query}」に一致する演奏会がありません。")
-
-    selected_name = st.session_state.get("harmonia_global_concert_name", _UNSELECTED)
-    if selected_name not in filtered_opt_map and selected_name not in concert_opt_map:
-        selected_name = _UNSELECTED
-    opts_with_empty = [_UNSELECTED] + list(filtered_opt_map.keys())
-    selected_name = st.sidebar.selectbox(
-        "対象演奏会",
-        opts_with_empty,
-        index=(opts_with_empty.index(selected_name) if selected_name in opts_with_empty else 0),
-        key="harmonia_global_concert_name_widget",
-    )
-    st.session_state["harmonia_global_concert_name"] = selected_name
-    if st.sidebar.button("選択をクリア", key="harmonia_clear_selected"):
-        st.session_state["_harmonia_pending_concert_name"] = _UNSELECTED
-        st.session_state["_harmonia_pending_page"] = "🏠 ホーム"
-        st.session_state["harmonia_global_concert_name"] = _UNSELECTED
-        st.rerun()
-
-    if selected_name == _UNSELECTED:
         concert_ctx["SELECTED_CONCERT_ID"] = ""
         concert_ctx["SELECTED_CONCERT_NAME"] = ""
     else:
-        picked_id = filtered_opt_map.get(selected_name) or concert_opt_map.get(selected_name, "")
-        concert_ctx["SELECTED_CONCERT_ID"] = picked_id
-        concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
+        if harmony_query:
+            filtered_map = {k: v for k, v in concert_opt_map.items() if harmony_query in k.lower()}
+            if not filtered_map:
+                st.sidebar.warning(f"「{harmony_query}」に一致する演奏会がありません。")
+                concert_ctx["SELECTED_CONCERT_ID"] = ""
+                concert_ctx["SELECTED_CONCERT_NAME"] = ""
+            else:
+                concert_opt_map = filtered_map
+        if concert_opt_map:
+            # 先頭に「未選択」を追加して、起動時は必ず未選択から始める
+            _UNSELECTED = "— 演奏会を選択してください —"
+            opts_with_empty = [_UNSELECTED] + list(concert_opt_map.keys())
+            selected_name = st.sidebar.selectbox(
+                "対象演奏会",
+                opts_with_empty,
+                index=0,  # 常に未選択から始まる
+                key="harmonia_global_concert_name",
+            )
+            if selected_name == _UNSELECTED:
+                concert_ctx["SELECTED_CONCERT_ID"] = ""
+                concert_ctx["SELECTED_CONCERT_NAME"] = ""
+            else:
+                concert_ctx["SELECTED_CONCERT_ID"] = concert_opt_map.get(selected_name, "")
+                concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
 
+    # 演奏会が選択されていない場合はrender()を呼ばない
     selected_concert_id = concert_ctx.get("SELECTED_CONCERT_ID", "").strip()
-    selected_concert_row = next((r for r in concert_rows if r.get("id", "") == selected_concert_id), None)
-    progress_stats = _build_harmonia_progress(concert_ctx, selected_concert_row) if selected_concert_row else {}
-
-    # サイドバー：選択済み演奏会向け補助機能
-    if selected_concert_id:
-        concert_mgmt.render_sidebar_summary_pdf(concert_ctx)
-        try:
-            from concert.pages.form import render_url_generator
-            with st.sidebar.expander("📋 奏者フォームURL", expanded=False):
-                render_url_generator(concert_ctx,
-                                     concert_ctx.get("SELECTED_CONCERT_ID",""),
-                                     concert_ctx.get("SELECTED_CONCERT_NAME",""))
-        except Exception:
-            pass
-
-    if concert_page == "🏠 ホーム":
-        _render_harmonia_home(concert_ctx, concert_rows, filtered_opt_map or concert_opt_map)
-        st.stop()
-
-    if concert_page == "🧪 テストデータ管理":
-        st.header("🧪 テストデータ管理")
-        st.caption("演奏会未選択でも利用できます。テスト投入後はホームまたはサイドバーから演奏会を選択してください。")
-        test_data.render(concert_ctx)
-        st.stop()
-
     if not selected_concert_id:
-        st.info("まずは『🏠 ホーム』かサイドバーの『演奏会フィルタ』から対象演奏会を選択してください。")
+        st.info("サイドバーの「演奏会フィルタ」で演奏会を選択してください。")
         st.stop()
 
-    page_label_map = {
-        "練習管理": "🗓️ 練習管理",
-        "楽曲・楽器管理": "🎵 楽曲・楽器管理",
-        "奏者・出欠・持参楽器": "🎻 奏者・出欠・持参楽器",
-        "アサイン検討": "🧩 アサイン検討",
-        "レンタル管理": "📦 レンタル管理",
-        "収支・振込管理": "💴 収支・振込管理",
-    }
-    _render_harmonia_common_header(concert_ctx, selected_concert_row, page_label_map.get(concert_page, concert_page), progress_stats)
+    # サイドバー：演奏会サマリPDF出力
+    concert_mgmt.render_sidebar_summary_pdf(concert_ctx)
+    # サイドバー：奏者フォームURL生成
+    try:
+        from concert.pages.form import render_url_generator
+        with st.sidebar.expander("📋 奏者フォームURL", expanded=False):
+            render_url_generator(concert_ctx,
+                                 concert_ctx.get("SELECTED_CONCERT_ID",""),
+                                 concert_ctx.get("SELECTED_CONCERT_NAME",""))
+    except Exception:
+        pass
 
     if concert_page == "練習管理":
         concert_mgmt.render(concert_ctx)
@@ -8977,6 +8503,8 @@ if system_mode == "HARMONIA":
         rental.render(concert_ctx)
     elif concert_page == "収支・振込管理":
         finance.render(concert_ctx)
+    elif concert_page == "🧪 テストデータ管理":
+        test_data.render(concert_ctx)
 
     st.stop()
 
