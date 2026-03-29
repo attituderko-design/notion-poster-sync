@@ -8690,7 +8690,7 @@ if system_mode == "HARMONIA":
             "movement_roman": movement_roman,
         }]
         encore_items = [{
-            "title": score_title + " Encore",
+            "title": score_title,
             "order": 2,
             "part": "Timpani" if rich_mode else "",
             "played": bool(rich_mode),
@@ -8780,14 +8780,18 @@ if system_mode == "HARMONIA":
 
         assign_pages = []
         if NOTION_SONG_ASSIGN_DB_ID:
+            created_score_ids = {r.get("id", "") for r in created_rows if r.get("id")}
             all_assign = query_notion_database_all(NOTION_SONG_ASSIGN_DB_ID) or []
             for pg in all_assign:
+                score_rel_ids = _extract_relation_ids_local(pg, ["演奏曲", "演奏曲DB", "曲", "楽曲"])
+                if created_score_ids.intersection(set(score_rel_ids)):
+                    assign_pages.append(pg)
+                    continue
                 props = pg.get("properties", {}) or {}
                 title, _, _ = get_title(props)
                 title = title or plain_text_join(((props.get("タイトル") or {}).get("title") or []))
-                if not str(title or "").startswith("[SMOKETEST] "):
-                    continue
-                assign_pages.append(pg)
+                if str(title or "").startswith("[SMOKETEST] "):
+                    assign_pages.append(pg)
         for pg in assign_pages:
             result["assign_rows_debug"].append({
                 "id": pg.get("id", ""),
