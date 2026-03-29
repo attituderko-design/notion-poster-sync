@@ -187,6 +187,7 @@ def get_concert_secrets() -> dict:
         "db_pi_master":        _normalize_notion_id(db_pi_master),
         "db_expense":          _normalize_notion_id(db_expense),
         "db_billing":          _normalize_notion_id(db_billing),
+        "db_concert_song":     normalized_required_db["演奏会×曲DB"],
     }
 
 
@@ -680,6 +681,7 @@ def build_concert_ctx() -> dict:
                     "CONCERT_DB_PARTICIPANT": "db_participant",
                     "CONCERT_DB_ATTENDANCE": "db_attendance",
                     "CONCERT_DB_PART_DEFINITION": "db_part_definition",
+                    "CONCERT_DB_CONCERT_SONG": "db_concert_song",
                     "CONCERT_DB_PREFERENCE": "db_preference",
                 }.get(db_ctx_key, ""),
                 "",
@@ -714,6 +716,7 @@ def build_concert_ctx() -> dict:
                                 "CONCERT_DB_PARTICIPANT": "db_participant",
                                 "CONCERT_DB_ATTENDANCE": "db_attendance",
                                 "CONCERT_DB_PART_DEFINITION": "db_part_definition",
+                                "CONCERT_DB_CONCERT_SONG": "db_concert_song",
                                 "CONCERT_DB_PREFERENCE": "db_preference",
                             }.get(target_ctx_key, ""),
                             "",
