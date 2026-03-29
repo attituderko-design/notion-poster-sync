@@ -8361,6 +8361,12 @@ if system_mode != _prev_mode:
 if system_mode == "HARMONIA":
     st.sidebar.caption("ArtéMis HARMONIA")
     st.sidebar.divider()
+    _pending_name = st.session_state.pop("_harmonia_pending_concert_name", None)
+    if _pending_name is not None:
+        st.session_state["harmonia_global_concert_name"] = _pending_name
+    _pending_page = st.session_state.pop("_harmonia_pending_page", None)
+    if _pending_page is not None:
+        st.session_state["concert_page_radio"] = _pending_page
     concert_page = st.sidebar.radio(
         "ページ",
         [
@@ -8692,13 +8698,6 @@ if system_mode == "HARMONIA":
             st.markdown("- レンタル管理と収支・振込管理で費用を確定する")
 
     _UNSELECTED = "— 演奏会を選択してください —"
-    _pending_name = st.session_state.pop("_harmonia_pending_concert_name", None)
-    if _pending_name is not None:
-        st.session_state["harmonia_global_concert_name"] = _pending_name
-    _pending_page = st.session_state.pop("_harmonia_pending_page", None)
-    if _pending_page is not None:
-        st.session_state["concert_page_radio"] = _pending_page
-
     concert_rows = _load_harmonia_concerts(
         concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
         concert_ctx["CONCERT_DB_CONCERT"],
