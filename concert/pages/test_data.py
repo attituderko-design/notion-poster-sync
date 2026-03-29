@@ -668,19 +668,21 @@ def render(ctx: dict):
 | DB | 件数 |
 |---|---|
 | PERFORMER | 11名（Perc×8・Vn1/Vn2/Va×各1） |
-| INSTRUMENT | 5種 |
+| INSTRUMENT | 6種 |
 | CONCERT | 1件（2099-12-31） |
 | SONG | 4曲 |
+| CONCERT_SONG | 4件（演奏会×曲） |
 | PRACTICE | 3回 |
+| PRACTICE（本番日） | 1件 |
 | PART_DEFINITION | 16件（4曲×4パート） |
 | CONCERT_CAST | 11件 |
-| ATTENDANCE | 40件（5回×8名） |
-| PLAYER_INSTRUMENT | 15件（所有：Perc5名×3楽器）+ 2件（持参担当） |
+| ATTENDANCE | 44件（4回×11名） |
+| PLAYER_INSTRUMENT | 48件（所有：Perc8名×6楽器） |
+| 持参担当 | 2件 |
 | PREFERENCE | 128件（Perc8名×16パート定義） |
 | CONCERT_EXPENSE | 3件 |
 | RENTAL | 2件 |
 | SCHEDULE | 5件（第1回練習のタイムスケジュール） |
-| PRACTICE（本番日） | 1件 |
 """)
 
     st.divider()
