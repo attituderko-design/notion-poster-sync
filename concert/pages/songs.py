@@ -214,19 +214,26 @@ def _get_global_concert_filter(ctx: dict, concert_opts: dict[str, str]) -> tuple
 
 def _create_song(ctx: dict, title: str, concert_ids: list[str],
                  composer: str, duration_sec: int | None, note: str) -> bool:
-    db_id    = ctx["CONCERT_DB_SONG"]
+    db_id    = ctx["CONCERT_DB_CONCERT"]  # ATLAS内の演奏曲ページとして作成
     type_map = ctx["get_prop_types"](db_id)
     if not type_map:
-        st.error("楽曲DBのプロパティ取得に失敗しました。")
+        st.error("ATLAS DBのプロパティ取得に失敗しました。")
         return False
     props: dict = {}
     ctx["put_prop_any"](props, type_map, SONG_NAME_KEYS, title)
     if concert_ids:
-        ctx["put_prop_any"](props, type_map, SONG_CONCERT_REL_KEYS, concert_ids)
+        ctx["put_prop_any"](props, type_map, ATLAS_SCORE_HISTORY_KEYS, concert_ids)
     ctx["put_prop_any"](props, type_map, SONG_COMPOSER_KEYS, composer)
-    if duration_sec is not None:
-        ctx["put_prop_any"](props, type_map, SONG_DURATION_KEYS, duration_sec)
     ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
+
+    media_key = ctx["find_prop_name"](type_map, ["媒体", "Media"])
+    if media_key:
+        mtype = type_map.get(media_key, "")
+        if mtype == "multi_select":
+            props[media_key] = {"multi_select": [{"name": "演奏曲"}]}
+        elif mtype == "select":
+            props[media_key] = {"select": {"name": "演奏曲"}}
+
     ctx["put_key_any"](props, type_map, SONG_KEY_KEYS, title, composer, prefix="song")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
@@ -235,15 +242,22 @@ def _create_song(ctx: dict, title: str, concert_ids: list[str],
 
 def _update_song(ctx: dict, page_id: str, title: str, concert_ids: list[str],
                  composer: str, duration_sec: int | None, note: str) -> bool:
-    type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
+    type_map = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT"])
     props: dict = {}
     ctx["put_prop_any"](props, type_map, SONG_NAME_KEYS, title)
     if concert_ids:
-        ctx["put_prop_any"](props, type_map, SONG_CONCERT_REL_KEYS, concert_ids)
+        ctx["put_prop_any"](props, type_map, ATLAS_SCORE_HISTORY_KEYS, concert_ids)
     ctx["put_prop_any"](props, type_map, SONG_COMPOSER_KEYS, composer)
-    if duration_sec is not None:
-        ctx["put_prop_any"](props, type_map, SONG_DURATION_KEYS, duration_sec)
     ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
+
+    media_key = ctx["find_prop_name"](type_map, ["媒体", "Media"])
+    if media_key:
+        mtype = type_map.get(media_key, "")
+        if mtype == "multi_select":
+            props[media_key] = {"multi_select": [{"name": "演奏曲"}]}
+        elif mtype == "select":
+            props[media_key] = {"select": {"name": "演奏曲"}}
+
     ctx["put_key_any"](props, type_map, SONG_KEY_KEYS, title, composer, prefix="song")
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})

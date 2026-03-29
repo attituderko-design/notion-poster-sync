@@ -39,6 +39,8 @@ from concert.services.keys import (
 )
 
 TEST_PREFIX = "[TEST]"
+ATLAS_SCORE_REL_KEYS = ["演奏曲"]
+ATLAS_SCORE_HISTORY_REL_KEYS = ["出演履歴"]
 
 
 def _clear_cache():
@@ -168,9 +170,7 @@ def _seed_all(ctx) -> dict:
         st.session_state["test_created_ids"] = created_ids
         return summary
 
-    # ── 4. SONG ───────────────────────────────────────────
-    song_db = ctx["CONCERT_DB_SONG"]
-    ts = _p(ctx, song_db)
+    # ── 4. SONG（ATLAS内の演奏曲ページ） ─────────────────────────
     song_ids = []
     song_composers = {
         "テスト曲α": "テスト太郎（作曲）",
@@ -180,12 +180,31 @@ def _seed_all(ctx) -> dict:
     }
     for name in ["テスト曲α", "テスト曲β", "テスト曲γ", "テスト曲δ"]:
         props = {}
-        _put(ctx, props, ts, SONG_NAME_KEYS,        f"{TEST_PREFIX} {name}")
-        _put(ctx, props, ts, SONG_CONCERT_REL_KEYS, concert_id)
-        _put(ctx, props, ts, SONG_COMPOSER_KEYS,    song_composers[name])
-        sid = track(_create(ctx, song_db, props))
+        # ATLAS内の「演奏曲」ページを作る
+        _put(ctx, props, tc, CONCERT_NAME_KEYS, f"{TEST_PREFIX} {name}")
+        _put(ctx, props, tc, CONCERT_CREATOR_KEYS, song_composers[name])
+        media_key = ctx["find_prop_name"](tc, ["媒体", "Media"])
+        if media_key:
+            mtype = tc.get(media_key, "")
+            if mtype == "multi_select":
+                props[media_key] = {"multi_select": [{"name": "演奏曲"}]}
+            elif mtype == "select":
+                props[media_key] = {"select": {"name": "演奏曲"}}
+        _put(ctx, props, tc, ATLAS_SCORE_HISTORY_REL_KEYS, concert_id)
+        sid = track(_create(ctx, concert_db, props))
         if sid:
             song_ids.append(sid)
+
+    # 親演奏会側にも「演奏曲」relation を明示的にセット
+    if song_ids:
+        concert_update_props = {}
+        _put(ctx, concert_update_props, tc, ATLAS_SCORE_REL_KEYS, song_ids)
+        ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{concert_id}",
+            json={"properties": concert_update_props},
+        )
+
     summary["SONG"] = len(song_ids)
 
     # ── 4.5 CONCERT_SONG ───────────────────────────
@@ -672,7 +691,7 @@ def render(ctx: dict):
 | PERFORMER | 11名（Perc×8・Vn1/Vn2/Va×各1） |
 | INSTRUMENT | 6種 |
 | CONCERT | 1件（2099-12-31） |
-| SONG | 4曲 |
+| SONG | 4曲（ATLAS内の演奏曲ページ） |
 | CONCERT_SONG | 4件（演奏会×曲） |
 | PRACTICE | 3回 |
 | PRACTICE（本番日） | 1件 |
