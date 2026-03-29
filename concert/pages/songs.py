@@ -5,6 +5,12 @@ concert.pages.songs
 import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
 
+ATLAS_SCORE_HISTORY_KEYS = ["出演履歴"]
+ATLAS_SCORE_REL_KEYS = ["演奏曲"]
+ATLAS_SCORE_CREATOR_KEYS = ["クリエイター", "作曲者", "Composer"]
+ATLAS_SCORE_MEDIA_KEYS = ["媒体", "Media"]
+
+
 
 
 
@@ -50,6 +56,30 @@ def _concert_media_values(c: dict) -> list[str]:
                     out.extend([s.strip() for s in txt.replace("／", "/").split("/") if s.strip()])
     return list(dict.fromkeys(out))
 
+
+def _page_media_values(page: dict) -> list[str]:
+    props = (page or {}).get("properties", {}) or {}
+    out: list[str] = []
+    for key in ATLAS_SCORE_MEDIA_KEYS:
+        meta = props.get(key) or {}
+        ptype = meta.get("type")
+        if ptype == "select":
+            n = ((meta.get("select") or {}).get("name") or "").strip()
+            if n:
+                out.append(n)
+        elif ptype == "multi_select":
+            for it in (meta.get("multi_select") or []):
+                n = (it.get("name") or "").strip()
+                if n:
+                    out.append(n)
+        elif ptype in ("rich_text", "title"):
+            txt = "".join((x.get("plain_text") or "") for x in (meta.get(ptype) or [])).strip()
+            if txt:
+                out.extend([x.strip() for x in txt.replace("／", "/").split("/") if x.strip()])
+    return list(dict.fromkeys(out))
+
+def _is_atlas_score_page(page: dict) -> bool:
+    return "演奏曲" in _page_media_values(page)
 
 def _is_performance_media_concert(c: dict) -> bool:
     return "出演" in _concert_media_values(c)
@@ -131,13 +161,33 @@ def _load_songs(ctx, concert_id: str = "") -> list[dict]:
 
     key = f"song_list_{concert_id}"
     if key not in st.session_state:
-        f = None
-        if concert_id:
-            type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
-            rel_prop = ctx["find_prop_name"](type_map, SONG_CONCERT_REL_KEYS)
-            if rel_prop:
-                f = {"filter": {"property": rel_prop, "relation": {"contains": concert_id}}}
-        st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_SONG"], f)
+        atlas_db = ctx["CONCERT_DB_CONCERT"]
+        all_atlas = ctx["query_all"](atlas_db)
+        rows = []
+        if concert_id and (ctx.get("CONCERT_DB_CONCERT_SONG") or "").strip():
+            cs_rows = _load_concert_song_rows(ctx, concert_id=concert_id)
+            song_id_set = set()
+            for r in cs_rows:
+                song_id_set.update(ctx["extract_relation_ids_any"](r, CONCERT_SONG_SONG_REL_KEYS))
+            rows = [r for r in all_atlas if r.get("id", "") in song_id_set]
+
+            def _order(song_row):
+                srow = _get_concert_song_row(ctx, concert_id, song_row.get("id", ""))
+                raw = ctx["extract_prop_text_any"](srow or {}, CONCERT_SONG_ORDER_KEYS) if srow else ""
+                try:
+                    return int(float(raw)) if raw else 9999
+                except Exception:
+                    return 9999
+
+            rows = sorted(rows, key=lambda r: (_order(r), _song_name(r, ctx)))
+        else:
+            for r in all_atlas:
+                if not _is_atlas_score_page(r):
+                    continue
+                if concert_id and concert_id not in ctx["extract_relation_ids_any"](r, ATLAS_SCORE_HISTORY_KEYS):
+                    continue
+                rows.append(r)
+        st.session_state[key] = rows
     return st.session_state.get(key, [])
 
 
@@ -177,6 +227,10 @@ def _song_name(s: dict, ctx: dict) -> str:
     return ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or ctx["extract_title"](s) or s.get("id", "")
 
 
+def _song_composer(s: dict, ctx: dict) -> str:
+    return ctx["extract_prop_text_any"](s, ATLAS_SCORE_CREATOR_KEYS) or ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS) or ""
+
+
 def _concert_song_meta(ctx: dict, concert_id: str, song_id: str) -> tuple[int, bool, str, str]:
     row = _get_concert_song_row(ctx, concert_id, song_id)
     if not row:
@@ -214,7 +268,7 @@ def _get_global_concert_filter(ctx: dict, concert_opts: dict[str, str]) -> tuple
 
 def _create_song(ctx: dict, title: str, concert_ids: list[str],
                  composer: str, duration_sec: int | None, note: str) -> bool:
-    db_id    = ctx["CONCERT_DB_CONCERT"]  # ATLAS内の演奏曲ページとして作成
+    db_id    = ctx["CONCERT_DB_CONCERT"]
     type_map = ctx["get_prop_types"](db_id)
     if not type_map:
         st.error("ATLAS DBのプロパティ取得に失敗しました。")
@@ -223,17 +277,15 @@ def _create_song(ctx: dict, title: str, concert_ids: list[str],
     ctx["put_prop_any"](props, type_map, SONG_NAME_KEYS, title)
     if concert_ids:
         ctx["put_prop_any"](props, type_map, ATLAS_SCORE_HISTORY_KEYS, concert_ids)
-    ctx["put_prop_any"](props, type_map, SONG_COMPOSER_KEYS, composer)
+    ctx["put_prop_any"](props, type_map, ATLAS_SCORE_CREATOR_KEYS, composer)
     ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
-
-    media_key = ctx["find_prop_name"](type_map, ["媒体", "Media"])
-    if media_key:
-        mtype = type_map.get(media_key, "")
+    media_prop = ctx["find_prop_name"](type_map, ATLAS_SCORE_MEDIA_KEYS)
+    if media_prop:
+        mtype = type_map.get(media_prop, "")
         if mtype == "multi_select":
-            props[media_key] = {"multi_select": [{"name": "演奏曲"}]}
+            props[media_prop] = {"multi_select": [{"name": "演奏曲"}]}
         elif mtype == "select":
-            props[media_key] = {"select": {"name": "演奏曲"}}
-
+            props[media_prop] = {"select": {"name": "演奏曲"}}
     ctx["put_key_any"](props, type_map, SONG_KEY_KEYS, title, composer, prefix="song")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
@@ -247,22 +299,19 @@ def _update_song(ctx: dict, page_id: str, title: str, concert_ids: list[str],
     ctx["put_prop_any"](props, type_map, SONG_NAME_KEYS, title)
     if concert_ids:
         ctx["put_prop_any"](props, type_map, ATLAS_SCORE_HISTORY_KEYS, concert_ids)
-    ctx["put_prop_any"](props, type_map, SONG_COMPOSER_KEYS, composer)
+    ctx["put_prop_any"](props, type_map, ATLAS_SCORE_CREATOR_KEYS, composer)
     ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
-
-    media_key = ctx["find_prop_name"](type_map, ["媒体", "Media"])
-    if media_key:
-        mtype = type_map.get(media_key, "")
+    media_prop = ctx["find_prop_name"](type_map, ATLAS_SCORE_MEDIA_KEYS)
+    if media_prop:
+        mtype = type_map.get(media_prop, "")
         if mtype == "multi_select":
-            props[media_key] = {"multi_select": [{"name": "演奏曲"}]}
+            props[media_prop] = {"multi_select": [{"name": "演奏曲"}]}
         elif mtype == "select":
-            props[media_key] = {"select": {"name": "演奏曲"}}
-
+            props[media_prop] = {"select": {"name": "演奏曲"}}
     ctx["put_key_any"](props, type_map, SONG_KEY_KEYS, title, composer, prefix="song")
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200
-
 
 # ============================================================
 # 楽器種別 CRUD
@@ -409,10 +458,10 @@ def _render_song_tab(ctx: dict):
                         ok = _create_song(ctx, title.strip(), concert_ids,
                                           composer, duration_sec, note)
                         if ok and global_concert_id:
-                            songs_after = ctx["query_all"](ctx["CONCERT_DB_SONG"])
+                            songs_after = [r for r in ctx["query_all"](ctx["CONCERT_DB_CONCERT"]) if _is_atlas_score_page(r)]
                             target_song = next((x for x in reversed(songs_after)
                                                 if (_song_name(x, ctx) == title.strip())
-                                                and (ctx["extract_prop_text_any"](x, SONG_COMPOSER_KEYS) or "") == (composer or "")), None)
+                                                and (_song_composer(x, ctx) or "") == (composer or "")), None)
                             if target_song:
                                 max_order = 0
                                 for csr in _load_concert_song_rows(ctx, concert_id=global_concert_id):
@@ -452,7 +501,7 @@ def _render_song_tab(ctx: dict):
         sorted_songs = [
             s for s in sorted_songs
             if song_query in (_song_name(s, ctx) or "").lower()
-            or song_query in (ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS) or "").lower()
+            or song_query in (_song_composer(s, ctx) or "").lower()
         ]
     st.caption(f"表示件数: {len(sorted_songs)} / {len(songs)}")
     if not sorted_songs:
@@ -467,7 +516,7 @@ def _render_song_tab(ctx: dict):
         for s in sorted_songs:
             sid = s.get("id", "")
             label = _song_name(s, ctx)
-            comp = ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS)
+            comp = _song_composer(s, ctx)
             labels.append(f"{label} / {comp}" if comp else label)
             sel_map[labels[-1]] = sid
         pick = st.selectbox("編集対象の楽曲", ["（選択してください）"] + labels, key="songs_pick_one")
@@ -489,7 +538,7 @@ def _render_song_tab(ctx: dict):
 def _render_song_editor(ctx: dict, s: dict, all_concert_opts: dict[str, str]):
     song_id = s.get("id", "")
     song_label = _song_name(s, ctx)
-    composer = ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS)
+    composer = _song_composer(s, ctx)
     dur_sec_str = ctx["extract_prop_text_any"](s, SONG_DURATION_KEYS)
     dur_disp = _sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None)
     caption = f"{composer}　{dur_disp}" if composer or dur_disp else ""
@@ -500,7 +549,7 @@ def _render_song_editor(ctx: dict, s: dict, all_concert_opts: dict[str, str]):
     with st.expander(f"{song_label}　{f'*{caption}*' if caption else ''}", expanded=True):
         with st.form(f"song_edit_{song_id}", border=True):
             title = st.text_input("曲名 *", value=_song_name(s, ctx), key=f"se_title_{song_id}")
-            composer = st.text_input("作曲者", value=ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS), key=f"se_composer_{song_id}")
+            composer = st.text_input("作曲者", value=_song_composer(s, ctx), key=f"se_composer_{song_id}")
             dur_str = st.text_input("演奏時間", value=_sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None), placeholder="例：5:30", key=f"se_duration_{song_id}")
             order_input = st.number_input("曲順", min_value=1, max_value=999, value=max(order_no if order_no != 9999 else 1, 1), step=1, key=f"se_order_{song_id}")
             done_input = st.checkbox("定義完了", value=done, key=f"se_done_{song_id}")
