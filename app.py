@@ -8675,7 +8675,7 @@ if system_mode == "HARMONIA":
                 label = _harmony_concert_name(row)
                 if cols[idx % 2].button(label, key=f"harmonia_recent_{row.get('id','')}", use_container_width=True):
                     st.session_state["_harmonia_pending_concert_name"] = label
-                    st.session_state["_harmonia_pending_page"] = "🏠 ホーム"
+                    st.session_state["_harmonia_pending_page"] = "ダッシュボード"
                     st.rerun()
         st.markdown("### 演奏会を検索して開く")
         search_opts = ["— 演奏会を選択してください —"] + list(concert_opt_map.keys())
@@ -8683,6 +8683,7 @@ if system_mode == "HARMONIA":
         if quick_pick != "— 演奏会を選択してください —":
             if st.button("この演奏会を開く", type="primary", key="harmonia_home_open"):
                 st.session_state["_harmonia_pending_concert_name"] = quick_pick
+                st.session_state["_harmonia_pending_page"] = "ダッシュボード"
                 st.rerun()
         st.markdown("### 作業の流れ")
         if concert_ctx.get("SELECTED_CONCERT_ID"):
