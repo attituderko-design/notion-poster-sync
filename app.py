@@ -8400,6 +8400,30 @@ if system_mode == "HARMONIA":
         dt = concert_ctx["extract_prop_text_any"](page, ["日時", "日付", "出演日", "体験日", "リリース日"])
         return f"{name}（{dt[:10] if dt else '日時未設定'}）"
 
+    def _cleanup_harmonia_smoketest_pages() -> dict:
+        result = {"archived": 0, "failed": 0, "target_ids": []}
+        all_pages = query_notion_database_all(NOTION_DB_ID) or []
+        for pg in all_pages:
+            props = pg.get("properties", {}) or {}
+            title, _, _ = get_title(props)
+            if not str(title or "").startswith("[SMOKETEST] "):
+                continue
+            pid = pg.get("id", "")
+            if not pid:
+                continue
+            result["target_ids"].append(pid)
+            res = api_request(
+                "patch",
+                f"https://api.notion.com/v1/pages/{pid}",
+                headers=NOTION_HEADERS,
+                json={"archived": True},
+            )
+            if res is not None and res.status_code == 200:
+                result["archived"] += 1
+            else:
+                result["failed"] += 1
+        return result
+
     def _run_performance_registration_e2e_smoketest() -> dict:
         """
         既存の『出演』登録フローを最小構成でE2E試験する。
@@ -8588,7 +8612,8 @@ if system_mode == "HARMONIA":
         st.caption("演奏会未選択でも利用できます。")
         with st.expander("🧪 出演登録E2Eテスト", expanded=False):
             st.caption("既存の『出演』登録フローを最小構成で1ボタン実行し、ATLASの出演演奏会/演奏曲と APOLLO 演奏曲DBの同時登録を確認します。")
-            if st.button("▶ 出演登録E2Eテストを実行", type="primary", use_container_width=True, key="harmonia_e2e_smoketest_run"):
+            col_run, col_cleanup = st.columns(2)
+            if col_run.button("▶ 出演登録E2Eテストを実行", type="primary", use_container_width=True, key="harmonia_e2e_smoketest_run"):
                 smoke = _run_performance_registration_e2e_smoketest()
                 st.session_state["harmonia_e2e_smoketest_result"] = smoke
                 if smoke.get("ok"):
@@ -8600,9 +8625,21 @@ if system_mode == "HARMONIA":
                     )
                     if smoke.get("error"):
                         st.error(smoke["error"])
+            if col_cleanup.button("🧹 SMOKETESTデータ削除", use_container_width=True, key="harmonia_e2e_smoketest_cleanup"):
+                clean = _cleanup_harmonia_smoketest_pages()
+                st.session_state["harmonia_e2e_smoketest_cleanup_result"] = clean
+                if clean.get("failed", 0) == 0:
+                    st.success(f"✅ SMOKETESTデータを {clean.get('archived', 0)} 件アーカイブしました")
+                else:
+                    st.warning(f"⚠️ アーカイブ {clean.get('archived', 0)} 件 / 失敗 {clean.get('failed', 0)} 件")
+
             smoke_result = st.session_state.get("harmonia_e2e_smoketest_result") or {}
             if smoke_result:
                 st.json(smoke_result)
+            cleanup_result = st.session_state.get("harmonia_e2e_smoketest_cleanup_result") or {}
+            if cleanup_result:
+                with st.expander("SMOKETEST削除結果", expanded=False):
+                    st.json(cleanup_result)
 
         test_data.render(concert_ctx)
         st.stop()
