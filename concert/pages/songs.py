@@ -5,13 +5,6 @@ concert.pages.songs
 import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
 
-ATLAS_SCORE_HISTORY_KEYS = ["出演履歴"]
-ATLAS_SCORE_REL_KEYS = ["演奏曲"]
-ATLAS_SCORE_CREATOR_KEYS = ["クリエイター", "作曲者", "Composer"]
-ATLAS_SCORE_MEDIA_KEYS = ["媒体", "Media"]
-
-
-
 
 
 
@@ -24,7 +17,7 @@ ATLAS_SCORE_MEDIA_KEYS = ["媒体", "Media"]
 
 def _clear_song_cache():
     for k in list(st.session_state.keys()):
-        if k.startswith(("song_list", "instrument_list", "si_list_", "concert_song_list_", "partdef_list_")):
+        if k.startswith(("song_list", "instrument_list", "si_list_")):
             st.session_state.pop(k, None)
     st.session_state.pop("songs_concert_list", None)
 
@@ -57,30 +50,6 @@ def _concert_media_values(c: dict) -> list[str]:
     return list(dict.fromkeys(out))
 
 
-def _page_media_values(page: dict) -> list[str]:
-    props = (page or {}).get("properties", {}) or {}
-    out: list[str] = []
-    for key in ATLAS_SCORE_MEDIA_KEYS:
-        meta = props.get(key) or {}
-        ptype = meta.get("type")
-        if ptype == "select":
-            n = ((meta.get("select") or {}).get("name") or "").strip()
-            if n:
-                out.append(n)
-        elif ptype == "multi_select":
-            for it in (meta.get("multi_select") or []):
-                n = (it.get("name") or "").strip()
-                if n:
-                    out.append(n)
-        elif ptype in ("rich_text", "title"):
-            txt = "".join((x.get("plain_text") or "") for x in (meta.get(ptype) or [])).strip()
-            if txt:
-                out.extend([x.strip() for x in txt.replace("／", "/").split("/") if x.strip()])
-    return list(dict.fromkeys(out))
-
-def _is_atlas_score_page(page: dict) -> bool:
-    return "演奏曲" in _page_media_values(page)
-
 def _is_performance_media_concert(c: dict) -> bool:
     return "出演" in _concert_media_values(c)
 
@@ -92,129 +61,36 @@ def _load_concerts(ctx) -> list[dict]:
     return st.session_state.get("songs_concert_list", [])
 
 
-
-
-def _load_concert_song_rows(ctx, concert_id: str = "", song_id: str = "") -> list[dict]:
-    db_id = (ctx.get("CONCERT_DB_CONCERT_SONG") or "").strip()
-    if not db_id:
-        return []
-    key = f"concert_song_list_{concert_id}_{song_id}"
+def _load_songs(ctx, concert_id: str = "") -> list[dict]:
+    key = f"song_list_{concert_id}"
     if key not in st.session_state:
-        rows = ctx["query_all"](db_id)
-        out = []
-        for r in rows:
-            ok = True
-            if concert_id:
-                ok = concert_id in ctx["extract_relation_ids_any"](r, CONCERT_SONG_CONCERT_REL_KEYS)
-            if ok and song_id:
-                ok = song_id in ctx["extract_relation_ids_any"](r, CONCERT_SONG_SONG_REL_KEYS)
-            if ok:
-                out.append(r)
-        st.session_state[key] = out
-    return st.session_state.get(key, [])
-
-
-def _get_concert_song_row(ctx, concert_id: str, song_id: str) -> dict | None:
-    rows = _load_concert_song_rows(ctx, concert_id, song_id)
-    return rows[0] if rows else None
-
-
-def _load_apollo_songs(ctx, concert_id: str = "") -> list[dict]:
-    key = f"apollo_song_list_{concert_id}"
-    if key not in st.session_state:
-        rows = ctx["query_all"](ctx["CONCERT_DB_SONG"])
+        f = None
         if concert_id:
-            rows = [r for r in rows if concert_id in ctx["extract_relation_ids_any"](r, SONG_CONCERT_REL_KEYS)]
-        st.session_state[key] = rows
+            type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
+            rel_prop = ctx["find_prop_name"](type_map, SONG_CONCERT_REL_KEYS)
+            if rel_prop:
+                f = {"filter": {"property": rel_prop, "relation": {"contains": concert_id}}}
+        st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_SONG"], f)
     return st.session_state.get(key, [])
 
 
 def _resolve_apollo_song_ids(ctx, concert_id: str, atlas_song_id: str) -> list[str]:
     """
-    HARMONIA/CONCERT_SONG の曲（ATLAS演奏曲）に対応する APOLLO 演奏曲DB行IDを返す。
+    画面上の曲ID（ATLAS / CONCERT_SONG側）に対応する APOLLO 演奏曲DB行IDを返す。
+    APOLLO.演奏曲 relation が ATLAS 演奏曲を向いている前提。
     """
     if not atlas_song_id:
         return []
     out = []
-    for row in _load_apollo_songs(ctx, concert_id):
-        rels = ctx["extract_relation_ids_any"](row, PARTDEF_SONG_REL_KEYS)
-        if atlas_song_id in rels:
+    seen = set()
+    for row in _load_songs(ctx, concert_id):
+        rel_ids = ctx["extract_relation_ids_any"](row, PARTDEF_SONG_REL_KEYS)
+        if atlas_song_id in rel_ids:
             rid = row.get("id", "")
-            if rid:
+            if rid and rid not in seen:
+                seen.add(rid)
                 out.append(rid)
     return out
-
-
-def _upsert_concert_song(
-    ctx: dict,
-    concert_id: str,
-    song_id: str,
-    order_no: int,
-    definition_done: bool,
-    note: str,
-    existing_id: str = "",
-) -> bool:
-    db_id = (ctx.get("CONCERT_DB_CONCERT_SONG") or "").strip()
-    if not db_id:
-        return True
-    t = ctx["get_prop_types"](db_id)
-    if not t:
-        st.error("CONCERT_SONG DBのプロパティ取得に失敗しました。")
-        return False
-    props: dict = {}
-    ctx["put_key_any"](props, t, CONCERT_SONG_KEY_KEYS, concert_id, song_id, prefix="concert_song")
-    ctx["put_prop_any"](props, t, CONCERT_SONG_CONCERT_REL_KEYS, concert_id)
-    ctx["put_prop_any"](props, t, CONCERT_SONG_SONG_REL_KEYS, song_id)
-    ctx["put_prop_any"](props, t, CONCERT_SONG_ORDER_KEYS, int(order_no))
-    ctx["put_prop_any"](props, t, CONCERT_SONG_DONE_KEYS, bool(definition_done))
-    ctx["put_prop_any"](props, t, CONCERT_SONG_NOTE_KEYS, note)
-    if existing_id:
-        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
-    else:
-        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
-    return res is not None and res.status_code == 200
-
-
-def _archive_concert_song(ctx: dict, page_id: str) -> bool:
-    db_id = (ctx.get("CONCERT_DB_CONCERT_SONG") or "").strip()
-    if not db_id or not page_id:
-        return True
-    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"archived": True})
-    return res is not None and res.status_code == 200
-
-
-def _load_songs(ctx, concert_id: str = "") -> list[dict]:
-
-    key = f"song_list_{concert_id}"
-    if key not in st.session_state:
-        atlas_db = ctx["CONCERT_DB_CONCERT"]
-        all_atlas = ctx["query_all"](atlas_db)
-        rows = []
-        if concert_id and (ctx.get("CONCERT_DB_CONCERT_SONG") or "").strip():
-            cs_rows = _load_concert_song_rows(ctx, concert_id=concert_id)
-            song_id_set = set()
-            for r in cs_rows:
-                song_id_set.update(ctx["extract_relation_ids_any"](r, CONCERT_SONG_SONG_REL_KEYS))
-            rows = [r for r in all_atlas if r.get("id", "") in song_id_set]
-
-            def _order(song_row):
-                srow = _get_concert_song_row(ctx, concert_id, song_row.get("id", ""))
-                raw = ctx["extract_prop_text_any"](srow or {}, CONCERT_SONG_ORDER_KEYS) if srow else ""
-                try:
-                    return int(float(raw)) if raw else 9999
-                except Exception:
-                    return 9999
-
-            rows = sorted(rows, key=lambda r: (_order(r), _song_name(r, ctx)))
-        else:
-            for r in all_atlas:
-                if not _is_atlas_score_page(r):
-                    continue
-                if concert_id and concert_id not in ctx["extract_relation_ids_any"](r, ATLAS_SCORE_HISTORY_KEYS):
-                    continue
-                rows.append(r)
-        st.session_state[key] = rows
-    return st.session_state.get(key, [])
 
 
 def _load_instruments(ctx) -> list[dict]:
@@ -231,12 +107,12 @@ def _load_partdefs(ctx, concert_id: str = "", song_id: str = "") -> list[dict]:
         c_rel = ctx["find_prop_name"](t, PARTDEF_CONCERT_REL_KEYS)
         s_rel = ctx["find_prop_name"](t, PARTDEF_SONG_REL_KEYS)
 
-        # PART_DEFINITION.演奏曲 は APOLLO 向き。
-        # 画面上で選ばれている曲は ATLAS 演奏曲なので、対応する APOLLO 行IDへ変換する。
         target_song_ids = set()
         if song_id:
+            # 画面上の song_id は ATLAS 演奏曲ID。
+            # PART_DEFINITION.演奏曲 は APOLLO 向きなので変換が必要。
             target_song_ids.update(_resolve_apollo_song_ids(ctx, concert_id, song_id))
-            # 旧実装互換: 既に APOLLO ID が渡されている可能性も残す
+            # 旧データ互換
             target_song_ids.add(song_id)
 
         out = []
@@ -249,7 +125,7 @@ def _load_partdefs(ctx, concert_id: str = "", song_id: str = "") -> list[dict]:
             if ok:
                 out.append(r)
 
-        # 旧データ互換: 演奏会relationが無い定義も、曲が一致していれば拾う
+        # 演奏会relation未設定の旧データ救済
         if not out and target_song_ids and s_rel:
             for r in rows:
                 if bool(target_song_ids.intersection(set(ctx["extract_relation_ids"](r, s_rel)))):
@@ -267,24 +143,6 @@ def _concert_name(c: dict, ctx: dict) -> str:
 
 def _song_name(s: dict, ctx: dict) -> str:
     return ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or ctx["extract_title"](s) or s.get("id", "")
-
-
-def _song_composer(s: dict, ctx: dict) -> str:
-    return ctx["extract_prop_text_any"](s, ATLAS_SCORE_CREATOR_KEYS) or ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS) or ""
-
-
-def _concert_song_meta(ctx: dict, concert_id: str, song_id: str) -> tuple[int, bool, str, str]:
-    row = _get_concert_song_row(ctx, concert_id, song_id)
-    if not row:
-        return 9999, False, "", ""
-    raw_order = ctx["extract_prop_text_any"](row, CONCERT_SONG_ORDER_KEYS)
-    try:
-        order_no = int(float(raw_order)) if raw_order else 9999
-    except Exception:
-        order_no = 9999
-    done = (ctx["extract_prop_text_any"](row, CONCERT_SONG_DONE_KEYS) == "True")
-    note = ctx["extract_prop_text_any"](row, CONCERT_SONG_NOTE_KEYS) or ""
-    return order_no, done, note, row.get("id", "")
 
 
 def _instrument_name(i: dict, ctx: dict) -> str:
@@ -310,24 +168,19 @@ def _get_global_concert_filter(ctx: dict, concert_opts: dict[str, str]) -> tuple
 
 def _create_song(ctx: dict, title: str, concert_ids: list[str],
                  composer: str, duration_sec: int | None, note: str) -> bool:
-    db_id    = ctx["CONCERT_DB_CONCERT"]
+    db_id    = ctx["CONCERT_DB_SONG"]
     type_map = ctx["get_prop_types"](db_id)
     if not type_map:
-        st.error("ATLAS DBのプロパティ取得に失敗しました。")
+        st.error("楽曲DBのプロパティ取得に失敗しました。")
         return False
     props: dict = {}
     ctx["put_prop_any"](props, type_map, SONG_NAME_KEYS, title)
     if concert_ids:
-        ctx["put_prop_any"](props, type_map, ATLAS_SCORE_HISTORY_KEYS, concert_ids)
-    ctx["put_prop_any"](props, type_map, ATLAS_SCORE_CREATOR_KEYS, composer)
+        ctx["put_prop_any"](props, type_map, SONG_CONCERT_REL_KEYS, concert_ids)
+    ctx["put_prop_any"](props, type_map, SONG_COMPOSER_KEYS, composer)
+    if duration_sec is not None:
+        ctx["put_prop_any"](props, type_map, SONG_DURATION_KEYS, duration_sec)
     ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
-    media_prop = ctx["find_prop_name"](type_map, ATLAS_SCORE_MEDIA_KEYS)
-    if media_prop:
-        mtype = type_map.get(media_prop, "")
-        if mtype == "multi_select":
-            props[media_prop] = {"multi_select": [{"name": "演奏曲"}]}
-        elif mtype == "select":
-            props[media_prop] = {"select": {"name": "演奏曲"}}
     ctx["put_key_any"](props, type_map, SONG_KEY_KEYS, title, composer, prefix="song")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
@@ -336,24 +189,20 @@ def _create_song(ctx: dict, title: str, concert_ids: list[str],
 
 def _update_song(ctx: dict, page_id: str, title: str, concert_ids: list[str],
                  composer: str, duration_sec: int | None, note: str) -> bool:
-    type_map = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT"])
+    type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
     props: dict = {}
     ctx["put_prop_any"](props, type_map, SONG_NAME_KEYS, title)
     if concert_ids:
-        ctx["put_prop_any"](props, type_map, ATLAS_SCORE_HISTORY_KEYS, concert_ids)
-    ctx["put_prop_any"](props, type_map, ATLAS_SCORE_CREATOR_KEYS, composer)
+        ctx["put_prop_any"](props, type_map, SONG_CONCERT_REL_KEYS, concert_ids)
+    ctx["put_prop_any"](props, type_map, SONG_COMPOSER_KEYS, composer)
+    if duration_sec is not None:
+        ctx["put_prop_any"](props, type_map, SONG_DURATION_KEYS, duration_sec)
     ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
-    media_prop = ctx["find_prop_name"](type_map, ATLAS_SCORE_MEDIA_KEYS)
-    if media_prop:
-        mtype = type_map.get(media_prop, "")
-        if mtype == "multi_select":
-            props[media_prop] = {"multi_select": [{"name": "演奏曲"}]}
-        elif mtype == "select":
-            props[media_prop] = {"select": {"name": "演奏曲"}}
     ctx["put_key_any"](props, type_map, SONG_KEY_KEYS, title, composer, prefix="song")
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
     return res is not None and res.status_code == 200
+
 
 # ============================================================
 # 楽器種別 CRUD
@@ -499,20 +348,6 @@ def _render_song_tab(ctx: dict):
                     with st.spinner("登録中..."):
                         ok = _create_song(ctx, title.strip(), concert_ids,
                                           composer, duration_sec, note)
-                        if ok and global_concert_id:
-                            songs_after = [r for r in ctx["query_all"](ctx["CONCERT_DB_CONCERT"]) if _is_atlas_score_page(r)]
-                            target_song = next((x for x in reversed(songs_after)
-                                                if (_song_name(x, ctx) == title.strip())
-                                                and (_song_composer(x, ctx) or "") == (composer or "")), None)
-                            if target_song:
-                                max_order = 0
-                                for csr in _load_concert_song_rows(ctx, concert_id=global_concert_id):
-                                    raw = ctx["extract_prop_text_any"](csr, CONCERT_SONG_ORDER_KEYS)
-                                    try:
-                                        max_order = max(max_order, int(float(raw)) if raw else 0)
-                                    except Exception:
-                                        pass
-                                ok = _upsert_concert_song(ctx, global_concert_id, target_song.get("id", ""), max_order + 1, False, "")
                     if ok:
                         st.success("✅ 楽曲を登録しました。")
                         _clear_song_cache()
@@ -543,7 +378,7 @@ def _render_song_tab(ctx: dict):
         sorted_songs = [
             s for s in sorted_songs
             if song_query in (_song_name(s, ctx) or "").lower()
-            or song_query in (_song_composer(s, ctx) or "").lower()
+            or song_query in (ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS) or "").lower()
         ]
     st.caption(f"表示件数: {len(sorted_songs)} / {len(songs)}")
     if not sorted_songs:
@@ -558,7 +393,7 @@ def _render_song_tab(ctx: dict):
         for s in sorted_songs:
             sid = s.get("id", "")
             label = _song_name(s, ctx)
-            comp = _song_composer(s, ctx)
+            comp = ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS)
             labels.append(f"{label} / {comp}" if comp else label)
             sel_map[labels[-1]] = sid
         pick = st.selectbox("編集対象の楽曲", ["（選択してください）"] + labels, key="songs_pick_one")
@@ -578,50 +413,54 @@ def _render_song_tab(ctx: dict):
 
 
 def _render_song_editor(ctx: dict, s: dict, all_concert_opts: dict[str, str]):
-    song_id = s.get("id", "")
+    song_id    = s.get("id", "")
     song_label = _song_name(s, ctx)
-    composer = _song_composer(s, ctx)
+    composer   = ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS)
     dur_sec_str = ctx["extract_prop_text_any"](s, SONG_DURATION_KEYS)
-    dur_disp = _sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None)
-    caption = f"{composer}　{dur_disp}" if composer or dur_disp else ""
-
-    concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
-    order_no, done, cs_note, cs_id = _concert_song_meta(ctx, concert_id, song_id)
+    dur_disp   = _sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None)
+    caption    = f"{composer}　{dur_disp}" if composer or dur_disp else ""
 
     with st.expander(f"{song_label}　{f'*{caption}*' if caption else ''}", expanded=True):
-        with st.form(f"song_edit_{song_id}", border=True):
-            title = st.text_input("曲名 *", value=_song_name(s, ctx), key=f"se_title_{song_id}")
-            composer = st.text_input("作曲者", value=_song_composer(s, ctx), key=f"se_composer_{song_id}")
-            dur_str = st.text_input("演奏時間", value=_sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None), placeholder="例：5:30", key=f"se_duration_{song_id}")
-            order_input = st.number_input("曲順", min_value=1, max_value=999, value=max(order_no if order_no != 9999 else 1, 1), step=1, key=f"se_order_{song_id}")
-            done_input = st.checkbox("定義完了", value=done, key=f"se_done_{song_id}")
-            cs_note_input = st.text_input("演奏会別備考", value=cs_note, key=f"se_cs_note_{song_id}")
-            note = st.text_area("難易度メモ", value=ctx["extract_prop_text_any"](s, SONG_NOTE_KEYS), height=60, key=f"se_note_{song_id}")
+        # 既存紐づき演奏会
+        existing_concert_ids = ctx["extract_relation_ids_any"](s, SONG_CONCERT_REL_KEYS)
+        existing_concert_names = [k for k, v in all_concert_opts.items() if v in existing_concert_ids]
 
-            c1, c2 = st.columns(2)
-            if c1.form_submit_button("💾 更新", use_container_width=True):
+        with st.form(f"song_edit_{song_id}", border=True):
+            title    = st.text_input("曲名 *", value=_song_name(s, ctx), key=f"se_title_{song_id}")
+            composer = st.text_input("作曲者", value=ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS),
+                                     key=f"se_composer_{song_id}")
+            dur_str  = st.text_input(
+                "演奏時間",
+                value=_sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None),
+                placeholder="例：5:30",
+                key=f"se_duration_{song_id}",
+            )
+            concert_sel = st.multiselect(
+                "紐づける演奏会",
+                list(all_concert_opts.keys()),
+                default=existing_concert_names,
+                key=f"se_concerts_{song_id}",
+            )
+            note = st.text_area("難易度メモ",
+                                value=ctx["extract_prop_text_any"](s, SONG_NOTE_KEYS),
+                                height=60, key=f"se_note_{song_id}")
+
+            if st.form_submit_button("💾 更新", use_container_width=True):
                 if not title.strip():
                     st.error("曲名は必須です。")
                 else:
                     duration_sec = _mmss_to_sec(dur_str)
+                    concert_ids  = [all_concert_opts[n] for n in concert_sel if all_concert_opts.get(n)]
                     with st.spinner("更新中..."):
-                        ok = _update_song(ctx, song_id, title.strip(), [], composer, duration_sec, note)
-                        if ok and concert_id:
-                            ok = _upsert_concert_song(ctx, concert_id, song_id, int(order_input), bool(done_input), cs_note_input, existing_id=cs_id)
+                        ok = _update_song(ctx, song_id, title.strip(), concert_ids,
+                                          composer, duration_sec, note)
                     if ok:
                         st.success("✅ 更新しました。")
                         _clear_song_cache()
                         st.rerun()
                     else:
                         st.error("❌ 更新に失敗しました。")
-            if c2.form_submit_button("🗑 この演奏会から外す", use_container_width=True):
-                ok = _archive_concert_song(ctx, cs_id)
-                if ok:
-                    st.success("✅ この演奏会から外しました。")
-                    _clear_song_cache()
-                    st.rerun()
-                else:
-                    st.error("❌ 解除に失敗しました。")
+
 
 
 def _upsert_partdef(
@@ -645,18 +484,11 @@ def _upsert_partdef(
     if not clean_inst_ids:
         st.error("担当楽器を1つ以上選択してください。")
         return False
-
-    apollo_song_ids = _resolve_apollo_song_ids(ctx, concert_id, song_id)
-    if not apollo_song_ids:
-        st.error("対応する APOLLO 演奏曲が見つかりません。既存の出演登録フローで APOLLO 演奏曲DB行が作成されているか確認してください。")
-        return False
-    target_song_id = apollo_song_ids[0]
-
     inst_label = " / ".join([x for x in (inst_names or []) if x]) or "楽器未設定"
     props = {}
     ctx["put_prop_any"](props, t, PARTDEF_RECORD_KEYS, f"{song_name} / {part_name} / {inst_label}")
     ctx["put_prop_any"](props, t, PARTDEF_CONCERT_REL_KEYS, concert_id)
-    ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS, target_song_id)
+    ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS, song_id)
     ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS, clean_inst_ids)
     ctx["put_prop_any"](props, t, PARTDEF_NOTE_KEYS, note)
     ctx["put_key_any"](
@@ -664,7 +496,7 @@ def _upsert_partdef(
         t,
         PARTDEF_KEY_KEYS,
         concert_id,
-        target_song_id,
+        song_id,
         part_name,
         "|".join(clean_inst_ids),
         prefix="part",
@@ -720,32 +552,10 @@ def _render_partdef_tab(ctx: dict):
     if not songs:
         st.info("この演奏会に紐づく楽曲がありません。先に楽曲を登録してください。")
         return
-    songs = sorted(songs, key=lambda x: _concert_song_meta(ctx, c_id, x.get("id", ""))[0])
     song_opts = {_song_name(s, ctx): s for s in songs}
     s_name = st.selectbox("楽曲", list(song_opts.keys()), key="partdef_song_sel")
     s = song_opts[s_name]
     s_id = s.get("id", "")
-
-    apollo_song_ids = _resolve_apollo_song_ids(ctx, c_id, s_id)
-    if apollo_song_ids:
-        st.caption(f"対応する APOLLO 演奏曲: {len(apollo_song_ids)} 件")
-    else:
-        st.warning("この曲に対応する APOLLO 演奏曲が見つかりません。出演登録フロー経由の演奏曲DB作成が必要です。")
-    cur_order_no, cur_done, cur_cs_note, cur_cs_id = _concert_song_meta(ctx, c_id, s_id)
-
-    with st.form(f"concert_song_meta_{c_id}_{s_id}", border=True):
-        st.caption("この演奏会における当該楽曲の管理状態")
-        cs_order = st.number_input("曲順", min_value=1, max_value=999, value=max(cur_order_no if cur_order_no != 9999 else 1, 1), step=1, key=f"concert_song_order_{c_id}_{s_id}")
-        cs_done = st.checkbox("定義完了", value=cur_done, key=f"concert_song_done_{c_id}_{s_id}")
-        cs_note = st.text_input("備考", value=cur_cs_note, key=f"concert_song_note_{c_id}_{s_id}")
-        if st.form_submit_button("💾 曲設定を保存", use_container_width=True):
-            ok_meta = _upsert_concert_song(ctx, c_id, s_id, int(cs_order), bool(cs_done), cs_note, existing_id=cur_cs_id)
-            if ok_meta:
-                st.success("✅ 曲設定を保存しました。")
-                _clear_song_cache()
-                st.rerun()
-            else:
-                st.error("❌ 曲設定の保存に失敗しました。")
 
     instruments = _load_instruments(ctx)
     if not instruments:
@@ -826,6 +636,12 @@ def _render_partdef_tab(ctx: dict):
                     st.rerun()
                 else:
                     st.error("❌ 追加に失敗しました。")
+
+    apollo_song_ids = _resolve_apollo_song_ids(ctx, c_id, s_id)
+    if apollo_song_ids:
+        st.caption(f"対応する APOLLO 演奏曲: {len(apollo_song_ids)} 件")
+    else:
+        st.warning("対応する APOLLO 演奏曲が見つかりません。出演登録フロー経由の演奏曲DB作成が必要です。")
 
     part_rows = _load_partdefs(ctx, c_id, s_id)
     st.caption(f"登録済みパート: {len(part_rows)}件")
