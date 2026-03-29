@@ -83,10 +83,18 @@ def _resolve_apollo_song_ids(ctx, concert_id: str, atlas_song_id: str) -> list[s
         return []
     out = []
     seen = set()
+    link_keys = list(dict.fromkeys((CONCERT_SONG_SONG_REL_KEYS or []) + (PARTDEF_SONG_REL_KEYS or [])))
     for row in _load_songs(ctx, concert_id):
-        rel_ids = ctx["extract_relation_ids_any"](row, PARTDEF_SONG_REL_KEYS)
+        rid = row.get("id", "")
+        # 既に APOLLO 行ID が選択されているケース（旧/新フロー混在の救済）
+        if rid == atlas_song_id:
+            if rid and rid not in seen:
+                seen.add(rid)
+                out.append(rid)
+            continue
+
+        rel_ids = ctx["extract_relation_ids_any"](row, link_keys)
         if atlas_song_id in rel_ids:
-            rid = row.get("id", "")
             if rid and rid not in seen:
                 seen.add(rid)
                 out.append(rid)
@@ -281,43 +289,11 @@ def _render_song_tab(ctx: dict):
     concerts = _load_concerts(ctx)
     all_concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     global_concert_id, global_concert_name = _get_global_concert_filter(ctx, all_concert_opts)
-
-    if global_concert_id:
-        concert_opts = {global_concert_name or "（選択中）": global_concert_id}
-        st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
-    else:
-        concert_search = st.text_input(
-            "演奏会を検索",
-            value=st.session_state.get("songs_concert_search", ""),
-            key="songs_concert_search",
-            placeholder="例: 2026 / Osaka / 定期 / Happy Hour",
-        ).strip().lower()
-        if concert_search:
-            concert_opts = {
-                k: v for k, v in all_concert_opts.items()
-                if concert_search in k.lower()
-            }
-        else:
-            concert_opts = all_concert_opts
-    if not concert_opts:
-        st.warning("演奏会検索の条件に一致する候補がありません。絞り込みを緩めてください。")
-
-    st.info(
-        "🎼 楽曲の正式登録は ArtéMis MUSE（媒体=演奏曲）を推奨します。"
-        " MUSE経由だと MusicBrainz / 初演情報 / 肖像画 / 作品・楽章マスタ連動まで一括反映されます。"
-    )
-    st.caption(
-        "この画面の「新規楽曲を登録」は簡易手動登録です。"
-        "急ぎの追記や、MUSE未収載データの暫定入力に使ってください。"
-    )
-
-    # 絞り込み
-    if global_concert_id:
-        filter_concert_id = global_concert_id
-    else:
-        filter_opts = {"すべて": ""} | concert_opts
-        selected_filter = st.selectbox("絞り込み：演奏会", list(filter_opts.keys()), key="song_filter")
-        filter_concert_id = filter_opts.get(selected_filter, "")
+    if not global_concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
+        return
+    st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
+    filter_concert_id = global_concert_id
 
     songs = _load_songs(ctx, filter_concert_id)
 
@@ -484,11 +460,16 @@ def _upsert_partdef(
     if not clean_inst_ids:
         st.error("担当楽器を1つ以上選択してください。")
         return False
+    apollo_song_ids = _resolve_apollo_song_ids(ctx, concert_id, song_id)
+    if not apollo_song_ids:
+        st.error("対応する APOLLO 演奏曲が見つかりません。出演登録フロー経由で APOLLO 演奏曲DB行が作成されているか確認してください。")
+        return False
+    target_song_id = apollo_song_ids[0]
     inst_label = " / ".join([x for x in (inst_names or []) if x]) or "楽器未設定"
     props = {}
     ctx["put_prop_any"](props, t, PARTDEF_RECORD_KEYS, f"{song_name} / {part_name} / {inst_label}")
     ctx["put_prop_any"](props, t, PARTDEF_CONCERT_REL_KEYS, concert_id)
-    ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS, song_id)
+    ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS, target_song_id)
     ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS, clean_inst_ids)
     ctx["put_prop_any"](props, t, PARTDEF_NOTE_KEYS, note)
     ctx["put_key_any"](
@@ -496,7 +477,7 @@ def _upsert_partdef(
         t,
         PARTDEF_KEY_KEYS,
         concert_id,
-        song_id,
+        target_song_id,
         part_name,
         "|".join(clean_inst_ids),
         prefix="part",
@@ -521,30 +502,12 @@ def _render_partdef_tab(ctx: dict):
     concerts = _load_concerts(ctx)
     all_concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     global_concert_id, global_concert_name = _get_global_concert_filter(ctx, all_concert_opts)
-    if global_concert_id:
-        concert_opts = {global_concert_name or "（選択中）": global_concert_id}
-        st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
-    else:
-        c_query = st.text_input(
-            "演奏会を検索",
-            value=st.session_state.get("partdef_concert_search", ""),
-            key="partdef_concert_search",
-            placeholder="例: 2026 / 定期 / Happy Hour",
-        ).strip().lower()
-        if c_query:
-            concert_opts = {k: v for k, v in all_concert_opts.items() if c_query in k.lower()}
-        else:
-            concert_opts = all_concert_opts
-    if not concert_opts:
-        st.warning("一致する演奏会がありません。")
+    if not global_concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
         return
-
-    if global_concert_id:
-        c_name = global_concert_name or next(iter(concert_opts.keys()))
-        c_id = global_concert_id
-    else:
-        c_name = st.selectbox("演奏会", list(concert_opts.keys()), key="partdef_concert_sel")
-        c_id = concert_opts.get(c_name, "")
+    c_name = global_concert_name or "（選択中）"
+    c_id = global_concert_id
+    st.caption(f"対象演奏会: {c_name}")
     if not c_id:
         return
 
