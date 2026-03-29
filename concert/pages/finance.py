@@ -31,7 +31,7 @@ from concert.services.keys import (
 
 def _clear_finance_cache(concert_id: str = ""):
     for k in list(st.session_state.keys()):
-        if k.startswith("expense_list_") or k.startswith("cast_list_"):
+        if k.startswith(("expense_list_", "cast_list_", "billing_list_")):
             if not concert_id or concert_id in k:
                 st.session_state.pop(k, None)
 
@@ -548,7 +548,6 @@ def _render_budget_tab(ctx, concert_id: str):
 
 def _render_billing_tab(ctx, concert_id: str):
     st.caption("管理代行費の見積・請求・領収（収支計算とは分離）")
-    st.caption("build: receipt-tab f44acc5")
     st.info("このタブの金額は請求用です。演奏会の収支・参加費には反映しません。")
     st.caption("料金式: 基本料 5,000円 + 参加者数 × 100円 + 練習回数 × 800円 + オプション実費")
     if not (ctx.get("CONCERT_DB_BILLING") or "").strip():
