@@ -8669,9 +8669,7 @@ if system_mode == "HARMONIA":
 
     def _render_harmonia_home(ctx: dict, concert_rows: list[dict], concert_opt_map: dict[str, str]):
         st.header("🏠 HARMONIAホーム")
-        st.caption("まずは最近の演奏会を開くか、検索して対象演奏会を選択してください。テストデータ管理は演奏会未選択でも使えます。")
-
-        selected_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+        st.caption("まずは最近の演奏会を開くか、検索して対象演奏会を選択してください。テストデータ管理は演奏会未選択でも使えます。")        selected_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
         if selected_id:
             selected_row = next((r for r in concert_rows if r.get("id", "") == selected_id), None)
             if selected_row:
@@ -8694,7 +8692,19 @@ if system_mode == "HARMONIA":
                     meta.append(f"🌟 ソリスト: {c_soloist}")
                 for line in meta:
                     st.caption(line)
+
+                col_open, col_back = st.columns(2)
+                if col_open.button("ダッシュボードへ", type="primary", use_container_width=True, key="harmonia_home_go_dashboard"):
+                    st.session_state["_harmonia_pending_page"] = "ダッシュボード"
+                    st.rerun()
+                if col_back.button("演奏会選択に戻る", use_container_width=True, key="harmonia_home_back_to_picker"):
+                    st.session_state["_harmonia_pending_concert_name"] = _UNSELECTED
+                    st.session_state["_harmonia_pending_page"] = "🏠 ホーム"
+                    st.session_state["harmonia_global_concert_name"] = _UNSELECTED
+                    st.rerun()
+
                 st.divider()
+                return
         recent_rows = sorted(
             concert_rows,
             key=lambda r: (concert_ctx["extract_prop_text_any"](r, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""),
