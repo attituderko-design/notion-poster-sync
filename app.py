@@ -8485,25 +8485,6 @@ if system_mode == "HARMONIA":
         for pg in _collect_targets(NOTION_PERFORMER_DB_ID):
             props = pg.get("properties", {}) or {}
             title, _, _ = get_title(props)
-            if not title:
-                title = (
-                    plain_text_join(((props.get("名前") or {}).get("title") or []))
-                    or plain_text_join(((props.get("Name") or {}).get("title") or []))
-                    or plain_text_join(((props.get("タイトル") or {}).get("title") or []))
-                    or ""
-                )
-            if not str(title or "").startswith("[SMOKETEST] "):
-                continue
-            pid = pg.get("id", "")
-            if not pid:
-                continue
-            result["performer_target_ids"].append(pid)
-            if _archive_page(pid):
-                result["archived_performer"] += 1
-            else:
-                result["failed"] += 1
-
-        return result
 
     def _run_performance_registration_e2e_smoketest(rich_mode: bool = False) -> dict:
         result = {
