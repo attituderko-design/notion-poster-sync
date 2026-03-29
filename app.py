@@ -6187,13 +6187,16 @@ def find_test_pages_by_tag(tag: str, max_pages: int = 200) -> list[dict]:
     return found[:max_pages]
 
 def collect_related_score_ids_from_parent_pages(parent_pages: list[dict]) -> list[str]:
+    """
+    ATLAS の出演演奏会ページから、ATLAS 内の「演奏曲」relation 先ページIDを収集する。
+    フィールド名は固定で「演奏曲」を使う。
+    """
     ids = []
     seen = set()
     for pg in parent_pages or []:
         props = (pg.get("properties") or {}) if isinstance(pg, dict) else {}
-        # 親DB -> 演奏曲DB の relation 列（想定名: 演奏曲）
-        rel = ((props.get("演奏曲") or {}).get("relation") or [])
-        for r in rel:
+        rel_items = ((props.get("演奏曲") or {}).get("relation") or [])
+        for r in rel_items:
             rid = (r or {}).get("id")
             if rid and rid not in seen:
                 seen.add(rid)
@@ -8856,7 +8859,8 @@ if system_mode == "HARMONIA":
         return out
 
     def _load_valid_song_id_set(ctx: dict) -> set[str]:
-        rows = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
+        # CONCERT_SONG.曲 は ATLAS の「演奏曲」ページを向く
+        rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT"], None)
         return {str(r.get("id", "")).strip() for r in rows if str(r.get("id", "")).strip()}
 
     def _cleanup_invalid_concert_song_rows(ctx: dict, concert_id: str = "") -> dict:
@@ -8985,7 +8989,7 @@ if system_mode == "HARMONIA":
             if sid not in valid_song_ids:
                 result["failed"] += 1
                 result["missing_score_ids"].append(sid)
-                result["debug_lines"].append(f"APOLLOに存在しない曲IDのためスキップ: {sid}")
+                result["debug_lines"].append(f"ATLASに存在しない演奏曲IDのためスキップ: {sid}")
                 continue
 
             max_order += 1
@@ -9075,7 +9079,7 @@ if system_mode == "HARMONIA":
 
     def _render_concert_song_migration_panel(ctx: dict, concert_rows: list[dict], selected_row: dict | None = None):
         with st.expander("🛠 HARMONIA管理開始 / CONCERT_SONG 移行", expanded=False):
-            st.caption("ATLAS の『出演』演奏会と APOLLO の『演奏曲』 relation から、HARMONIA 用の CONCERT_SONG を初期生成します。relation が成立しない行は作成しません。")
+            st.caption("ATLAS の『出演』演奏会と ATLAS の『演奏曲』 relation から、HARMONIA 用の CONCERT_SONG を初期生成します。relation が成立しない行は作成しません。")
             if selected_row:
                 score_ids = _extract_parent_score_ids(selected_row)
                 valid_song_ids = _load_valid_song_id_set(ctx)
