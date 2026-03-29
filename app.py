@@ -6574,106 +6574,6 @@ def upsert_score_master_links(
         movement_roman=movement_roman,
     )
 
-
-def run_apollo_registration_smoketest(performance_page: dict) -> dict:
-    """
-    選択中の出演演奏会ページから ATLAS の「演奏曲」relation を1件取り、
-    APOLLO 演奏曲DB登録を単発で試す。
-    """
-    result = {
-        "ok": False,
-        "error": "",
-        "performance_id": "",
-        "performance_title": "",
-        "performance_date": "",
-        "selected_scores": [],
-        "main_items": [],
-        "encore_items": [],
-        "created": 0,
-        "failed": 0,
-        "reason": "",
-        "created_rows": [],
-    }
-    if not performance_page:
-        result["error"] = "演奏会が選択されていません。"
-        return result
-
-    performance_id = performance_page.get("id", "")
-    props = performance_page.get("properties", {}) or {}
-    performance_title, _, _ = get_title(props)
-    performance_date = get_experience_date_from_props(props) or (((props.get("リリース日") or {}).get("date") or {}).get("start") or "")
-    result["performance_id"] = performance_id
-    result["performance_title"] = performance_title
-    result["performance_date"] = performance_date
-
-    score_ids = collect_related_score_ids_from_parent_pages([performance_page])
-    if not score_ids:
-        result["error"] = "ATLASの『演奏曲』relationが見つかりません。"
-        return result
-
-    atlas_pages = query_notion_database_all(NOTION_DB_ID) or []
-    page_by_id = {p.get("id", ""): p for p in atlas_pages if p.get("id")}
-    score_page = None
-    for sid in score_ids:
-        if sid in page_by_id:
-            score_page = page_by_id[sid]
-            break
-    if not score_page:
-        result["error"] = "relation先のATLAS演奏曲ページを取得できませんでした。"
-        return result
-
-    score_props = score_page.get("properties", {}) or {}
-    score_title, _, _ = get_title(score_props)
-    composer = plain_text_join((score_props.get("クリエイター") or {}).get("rich_text", []))
-    composer_country = ""
-    movement_name = ""
-    movement_no = None
-    movement_order = None
-    movement_roman = ""
-
-    selected_scores = [{
-        "id": score_page.get("id", ""),
-        "title": score_title,
-        "composer": composer,
-        "composer_country": composer_country,
-    }]
-    main_items = [{
-        "title": score_title,
-        "order": 1,
-        "part": "",
-        "played": False,
-        "players": [],
-        "section": "本編",
-        "composer": composer,
-        "composer_country": composer_country,
-        "movement_name": movement_name,
-        "movement_no": movement_no,
-        "movement_order": movement_order,
-        "movement_roman": movement_roman,
-    }]
-    encore_items = []
-
-    result["selected_scores"] = selected_scores
-    result["main_items"] = main_items
-    result["encore_items"] = encore_items
-
-    created, failed, reason, created_rows = create_setlist_rows_for_performance(
-        performance_page_id=performance_id,
-        performance_title=performance_title,
-        performance_date=performance_date,
-        main_items=main_items,
-        encore_items=encore_items,
-        selected_scores=selected_scores,
-        score_pages=[score_page],
-    )
-    result["created"] = created
-    result["failed"] = failed
-    result["reason"] = reason
-    result["created_rows"] = created_rows
-    result["ok"] = (created > 0 and failed == 0)
-    st.session_state["apollo_registration_smoketest_result"] = result
-    return result
-
 def relink_existing_score_master_links(
     max_rows: int = 300,
     only_missing: bool = True,
@@ -8435,6 +8335,7 @@ if system_mode == "HARMONIA":
     concert_page = st.sidebar.radio(
         "ページ",
         [
+            "🏠 ホーム",
             "練習管理",
             "楽曲・楽器管理",
             "奏者・出欠・持参楽器",
@@ -8499,6 +8400,92 @@ if system_mode == "HARMONIA":
         dt = concert_ctx["extract_prop_text_any"](page, ["日時", "日付", "出演日", "体験日", "リリース日"])
         return f"{name}（{dt[:10] if dt else '日時未設定'}）"
 
+    def _run_apollo_registration_smoketest_local(performance_page: dict) -> dict:
+        result = {
+            "ok": False,
+            "error": "",
+            "performance_id": "",
+            "performance_title": "",
+            "performance_date": "",
+            "selected_scores": [],
+            "main_items": [],
+            "encore_items": [],
+            "created": 0,
+            "failed": 0,
+            "reason": "",
+            "created_rows": [],
+        }
+        if not performance_page:
+            result["error"] = "演奏会が選択されていません。"
+            return result
+
+        performance_id = performance_page.get("id", "")
+        props = performance_page.get("properties", {}) or {}
+        performance_title, _, _ = get_title(props)
+        performance_date = get_experience_date_from_props(props) or (((props.get("リリース日") or {}).get("date") or {}).get("start") or "")
+        result["performance_id"] = performance_id
+        result["performance_title"] = performance_title
+        result["performance_date"] = performance_date
+
+        score_ids = collect_related_score_ids_from_parent_pages([performance_page])
+        if not score_ids:
+            result["error"] = "ATLASの『演奏曲』relationが見つかりません。"
+            return result
+
+        atlas_pages = query_notion_database_all(NOTION_DB_ID) or []
+        page_by_id = {p.get("id", ""): p for p in atlas_pages if p.get("id")}
+        score_page = next((page_by_id.get(sid) for sid in score_ids if page_by_id.get(sid)), None)
+        if not score_page:
+            result["error"] = "relation先のATLAS演奏曲ページを取得できませんでした。"
+            return result
+
+        score_props = score_page.get("properties", {}) or {}
+        score_title, _, _ = get_title(score_props)
+        composer = plain_text_join((score_props.get("クリエイター") or {}).get("rich_text", []))
+        composer_country = ""
+
+        selected_scores = [{
+            "id": score_page.get("id", ""),
+            "title": score_title,
+            "composer": composer,
+            "composer_country": composer_country,
+        }]
+        main_items = [{
+            "title": score_title,
+            "order": 1,
+            "part": "",
+            "played": False,
+            "players": [],
+            "section": "本編",
+            "composer": composer,
+            "composer_country": composer_country,
+            "movement_name": "",
+            "movement_no": None,
+            "movement_order": None,
+            "movement_roman": "",
+        }]
+        encore_items = []
+
+        result["selected_scores"] = selected_scores
+        result["main_items"] = main_items
+        result["encore_items"] = encore_items
+
+        created, failed, reason, created_rows = create_setlist_rows_for_performance(
+            performance_page_id=performance_id,
+            performance_title=performance_title,
+            performance_date=performance_date,
+            main_items=main_items,
+            encore_items=encore_items,
+            selected_scores=selected_scores,
+            score_pages=[score_page],
+        )
+        result["created"] = created
+        result["failed"] = failed
+        result["reason"] = reason
+        result["created_rows"] = created_rows
+        result["ok"] = (created > 0 and failed == 0)
+        return result
+
     # Concert DB専用DBなので媒体フィルタは不要（全件対象）
     concert_rows = _load_harmonia_concerts(
         concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
@@ -8544,15 +8531,66 @@ if system_mode == "HARMONIA":
                 concert_ctx["SELECTED_CONCERT_ID"] = concert_opt_map.get(selected_name, "")
                 concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
 
-    # 演奏会が選択されていない場合はrender()を呼ばない
     selected_concert_id = concert_ctx.get("SELECTED_CONCERT_ID", "").strip()
+    selected_concert_row = next((r for r in concert_rows if r.get("id", "") == selected_concert_id), None)
+
+    if concert_page == "🏠 ホーム":
+        st.header("🏠 HARMONIAホーム")
+        st.caption("演奏会の選択・変更はサイドバーで行います。テストデータ管理は演奏会未選択でも利用できます。")
+        if selected_concert_row:
+            st.markdown("### 現在選択中の演奏会")
+            st.markdown(f"**{_harmony_concert_name(selected_concert_row)}**")
+            c_date = concert_ctx["extract_prop_text_any"](selected_concert_row, ["日時", "日付", "出演日", "体験日", "リリース日"])
+            c_loc = concert_ctx["extract_prop_text_any"](selected_concert_row, ["ロケーション", "会場", "会場名", "場所"])
+            if c_date:
+                st.caption(f"📅 {c_date[:10]}")
+            if c_loc:
+                st.caption(f"📍 {c_loc}")
+            go_cols = st.columns(3)
+            if go_cols[0].button("練習管理へ", use_container_width=True, key="harmonia_home_go_practice"):
+                st.session_state["concert_page_radio"] = "練習管理"
+                st.rerun()
+            if go_cols[1].button("楽曲・楽器管理へ", use_container_width=True, key="harmonia_home_go_songs"):
+                st.session_state["concert_page_radio"] = "楽曲・楽器管理"
+                st.rerun()
+            if go_cols[2].button("テストデータ管理へ", use_container_width=True, key="harmonia_home_go_testdata"):
+                st.session_state["concert_page_radio"] = "🧪 テストデータ管理"
+                st.rerun()
+        else:
+            st.info("サイドバーの『演奏会フィルタ』で演奏会を選択してください。")
+        st.stop()
+
+    if concert_page == "🧪 テストデータ管理":
+        st.header("🧪 テストデータ管理")
+        st.caption("演奏会未選択でも利用できます。")
+        with st.expander("🧪 APOLLO登録テスト", expanded=False):
+            st.caption("選択中の出演演奏会の『演奏曲』relationから先頭1件を取り、APOLLO演奏曲DBへの登録を1ボタンで試します。")
+            if not selected_concert_id:
+                st.info("先に対象演奏会を選択してください。")
+            else:
+                st.caption(f"対象演奏会: {_harmony_concert_name(selected_concert_row) if selected_concert_row else selected_concert_id}")
+                if st.button("▶ APOLLO登録テストを実行", type="primary", use_container_width=True, key="apollo_registration_smoketest_run"):
+                    smoke = _run_apollo_registration_smoketest_local(selected_concert_row)
+                    st.session_state["apollo_registration_smoketest_result"] = smoke
+                    if smoke.get("ok"):
+                        st.success(f"✅ APOLLO登録テスト成功: {smoke['created']} 件")
+                    else:
+                        st.warning(f"⚠️ APOLLO登録テスト: created={smoke.get('created',0)} / failed={smoke.get('failed',0)}" + (f" / {smoke.get('reason','')}" if smoke.get('reason') else ""))
+                        if smoke.get("error"):
+                            st.error(smoke["error"])
+            smoke_result = st.session_state.get("apollo_registration_smoketest_result") or {}
+            if smoke_result:
+                st.json(smoke_result)
+        test_data.render(concert_ctx)
+        st.stop()
+
+    # ここから先は演奏会選択必須
     if not selected_concert_id:
         st.info("サイドバーの「演奏会フィルタ」で演奏会を選択してください。")
         st.stop()
 
     # サイドバー：演奏会サマリPDF出力
     concert_mgmt.render_sidebar_summary_pdf(concert_ctx)
-    # サイドバー：奏者フォームURL生成
     try:
         from concert.pages.form import render_url_generator
         with st.sidebar.expander("📋 奏者フォームURL", expanded=False):
@@ -8574,8 +8612,6 @@ if system_mode == "HARMONIA":
         rental.render(concert_ctx)
     elif concert_page == "収支・振込管理":
         finance.render(concert_ctx)
-    elif concert_page == "🧪 テストデータ管理":
-        test_data.render(concert_ctx)
 
     st.stop()
 
