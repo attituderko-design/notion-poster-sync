@@ -32,6 +32,16 @@ from services.performance_ops import get_cast_row_map_for_performance_service as
 from services.performance_ops import upsert_score_master_links_service as _upsert_score_master_links_service
 try:
     from concert.services.notion_client import build_concert_ctx
+    from concert.services.keys import (
+        CONCERT_NAME_KEYS, CONCERT_DATE_KEYS, CONCERT_VENUE_KEYS,
+        SONG_CONCERT_REL_KEYS,
+        PRACTICE_CONCERT_REL_KEYS, PRACTICE_NAME_KEYS, PRACTICE_DATE_KEYS, PRACTICE_CONCERT_DAY_KEYS,
+        PARTICIPANT_CONCERT_REL_KEYS,
+        ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS,
+        PREF_PLAYER_REL_KEYS, PREF_PRIORITY_KEYS,
+        RENTAL_PRACTICE_REL_KEYS, RENTAL_CONFIRMED_KEYS,
+        EXPENSE_CONCERT_REL_KEYS, EXPENSE_AMOUNT_KEYS, EXPENSE_CONFIRMED_KEYS,
+    )
     from concert.pages import (
         concert_mgmt,
         finance,
@@ -8358,12 +8368,208 @@ if system_mode != _prev_mode:
         )):
             st.session_state.pop(_k, None)
     st.session_state["_prev_system_mode"] = system_mode
+def _harmonia_truthy(raw: str) -> bool:
+    return str(raw or "").strip().lower() in {"true", "1", "yes", "on", "はい"}
+
+
+def _harmonia_parse_date(value: str) -> datetime | None:
+    s = str(value or "").strip()
+    if not s:
+        return None
+    s = s.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        try:
+            return datetime.fromisoformat(s[:10])
+        except Exception:
+            return None
+
+
+def _render_harmonia_page_header(ctx: dict, page_label: str, concert_row: dict, stats: dict | None = None):
+    ext = ctx["extract_prop_text_any"]
+    c_name = ext(concert_row, CONCERT_NAME_KEYS) or ctx["extract_title"](concert_row) or "演奏会"
+    c_date = (ext(concert_row, CONCERT_DATE_KEYS) or "")[:10]
+    c_venue = ext(concert_row, CONCERT_VENUE_KEYS) or "未設定"
+    st.markdown(
+        f"""
+        <div style="padding:1rem 1.1rem;border:1px solid rgba(255,255,255,.10);border-radius:16px;margin:.25rem 0 1rem 0;background:rgba(255,255,255,.03)">
+            <div style="font-size:.8rem;opacity:.8;margin-bottom:.25rem;">ArtéMis HARMONIA / {page_label}</div>
+            <div style="font-size:1.5rem;font-weight:700;line-height:1.3;">🎻 {c_name}</div>
+            <div style="font-size:.92rem;opacity:.9;margin-top:.35rem;">📅 {c_date or '日時未設定'}　　📍 {c_venue}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if stats:
+        cols = st.columns(4)
+        cols[0].metric("参加者", f"{stats.get('participant_count', 0)}人")
+        cols[1].metric("出欠未回答", f"{stats.get('attendance_unanswered_count', 0)}人")
+        cols[2].metric("希望未提出", f"{stats.get('preference_unanswered_count', 0)}人")
+        cols[3].metric("レンタル未確定", f"{stats.get('rental_unconfirmed_count', 0)}件")
+
+
+def _build_harmonia_dashboard_stats(ctx: dict, concert_row: dict) -> dict:
+    ext = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
+    stats = {
+        "participant_count": 0,
+        "practice_count": 0,
+        "song_count": 0,
+        "attendance_unanswered_count": 0,
+        "preference_unanswered_count": 0,
+        "rental_unconfirmed_count": 0,
+        "expense_total": 0,
+        "expense_confirmed_total": 0,
+        "next_practice_label": "未設定",
+        "concert_date": (ext(concert_row, CONCERT_DATE_KEYS) or "")[:10],
+    }
+    concert_id = (concert_row or {}).get("id", "")
+    if not concert_id:
+        return stats
+
+    participant_prop = ctx["find_prop_name"](ctx["get_prop_types"](ctx["CONCERT_DB_PARTICIPANT"]), PARTICIPANT_CONCERT_REL_KEYS)
+    participants = ctx["query_all"](
+        ctx["CONCERT_DB_PARTICIPANT"],
+        {"filter": {"property": participant_prop, "relation": {"contains": concert_id}}} if participant_prop else None,
+    )
+    participant_ids = {r.get("id", "") for r in participants if r.get("id")}
+    stats["participant_count"] = len(participant_ids)
+
+    song_prop = ctx["find_prop_name"](ctx["get_prop_types"](ctx["CONCERT_DB_SONG"]), SONG_CONCERT_REL_KEYS)
+    songs_rows = ctx["query_all"](
+        ctx["CONCERT_DB_SONG"],
+        {"filter": {"property": song_prop, "relation": {"contains": concert_id}}} if song_prop else None,
+    )
+    stats["song_count"] = len(songs_rows or [])
+
+    practice_prop = ctx["find_prop_name"](ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"]), PRACTICE_CONCERT_REL_KEYS)
+    practice_rows = ctx["query_all"](
+        ctx["CONCERT_DB_PRACTICE"],
+        {"filter": {"property": practice_prop, "relation": {"contains": concert_id}}} if practice_prop else None,
+    )
+    regular_practice_ids = []
+    future_candidates = []
+    now_dt = datetime.now()
+    for p in (practice_rows or []):
+        is_concert_day = _harmonia_truthy(ext(p, PRACTICE_CONCERT_DAY_KEYS))
+        pdt_raw = ext(p, PRACTICE_DATE_KEYS)
+        pdt = _harmonia_parse_date(pdt_raw)
+        if not is_concert_day:
+            pid = p.get("id", "")
+            if pid:
+                regular_practice_ids.append(pid)
+            if pdt and pdt >= now_dt:
+                label = f"{(pdt_raw or '')[:10]} {ext(p, PRACTICE_NAME_KEYS) or ctx['extract_title'](p) or ''}".strip()
+                future_candidates.append((pdt, label))
+    stats["practice_count"] = len(regular_practice_ids)
+    if future_candidates:
+        future_candidates.sort(key=lambda x: x[0])
+        stats["next_practice_label"] = future_candidates[0][1]
+
+    if participant_ids and regular_practice_ids:
+        attendance_rows = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"])
+        answered = set()
+        practice_id_set = set(regular_practice_ids)
+        for r in (attendance_rows or []):
+            pids = set(ext_rel(r, ATT_PLAYER_REL_KEYS))
+            prids = set(ext_rel(r, ATT_PRACTICE_REL_KEYS))
+            if not (pids and prids):
+                continue
+            hit_p = participant_ids & pids
+            hit_pr = practice_id_set & prids
+            for pid in hit_p:
+                for prid in hit_pr:
+                    answered.add((pid, prid))
+        stats["attendance_unanswered_count"] = sum(
+            1 for pid in participant_ids if any((pid, prid) not in answered for prid in regular_practice_ids)
+        )
+
+    if participant_ids:
+        pref_rows = ctx["query_all"](ctx["CONCERT_DB_PREFERENCE"])
+        answered_participants = set()
+        for r in (pref_rows or []):
+            pids = set(ext_rel(r, PREF_PLAYER_REL_KEYS))
+            if not pids:
+                continue
+            priority = (ext(r, PREF_PRIORITY_KEYS) or "").strip()
+            if priority and priority != "未回答":
+                answered_participants |= (participant_ids & pids)
+        stats["preference_unanswered_count"] = max(0, len(participant_ids - answered_participants))
+
+    if regular_practice_ids:
+        rental_rows = ctx["query_all"](ctx["CONCERT_DB_RENTAL"])
+        practice_id_set = set(regular_practice_ids)
+        stats["rental_unconfirmed_count"] = sum(
+            1
+            for r in (rental_rows or [])
+            if (practice_id_set & set(ext_rel(r, RENTAL_PRACTICE_REL_KEYS)))
+            and not _harmonia_truthy(ext(r, RENTAL_CONFIRMED_KEYS))
+        )
+
+    expense_db = (ctx.get("CONCERT_DB_CONCERT_EXPENSE") or "").strip()
+    if expense_db:
+        expense_prop = ctx["find_prop_name"](ctx["get_prop_types"](expense_db), EXPENSE_CONCERT_REL_KEYS)
+        expense_rows = ctx["query_all"](
+            expense_db,
+            {"filter": {"property": expense_prop, "relation": {"contains": concert_id}}} if expense_prop else None,
+        )
+        total = 0
+        confirmed_total = 0
+        for r in (expense_rows or []):
+            amt_raw = ext(r, EXPENSE_AMOUNT_KEYS)
+            try:
+                amt = int(float(amt_raw)) if amt_raw else 0
+            except Exception:
+                amt = 0
+            total += amt
+            if _harmonia_truthy(ext(r, EXPENSE_CONFIRMED_KEYS)):
+                confirmed_total += amt
+        stats["expense_total"] = total
+        stats["expense_confirmed_total"] = confirmed_total
+    return stats
+
+
+def _render_harmonia_dashboard(ctx: dict, concert_row: dict, stats: dict):
+    _render_harmonia_page_header(ctx, "ダッシュボード", concert_row, stats)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("練習回数", f"{stats.get('practice_count', 0)}回")
+    c2.metric("演奏曲数", f"{stats.get('song_count', 0)}曲")
+    c3.metric("次回練習", stats.get('next_practice_label', '未設定'))
+
+    c4, c5 = st.columns(2)
+    c4.metric("経費合計", f"¥{int(stats.get('expense_total', 0)):,}")
+    c5.metric("経費確定額", f"¥{int(stats.get('expense_confirmed_total', 0)):,}")
+
+    st.markdown("### いま確認すべきこと")
+    todo_lines = []
+    if stats.get("attendance_unanswered_count", 0) > 0:
+        todo_lines.append(f"- 出欠未回答の参加者が **{stats['attendance_unanswered_count']}人** います。")
+    if stats.get("preference_unanswered_count", 0) > 0:
+        todo_lines.append(f"- パート希望未提出の参加者が **{stats['preference_unanswered_count']}人** います。")
+    if stats.get("rental_unconfirmed_count", 0) > 0:
+        todo_lines.append(f"- レンタル未確定の見積が **{stats['rental_unconfirmed_count']}件** あります。")
+    if not todo_lines:
+        st.success("未回答・未確定の主要タスクは今のところ見当たりません。")
+    else:
+        st.markdown("\n".join(todo_lines))
+
+    st.markdown("### 作業の流れ")
+    st.markdown(
+        "1. 練習管理で本番日・練習回を整える\n"
+        "2. 楽曲・パート定義を整える\n"
+        "3. 奏者・出欠・持参楽器で参加者を確定する\n"
+        "4. アサイン検討で希望入力と割当候補を確認する\n"
+        "5. レンタル管理と収支・振込管理で費用を確定する"
+    )
+
 if system_mode == "HARMONIA":
     st.sidebar.caption("ArtéMis HARMONIA")
     st.sidebar.divider()
     concert_page = st.sidebar.radio(
         "ページ",
         [
+            "ダッシュボード",
             "練習管理",
             "楽曲・楽器管理",
             "奏者・出欠・持参楽器",
@@ -8491,19 +8697,38 @@ if system_mode == "HARMONIA":
     except Exception:
         pass
 
-    if concert_page == "練習管理":
+    selected_concert_row = next((r for r in concert_rows if r.get("id", "") == selected_concert_id), None)
+    dashboard_stats = _build_harmonia_dashboard_stats(concert_ctx, selected_concert_row or {}) if selected_concert_row else {}
+
+    if concert_page == "ダッシュボード":
+        _render_harmonia_dashboard(concert_ctx, selected_concert_row or {}, dashboard_stats)
+    elif concert_page == "練習管理":
+        if selected_concert_row:
+            _render_harmonia_page_header(concert_ctx, concert_page, selected_concert_row, dashboard_stats)
         concert_mgmt.render(concert_ctx)
     elif concert_page == "楽曲・楽器管理":
+        if selected_concert_row:
+            _render_harmonia_page_header(concert_ctx, concert_page, selected_concert_row, dashboard_stats)
         songs.render(concert_ctx)
     elif concert_page == "奏者・出欠・持参楽器":
+        if selected_concert_row:
+            _render_harmonia_page_header(concert_ctx, concert_page, selected_concert_row, dashboard_stats)
         players.render(concert_ctx)
     elif concert_page == "アサイン検討":
+        if selected_concert_row:
+            _render_harmonia_page_header(concert_ctx, concert_page, selected_concert_row, dashboard_stats)
         assign.render(concert_ctx)
     elif concert_page == "レンタル管理":
+        if selected_concert_row:
+            _render_harmonia_page_header(concert_ctx, concert_page, selected_concert_row, dashboard_stats)
         rental.render(concert_ctx)
     elif concert_page == "収支・振込管理":
+        if selected_concert_row:
+            _render_harmonia_page_header(concert_ctx, concert_page, selected_concert_row, dashboard_stats)
         finance.render(concert_ctx)
     elif concert_page == "🧪 テストデータ管理":
+        if selected_concert_row:
+            _render_harmonia_page_header(concert_ctx, concert_page, selected_concert_row, dashboard_stats)
         test_data.render(concert_ctx)
 
     st.stop()
