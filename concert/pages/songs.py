@@ -5,12 +5,6 @@ concert.pages.songs
 import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
 
-CONCERT_SONG_KEY_KEYS = ["concert_song_key", "CONCERT_SONG_KEY", "key"]
-CONCERT_SONG_CONCERT_REL_KEYS = ["演奏会", "FK演奏会", "concert"]
-CONCERT_SONG_SONG_REL_KEYS = ["曲", "楽曲", "演奏曲", "song"]
-CONCERT_SONG_ORDER_KEYS = ["曲順", "順番", "order"]
-CONCERT_SONG_DONE_KEYS = ["定義完了", "definition_done", "完了"]
-CONCERT_SONG_NOTE_KEYS = ["備考", "メモ", "note"]
 
 
 
