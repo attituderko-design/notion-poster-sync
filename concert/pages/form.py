@@ -888,6 +888,9 @@ def render_form(ctx, concert_id: str):
         current_pid = st.session_state.get("form_player_id", "")
         if current_pid:
             _, existing_att = _get_form_cast_and_att_map(ctx, concert_id, current_pid)
+        # 入力途中で戻ってきた場合はsession_stateを最優先し、無ければDB既存値を使う
+        session_att = st.session_state.get("form_att") or {}
+        session_att_comment = st.session_state.get("form_att_comment") or {}
 
         with st.form("step2"):
             att: dict[str, str] = {}
@@ -904,14 +907,14 @@ def render_form(ctx, concert_id: str):
                 if pr_venue:  label += f"　📍 {pr_venue}"
                 st.markdown(label)
                 cur = existing_att.get(pr_id, {})
-                cur_status = cur.get("status", "△")
+                cur_status = session_att.get(pr_id) or cur.get("status", "△")
                 idx = ATT_OPTS.index(cur_status) if cur_status in ATT_OPTS else 1
                 val = st.radio("　", ATT_OPTS, index=idx, horizontal=True,
                                key=f"att_{pr_id}", label_visibility="collapsed")
                 att[pr_id] = val
                 att_comment[pr_id] = st.text_input(
                     "コメント（任意）",
-                    value=cur.get("comment", ""),
+                    value=session_att_comment.get(pr_id, cur.get("comment", "")),
                     key=f"att_note_{pr_id}",
                 )
                 st.divider()
@@ -1146,13 +1149,13 @@ def _delete_form_test_data(ctx, concert_id: str) -> dict:
 
     # 2. ATTENDANCE（cast_idまたはplayer_idでリレーション）
     all_att = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], None)
+    all_pr = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"], None)
+    pr_concert_map = {p.get("id",""): ext_rel(p, PRACTICE_CONCERT_REL_KEYS) for p in all_pr}
     att_count = 0
     for r in all_att:
         pl_ids = ext_rel(r, ATT_PLAYER_REL_KEYS)
         pr_ids = ext_rel(r, ATT_PRACTICE_REL_KEYS)
         # 練習がこの演奏会に紐づいているか確認
-        all_pr = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"], None)
-        pr_concert_map = {p.get("id",""): ext_rel(p, PRACTICE_CONCERT_REL_KEYS) for p in all_pr}
         if any(concert_id in pr_concert_map.get(pr_id, []) for pr_id in pr_ids):
             if archive(r.get("id","")):
                 att_count += 1
