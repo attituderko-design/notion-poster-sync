@@ -8489,7 +8489,14 @@ if system_mode == "HARMONIA":
         for pg in _collect_targets(NOTION_PERFORMER_DB_ID):
             props = pg.get("properties", {}) or {}
             title, _, _ = get_title(props)
-            title = title or extract_name_title(pg) or ""
+            if not title:
+                props_local = pg.get("properties", {}) or {}
+                title = (
+                    plain_text_join(((props_local.get("名前") or {}).get("title") or []))
+                    or plain_text_join(((props_local.get("Name") or {}).get("title") or []))
+                    or plain_text_join(((props_local.get("タイトル") or {}).get("title") or []))
+                    or ""
+                )
             if not str(title or "").startswith("[SMOKETEST] "):
                 continue
             pid = pg.get("id", "")
