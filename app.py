@@ -9995,6 +9995,10 @@ if mode == "新規登録":
                                 st.warning(f"⚠️ 楽曲別担当者DB登録に失敗しました（{failed_assign} 件）")
                             elif assign_reason:
                                 st.info(f"ℹ️ 楽曲別担当者DB連携: {assign_reason}")
+                        debug_payload = st.session_state.get("apollo_last_debug_payload") or {}
+                        if debug_payload:
+                            with st.expander("演奏曲DB投入デバッグ", expanded=False):
+                                st.json(debug_payload)
                         show_post_register_ui()
                     else:
                         st.error("❌ 登録失敗")
@@ -10406,8 +10410,17 @@ if mode == "新規登録":
                                                 selected_scores_for_link = [{
                                                     "id": created_id,
                                                     "title": item.get("jp_title", ""),
-                                                    "composer": ((item.get("details") or {}).get("director") or "").strip(),
-                                                    "composer_country": normalize_country_code_for_flag(item.get("composer_country", "")),
+                                                    "composer": (
+                                                        (item.get("composer") or "").strip()
+                                                        or ((item.get("details") or {}).get("composer") or "").strip()
+                                                        or ((item.get("details") or {}).get("creator") or "").strip()
+                                                        or ((item.get("details") or {}).get("director") or "").strip()
+                                                    ),
+                                                    "composer_country": normalize_country_code_for_flag(
+                                                        item.get("composer_country", "")
+                                                        or ((item.get("details") or {}).get("composer_country") or "")
+                                                        or ((item.get("details") or {}).get("country_code") or "")
+                                                    ),
                                                 }]
                                                 score_pages_for_link = _get_score_pages()
                                                 for perf_id in rel_ids:
@@ -10424,6 +10437,17 @@ if mode == "新規登録":
                                                         "played": bool(item.get("played", True)),
                                                         "players": item.get("players", []) or [],
                                                         "section": section,
+                                                        "composer": (
+                                                            (item.get("composer") or "").strip()
+                                                            or ((item.get("details") or {}).get("composer") or "").strip()
+                                                            or ((item.get("details") or {}).get("creator") or "").strip()
+                                                            or ((item.get("details") or {}).get("director") or "").strip()
+                                                        ),
+                                                        "composer_country": normalize_country_code_for_flag(
+                                                            item.get("composer_country", "")
+                                                            or ((item.get("details") or {}).get("composer_country") or "")
+                                                            or ((item.get("details") or {}).get("country_code") or "")
+                                                        ),
                                                         "movement_name": item.get("movement_name", ""),
                                                         "movement_no": item.get("movement_no"),
                                                         "movement_order": item.get("movement_order"),
@@ -10440,6 +10464,16 @@ if mode == "新規登録":
                                                         selected_scores=selected_scores_for_link,
                                                         score_pages=score_pages_for_link,
                                                     )
+                                                    st.session_state["apollo_last_debug_payload"] = {
+                                                        "performance_page_id": perf_id,
+                                                        "performance_title": perf_title,
+                                                        "selected_scores_for_link": selected_scores_for_link,
+                                                        "main_items": main_items,
+                                                        "encore_items": encore_items,
+                                                        "setlist_reason": reason_set,
+                                                        "created_setlist": c_set,
+                                                        "failed_setlist": f_set,
+                                                    }
                                                     linked_setlist_created += c_set
                                                     linked_setlist_failed += f_set
                                                     if reason_set:
