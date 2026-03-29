@@ -8401,7 +8401,26 @@ if system_mode == "HARMONIA":
         return f"{name}（{dt[:10] if dt else '日時未設定'}）"
 
     def _cleanup_harmonia_smoketest_pages() -> dict:
-        result = {"archived": 0, "failed": 0, "target_ids": []}
+        result = {
+            "archived_atlas": 0,
+            "archived_apollo": 0,
+            "archived_assign": 0,
+            "failed": 0,
+            "atlas_target_ids": [],
+            "apollo_target_ids": [],
+            "assign_target_ids": [],
+        }
+
+        def _archive_page(page_id: str) -> bool:
+            res = api_request(
+                "patch",
+                f"https://api.notion.com/v1/pages/{page_id}",
+                headers=NOTION_HEADERS,
+                json={"archived": True},
+            )
+            return res is not None and res.status_code == 200
+
+        # ATLAS
         all_pages = query_notion_database_all(NOTION_DB_ID) or []
         for pg in all_pages:
             props = pg.get("properties", {}) or {}
@@ -8411,17 +8430,46 @@ if system_mode == "HARMONIA":
             pid = pg.get("id", "")
             if not pid:
                 continue
-            result["target_ids"].append(pid)
-            res = api_request(
-                "patch",
-                f"https://api.notion.com/v1/pages/{pid}",
-                headers=NOTION_HEADERS,
-                json={"archived": True},
-            )
-            if res is not None and res.status_code == 200:
-                result["archived"] += 1
+            result["atlas_target_ids"].append(pid)
+            if _archive_page(pid):
+                result["archived_atlas"] += 1
             else:
                 result["failed"] += 1
+
+        # APOLLO（演奏曲DB）
+        if NOTION_SCORE_DB_ID:
+            score_pages = query_notion_database_all(NOTION_SCORE_DB_ID) or []
+            for pg in score_pages:
+                props = pg.get("properties", {}) or {}
+                title, _, _ = get_title(props)
+                if not str(title or "").startswith("[SMOKETEST] "):
+                    continue
+                pid = pg.get("id", "")
+                if not pid:
+                    continue
+                result["apollo_target_ids"].append(pid)
+                if _archive_page(pid):
+                    result["archived_apollo"] += 1
+                else:
+                    result["failed"] += 1
+
+        # 楽曲別担当者DB（念のため）
+        if NOTION_SONG_ASSIGN_DB_ID:
+            assign_pages = query_notion_database_all(NOTION_SONG_ASSIGN_DB_ID) or []
+            for pg in assign_pages:
+                props = pg.get("properties", {}) or {}
+                title, _, _ = get_title(props)
+                if not str(title or "").startswith("[SMOKETEST] "):
+                    continue
+                pid = pg.get("id", "")
+                if not pid:
+                    continue
+                result["assign_target_ids"].append(pid)
+                if _archive_page(pid):
+                    result["archived_assign"] += 1
+                else:
+                    result["failed"] += 1
+
         return result
 
     def _run_performance_registration_e2e_smoketest() -> dict:
@@ -8629,9 +8677,9 @@ if system_mode == "HARMONIA":
                 clean = _cleanup_harmonia_smoketest_pages()
                 st.session_state["harmonia_e2e_smoketest_cleanup_result"] = clean
                 if clean.get("failed", 0) == 0:
-                    st.success(f"✅ SMOKETESTデータを {clean.get('archived', 0)} 件アーカイブしました")
+                    st.success(f"✅ SMOKETESTデータをアーカイブしました（ATLAS {clean.get('archived_atlas', 0)} / APOLLO {clean.get('archived_apollo', 0)} / ASSIGN {clean.get('archived_assign', 0)}）")
                 else:
-                    st.warning(f"⚠️ アーカイブ {clean.get('archived', 0)} 件 / 失敗 {clean.get('failed', 0)} 件")
+                    st.warning(f"⚠️ アーカイブ（ATLAS {clean.get('archived_atlas', 0)} / APOLLO {clean.get('archived_apollo', 0)} / ASSIGN {clean.get('archived_assign', 0)}） / 失敗 {clean.get('failed', 0)} 件")
 
             smoke_result = st.session_state.get("harmonia_e2e_smoketest_result") or {}
             if smoke_result:
