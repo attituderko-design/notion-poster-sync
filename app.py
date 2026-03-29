@@ -8450,7 +8450,7 @@ def _build_harmonia_dashboard_stats(ctx: dict, concert_row: dict) -> dict:
     )
     regular_practice_ids = []
     future_candidates = []
-    now_dt = datetime.now()
+    now_date = datetime.now().date()
     for p in (practice_rows or []):
         is_concert_day = _harmonia_truthy(ext(p, PRACTICE_CONCERT_DAY_KEYS))
         pdt_raw = ext(p, PRACTICE_DATE_KEYS)
@@ -8459,7 +8459,8 @@ def _build_harmonia_dashboard_stats(ctx: dict, concert_row: dict) -> dict:
             pid = p.get("id", "")
             if pid:
                 regular_practice_ids.append(pid)
-            if pdt and pdt >= now_dt:
+            pdate = pdt.date() if pdt else None
+            if pdate and pdate >= now_date:
                 label = f"{(pdt_raw or '')[:10]} {ext(p, PRACTICE_NAME_KEYS) or ctx['extract_title'](p) or ''}".strip()
                 future_candidates.append((pdt, label))
     stats["practice_count"] = len(regular_practice_ids)
