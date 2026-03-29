@@ -8728,7 +8728,7 @@ if system_mode == "HARMONIA":
         "対象演奏会",
         opts_with_empty,
         index=(opts_with_empty.index(selected_name) if selected_name in opts_with_empty else 0),
-        key="harmonia_global_concert_name",
+        key="harmonia_global_concert_name_widget",
     )
     if st.sidebar.button("選択をクリア", key="harmonia_clear_selected"):
         st.session_state["_harmonia_pending_concert_name"] = _UNSELECTED
