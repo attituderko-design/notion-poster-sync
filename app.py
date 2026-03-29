@@ -8361,12 +8361,6 @@ if system_mode != _prev_mode:
 if system_mode == "HARMONIA":
     st.sidebar.caption("ArtéMis HARMONIA")
     st.sidebar.divider()
-    _pending_name = st.session_state.pop("_harmonia_pending_concert_name", None)
-    if _pending_name is not None:
-        st.session_state["harmonia_global_concert_name"] = _pending_name
-    _pending_page = st.session_state.pop("_harmonia_pending_page", None)
-    if _pending_page is not None:
-        st.session_state["concert_page_radio"] = _pending_page
     concert_page = st.sidebar.radio(
         "ページ",
         [
@@ -8663,6 +8657,31 @@ if system_mode == "HARMONIA":
     def _render_harmonia_home(ctx: dict, concert_rows: list[dict], concert_opt_map: dict[str, str]):
         st.header("🏠 HARMONIAホーム")
         st.caption("まずは最近の演奏会を開くか、検索して対象演奏会を選択してください。テストデータ管理は演奏会未選択でも使えます。")
+
+        selected_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+        if selected_id:
+            selected_row = next((r for r in concert_rows if r.get("id", "") == selected_id), None)
+            if selected_row:
+                ext = ctx["extract_prop_text_any"]
+                title = _harmony_concert_name(selected_row)
+                c_date = (ext(selected_row, ["日時", "日付", "出演日", "体験日", "リリース日"]) or "")[:10]
+                c_venue = ext(selected_row, ["会場", "会場名", "ロケーション", "場所", "Location"]) or ""
+                c_conductor = ext(selected_row, ["指揮", "指揮者", "Conductor"]) or ""
+                c_soloist = ext(selected_row, ["ソリスト", "Soloist"]) or ""
+                st.markdown("### 現在選択中の演奏会")
+                st.markdown(f"**{title}**")
+                meta = []
+                if c_date:
+                    meta.append(f"📅 本番日: {c_date}")
+                if c_venue:
+                    meta.append(f"📍 会場: {c_venue}")
+                if c_conductor:
+                    meta.append(f"🎼 指揮: {c_conductor}")
+                if c_soloist:
+                    meta.append(f"🌟 ソリスト: {c_soloist}")
+                for line in meta:
+                    st.caption(line)
+                st.divider()
         recent_rows = sorted(
             concert_rows,
             key=lambda r: (concert_ctx["extract_prop_text_any"](r, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""),
@@ -8699,6 +8718,15 @@ if system_mode == "HARMONIA":
             st.markdown("- レンタル管理と収支・振込管理で費用を確定する")
 
     _UNSELECTED = "— 演奏会を選択してください —"
+
+    _pending_name = st.session_state.pop("_harmonia_pending_concert_name", None)
+    if _pending_name is not None:
+        st.session_state["harmonia_global_concert_name"] = _pending_name
+        st.session_state["harmonia_global_concert_name_widget"] = _pending_name
+    _pending_page = st.session_state.pop("_harmonia_pending_page", None)
+    if _pending_page is not None:
+        st.session_state["concert_page_radio"] = _pending_page
+
     concert_rows = _load_harmonia_concerts(
         concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
         concert_ctx["CONCERT_DB_CONCERT"],
@@ -8731,8 +8759,11 @@ if system_mode == "HARMONIA":
         index=(opts_with_empty.index(selected_name) if selected_name in opts_with_empty else 0),
         key="harmonia_global_concert_name_widget",
     )
+    st.session_state["harmonia_global_concert_name"] = selected_name
     if st.sidebar.button("選択をクリア", key="harmonia_clear_selected"):
         st.session_state["_harmonia_pending_concert_name"] = _UNSELECTED
+        st.session_state["harmonia_global_concert_name"] = _UNSELECTED
+        st.session_state["harmonia_global_concert_name_widget"] = _UNSELECTED
         st.rerun()
 
     if selected_name == _UNSELECTED:
