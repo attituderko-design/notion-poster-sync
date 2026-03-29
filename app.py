@@ -8468,7 +8468,7 @@ if system_mode == "HARMONIA":
             watched_date="2099-12-31",
             rating=None,
             event_end="2099-12-31",
-            location="HARMONIA SmokeTest Hall",
+            location={"name": "HARMONIA SmokeTest Hall", "lat": None, "lon": None},
             memo="[SMOKETEST] performance seed",
             relation_prop="演奏曲",
             relation_ids=[score_page_id],
