@@ -26,6 +26,7 @@ from concert.services.keys import (
     PREFERENCE_KEY_KEYS, PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     CONCERT_CONFIRMED_FEE_KEYS,
 )
+from concert.services.relation_utils import find_relation_prop
 
 _TOKEN_SECRET = "harmonia_form_2024"
 PRIORITY_OPTS = ["第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
@@ -176,24 +177,6 @@ def _get_select_opts(ctx, db_id: str, field_keys: list) -> list[str]:
 
 # ── 送信処理 ──────────────────────────────────────────────────
 
-def _find_rel(type_map: dict, candidates: list, keywords: list,
-              exclude: set | None = None) -> str:
-    """relationフィールド名をfuzzy検索（players.pyの_find_relation_propと同等）。"""
-    exclude = exclude or set()
-    for k in candidates:
-        if (type_map or {}).get(k) == "relation" and k not in exclude:
-            return k
-    for k, t in (type_map or {}).items():
-        if t != "relation" or k in exclude:
-            continue
-        if any(kw.lower() in str(k).lower() for kw in keywords):
-            return k
-    for k, t in (type_map or {}).items():
-        if t == "relation" and k not in exclude:
-            return k
-    return ""
-
-
 def _get_form_cast_and_att_map(ctx, concert_id: str, player_id: str) -> tuple[str, dict[str, dict]]:
     """この演奏会におけるcast_id と、練習ID -> {status, comment} を返す。"""
     ext_rel = ctx["extract_relation_ids_any"]
@@ -214,12 +197,12 @@ def _get_form_cast_and_att_map(ctx, concert_id: str, player_id: str) -> tuple[st
     if not t_att:
         return cast_id, att_map
 
-    practice_rel_key = _find_rel(
+    practice_rel_key = find_relation_prop(
         t_att,
         ATT_PRACTICE_REL_KEYS,
         ["練習", "practice"],
     )
-    player_rel_key = _find_rel(
+    player_rel_key = find_relation_prop(
         t_att,
         ATT_PLAYER_REL_KEYS,
         ["奏者", "出演者", "participant", "player"],
@@ -335,8 +318,8 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
             att_all[concert_day.get("id","")] = "○"
 
         # 既存players.pyと同じロジック：_find_relation_propでフィールド名を特定
-        practice_rel_key = _find_rel(t_att, ATT_PRACTICE_REL_KEYS, ["練習", "practice"])
-        player_rel_key   = _find_rel(t_att, ATT_PLAYER_REL_KEYS,
+        practice_rel_key = find_relation_prop(t_att, ATT_PRACTICE_REL_KEYS, ["練習", "practice"])
+        player_rel_key   = find_relation_prop(t_att, ATT_PLAYER_REL_KEYS,
                                      ["奏者", "出演者", "participant", "player"],
                                      exclude={practice_rel_key} if practice_rel_key else set())
         status_key = ctx["find_prop_name"](t_att, ATT_STATUS_KEYS)

@@ -5,6 +5,7 @@ concert.pages.players
 """
 import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
+from concert.services.relation_utils import find_relation_prop
 
 
 
@@ -18,24 +19,6 @@ from concert.services.keys import *  # noqa: F401,F403
 def _first_prop_by_type(type_map: dict, ptype: str) -> str:
     for k, t in (type_map or {}).items():
         if t == ptype:
-            return k
-    return ""
-
-
-def _find_relation_prop(type_map: dict, candidates: list[str], keywords: list[str], exclude: set[str] | None = None) -> str:
-    exclude = exclude or set()
-    found = [ctx_k for ctx_k in candidates if ctx_k in (type_map or {}) and (type_map or {}).get(ctx_k) == "relation"]
-    for k in found:
-        if k not in exclude:
-            return k
-    for k, t in (type_map or {}).items():
-        if t != "relation" or k in exclude:
-            continue
-        ks = str(k).lower()
-        if any(kw.lower() in ks for kw in keywords):
-            return k
-    for k, t in (type_map or {}).items():
-        if t == "relation" and k not in exclude:
             return k
     return ""
 
@@ -315,8 +298,8 @@ def _upsert_attendance(
         return False
 
     record_key = ctx["find_prop_name"](t, ATT_RECORD_KEYS) or _first_prop_by_type(t, "title")
-    practice_rel_key = _find_relation_prop(t, ATT_PRACTICE_REL_KEYS, ["練習", "practice", "fk"])
-    player_rel_key = _find_relation_prop(t, ATT_PLAYER_REL_KEYS, ["奏者", "出演者", "player", "participant"], exclude={practice_rel_key} if practice_rel_key else set())
+            practice_rel_key = find_relation_prop(t, ATT_PRACTICE_REL_KEYS, ["練習", "practice", "fk"])
+            player_rel_key = find_relation_prop(t, ATT_PLAYER_REL_KEYS, ["奏者", "出演者", "player", "participant"], exclude={practice_rel_key} if practice_rel_key else set())
     status_key = ctx["find_prop_name"](t, ATT_STATUS_KEYS)
     if not status_key:
         for k, typ in (t or {}).items():
