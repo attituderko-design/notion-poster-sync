@@ -8669,80 +8669,60 @@ if system_mode == "HARMONIA":
 
     def _render_harmonia_home(ctx: dict, concert_rows: list[dict], concert_opt_map: dict[str, str]):
         st.header("🏠 HARMONIAホーム")
-        st.caption("まずは最近の演奏会を開くか、検索して対象演奏会を選択してください。テストデータ管理は演奏会未選択でも使えます。")
+        st.caption("本画面は状況確認と作業の入口です。演奏会の選択・変更はサイドバーで行ってください。")
 
         selected_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
-        if selected_id:
-            selected_row = next((r for r in concert_rows if r.get("id", "") == selected_id), None)
-            if selected_row:
-                ext = ctx["extract_prop_text_any"]
-                title = _harmony_concert_name(selected_row)
-                c_date = (ext(selected_row, ["日時", "日付", "出演日", "体験日", "リリース日"]) or "")[:10]
-                c_venue = ext(selected_row, ["会場", "会場名", "ロケーション", "場所", "Location"]) or ""
-                c_conductor = ext(selected_row, ["指揮", "指揮者", "Conductor"]) or ""
-                c_soloist = ext(selected_row, ["ソリスト", "Soloist"]) or ""
+        if not selected_id:
+            st.info("サイドバーで演奏会を選ぶと、ここに概要と進捗が表示されます。")
+            st.markdown("### 使い方")
+            st.markdown("- サイドバーで対象演奏会を選択")
+            st.markdown("- ダッシュボードで進捗と未対応項目を確認")
+            st.markdown("- 各ページで実作業を進める")
+            st.divider()
+            st.markdown("### テストデータ管理")
+            st.caption("テストデータ投入・削除は、サイドバーの「🧪 テストデータ管理」から実行できます。")
+            return
 
-                st.markdown("### 現在選択中の演奏会")
-                st.markdown(f"**{title}**")
-                meta = []
-                if c_date:
-                    meta.append(f"📅 本番日: {c_date}")
-                if c_venue:
-                    meta.append(f"📍 会場: {c_venue}")
-                if c_conductor:
-                    meta.append(f"🎼 指揮: {c_conductor}")
-                if c_soloist:
-                    meta.append(f"🌟 ソリスト: {c_soloist}")
-                for line in meta:
-                    st.caption(line)
+        selected_row = next((r for r in concert_rows if r.get("id", "") == selected_id), None)
+        if not selected_row:
+            st.warning("選択中の演奏会が見つかりません。サイドバーで選び直してください。")
+            return
 
-                col_open, col_back = st.columns(2)
-                if col_open.button("ダッシュボードへ", type="primary", use_container_width=True, key="harmonia_home_go_dashboard"):
-                    st.session_state["_harmonia_pending_page"] = "ダッシュボード"
-                    st.rerun()
-                if col_back.button("演奏会選択に戻る", use_container_width=True, key="harmonia_home_back_to_picker"):
-                    st.session_state["_harmonia_pending_concert_name"] = _UNSELECTED
-                    st.session_state["_harmonia_pending_page"] = "🏠 ホーム"
-                    st.session_state["harmonia_global_concert_name"] = _UNSELECTED
-                    st.rerun()
+        ext = ctx["extract_prop_text_any"]
+        title = _harmony_concert_name(selected_row)
+        c_date = (ext(selected_row, ["日時", "日付", "出演日", "体験日", "リリース日"]) or "")[:10]
+        c_venue = ext(selected_row, ["会場", "会場名", "ロケーション", "場所", "Location"]) or ""
+        c_conductor = ext(selected_row, ["指揮", "指揮者", "Conductor"]) or ""
+        c_soloist = ext(selected_row, ["ソリスト", "Soloist"]) or ""
 
-                st.divider()
-                st.markdown("### 作業の流れ")
-                stats = _build_harmonia_progress(ctx, selected_row)
-                _render_harmonia_progress_cards(stats)
-                return
+        st.markdown("### 現在選択中の演奏会")
+        st.markdown(f"**{title}**")
+        meta = []
+        if c_date:
+            meta.append(f"📅 本番日: {c_date}")
+        if c_venue:
+            meta.append(f"📍 会場: {c_venue}")
+        if c_conductor:
+            meta.append(f"🎼 指揮: {c_conductor}")
+        if c_soloist:
+            meta.append(f"🌟 ソリスト: {c_soloist}")
+        for line in meta:
+            st.caption(line)
 
-        recent_rows = sorted(
-            concert_rows,
-            key=lambda r: (ctx["extract_prop_text_any"](r, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""),
-            reverse=True,
-        )[:6]
-        if recent_rows:
-            st.markdown("### 最近の演奏会")
-            cols = st.columns(2)
-            for idx, row in enumerate(recent_rows):
-                label = _harmony_concert_name(row)
-                if cols[idx % 2].button(label, key=f"harmonia_recent_{row.get('id','')}", use_container_width=True):
-                    st.session_state["_harmonia_pending_concert_name"] = label
-                    st.session_state["_harmonia_pending_page"] = "ダッシュボード"
-                    st.rerun()
+        col_open, col_back = st.columns(2)
+        if col_open.button("ダッシュボードへ", type="primary", use_container_width=True, key="harmonia_home_go_dashboard"):
+            st.session_state["_harmonia_pending_page"] = "ダッシュボード"
+            st.rerun()
+        if col_back.button("演奏会選択に戻る", use_container_width=True, key="harmonia_home_back_to_picker"):
+            st.session_state["_harmonia_pending_concert_name"] = _UNSELECTED
+            st.session_state["_harmonia_pending_page"] = "🏠 ホーム"
+            st.session_state["harmonia_global_concert_name"] = _UNSELECTED
+            st.rerun()
 
-        st.markdown("### 演奏会を検索して開く")
-        search_opts = [_UNSELECTED] + list(concert_opt_map.keys())
-        quick_pick = st.selectbox("演奏会一覧", search_opts, key="harmonia_home_pick")
-        if quick_pick != _UNSELECTED:
-            if st.button("この演奏会を開く", type="primary", key="harmonia_home_open"):
-                st.session_state["_harmonia_pending_concert_name"] = quick_pick
-                st.session_state["_harmonia_pending_page"] = "ダッシュボード"
-                st.rerun()
-
+        st.divider()
         st.markdown("### 作業の流れ")
-        st.info("演奏会を選ぶと、どこまで完了していて何が残っているかを表示します。")
-        st.markdown("- 練習管理で本番日・練習回を整える")
-        st.markdown("- 楽曲・パート定義を整える")
-        st.markdown("- 奏者・出欠・持参楽器で参加者を確定する")
-        st.markdown("- アサイン検討で希望入力と割当候補を確認する")
-        st.markdown("- レンタル管理と収支・振込管理で費用を確定する")
+        stats = _build_harmonia_progress(ctx, selected_row)
+        _render_harmonia_progress_cards(stats)
 
     concert_rows = _load_harmonia_concerts(
         concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
