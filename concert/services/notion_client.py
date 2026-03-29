@@ -52,6 +52,7 @@ _DEFAULT_CONCERT_DB_IDS = {
     "part_definition": "32c4532d7d56803ba3e1c8c87d1cd0dc",  # パート定義DB
     "preference": "32c4532d7d5680b1902dce3555590db3",       # 希望入力DB
     "billing": "",                                           # 見積/請求DB（任意）
+    "concert_song": "",                                      # 演奏会×曲 管理DB
 }
 
 _NOTION_ID_PATTERN = re.compile(
@@ -142,6 +143,10 @@ def get_concert_secrets() -> dict:
         st.secrets.get("CONCERT_DB_BILLING", "")
         or _DEFAULT_CONCERT_DB_IDS.get("billing", "")
     )
+    db_concert_song = (
+        st.secrets.get("CONCERT_DB_CONCERT_SONG", "")
+        or _DEFAULT_CONCERT_DB_IDS.get("concert_song", "")
+    )
     required_db = {
         "演奏会DB": db_concert,
         "練習DB": db_practice,
@@ -156,6 +161,7 @@ def get_concert_secrets() -> dict:
         "パート定義DB": db_part_definition,
         "希望入力DB": db_preference,
         "スケジュールDB": db_schedule,
+        "演奏会×曲DB": db_concert_song,
     }
     normalized_required_db = {
         name: _normalize_notion_id(val) for name, val in required_db.items()
@@ -614,6 +620,15 @@ def build_concert_ctx() -> dict:
                 ],
             ),
             (
+                "CONCERT_DB_CONCERT_SONG",
+                "演奏会×曲DB",
+                [
+                    ("relation", ["演奏会", "FK演奏会", "concert"], "CONCERT_DB_CONCERT"),
+                    ("relation", ["曲", "楽曲", "演奏曲", "song"], "CONCERT_DB_SONG"),
+                    ("any", ["定義完了", "definition_done"]),
+                ],
+            ),
+            (
                 "CONCERT_DB_PREFERENCE",
                 "希望入力DB",
                 [
@@ -736,6 +751,7 @@ def build_concert_ctx() -> dict:
         "CONCERT_DB_SCHEDULE":         secrets["db_schedule"],
         "CONCERT_DB_CONCERT_EXPENSE":  secrets["db_expense"],
         "CONCERT_DB_BILLING":          secrets["db_billing"],
+        "CONCERT_DB_CONCERT_SONG":     secrets["db_concert_song"],
         "query_all":                   _query_all,
         "get_prop_types":              _get_prop_types,
         "get_db_schema":               _get_db_schema,
