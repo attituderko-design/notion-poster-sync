@@ -8669,7 +8669,9 @@ if system_mode == "HARMONIA":
 
     def _render_harmonia_home(ctx: dict, concert_rows: list[dict], concert_opt_map: dict[str, str]):
         st.header("🏠 HARMONIAホーム")
-        st.caption("まずは最近の演奏会を開くか、検索して対象演奏会を選択してください。テストデータ管理は演奏会未選択でも使えます。")        selected_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+        st.caption("まずは最近の演奏会を開くか、検索して対象演奏会を選択してください。テストデータ管理は演奏会未選択でも使えます。")
+
+        selected_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
         if selected_id:
             selected_row = next((r for r in concert_rows if r.get("id", "") == selected_id), None)
             if selected_row:
@@ -8679,6 +8681,7 @@ if system_mode == "HARMONIA":
                 c_venue = ext(selected_row, ["会場", "会場名", "ロケーション", "場所", "Location"]) or ""
                 c_conductor = ext(selected_row, ["指揮", "指揮者", "Conductor"]) or ""
                 c_soloist = ext(selected_row, ["ソリスト", "Soloist"]) or ""
+
                 st.markdown("### 現在選択中の演奏会")
                 st.markdown(f"**{title}**")
                 meta = []
@@ -8704,10 +8707,14 @@ if system_mode == "HARMONIA":
                     st.rerun()
 
                 st.divider()
+                st.markdown("### 作業の流れ")
+                stats = _build_harmonia_progress(ctx, selected_row)
+                _render_harmonia_progress_cards(stats)
                 return
+
         recent_rows = sorted(
             concert_rows,
-            key=lambda r: (concert_ctx["extract_prop_text_any"](r, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""),
+            key=lambda r: (ctx["extract_prop_text_any"](r, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""),
             reverse=True,
         )[:6]
         if recent_rows:
@@ -8719,26 +8726,23 @@ if system_mode == "HARMONIA":
                     st.session_state["_harmonia_pending_concert_name"] = label
                     st.session_state["_harmonia_pending_page"] = "ダッシュボード"
                     st.rerun()
+
         st.markdown("### 演奏会を検索して開く")
-        search_opts = ["— 演奏会を選択してください —"] + list(concert_opt_map.keys())
+        search_opts = [_UNSELECTED] + list(concert_opt_map.keys())
         quick_pick = st.selectbox("演奏会一覧", search_opts, key="harmonia_home_pick")
-        if quick_pick != "— 演奏会を選択してください —":
+        if quick_pick != _UNSELECTED:
             if st.button("この演奏会を開く", type="primary", key="harmonia_home_open"):
                 st.session_state["_harmonia_pending_concert_name"] = quick_pick
                 st.session_state["_harmonia_pending_page"] = "ダッシュボード"
                 st.rerun()
+
         st.markdown("### 作業の流れ")
-        if concert_ctx.get("SELECTED_CONCERT_ID"):
-            selected_row = next((r for r in concert_rows if r.get("id", "") == concert_ctx.get("SELECTED_CONCERT_ID")), None)
-            stats = _build_harmonia_progress(concert_ctx, selected_row)
-            _render_harmonia_progress_cards(stats)
-        else:
-            st.info("演奏会を選ぶと、どこまで完了していて何が残っているかを表示します。")
-            st.markdown("- 練習管理で本番日・練習回を整える")
-            st.markdown("- 楽曲・パート定義を整える")
-            st.markdown("- 奏者・出欠・持参楽器で参加者を確定する")
-            st.markdown("- アサイン検討で希望入力と割当候補を確認する")
-            st.markdown("- レンタル管理と収支・振込管理で費用を確定する")
+        st.info("演奏会を選ぶと、どこまで完了していて何が残っているかを表示します。")
+        st.markdown("- 練習管理で本番日・練習回を整える")
+        st.markdown("- 楽曲・パート定義を整える")
+        st.markdown("- 奏者・出欠・持参楽器で参加者を確定する")
+        st.markdown("- アサイン検討で希望入力と割当候補を確認する")
+        st.markdown("- レンタル管理と収支・振込管理で費用を確定する")
 
     concert_rows = _load_harmonia_concerts(
         concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
