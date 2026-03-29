@@ -85,6 +85,16 @@ def _resolve_apollo_song_ids(ctx, concert_id: str, atlas_song_id: str) -> list[s
         return (v or "").replace("-", "").strip().lower()
 
     target_norm = _norm_id(atlas_song_id)
+    def _main_title(v: str) -> str:
+        s = (v or "").strip().lower()
+        if not s:
+            return ""
+        for sep in ("：", ":", " - ", " / "):
+            if sep in s:
+                s = s.split(sep, 1)[0].strip()
+                break
+        return s
+
     out = []
     seen = set()
     link_keys = list(dict.fromkeys((CONCERT_SONG_SONG_REL_KEYS or []) + (PARTDEF_SONG_REL_KEYS or [])))
@@ -93,6 +103,11 @@ def _resolve_apollo_song_ids(ctx, concert_id: str, atlas_song_id: str) -> list[s
     # 2) 演奏会relation欠落データ救済のため全件も探索対象に追加
     if concert_id:
         rows = rows + [r for r in _load_songs(ctx, "") if r.get("id", "") not in {x.get("id", "") for x in rows}]
+
+    row_by_norm_id = {_norm_id(r.get("id", "")): r for r in rows if r.get("id", "")}
+    selected_row = row_by_norm_id.get(target_norm)
+    selected_title = _main_title(_song_name(selected_row, ctx) if selected_row else "")
+    selected_rel_ids = set(ctx["extract_relation_ids_any"](selected_row, link_keys)) if selected_row else set()
 
     for row in rows:
         rid = row.get("id", "")
@@ -110,6 +125,20 @@ def _resolve_apollo_song_ids(ctx, concert_id: str, atlas_song_id: str) -> list[s
             if rid and rid not in seen:
                 seen.add(rid)
                 out.append(rid)
+            continue
+
+        # 同一作品の楽章行を補足（作品マスタ/楽章relation、または主タイトル一致）
+        if selected_rel_ids and set(rel_ids).intersection(selected_rel_ids):
+            if rid and rid not in seen:
+                seen.add(rid)
+                out.append(rid)
+            continue
+        if selected_title:
+            row_title = _main_title(_song_name(row, ctx))
+            if row_title and row_title == selected_title:
+                if rid and rid not in seen:
+                    seen.add(rid)
+                    out.append(rid)
     # 3) それでも不明なら現行選択IDを最終救済として返す
     if not out and atlas_song_id:
         out = [atlas_song_id]
