@@ -1,8 +1,6 @@
 import re
 import json
 import tomllib
-import hashlib
-import hmac
 from collections.abc import Mapping
 import requests
 import time
@@ -69,12 +67,6 @@ DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"]
 IGDB_CLIENT_ID     = st.secrets.get("IGDB_CLIENT_ID", "")
 IGDB_CLIENT_SECRET = st.secrets.get("IGDB_CLIENT_SECRET", "")
 
-# ── Admin Authentication（app.py 側のみ）─────────────────────
-ADMIN_AUTH_ENABLED = str(st.secrets.get("ADMIN_AUTH_ENABLED", "true")).strip().lower() in {"1", "true", "yes", "on"}
-ADMIN_USERNAME = str(st.secrets.get("ADMIN_USERNAME", "")).strip()
-ADMIN_PASSWORD = str(st.secrets.get("ADMIN_PASSWORD", ""))
-ADMIN_PASSWORD_SHA256 = str(st.secrets.get("ADMIN_PASSWORD_SHA256", "")).strip().lower()
-
 NOTION_HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
     "Notion-Version": "2022-06-28",
@@ -83,7 +75,7 @@ NOTION_HEADERS = {
 
 DEFAULT_TIMEOUT = 20
 REFRESH_BATCH_SIZE = 20
-APP_VERSION = "11.61"
+APP_VERSION = "11.60"
 GAME_JP_LEARNED_MAP_PATH = Path("data/game_jp_learned.json")
 API_AUDIT_LOG_PATH = Path("logs/api_events.jsonl")
 OPERATION_AUDIT_LOG_PATH = Path("logs/operation_events.jsonl")
@@ -6582,6 +6574,106 @@ def upsert_score_master_links(
         movement_roman=movement_roman,
     )
 
+
+def run_apollo_registration_smoketest(performance_page: dict) -> dict:
+    """
+    選択中の出演演奏会ページから ATLAS の「演奏曲」relation を1件取り、
+    APOLLO 演奏曲DB登録を単発で試す。
+    """
+    result = {
+        "ok": False,
+        "error": "",
+        "performance_id": "",
+        "performance_title": "",
+        "performance_date": "",
+        "selected_scores": [],
+        "main_items": [],
+        "encore_items": [],
+        "created": 0,
+        "failed": 0,
+        "reason": "",
+        "created_rows": [],
+    }
+    if not performance_page:
+        result["error"] = "演奏会が選択されていません。"
+        return result
+
+    performance_id = performance_page.get("id", "")
+    props = performance_page.get("properties", {}) or {}
+    performance_title, _, _ = get_title(props)
+    performance_date = get_experience_date_from_props(props) or (((props.get("リリース日") or {}).get("date") or {}).get("start") or "")
+    result["performance_id"] = performance_id
+    result["performance_title"] = performance_title
+    result["performance_date"] = performance_date
+
+    score_ids = collect_related_score_ids_from_parent_pages([performance_page])
+    if not score_ids:
+        result["error"] = "ATLASの『演奏曲』relationが見つかりません。"
+        return result
+
+    atlas_pages = query_notion_database_all(NOTION_DB_ID) or []
+    page_by_id = {p.get("id", ""): p for p in atlas_pages if p.get("id")}
+    score_page = None
+    for sid in score_ids:
+        if sid in page_by_id:
+            score_page = page_by_id[sid]
+            break
+    if not score_page:
+        result["error"] = "relation先のATLAS演奏曲ページを取得できませんでした。"
+        return result
+
+    score_props = score_page.get("properties", {}) or {}
+    score_title, _, _ = get_title(score_props)
+    composer = plain_text_join((score_props.get("クリエイター") or {}).get("rich_text", []))
+    composer_country = ""
+    movement_name = ""
+    movement_no = None
+    movement_order = None
+    movement_roman = ""
+
+    selected_scores = [{
+        "id": score_page.get("id", ""),
+        "title": score_title,
+        "composer": composer,
+        "composer_country": composer_country,
+    }]
+    main_items = [{
+        "title": score_title,
+        "order": 1,
+        "part": "",
+        "played": False,
+        "players": [],
+        "section": "本編",
+        "composer": composer,
+        "composer_country": composer_country,
+        "movement_name": movement_name,
+        "movement_no": movement_no,
+        "movement_order": movement_order,
+        "movement_roman": movement_roman,
+    }]
+    encore_items = []
+
+    result["selected_scores"] = selected_scores
+    result["main_items"] = main_items
+    result["encore_items"] = encore_items
+
+    created, failed, reason, created_rows = create_setlist_rows_for_performance(
+        performance_page_id=performance_id,
+        performance_title=performance_title,
+        performance_date=performance_date,
+        main_items=main_items,
+        encore_items=encore_items,
+        selected_scores=selected_scores,
+        score_pages=[score_page],
+    )
+    result["created"] = created
+    result["failed"] = failed
+    result["reason"] = reason
+    result["created_rows"] = created_rows
+    result["ok"] = (created > 0 and failed == 0)
+    st.session_state["apollo_registration_smoketest_result"] = result
+    return result
+
 def relink_existing_score_master_links(
     max_rows: int = 300,
     only_missing: bool = True,
@@ -8294,46 +8386,25 @@ st.caption(
 st.caption("MUSE collects. ATLAS archives. APOLLO performs. HARMONIA orchestrates.")
 st.caption(f"v{APP_VERSION}")
 
-# ── 管理者認証（admin app専用）───────────────────────────────
-def _verify_admin_password(raw_password: str) -> bool:
-    pw = str(raw_password or "")
-    if ADMIN_PASSWORD_SHA256:
-        digest = hashlib.sha256(pw.encode("utf-8")).hexdigest().lower()
-        return hmac.compare_digest(digest, ADMIN_PASSWORD_SHA256)
-    return hmac.compare_digest(pw, ADMIN_PASSWORD)
-
-
-def _require_admin_auth():
-    if not ADMIN_AUTH_ENABLED:
-        return
-    if not ADMIN_USERNAME or (not ADMIN_PASSWORD and not ADMIN_PASSWORD_SHA256):
-        st.error("管理者認証の設定が不足しています。`ADMIN_USERNAME` と `ADMIN_PASSWORD`（または `ADMIN_PASSWORD_SHA256`）をsecretsに設定してください。")
-        st.stop()
-
-    if st.session_state.get("admin_authed", False):
-        with st.sidebar:
-            st.caption(f"管理者: {ADMIN_USERNAME}")
-            if st.button("ログアウト", key="admin_logout_btn"):
-                st.session_state["admin_authed"] = False
-                st.rerun()
-        return
-
-    st.subheader("管理者ログイン")
-    with st.form("admin_login_form", clear_on_submit=False):
-        in_user = st.text_input("管理者ID", key="admin_login_id")
-        in_pw = st.text_input("パスワード", type="password", key="admin_login_pw")
-        submitted = st.form_submit_button("ログイン")
-    if submitted:
-        ok_user = hmac.compare_digest((in_user or "").strip(), ADMIN_USERNAME)
-        ok_pw = _verify_admin_password(in_pw)
-        if ok_user and ok_pw:
-            st.session_state["admin_authed"] = True
-            st.rerun()
-        st.error("IDまたはパスワードが正しくありません。")
+# ── 奏者フォームモード（?concert=TOKEN&cid=CONCERT_ID） ──────
+_qp = st.query_params
+if "concert" in _qp and "cid" in _qp:
+    try:
+        from concert.pages.form import verify_form_token, render_form
+        from concert.services.notion_client import build_concert_ctx
+        _token = _qp["concert"]
+        _cid   = _qp["cid"]
+        if verify_form_token(_token, _cid):
+            try:
+                _form_ctx = build_concert_ctx()
+                render_form(_form_ctx, _cid)
+            except Exception as _e:
+                st.error(f"フォームの読み込みに失敗しました: {_e}")
+        else:
+            st.error("URLが無効です。正しいURLを使用してください。")
+    except Exception as _e:
+        st.error(f"フォームの初期化に失敗しました: {_e}")
     st.stop()
-
-
-_require_admin_auth()
 
 # ============================================================
 # システム切替（通常 / Concert）
@@ -9169,7 +9240,7 @@ if mode == "新規登録":
                 c_info, c_btn = st.columns([4, 1])
                 c_info.caption(f"現在の登録: 通常 {main_count} 曲 / アンコール {enc_count} 曲")
                 if c_btn.button("確認へ", key="ev_setlist_goto_review"):
-                    st.session_state["_pending_ev_setlist_ui_tab"] = "セットリスト確認"
+                    st.session_state.ev_setlist_ui_tab = "セットリスト確認"
                     st.rerun()
 
                 if setlist_tab == "セットリスト確認":
@@ -9523,10 +9594,6 @@ if mode == "新規登録":
                                 st.warning(f"⚠️ 楽曲別担当者DB登録に失敗しました（{failed_assign} 件）")
                             elif assign_reason:
                                 st.info(f"ℹ️ 楽曲別担当者DB連携: {assign_reason}")
-                        debug_payload = st.session_state.get("apollo_last_debug_payload") or {}
-                        if debug_payload:
-                            with st.expander("演奏曲DB投入デバッグ", expanded=False):
-                                st.json(debug_payload)
                         show_post_register_ui()
                     else:
                         st.error("❌ 登録失敗")
@@ -9938,17 +10005,8 @@ if mode == "新規登録":
                                                 selected_scores_for_link = [{
                                                     "id": created_id,
                                                     "title": item.get("jp_title", ""),
-                                                    "composer": (
-                                                        (item.get("composer") or "").strip()
-                                                        or ((item.get("details") or {}).get("composer") or "").strip()
-                                                        or ((item.get("details") or {}).get("creator") or "").strip()
-                                                        or ((item.get("details") or {}).get("director") or "").strip()
-                                                    ),
-                                                    "composer_country": normalize_country_code_for_flag(
-                                                        item.get("composer_country", "")
-                                                        or ((item.get("details") or {}).get("composer_country") or "")
-                                                        or ((item.get("details") or {}).get("country_code") or "")
-                                                    ),
+                                                    "composer": ((item.get("details") or {}).get("director") or "").strip(),
+                                                    "composer_country": normalize_country_code_for_flag(item.get("composer_country", "")),
                                                 }]
                                                 score_pages_for_link = _get_score_pages()
                                                 for perf_id in rel_ids:
@@ -9965,17 +10023,6 @@ if mode == "新規登録":
                                                         "played": bool(item.get("played", True)),
                                                         "players": item.get("players", []) or [],
                                                         "section": section,
-                                                        "composer": (
-                                                            (item.get("composer") or "").strip()
-                                                            or ((item.get("details") or {}).get("composer") or "").strip()
-                                                            or ((item.get("details") or {}).get("creator") or "").strip()
-                                                            or ((item.get("details") or {}).get("director") or "").strip()
-                                                        ),
-                                                        "composer_country": normalize_country_code_for_flag(
-                                                            item.get("composer_country", "")
-                                                            or ((item.get("details") or {}).get("composer_country") or "")
-                                                            or ((item.get("details") or {}).get("country_code") or "")
-                                                        ),
                                                         "movement_name": item.get("movement_name", ""),
                                                         "movement_no": item.get("movement_no"),
                                                         "movement_order": item.get("movement_order"),
@@ -9992,16 +10039,6 @@ if mode == "新規登録":
                                                         selected_scores=selected_scores_for_link,
                                                         score_pages=score_pages_for_link,
                                                     )
-                                                    st.session_state["apollo_last_debug_payload"] = {
-                                                        "performance_page_id": perf_id,
-                                                        "performance_title": perf_title,
-                                                        "selected_scores_for_link": selected_scores_for_link,
-                                                        "main_items": main_items,
-                                                        "encore_items": encore_items,
-                                                        "setlist_reason": reason_set,
-                                                        "created_setlist": c_set,
-                                                        "failed_setlist": f_set,
-                                                    }
                                                     linked_setlist_created += c_set
                                                     linked_setlist_failed += f_set
                                                     if reason_set:
