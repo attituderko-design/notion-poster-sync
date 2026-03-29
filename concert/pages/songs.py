@@ -455,6 +455,7 @@ def _upsert_partdef(
     ctx["put_prop_any"](props, t, PARTDEF_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS, song_id)
     ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS, clean_inst_ids)
+    ctx["put_prop_any"](props, t, PART_COUNT_KEYS, int(need_count))
     ctx["put_prop_any"](props, t, PARTDEF_NOTE_KEYS, note)
     ctx["put_key_any"](
         props,
@@ -620,7 +621,19 @@ def _render_partdef_tab(ctx: dict):
                     list(inst_opts.keys()),
                     default=[x for x in cur_inst_names if x in inst_opts],
                 )
-                n_need = 1  # パートNoフィールド廃止のため固定
+                cur_need_str = ctx["extract_prop_text_any"](r, PART_COUNT_KEYS)
+                try:
+                    cur_need = int(float(cur_need_str)) if cur_need_str else 1
+                except Exception:
+                    cur_need = 1
+                n_need = st.number_input(
+                    "必要人数",
+                    min_value=1,
+                    max_value=20,
+                    value=cur_need,
+                    step=1,
+                    key=f"pd_need_{rid}",
+                )
                 n_note = st.text_input("備考", value=cur_note)
                 c1, c2 = st.columns(2)
                 if c1.form_submit_button("💾 更新", use_container_width=True):
