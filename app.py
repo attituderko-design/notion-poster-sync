@@ -6187,16 +6187,13 @@ def find_test_pages_by_tag(tag: str, max_pages: int = 200) -> list[dict]:
     return found[:max_pages]
 
 def collect_related_score_ids_from_parent_pages(parent_pages: list[dict]) -> list[str]:
-    """
-    ATLAS の出演演奏会ページから、ATLAS 内の「演奏曲」relation 先ページIDを収集する。
-    フィールド名は固定で「演奏曲」を使う。
-    """
     ids = []
     seen = set()
     for pg in parent_pages or []:
         props = (pg.get("properties") or {}) if isinstance(pg, dict) else {}
-        rel_items = ((props.get("演奏曲") or {}).get("relation") or [])
-        for r in rel_items:
+        # 親DB -> 演奏曲DB の relation 列（想定名: 演奏曲）
+        rel = ((props.get("演奏曲") or {}).get("relation") or [])
+        for r in rel:
             rid = (r or {}).get("id")
             if rid and rid not in seen:
                 seen.add(rid)
@@ -8824,341 +8821,6 @@ if system_mode == "HARMONIA":
                 st.info(f"次回練習: {stats['next_practice_label']}")
         st.divider()
 
-
-    CONCERT_SONG_KEY_KEYS_LOCAL = ["concert_song_key", "CONCERT_SONG_KEY", "key"]
-    CONCERT_SONG_CONCERT_REL_KEYS_LOCAL = ["演奏会", "FK演奏会", "concert"]
-    CONCERT_SONG_SONG_REL_KEYS_LOCAL = ["曲", "楽曲", "演奏曲", "song"]
-    CONCERT_SONG_ORDER_KEYS_LOCAL = ["曲順", "順番", "order"]
-    CONCERT_SONG_DONE_KEYS_LOCAL = ["定義完了", "definition_done", "完了"]
-    CONCERT_SONG_NOTE_KEYS_LOCAL = ["備考", "メモ", "note"]
-
-    def _load_concert_song_rows_for_concert(ctx: dict, concert_id: str) -> list[dict]:
-        db_id = (ctx.get("CONCERT_DB_CONCERT_SONG") or "").strip()
-        if not db_id or not concert_id:
-            return []
-        rows = ctx["query_all"](db_id, None)
-        out = []
-        for r in rows:
-            cids = ctx["extract_relation_ids_any"](r, CONCERT_SONG_CONCERT_REL_KEYS_LOCAL)
-            if concert_id in cids:
-                out.append(r)
-        return out
-
-    def _extract_parent_score_ids(parent_page: dict) -> list[str]:
-        if not parent_page:
-            return []
-        ids = collect_related_score_ids_from_parent_pages([parent_page])
-        seen = set()
-        out = []
-        for sid in ids:
-            sid = str(sid or "").strip()
-            if not sid or sid in seen:
-                continue
-            seen.add(sid)
-            out.append(sid)
-        return out
-
-    def _load_valid_song_id_set(ctx: dict) -> set[str]:
-        # CONCERT_SONG.曲 は ATLAS の「演奏曲」ページを向く
-        rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT"], None)
-        return {str(r.get("id", "")).strip() for r in rows if str(r.get("id", "")).strip()}
-
-    def _cleanup_invalid_concert_song_rows(ctx: dict, concert_id: str = "") -> dict:
-        result = {
-            "scanned": 0,
-            "archived": 0,
-            "failed": 0,
-            "invalid_rows": [],
-        }
-        db_id = (ctx.get("CONCERT_DB_CONCERT_SONG") or "").strip()
-        if not db_id:
-            return result
-        valid_song_ids = _load_valid_song_id_set(ctx)
-        rows = ctx["query_all"](db_id, None)
-        for row in rows:
-            result["scanned"] += 1
-            row_id = row.get("id", "")
-            concert_ids = ctx["extract_relation_ids_any"](row, CONCERT_SONG_CONCERT_REL_KEYS_LOCAL)
-            song_ids = ctx["extract_relation_ids_any"](row, CONCERT_SONG_SONG_REL_KEYS_LOCAL)
-            if concert_id and concert_id not in concert_ids:
-                continue
-            invalid_reasons = []
-            if not concert_ids:
-                invalid_reasons.append("演奏会relation空")
-            if not song_ids:
-                invalid_reasons.append("曲relation空")
-            elif any(sid not in valid_song_ids for sid in song_ids):
-                invalid_reasons.append("曲relation不正")
-            if not invalid_reasons:
-                continue
-            result["invalid_rows"].append({
-                "id": row_id,
-                "concert_ids": concert_ids,
-                "song_ids": song_ids,
-                "reason": ",".join(invalid_reasons),
-            })
-            res = ctx["api_request"](
-                "patch",
-                f"https://api.notion.com/v1/pages/{row_id}",
-                json={"archived": True},
-            )
-            if res is not None and res.status_code == 200:
-                result["archived"] += 1
-            else:
-                result["failed"] += 1
-        return result
-
-    def _ensure_concert_song_rows_for_concert(
-        ctx: dict,
-        concert_row: dict | None,
-        *,
-        default_done: bool = False,
-        note: str = "",
-        dry_run: bool = False,
-    ) -> dict:
-        result = {
-            "concert_id": "",
-            "concert_name": "",
-            "parent_score_count": 0,
-            "existing_count": 0,
-            "created": 0,
-            "skipped": 0,
-            "failed": 0,
-            "missing_score_ids": [],
-            "debug_lines": [],
-        }
-        if not concert_row:
-            return result
-        concert_id = concert_row.get("id", "")
-        result["concert_id"] = concert_id
-        result["concert_name"] = _harmony_concert_name(concert_row)
-        if not concert_id:
-            return result
-
-        db_id = (ctx.get("CONCERT_DB_CONCERT_SONG") or "").strip()
-        if not db_id:
-            result["debug_lines"].append("CONCERT_DB_CONCERT_SONG 未設定")
-            return result
-
-        score_ids = _extract_parent_score_ids(concert_row)
-        result["parent_score_count"] = len(score_ids)
-        valid_song_ids = _load_valid_song_id_set(ctx)
-
-        existing_rows = _load_concert_song_rows_for_concert(ctx, concert_id)
-        existing_song_ids = set()
-        max_order = 0
-        for row in existing_rows:
-            song_rel = ctx["extract_relation_ids_any"](row, CONCERT_SONG_SONG_REL_KEYS_LOCAL)
-            for sid in song_rel:
-                if sid:
-                    existing_song_ids.add(sid)
-            raw_order = ctx["extract_prop_text_any"](row, CONCERT_SONG_ORDER_KEYS_LOCAL)
-            try:
-                if raw_order:
-                    max_order = max(max_order, int(float(raw_order)))
-            except Exception:
-                pass
-        result["existing_count"] = len(existing_song_ids)
-
-        type_map = ctx["get_prop_types"](db_id)
-        if not type_map:
-            result["failed"] = len(score_ids)
-            result["debug_lines"].append("CONCERT_SONG の type_map 取得失敗")
-            return result
-
-        concert_prop = ctx["find_prop_name"](type_map, CONCERT_SONG_CONCERT_REL_KEYS_LOCAL)
-        song_prop = ctx["find_prop_name"](type_map, CONCERT_SONG_SONG_REL_KEYS_LOCAL)
-        if not concert_prop or not song_prop:
-            result["failed"] = len(score_ids)
-            result["debug_lines"].append(f"relation列解決失敗 concert_prop={concert_prop!r} song_prop={song_prop!r}")
-            return result
-
-        seen = set()
-        ordered_score_ids = []
-        for sid in score_ids:
-            sid = str(sid or "").strip()
-            if not sid or sid in seen:
-                continue
-            seen.add(sid)
-            ordered_score_ids.append(sid)
-
-        for sid in ordered_score_ids:
-            if sid in existing_song_ids:
-                result["skipped"] += 1
-                continue
-            if sid not in valid_song_ids:
-                result["failed"] += 1
-                result["missing_score_ids"].append(sid)
-                result["debug_lines"].append(f"ATLASに存在しない演奏曲IDのためスキップ: {sid}")
-                continue
-
-            max_order += 1
-            props = {}
-            key_prop = ctx["put_key_any"](props, type_map, CONCERT_SONG_KEY_KEYS_LOCAL, concert_id, sid, prefix="concert_song")
-            concert_written = ctx["put_prop_any"](props, type_map, CONCERT_SONG_CONCERT_REL_KEYS_LOCAL, concert_id)
-            song_written = ctx["put_prop_any"](props, type_map, CONCERT_SONG_SONG_REL_KEYS_LOCAL, sid)
-            ctx["put_prop_any"](props, type_map, CONCERT_SONG_ORDER_KEYS_LOCAL, max_order)
-            ctx["put_prop_any"](props, type_map, CONCERT_SONG_DONE_KEYS_LOCAL, bool(default_done))
-            ctx["put_prop_any"](props, type_map, CONCERT_SONG_NOTE_KEYS_LOCAL, note)
-
-            concert_relation = ((props.get(concert_prop) or {}).get("relation") or [])
-            song_relation = ((props.get(song_prop) or {}).get("relation") or [])
-            result["debug_lines"].append(
-                f"prepare sid={sid} key_prop={key_prop!r} concert_written={concert_written!r} song_written={song_written!r} "
-                f"concert_relation={concert_relation} song_relation={song_relation}"
-            )
-
-            if not concert_relation or not song_relation:
-                result["failed"] += 1
-                result["missing_score_ids"].append(sid)
-                result["debug_lines"].append(f"relation組み立て失敗のため未作成: sid={sid}")
-                continue
-
-            if dry_run:
-                result["created"] += 1
-                continue
-
-            res = ctx["api_request"](
-                "post",
-                "https://api.notion.com/v1/pages",
-                json={"parent": {"database_id": db_id}, "properties": props},
-            )
-            if res is not None and res.status_code == 200:
-                created_page = (res.json() or {})
-                created_song_rel = ctx["extract_relation_ids_any"](created_page, CONCERT_SONG_SONG_REL_KEYS_LOCAL)
-                created_concert_rel = ctx["extract_relation_ids_any"](created_page, CONCERT_SONG_CONCERT_REL_KEYS_LOCAL)
-                if created_song_rel and created_concert_rel:
-                    result["created"] += 1
-                else:
-                    # ゴミデータ救済: 作成直後にrelation空なら即アーカイブ
-                    page_id = created_page.get("id", "")
-                    result["failed"] += 1
-                    result["missing_score_ids"].append(sid)
-                    result["debug_lines"].append(
-                        f"作成後relation検証失敗 sid={sid} concert_rel={created_concert_rel} song_rel={created_song_rel} page_id={page_id}"
-                    )
-                    if page_id:
-                        ctx["api_request"](
-                            "patch",
-                            f"https://api.notion.com/v1/pages/{page_id}",
-                            json={"archived": True},
-                        )
-            else:
-                result["failed"] += 1
-                result["missing_score_ids"].append(sid)
-                result["debug_lines"].append(f"POST失敗 sid={sid} status={(res.status_code if res is not None else 'None')}")
-        return result
-
-    def _backfill_all_concert_song_rows(ctx: dict, concert_rows: list[dict], *, dry_run: bool = False) -> dict:
-        total = {
-            "concerts": 0,
-            "with_scores": 0,
-            "created": 0,
-            "skipped": 0,
-            "failed": 0,
-            "details": [],
-        }
-        for row in concert_rows or []:
-            total["concerts"] += 1
-            score_ids = _extract_parent_score_ids(row)
-            if score_ids:
-                total["with_scores"] += 1
-            res = _ensure_concert_song_rows_for_concert(
-                ctx,
-                row,
-                default_done=False,
-                note="",
-                dry_run=dry_run,
-            )
-            if res["parent_score_count"] or res["created"] or res["skipped"] or res["failed"]:
-                total["details"].append(res)
-            total["created"] += res["created"]
-            total["skipped"] += res["skipped"]
-            total["failed"] += res["failed"]
-        return total
-
-    def _render_concert_song_migration_panel(ctx: dict, concert_rows: list[dict], selected_row: dict | None = None):
-        with st.expander("🛠 HARMONIA管理開始 / CONCERT_SONG 移行", expanded=False):
-            st.caption("ATLAS の『出演』演奏会と ATLAS の『演奏曲』 relation から、HARMONIA 用の CONCERT_SONG を初期生成します。relation が成立しない行は作成しません。")
-            if selected_row:
-                score_ids = _extract_parent_score_ids(selected_row)
-                valid_song_ids = _load_valid_song_id_set(ctx)
-                existing_rows = _load_concert_song_rows_for_concert(ctx, selected_row.get("id", ""))
-                existing_song_ids = set()
-                invalid_existing = 0
-                for row in existing_rows:
-                    song_rel = ctx["extract_relation_ids_any"](row, CONCERT_SONG_SONG_REL_KEYS_LOCAL)
-                    if not song_rel:
-                        invalid_existing += 1
-                    existing_song_ids.update(song_rel)
-                valid_parent_ids = [sid for sid in score_ids if sid in valid_song_ids]
-                invalid_parent_ids = [sid for sid in score_ids if sid not in valid_song_ids]
-
-                st.markdown(f"**選択中:** {_harmony_concert_name(selected_row)}")
-                st.caption(
-                    f"親演奏曲 relation: {len(score_ids)} 曲 "
-                    f"(有効 {len(valid_parent_ids)} / 無効 {len(invalid_parent_ids)}) / "
-                    f"CONCERT_SONG 既存: {len(existing_song_ids)} 件 / 既存ゴミ候補: {invalid_existing} 件"
-                )
-                col_a, col_b, col_c = st.columns(3)
-                if col_a.button("この演奏会の HARMONIA 管理を開始", type="primary", use_container_width=True, key=f"harmonia_start_manage_{selected_row.get('id','')}"):
-                    with st.spinner("CONCERT_SONG を初期化中..."):
-                        res = _ensure_concert_song_rows_for_concert(ctx, selected_row, default_done=False, note="")
-                    if res["failed"] == 0:
-                        st.success(f"✅ CONCERT_SONG 作成 {res['created']} 件 / 既存スキップ {res['skipped']} 件")
-                    else:
-                        st.warning(f"⚠️ 作成 {res['created']} 件 / 失敗 {res['failed']} 件 / 既存スキップ {res['skipped']} 件")
-                        if res["missing_score_ids"]:
-                            st.caption("失敗した曲ID: " + ", ".join(res["missing_score_ids"][:20]))
-                        with st.expander("この演奏会の backfill デバッグ", expanded=False):
-                            for line in res.get("debug_lines", []):
-                                st.text(line)
-                    st.rerun()
-                dry = _ensure_concert_song_rows_for_concert(ctx, selected_row, dry_run=True)
-                col_b.metric("新規作成予定", dry["created"])
-                if col_c.button("この演奏会のゴミ行を救済", use_container_width=True, key=f"harmonia_cleanup_selected_{selected_row.get('id','')}"):
-                    with st.spinner("不正な CONCERT_SONG 行を救済中..."):
-                        clean = _cleanup_invalid_concert_song_rows(ctx, selected_row.get("id", ""))
-                    if clean["failed"] == 0:
-                        st.success(f"✅ 救済完了: アーカイブ {clean['archived']} 件")
-                    else:
-                        st.warning(f"⚠️ 救済: アーカイブ {clean['archived']} 件 / 失敗 {clean['failed']} 件")
-                    with st.expander("救済詳細", expanded=False):
-                        for d in clean["invalid_rows"][:100]:
-                            st.caption(f"{d['id']} | concert={d['concert_ids']} | song={d['song_ids']} | reason={d['reason']}")
-                    st.rerun()
-                st.divider()
-
-            col_all_a, col_all_b = st.columns(2)
-            if col_all_a.button("既存の出演演奏会を一括 backfill", use_container_width=True, key="harmonia_backfill_all_concert_song"):
-                with st.spinner("既存出演演奏会を走査して CONCERT_SONG を作成中..."):
-                    res = _backfill_all_concert_song_rows(ctx, concert_rows, dry_run=False)
-                if res["failed"] == 0:
-                    st.success(f"✅ backfill 完了: 作成 {res['created']} 件 / 既存スキップ {res['skipped']} 件")
-                else:
-                    st.warning(f"⚠️ backfill: 作成 {res['created']} 件 / 失敗 {res['failed']} 件 / 既存スキップ {res['skipped']} 件")
-                with st.expander("backfill 詳細", expanded=False):
-                    for d in res["details"][:100]:
-                        st.caption(
-                            f"{d['concert_name']} | parent演奏曲={d['parent_score_count']} | "
-                            f"created={d['created']} | skipped={d['skipped']} | failed={d['failed']}"
-                        )
-                        if d.get("missing_score_ids"):
-                            st.caption("  missing: " + ", ".join(d["missing_score_ids"][:20]))
-                st.rerun()
-
-            if col_all_b.button("不正な CONCERT_SONG を一括救済", use_container_width=True, key="harmonia_cleanup_all_concert_song"):
-                with st.spinner("不正な CONCERT_SONG 行を一括救済中..."):
-                    clean = _cleanup_invalid_concert_song_rows(ctx)
-                if clean["failed"] == 0:
-                    st.success(f"✅ 一括救済完了: アーカイブ {clean['archived']} 件")
-                else:
-                    st.warning(f"⚠️ 一括救済: アーカイブ {clean['archived']} 件 / 失敗 {clean['failed']} 件")
-                with st.expander("一括救済 詳細", expanded=False):
-                    for d in clean["invalid_rows"][:100]:
-                        st.caption(f"{d['id']} | concert={d['concert_ids']} | song={d['song_ids']} | reason={d['reason']}")
-                st.rerun()
-
     def _render_harmonia_home(ctx: dict, concert_rows: list[dict], concert_opt_map: dict[str, str]):
         st.header("🏠 HARMONIAホーム")
         st.caption("本画面は状況確認と作業の入口です。演奏会の選択・変更はサイドバーで行ってください。")
@@ -9168,10 +8830,8 @@ if system_mode == "HARMONIA":
             st.info("サイドバーで演奏会を選ぶと、ここに概要と進捗が表示されます。")
             st.markdown("### 使い方")
             st.markdown("- サイドバーで対象演奏会を選択")
-            st.markdown("- 『この演奏会の HARMONIA 管理を開始』で CONCERT_SONG を初期化")
             st.markdown("- ダッシュボードで進捗と未対応項目を確認")
             st.markdown("- 各ページで実作業を進める")
-            _render_concert_song_migration_panel(ctx, concert_rows, None)
             st.divider()
             st.markdown("### テストデータ管理")
             st.caption("テストデータ投入・削除は、サイドバーの「🧪 テストデータ管理」から実行できます。")
@@ -9203,20 +8863,6 @@ if system_mode == "HARMONIA":
         for line in meta:
             st.caption(line)
 
-        parent_score_ids = _extract_parent_score_ids(selected_row)
-        existing_cs_rows = _load_concert_song_rows_for_concert(ctx, selected_row.get("id", ""))
-        existing_song_ids = set()
-        for row in existing_cs_rows:
-            existing_song_ids.update(ctx["extract_relation_ids_any"](row, CONCERT_SONG_SONG_REL_KEYS_LOCAL))
-        missing_count = max(len(set(parent_score_ids) - existing_song_ids), 0)
-        if parent_score_ids:
-            if existing_song_ids:
-                st.info(f"HARMONIA管理開始済み: 親演奏曲 {len(parent_score_ids)} 曲 / CONCERT_SONG {len(existing_song_ids)} 件 / 未生成 {missing_count} 件")
-            else:
-                st.warning(f"この演奏会はまだ HARMONIA 管理開始前です。親演奏曲 {len(parent_score_ids)} 曲を CONCERT_SONG に初期化できます。")
-        else:
-            st.warning("親演奏会に『演奏曲』relation がありません。MUSE 側で ATLAS⇔APOLLO の演奏曲紐付けを確認してください。")
-
         col_open, col_back = st.columns(2)
         if col_open.button("ダッシュボードへ", type="primary", use_container_width=True, key="harmonia_home_go_dashboard"):
             st.session_state["_harmonia_pending_page"] = "ダッシュボード"
@@ -9226,8 +8872,6 @@ if system_mode == "HARMONIA":
             st.session_state["_harmonia_pending_page"] = "🏠 ホーム"
             st.session_state["harmonia_global_concert_name"] = _UNSELECTED
             st.rerun()
-
-        _render_concert_song_migration_panel(ctx, concert_rows, selected_row)
 
         st.divider()
         st.markdown("### 作業の流れ")
