@@ -9641,7 +9641,7 @@ if mode == "新規登録":
                 c_info, c_btn = st.columns([4, 1])
                 c_info.caption(f"現在の登録: 通常 {main_count} 曲 / アンコール {enc_count} 曲")
                 if c_btn.button("確認へ", key="ev_setlist_goto_review"):
-                    st.session_state.ev_setlist_ui_tab = "セットリスト確認"
+                    st.session_state["_pending_ev_setlist_ui_tab"] = "セットリスト確認"
                     st.rerun()
 
                 if setlist_tab == "セットリスト確認":
