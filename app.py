@@ -8510,17 +8510,15 @@ if system_mode == "HARMONIA":
 
         return result
 
-    def _run_performance_registration_e2e_smoketest() -> dict:
+    def _run_performance_registration_e2e_smoketest(rich_mode: bool = False) -> dict:
         """
-        既存の『出演』登録フローを最小構成でE2E試験する。
-        1) ATLAS に演奏曲ページを作成
-        2) ATLAS に出演演奏会ページを作成（演奏曲 relation 付き）
-        3) APOLLO 演奏曲DB作成を実行
-        4) 演奏会参加者DBを1件作成
-        5) 楽曲別担当者DBを1件作成できるか確認
+        既存の『出演』登録フローをE2E試験する。
+        rich_mode=False: 最小構成
+        rich_mode=True : 国コード/楽章/Encore を含む少し厚い構成
         """
         result = {
             "ok": False,
+            "mode": "rich" if rich_mode else "basic",
             "error": "",
             "score_page_id": "",
             "performance_page_id": "",
@@ -8539,9 +8537,70 @@ if system_mode == "HARMONIA":
             "created_assign": 0,
             "failed_assign": 0,
             "assign_reason": "",
+            "apollo_rows_debug": [],
+            "cast_rows_debug": [],
+            "assign_rows_debug": [],
             "title": "",
             "score_title": "",
         }
+
+        def _read_pages_by_ids(ids: list[str]) -> list[dict]:
+            out = []
+            for pid in ids:
+                if not pid:
+                    continue
+                res = api_request(
+                    "get",
+                    f"https://api.notion.com/v1/pages/{pid}",
+                    headers=NOTION_HEADERS,
+                )
+                if res is not None and res.status_code == 200:
+                    out.append(res.json() or {})
+            return out
+
+        def _extract_relation_ids_local(page: dict, keys: list[str]) -> list[str]:
+            props = (page.get("properties") or {}) if isinstance(page, dict) else {}
+            ids = []
+            seen = set()
+            for k in keys:
+                meta = props.get(k) or {}
+                if (meta.get("type") or "") != "relation":
+                    continue
+                for rel in (meta.get("relation") or []):
+                    rid = (rel or {}).get("id")
+                    if rid and rid not in seen:
+                        seen.add(rid)
+                        ids.append(rid)
+            return ids
+
+        def _extract_checkbox_local(page: dict, keys: list[str]):
+            props = (page.get("properties") or {}) if isinstance(page, dict) else {}
+            for k in keys:
+                meta = props.get(k) or {}
+                if (meta.get("type") or "") == "checkbox":
+                    return bool(meta.get("checkbox"))
+            return None
+
+        def _extract_text_local(page: dict, keys: list[str]) -> str:
+            props = (page.get("properties") or {}) if isinstance(page, dict) else {}
+            for k in keys:
+                meta = props.get(k) or {}
+                ptype = meta.get("type")
+                if ptype == "title":
+                    return plain_text_join(meta.get("title") or [])
+                if ptype == "rich_text":
+                    return plain_text_join(meta.get("rich_text") or [])
+                if ptype == "select":
+                    return ((meta.get("select") or {}).get("name") or "").strip()
+                if ptype == "multi_select":
+                    vals = [((x or {}).get("name") or "").strip() for x in (meta.get("multi_select") or [])]
+                    return ", ".join([v for v in vals if v])
+                if ptype == "number":
+                    n = meta.get("number")
+                    return "" if n is None else str(n)
+                if ptype == "date":
+                    return (((meta.get("date") or {}).get("start")) or "").strip()
+            return ""
 
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         perf_title = f"[SMOKETEST] HARMONIA E2E {stamp}"
@@ -8551,6 +8610,13 @@ if system_mode == "HARMONIA":
         result["score_title"] = score_title
         result["performer_name"] = performer_name
 
+        composer_name = "Igor Stravinsky"
+        composer_country = "RU" if rich_mode else ""
+        movement_name = "Introduction" if rich_mode else ""
+        movement_no = 1 if rich_mode else None
+        movement_order = 1 if rich_mode else None
+        movement_roman = "I" if rich_mode else ""
+
         score_ok = create_notion_page(
             jp_title=score_title,
             en_title=score_title,
@@ -8559,7 +8625,7 @@ if system_mode == "HARMONIA":
             media_type="score",
             cover_url=get_media_icon_url("演奏曲"),
             tmdb_release="1913-05-29",
-            details={"genres": [], "cast": "", "director": "Igor Stravinsky", "score": None},
+            details={"genres": [], "cast": "", "director": composer_name, "score": None},
             wlflg=False,
             watched_date=None,
             rating=None,
@@ -8606,8 +8672,8 @@ if system_mode == "HARMONIA":
         selected_scores = [{
             "id": score_page_id,
             "title": score_title,
-            "composer": "Igor Stravinsky",
-            "composer_country": "",
+            "composer": composer_name,
+            "composer_country": composer_country,
         }]
         main_items = [{
             "title": score_title,
@@ -8616,14 +8682,27 @@ if system_mode == "HARMONIA":
             "played": True,
             "players": [performer_name],
             "section": "本編",
-            "composer": "Igor Stravinsky",
-            "composer_country": "",
+            "composer": composer_name,
+            "composer_country": composer_country,
+            "movement_name": movement_name,
+            "movement_no": movement_no,
+            "movement_order": movement_order,
+            "movement_roman": movement_roman,
+        }]
+        encore_items = [{
+            "title": score_title + " Encore",
+            "order": 2,
+            "part": "Timpani" if rich_mode else "",
+            "played": bool(rich_mode),
+            "players": [performer_name] if rich_mode else [],
+            "section": "Encore",
+            "composer": composer_name,
+            "composer_country": composer_country,
             "movement_name": "",
             "movement_no": None,
             "movement_order": None,
             "movement_roman": "",
-        }]
-        encore_items = []
+        }] if rich_mode else []
 
         result["selected_scores"] = selected_scores
         result["main_items"] = main_items
@@ -8670,6 +8749,54 @@ if system_mode == "HARMONIA":
         result["failed_assign"] = failed_assign
         result["assign_reason"] = assign_reason
 
+        # debug payload
+        apollo_pages = _read_pages_by_ids([r.get("id", "") for r in created_rows])
+        for pg in apollo_pages:
+            result["apollo_rows_debug"].append({
+                "id": pg.get("id", ""),
+                "title": _extract_text_local(pg, ["タイトル", "Name"]),
+                "creator": _extract_text_local(pg, ["クリエイター", "Creator", "作曲家"]),
+                "country_code": _extract_text_local(pg, ["国コード", "CountryCode"]),
+                "section": _extract_text_local(pg, ["区分"]),
+                "order": _extract_text_local(pg, ["曲順"]),
+                "instruments": _extract_text_local(pg, ["担当楽器", "楽器"]),
+                "playflg": _extract_checkbox_local(pg, ["Playflg", "PlayFlg", "演奏した"]),
+                "performance_rel": _extract_relation_ids_local(pg, ["出演", "演奏会", "公演"]),
+                "atlas_score_rel": _extract_relation_ids_local(pg, ["演奏曲", "Score", "スコア", "関連演奏曲"]),
+                "work_rel": _extract_relation_ids_local(pg, ["作品マスタ", "作品", "Work"]),
+                "movement_rel": _extract_relation_ids_local(pg, ["作品楽章", "作品楽章マスタ", "楽章マスタ", "Movement"]),
+                "country_master_rel": _extract_relation_ids_local(pg, ["国名マスタ", "CountryMaster", "国マスタ"]),
+            })
+
+        cast_pages = _read_pages_by_ids(list(cast_row_map.values()))
+        for pg in cast_pages:
+            result["cast_rows_debug"].append({
+                "id": pg.get("id", ""),
+                "title": _extract_text_local(pg, ["タイトル", "Name"]),
+                "performance_rel": _extract_relation_ids_local(pg, ["出演", "演奏会", "公演"]),
+                "performer_rel": _extract_relation_ids_local(pg, ["出演者", "奏者", "演奏者"]),
+                "instruments": _extract_text_local(pg, ["担当楽器", "楽器"]),
+            })
+
+        assign_pages = []
+        if NOTION_SONG_ASSIGN_DB_ID:
+            all_assign = query_notion_database_all(NOTION_SONG_ASSIGN_DB_ID) or []
+            for pg in all_assign:
+                props = pg.get("properties", {}) or {}
+                title, _, _ = get_title(props)
+                title = title or plain_text_join(((props.get("タイトル") or {}).get("title") or []))
+                if not str(title or "").startswith("[SMOKETEST] "):
+                    continue
+                assign_pages.append(pg)
+        for pg in assign_pages:
+            result["assign_rows_debug"].append({
+                "id": pg.get("id", ""),
+                "title": _extract_text_local(pg, ["タイトル", "Name"]),
+                "score_rel": _extract_relation_ids_local(pg, ["演奏曲", "演奏曲DB", "曲", "楽曲"]),
+                "cast_rel": _extract_relation_ids_local(pg, ["演奏会出演者", "出演者", "参加者", "演奏会参加者"]),
+                "instruments": _extract_text_local(pg, ["担当楽器", "楽器"]),
+            })
+
         result["ok"] = (
             created_setlist > 0
             and failed_setlist == 0
@@ -8707,12 +8834,24 @@ if system_mode == "HARMONIA":
         st.caption("演奏会未選択でも利用できます。")
         with st.expander("🧪 出演登録E2Eテスト", expanded=False):
             st.caption("既存の『出演』登録フローを最小構成で1ボタン実行し、ATLASの出演演奏会/演奏曲と APOLLO 演奏曲DBの同時登録を確認します。")
-            col_run, col_cleanup = st.columns(2)
-            if col_run.button("▶ 出演登録E2Eテストを実行", type="primary", use_container_width=True, key="harmonia_e2e_smoketest_run"):
-                smoke = _run_performance_registration_e2e_smoketest()
+            col_run, col_run_rich, col_cleanup = st.columns(3)
+            if col_run.button("▶ E2Eテスト(基本)", type="primary", use_container_width=True, key="harmonia_e2e_smoketest_run_basic"):
+                smoke = _run_performance_registration_e2e_smoketest(rich_mode=False)
                 st.session_state["harmonia_e2e_smoketest_result"] = smoke
                 if smoke.get("ok"):
-                    st.success(f"✅ E2Eテスト成功: APOLLO {smoke.get('created_setlist', 0)} 件")
+                    st.success(f"✅ E2Eテスト成功: APOLLO {smoke.get('created_setlist', 0)} 件 / CAST {smoke.get('created_cast', 0)} 件 / ASSIGN {smoke.get('created_assign', 0)} 件")
+                else:
+                    st.warning(
+                        f"⚠️ E2Eテスト: APOLLO created={smoke.get('created_setlist', 0)} / failed={smoke.get('failed_setlist', 0)}"
+                        + (f" / {smoke.get('setlist_reason','')}" if smoke.get('setlist_reason') else "")
+                    )
+                    if smoke.get("error"):
+                        st.error(smoke["error"])
+            if col_run_rich.button("▶ E2Eテスト(厚め)", use_container_width=True, key="harmonia_e2e_smoketest_run_rich"):
+                smoke = _run_performance_registration_e2e_smoketest(rich_mode=True)
+                st.session_state["harmonia_e2e_smoketest_result"] = smoke
+                if smoke.get("ok"):
+                    st.success(f"✅ E2Eテスト成功: APOLLO {smoke.get('created_setlist', 0)} 件 / CAST {smoke.get('created_cast', 0)} 件 / ASSIGN {smoke.get('created_assign', 0)} 件")
                 else:
                     st.warning(
                         f"⚠️ E2Eテスト: APOLLO created={smoke.get('created_setlist', 0)} / failed={smoke.get('failed_setlist', 0)}"
