@@ -8357,7 +8357,6 @@ if system_mode == "HARMONIA":
         st.error(f"HARMONIA System の設定が不足しています。secrets.toml を確認してください。（{e}）")
         st.stop()
 
-    # HARMONIA契約チェック（品質重視: 先に設定齟齬を可視化）
     _contract_check = {}
     try:
         _contract_check = concert_ctx.get("validate_contract", lambda: {})() or {}
@@ -8378,11 +8377,8 @@ if system_mode == "HARMONIA":
                 for _m in _contract_warnings:
                     st.write(f"- {_m}")
 
-    # HARMONIA共通: 演奏会を先に1つ選び、各画面はその演奏会だけを対象にする
-
     @st.cache_data(ttl=300, show_spinner=False)
     def _load_harmonia_concerts(_api_key: str, _db_id: str) -> list[dict]:
-        """ATLASから媒体=出演のみをAPI側フィルタで取得（キャッシュ付き）。"""
         from concert.services.notion_client import query_concert_db_all, get_concert_headers
         headers = get_concert_headers(_api_key)
         return query_concert_db_all(_db_id, headers, {
@@ -8490,11 +8486,10 @@ if system_mode == "HARMONIA":
             props = pg.get("properties", {}) or {}
             title, _, _ = get_title(props)
             if not title:
-                props_local = pg.get("properties", {}) or {}
                 title = (
-                    plain_text_join(((props_local.get("名前") or {}).get("title") or []))
-                    or plain_text_join(((props_local.get("Name") or {}).get("title") or []))
-                    or plain_text_join(((props_local.get("タイトル") or {}).get("title") or []))
+                    plain_text_join(((props.get("名前") or {}).get("title") or []))
+                    or plain_text_join(((props.get("Name") or {}).get("title") or []))
+                    or plain_text_join(((props.get("タイトル") or {}).get("title") or []))
                     or ""
                 )
             if not str(title or "").startswith("[SMOKETEST] "):
@@ -8511,11 +8506,6 @@ if system_mode == "HARMONIA":
         return result
 
     def _run_performance_registration_e2e_smoketest(rich_mode: bool = False) -> dict:
-        """
-        既存の『出演』登録フローをE2E試験する。
-        rich_mode=False: 最小構成
-        rich_mode=True : 国コード/楽章/Encore を含む少し厚い構成
-        """
         result = {
             "ok": False,
             "mode": "rich" if rich_mode else "basic",
@@ -8549,11 +8539,7 @@ if system_mode == "HARMONIA":
             for pid in ids:
                 if not pid:
                     continue
-                res = api_request(
-                    "get",
-                    f"https://api.notion.com/v1/pages/{pid}",
-                    headers=NOTION_HEADERS,
-                )
+                res = api_request("get", f"https://api.notion.com/v1/pages/{pid}", headers=NOTION_HEADERS)
                 if res is not None and res.status_code == 200:
                     out.append(res.json() or {})
             return out
@@ -8749,7 +8735,6 @@ if system_mode == "HARMONIA":
         result["failed_assign"] = failed_assign
         result["assign_reason"] = assign_reason
 
-        # debug payload
         apollo_pages = _read_pages_by_ids([r.get("id", "") for r in created_rows])
         for pg in apollo_pages:
             result["apollo_rows_debug"].append({
@@ -8811,16 +8796,50 @@ if system_mode == "HARMONIA":
         )
         return result
 
+    concert_rows = _load_harmonia_concerts(
+        concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
+        concert_ctx["CONCERT_DB_CONCERT"],
+    )
+    concert_opt_map = {_harmony_concert_name(r): r.get("id", "") for r in concert_rows if r.get("id")}
+
+    st.sidebar.markdown("### 演奏会フィルタ")
+    harmony_query = st.sidebar.text_input(
+        "演奏会検索",
+        value=st.session_state.get("harmonia_global_concert_query", ""),
+        key="harmonia_global_concert_query",
+        placeholder="例: Happy Hour / 2026 / 定期",
+    ).strip().lower()
+
+    if not concert_opt_map:
+        st.sidebar.info("演奏会がまだ登録されていません。")
+        concert_ctx["SELECTED_CONCERT_ID"] = ""
+        concert_ctx["SELECTED_CONCERT_NAME"] = ""
+    else:
+        if harmony_query:
+            filtered_map = {k: v for k, v in concert_opt_map.items() if harmony_query in k.lower()}
+            if not filtered_map:
+                st.sidebar.warning(f"「{harmony_query}」に一致する演奏会がありません。")
+                concert_ctx["SELECTED_CONCERT_ID"] = ""
+                concert_ctx["SELECTED_CONCERT_NAME"] = ""
+            else:
+                concert_opt_map = filtered_map
+        if concert_opt_map:
+            _UNSELECTED = "— 演奏会を選択してください —"
+            opts_with_empty = [_UNSELECTED] + list(concert_opt_map.keys())
+            selected_name = st.sidebar.selectbox(
+                "対象演奏会",
+                opts_with_empty,
+                index=0,
+                key="harmonia_global_concert_name",
+            )
+            if selected_name == _UNSELECTED:
+                concert_ctx["SELECTED_CONCERT_ID"] = ""
+                concert_ctx["SELECTED_CONCERT_NAME"] = ""
+            else:
+                concert_ctx["SELECTED_CONCERT_ID"] = concert_opt_map.get(selected_name, "")
+                concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
 
     selected_concert_id = concert_ctx.get("SELECTED_CONCERT_ID", "").strip()
-    concert_rows = []
-    try:
-        concert_rows = _load_harmonia_concerts(
-            concert_ctx["NOTION_HEADERS"]["Authorization"].replace("Bearer ", ""),
-            concert_ctx["CONCERT_DB_CONCERT"],
-        )
-    except Exception:
-        concert_rows = []
     selected_concert_row = next((r for r in concert_rows if r.get("id", "") == selected_concert_id), None)
 
     if concert_page == "🏠 ホーム":
@@ -8882,19 +8901,15 @@ if system_mode == "HARMONIA":
         test_data.render(concert_ctx)
         st.stop()
 
-    # ここから先は演奏会選択必須
     if not selected_concert_id:
         st.info("サイドバーの「演奏会フィルタ」で演奏会を選択してください。")
         st.stop()
 
-    # サイドバー：演奏会サマリPDF出力
     concert_mgmt.render_sidebar_summary_pdf(concert_ctx)
     try:
         from concert.pages.form import render_url_generator
         with st.sidebar.expander("📋 奏者フォームURL", expanded=False):
-            render_url_generator(concert_ctx,
-                                 concert_ctx.get("SELECTED_CONCERT_ID",""),
-                                 concert_ctx.get("SELECTED_CONCERT_NAME",""))
+            render_url_generator(concert_ctx, concert_ctx.get("SELECTED_CONCERT_ID",""), concert_ctx.get("SELECTED_CONCERT_NAME",""))
     except Exception:
         pass
 
