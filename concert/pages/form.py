@@ -752,9 +752,15 @@ def render_form(ctx, concert_id: str):
 
             if st.button("出欠・希望の入力へ進む →", type="primary",
                          use_container_width=True, key="existing_to_step2"):
+                _, existing_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
+                preload_att: dict[str, str] = {}
+                preload_comment: dict[str, str] = {}
+                for _pr_id, _v in (existing_att_map or {}).items():
+                    preload_att[_pr_id] = (_v or {}).get("status", "")
+                    preload_comment[_pr_id] = (_v or {}).get("comment", "")
                 st.session_state.update({
-                    "form_att":  {},
-                    "form_att_comment": {},
+                    "form_att": preload_att,
+                    "form_att_comment": preload_comment,
                     "form_pref": {},
                     "form_own":  {},
                     "form_step": 2,
