@@ -53,6 +53,7 @@ _DEFAULT_CONCERT_DB_IDS = {
     "preference": "32c4532d7d5680b1902dce3555590db3",       # 希望入力DB
     "billing": "3314532d7d5680fb9cdbebd1d2730e62",          # 見積/請求DB（任意）
     "concert_song": "3324532d7d5680f38f0fccc3adae9860",     # 演奏会×曲 管理DB
+    "harmonia_concert": "3334532d7d5680589934fa73ed352551",  # HARMONIA演奏会ヘッダDB
 }
 
 _NOTION_ID_PATTERN = re.compile(
@@ -147,6 +148,10 @@ def get_concert_secrets() -> dict:
         st.secrets.get("CONCERT_DB_CONCERT_SONG", "")
         or _DEFAULT_CONCERT_DB_IDS.get("concert_song", "")
     )
+    db_harmonia_concert = (
+        st.secrets.get("CONCERT_DB_HARMONIA_CONCERT", "")
+        or _DEFAULT_CONCERT_DB_IDS.get("harmonia_concert", "")
+    )
     required_db = {
         "演奏会DB": db_concert,
         "練習DB": db_practice,
@@ -162,6 +167,7 @@ def get_concert_secrets() -> dict:
         "希望入力DB": db_preference,
         "スケジュールDB": db_schedule,
         "演奏会×曲DB": db_concert_song,
+        "HARMONIA演奏会ヘッダDB": db_harmonia_concert,
     }
     normalized_required_db = {
         name: _normalize_notion_id(val) for name, val in required_db.items()
@@ -188,6 +194,7 @@ def get_concert_secrets() -> dict:
         "db_expense":          _normalize_notion_id(db_expense),
         "db_billing":          _normalize_notion_id(db_billing),
         "db_concert_song":     normalized_required_db["演奏会×曲DB"],
+        "db_harmonia_concert": normalized_required_db["HARMONIA演奏会ヘッダDB"],
     }
 
 
@@ -755,6 +762,7 @@ def build_concert_ctx() -> dict:
         "CONCERT_DB_CONCERT_EXPENSE":  secrets["db_expense"],
         "CONCERT_DB_BILLING":          secrets["db_billing"],
         "CONCERT_DB_CONCERT_SONG":     secrets["db_concert_song"],
+        "CONCERT_DB_HARMONIA_CONCERT":  secrets["db_harmonia_concert"],
         "query_all":                   _query_all,
         "get_prop_types":              _get_prop_types,
         "get_db_schema":               _get_db_schema,
