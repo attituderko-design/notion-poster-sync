@@ -927,6 +927,109 @@ def _render_song_row(
 # パート定義タブ
 # ============================================================
 
+def _upsert_partdef(
+    ctx: dict,
+    concert_id: str,
+    song_id: str,
+    song_name: str,
+    part_name: str,
+    inst_ids: list[str],
+    inst_names: list[str],
+    need_count: int,
+    note: str,
+    existing_id: str = "",
+) -> bool:
+    """
+    パート定義を新規作成または更新する。
+    表示パート名フィールドに純粋なパート名を書き込む。
+    """
+    db_id = ctx["CONCERT_DB_PART_DEFINITION"]
+    t = ctx["get_prop_types"](db_id)
+    if not t:
+        st.error("パート定義DBのプロパティ取得に失敗しました。")
+        return False
+    clean_inst_ids = [x for x in (inst_ids or []) if x]
+    if not clean_inst_ids:
+        st.error("担当楽器を1つ以上選択してください。")
+        return False
+
+    apollo_song_ids = _resolve_apollo_song_ids(ctx, concert_id, song_id)
+    if apollo_song_ids:
+        target_song_id = apollo_song_ids[0]
+    else:
+        st.warning("対応する APOLLO 演奏曲が見つからないため、ATLAS IDで代替登録します。")
+        target_song_id = song_id
+
+    inst_label = " / ".join([x for x in (inst_names or []) if x]) or "楽器未設定"
+
+    # タイトル（PKフィールド）：結合文字列
+    record_title = f"{song_name} / {part_name} / {inst_label}"
+
+    props = {}
+    ctx["put_prop_any"](props, t, PARTDEF_RECORD_KEYS,       record_title)
+    ctx["put_prop_any"](props, t, PARTDEF_DISPLAY_NAME_KEYS, part_name)   # 純粋なパート名
+    ctx["put_prop_any"](props, t, PARTDEF_CONCERT_REL_KEYS,  concert_id)
+    ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS,     target_song_id)
+    ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS,     clean_inst_ids)
+    ctx["put_prop_any"](props, t, PARTDEF_NOTE_KEYS,         note)
+    ctx["put_key_any"](
+        props, t, PARTDEF_KEY_KEYS,
+        concert_id, target_song_id, part_name,
+        "|".join(clean_inst_ids),
+        prefix="part",
+    )
+
+    if existing_id:
+        res = ctx["api_request"]("patch",
+            f"https://api.notion.com/v1/pages/{existing_id}",
+            json={"properties": props})
+    else:
+        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
+            json={"parent": {"database_id": db_id}, "properties": props})
+    return res is not None and res.status_code == 200
+
+
+def _backfill_partdef_display_name(ctx: dict, concert_id: str, song_id: str) -> tuple[int, int]:
+    """
+    既存のパート定義レコードの「パート名」フィールドから
+    「表示パート名」を抽出してバックフィルする。
+    パート名フィールドの形式:「曲名 / パート名 / 楽器名...」から2番目の要素を取り出す。
+    """
+    rows = _load_partdefs(ctx, concert_id, song_id)
+    ok_n = ng_n = 0
+    t = ctx["get_prop_types"](ctx["CONCERT_DB_PART_DEFINITION"])
+    for r in rows:
+        rid = r.get("id", "")
+        if not rid:
+            continue
+        # 既に表示パート名がある場合はスキップ
+        existing = ctx["extract_prop_text_any"](r, PARTDEF_DISPLAY_NAME_KEYS)
+        if existing and existing.strip():
+            ok_n += 1
+            continue
+        # パート名フィールドから抽出（「曲名 / パート名 / 楽器名...」の2番目）
+        raw = ctx["extract_prop_text_any"](r, PARTDEF_NAME_KEYS) or               ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS) or ""
+        parts = [p.strip() for p in raw.split("/")]
+        if len(parts) >= 2:
+            display_name = parts[1].strip()
+        elif parts:
+            display_name = parts[0].strip()
+        else:
+            continue
+        if not display_name:
+            continue
+        props = {}
+        ctx["put_prop_any"](props, t, PARTDEF_DISPLAY_NAME_KEYS, display_name)
+        res = ctx["api_request"]("patch",
+            f"https://api.notion.com/v1/pages/{rid}",
+            json={"properties": props})
+        if res and res.status_code == 200:
+            ok_n += 1
+        else:
+            ng_n += 1
+    return ok_n, ng_n
+
+
 def _render_partdef_tab(ctx: dict):
     """パート定義タブ：曲選択→パート一覧→追加。楽器追加は楽器タブへ。"""
     pending_inst_search = st.session_state.pop("partdef_inst_search_next", "")
@@ -1046,18 +1149,38 @@ def _render_partdef_tab(ctx: dict):
 
     # 登録済みパート一覧
     part_rows = _load_partdefs(ctx, c_id, s_id)
+
+    # 表示パート名が未設定の既存データがある場合にバックフィルボタンを表示
+    needs_backfill = any(
+        not (ctx["extract_prop_text_any"](r, PARTDEF_DISPLAY_NAME_KEYS) or "").strip()
+        for r in part_rows
+    )
+    if needs_backfill:
+        st.warning("表示パート名が未設定のパートがあります。バックフィルで既存データに名前を反映できます。")
+        if st.button("🔧 表示パート名をバックフィル", key=f"backfill_partdef_{c_id}_{s_id}"):
+            with st.spinner("バックフィル中..."):
+                ok_n, ng_n = _backfill_partdef_display_name(ctx, c_id, s_id)
+            if ng_n == 0:
+                st.success(f"✅ {ok_n}件を更新しました。")
+            else:
+                st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+            st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
+            st.rerun()
+
     st.subheader(f"登録済みパート（{len(part_rows)}件）")
     if not part_rows:
         st.info("まだパートが登録されていません。上の「パートを追加」から登録してください。")
     else:
         for r in part_rows:
             rid = r.get("id", "")
+            # 表示パート名（純粋なパート名）を優先、なければパート名フィールド、最後にPKフィールド
             part_name_disp = (
-                ctx["extract_prop_text_any"](r, PARTDEF_NAME_KEYS)
+                ctx["extract_prop_text_any"](r, PARTDEF_DISPLAY_NAME_KEYS)
+                or ctx["extract_prop_text_any"](r, PARTDEF_NAME_KEYS)
                 or ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS)
                 or ctx["extract_title"](r)
             )
-            row_title      = ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS) or part_name_disp
+            row_title = part_name_disp
             cur_inst_ids   = ctx["extract_relation_ids_any"](r, PARTDEF_INST_REL_KEYS)
             cur_inst_names = [k for k, v in inst_opts_all.items() if v in set(cur_inst_ids)]
             cur_note       = ctx["extract_prop_text_any"](r, PARTDEF_NOTE_KEYS) or ""
