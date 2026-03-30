@@ -29,6 +29,12 @@ from concert.services.keys import (
     PREF_PLAYER_REL_KEYS,
     PREF_PART_REL_KEYS,
     PREF_PRIORITY_KEYS,
+    CONCERT_INST_KEY_KEYS,
+    CONCERT_INST_CONCERT_REL_KEYS,
+    CONCERT_INST_SONG_REL_KEYS,
+    CONCERT_INST_INST_REL_KEYS,
+    CONCERT_INST_COUNT_KEYS,
+    CONCERT_INST_NOTE_KEYS,
 )
 
 NOTION_VERSION = "2022-06-28"
@@ -54,6 +60,7 @@ _DEFAULT_CONCERT_DB_IDS = {
     "billing": "3314532d7d5680fb9cdbebd1d2730e62",          # 見積/請求DB（任意）
     "concert_song": "3324532d7d5680f38f0fccc3adae9860",     # 演奏会×曲 管理DB
     "harmonia_concert": "3334532d7d5680589934fa73ed352551",  # HARMONIA演奏会ヘッダDB
+    "concert_instrument": "3334532d7d5680b48e1ced6aae5c7b40",  # 演奏会必要楽器DB
 }
 
 _NOTION_ID_PATTERN = re.compile(
@@ -804,8 +811,9 @@ def build_concert_ctx() -> dict:
         "CONCERT_DB_SCHEDULE":         secrets["db_schedule"],
         "CONCERT_DB_CONCERT_EXPENSE":  secrets["db_expense"],
         "CONCERT_DB_BILLING":          secrets["db_billing"],
-        "CONCERT_DB_CONCERT_SONG":     secrets["db_concert_song"],
+        "CONCERT_DB_CONCERT_SONG":      secrets["db_concert_song"],
         "CONCERT_DB_HARMONIA_CONCERT":  secrets["db_harmonia_concert"],
+        "CONCERT_DB_CONCERT_INSTRUMENT": secrets["db_concert_instrument"],
         "CONCERT_DB_PI_MASTER":         secrets["db_pi_master"],
         "query_all":                   _query_all,
         "get_prop_types":              _get_prop_types,
