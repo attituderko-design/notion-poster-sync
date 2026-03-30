@@ -8500,7 +8500,7 @@ if system_mode == "HARMONIA":
             return "🟡 一部未完"
         return "⚪ 未着手"
 
-        def _h_collect_apollo_song_ids_for_concert(concert_id: str, atlas_song_ids: list[str]) -> set[str]:
+    def _h_collect_apollo_song_ids_for_concert(concert_id: str, atlas_song_ids: list[str]) -> set[str]:
         """
         CONCERT_SONG.曲（ATLAS曲ID）から、ホーム画面集計用の対象曲ID集合を作る。
         APOLLO.演奏曲 relation が ATLAS 向きである前提。
@@ -8780,7 +8780,7 @@ if system_mode == "HARMONIA":
             return "🟡 一部未完"
         return "⚪ 未着手"
 
-        def _h_collect_apollo_song_ids_for_concert(concert_id: str, atlas_song_ids: list[str]) -> set[str]:
+    def _h_collect_apollo_song_ids_for_concert(concert_id: str, atlas_song_ids: list[str]) -> set[str]:
         """
         CONCERT_SONG.曲（ATLAS曲ID）から、ホーム画面集計用の対象曲ID集合を作る。
         APOLLO.演奏曲 relation が ATLAS 向きである前提。
