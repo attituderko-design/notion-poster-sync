@@ -71,6 +71,7 @@ PARTDEF_CONCERT_REL_KEYS  = ["演奏会", "出演", "FK演奏会"]
 PARTDEF_SONG_REL_KEYS     = ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ"]
 PARTDEF_INST_REL_KEYS     = ["必要楽器", "楽器種別", "楽器", "FK楽器種別", "担当楽器"]
 PARTDEF_NAME_KEYS         = ["パート名", "名称", "表示名"]
+PARTDEF_DISPLAY_NAME_KEYS = ["表示パート名", "display_part_name", "パート表示名"]
 PARTDEF_NOTE_KEYS         = ["備考", "メモ", "注記"]
 PARTDEF_KEY_KEYS          = ["part_key", "PartKey", "PKパートキー", "パートキー"]
 
