@@ -741,71 +741,91 @@ def _mmss_to_sec(mmss: str) -> int | None:
 # 楽曲タブ
 # ============================================================
 
+
+# ============================================================
+# 楽曲タブ
+# ============================================================
+
 def _render_song_tab(ctx: dict):
+    """楽曲タブ：一覧・確定管理・新規登録をサブタブで分離。"""
     concerts = _load_concerts(ctx)
     all_concert_opts = {_concert_name(c, ctx): c.get("id", "") for c in concerts}
     global_concert_id, global_concert_name = _get_global_concert_filter(ctx, all_concert_opts)
     if not global_concert_id:
         st.info("サイドバーで演奏会を選択してください。")
         return
-    st.caption(f"対象演奏会: {global_concert_name or global_concert_id}")
     filter_concert_id = global_concert_id
 
-    songs = _load_songs(ctx, filter_concert_id)
+    sub_list, sub_new = st.tabs(["📋 楽曲一覧", "➕ 新規登録"])
 
-    st.markdown("### 楽曲情報の確定")
-    song_confirm_stats = _get_concert_song_confirmation_stats(ctx, filter_concert_id)
-    if not song_confirm_stats["rows"]:
-        st.info("この演奏会の CONCERT_SONG がまだありません。楽曲情報は未着手です。")
-    elif not song_confirm_stats["flag_key"]:
-        st.warning("CONCERT_SONG DB に『楽曲確定』プロパティが見つかりません。")
-    else:
-        st.caption(
-            f"楽曲確定 {song_confirm_stats['confirmed']} / {song_confirm_stats['total']} 曲"
-        )
-        pending_names = [d["name"] for d in song_confirm_stats["details"] if not d["confirmed"]]
-        if pending_names:
-            st.caption("未確定: " + "、".join(pending_names[:8]) + (" …" if len(pending_names) > 8 else ""))
-        c_sc1, c_sc2 = st.columns(2)
-        if c_sc1.button("✅ 楽曲情報を確定", use_container_width=True, key=f"song_confirm_all_{filter_concert_id}"):
-            total, updated = _set_concert_song_song_confirmed(ctx, filter_concert_id, True)
-            if total == 0:
-                st.error("CONCERT_SONG の対象行が見つかりません。")
-            elif updated == total:
-                st.success(f"✅ {updated}件の楽曲を確定しました。")
-                st.rerun()
-            else:
-                st.warning(f"⚠️ {updated} / {total} 件の更新に成功しました。")
-                st.rerun()
-        if c_sc2.button("↩ 楽曲情報確定を解除", use_container_width=True, key=f"song_unconfirm_all_{filter_concert_id}"):
-            total, updated = _set_concert_song_song_confirmed(ctx, filter_concert_id, False)
-            if total == 0:
-                st.error("CONCERT_SONG の対象行が見つかりません。")
-            elif updated == total:
-                st.success(f"✅ {updated}件の楽曲確定を解除しました。")
-                st.rerun()
-            else:
-                st.warning(f"⚠️ {updated} / {total} 件の更新に成功しました。")
-                st.rerun()
+    # ── サブタブ: 楽曲一覧 ──────────────────────────────────
+    with sub_list:
+        songs = _load_songs(ctx, filter_concert_id)
 
-    with st.expander("➕ 新規楽曲を登録（簡易・手動）", expanded=(len(songs) == 0)):
-        st.caption("※ ここで設定する「必要楽器」は曲側の必要編成（人数・台数）です。")
-        st.caption("　誰が何を担当するかは「奏者・出欠・アサイン」画面で設定します。")
+        # 確定サマリーをコンパクトに表示
+        song_confirm_stats = _get_concert_song_confirmation_stats(ctx, filter_concert_id)
+        if song_confirm_stats["rows"] and song_confirm_stats["flag_key"]:
+            confirmed = song_confirm_stats["confirmed"]
+            total     = song_confirm_stats["total"]
+            if confirmed == total:
+                st.success(f"✅ 楽曲情報確定：{confirmed} / {total} 曲（全曲完了）")
+            else:
+                pending = [d["name"] for d in song_confirm_stats["details"] if not d["confirmed"]]
+                st.warning(
+                    f"楽曲情報確定：{confirmed} / {total} 曲　"
+                    f"未確定：{'、'.join(pending[:5])}{'…' if len(pending) > 5 else ''}"
+                )
+
+        col_h, col_r = st.columns([8, 1])
+        col_h.subheader(f"楽曲一覧（{len(songs)}件）" if songs else "楽曲一覧")
+        if col_r.button("🔄", key="refresh_songs", help="再読み込み"):
+            _clear_song_cache()
+            st.rerun()
+
+        if not songs:
+            st.info("楽曲がまだ登録されていません。「新規登録」タブから追加してください。")
+            return
+
+        # 検索
+        song_query = st.text_input(
+            "検索",
+            value=st.session_state.get("songs_song_search", ""),
+            key="songs_song_search",
+            placeholder="曲名 / 作曲者",
+        ).strip().lower()
+        sorted_songs = sorted(songs, key=lambda x: _song_name(x, ctx))
+        if song_query:
+            sorted_songs = [
+                s for s in sorted_songs
+                if song_query in (_song_name(s, ctx) or "").lower()
+                or song_query in (ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS) or "").lower()
+            ]
+        if not sorted_songs:
+            st.info("検索条件に一致する楽曲がありません。")
+            return
+        st.caption(f"{len(sorted_songs)} / {len(songs)} 件表示")
+
+        # 楽曲ごとに1行ずつ表示
+        for s in sorted_songs:
+            _render_song_row(ctx, s, all_concert_opts, filter_concert_id, song_confirm_stats)
+
+    # ── サブタブ: 新規登録 ───────────────────────────────────
+    with sub_new:
+        st.subheader("楽曲を新規登録")
+        st.caption("APOLLO（演奏曲DB）に登録済みの曲を追加する場合は、出演登録フロー経由で行ってください。")
         with st.form("song_new_form", border=True):
             title    = st.text_input("曲名 *", placeholder="例：マリンバ協奏曲", key="sn_title")
             composer = st.text_input("作曲者", placeholder="例：安倍圭子", key="sn_composer")
-
             duration_str = st.text_input(
                 "演奏時間", placeholder="例：5:30（分:秒）または 330（秒）", key="sn_duration"
             )
-
             concert_sel = st.multiselect(
                 "紐づける演奏会",
                 list(all_concert_opts.keys()),
+                default=[k for k, v in all_concert_opts.items() if v == filter_concert_id],
                 key="sn_concerts",
             )
             note = st.text_area("難易度メモ", height=60, key="sn_note")
-
             if st.form_submit_button("💾 登録", use_container_width=True, type="primary"):
                 if not title.strip():
                     st.error("曲名は必須です。")
@@ -813,8 +833,7 @@ def _render_song_tab(ctx: dict):
                     duration_sec = _mmss_to_sec(duration_str)
                     concert_ids  = [all_concert_opts[n] for n in concert_sel if all_concert_opts.get(n)]
                     with st.spinner("登録中..."):
-                        ok = _create_song(ctx, title.strip(), concert_ids,
-                                          composer, duration_sec, note)
+                        ok = _create_song(ctx, title.strip(), concert_ids, composer, duration_sec, note)
                     if ok:
                         st.success("✅ 楽曲を登録しました。")
                         _clear_song_cache()
@@ -822,120 +841,71 @@ def _render_song_tab(ctx: dict):
                     else:
                         st.error("❌ 登録に失敗しました。")
 
-    st.divider()
 
-    if not songs:
-        st.info("楽曲がまだ登録されていません。")
-        return
-
-    col_h, col_r = st.columns([8, 1])
-    col_h.subheader(f"登録済み楽曲（{len(songs)}件）")
-    if col_r.button("🔄", key="refresh_songs", help="再読み込み"):
-        _clear_song_cache()
-        st.rerun()
-    song_query = st.text_input(
-        "楽曲を検索",
-        value=st.session_state.get("songs_song_search", ""),
-        key="songs_song_search",
-        placeholder="例: Jupiter / marimba / concerto",
-    ).strip().lower()
-
-    sorted_songs = sorted(songs, key=lambda x: _song_name(x, ctx))
-    if song_query:
-        sorted_songs = [
-            s for s in sorted_songs
-            if song_query in (_song_name(s, ctx) or "").lower()
-            or song_query in (ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS) or "").lower()
-        ]
-    st.caption(f"表示件数: {len(sorted_songs)} / {len(songs)}")
-    if not sorted_songs:
-        st.info("検索条件に一致する楽曲がありません。")
-        return
-
-    # 重い全件描画を避け、基本は1件選択編集
-    mode_all = st.toggle("全件展開モード（重い）", value=False, key="songs_all_mode")
-    if not mode_all:
-        sel_map = {}
-        labels = []
-        for s in sorted_songs:
-            sid = s.get("id", "")
-            label = _song_name(s, ctx)
-            comp = ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS)
-            labels.append(f"{label} / {comp}" if comp else label)
-            sel_map[labels[-1]] = sid
-        pick = st.selectbox("編集対象の楽曲", ["（選択してください）"] + labels, key="songs_pick_one")
-        if pick == "（選択してください）":
-            st.info("上のプルダウンから1件選ぶと編集フォームを表示します。")
-            return
-        song_id = sel_map.get(pick, "")
-        target = next((s for s in sorted_songs if s.get("id", "") == song_id), None)
-        if not target:
-            st.warning("選択した楽曲が見つかりません。再読み込みしてください。")
-            return
-        _render_song_editor(ctx, target, all_concert_opts)
-        return
-
-    for s in sorted_songs:
-        _render_song_editor(ctx, s, all_concert_opts)
-
-
-def _render_song_editor(ctx: dict, s: dict, all_concert_opts: dict[str, str]):
+def _render_song_row(
+    ctx: dict,
+    s: dict,
+    all_concert_opts: dict[str, str],
+    concert_id: str,
+    song_confirm_stats: dict,
+):
+    """楽曲1件の行表示。確定ボタンを行内に統合。"""
     song_id    = s.get("id", "")
     song_label = _song_name(s, ctx)
-    composer   = ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS)
+    composer   = ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS) or ""
     dur_sec_str = ctx["extract_prop_text_any"](s, SONG_DURATION_KEYS)
     dur_disp   = _sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None)
-    caption    = f"{composer}　{dur_disp}" if composer or dur_disp else ""
+    sub_cap    = "　".join(filter(None, [composer, dur_disp]))
 
-    with st.expander(f"{song_label}　{f'*{caption}*' if caption else ''}", expanded=True):
-        concert_ids_current = list(all_concert_opts.values())
-        active_concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
-        if active_concert_id:
-            song_confirm_stats = _get_concert_song_confirmation_stats(ctx, active_concert_id)
-            target_norms = {_norm_notion_id(x) for x in _resolve_atlas_song_ids(ctx, active_concert_id, song_id)}
-            row_detail = next((d for d in song_confirm_stats["details"] if {_norm_notion_id(x) for x in ctx["extract_relation_ids_any"](d["row"], CONCERT_SONG_SONG_REL_KEYS)}.intersection(target_norms)), None)
-            if row_detail and song_confirm_stats["flag_key"]:
-                st.caption(f"この曲の楽曲確定: {'✅ 確定' if row_detail['confirmed'] else '⬜ 未確定'}")
-                c1_song, c2_song = st.columns(2)
-                if c1_song.button("✅ この曲を確定", key=f"song_confirm_one_{active_concert_id}_{song_id}", use_container_width=True):
-                    total, updated = _set_concert_song_song_confirmed(ctx, active_concert_id, True, song_id=song_id)
-                    if total == 0:
-                        st.error("CONCERT_SONG 行が見つかりません。")
-                    else:
-                        st.success(f"✅ {updated}件を更新しました。")
-                        st.rerun()
-                if c2_song.button("↩ この曲の確定を解除", key=f"song_unconfirm_one_{active_concert_id}_{song_id}", use_container_width=True):
-                    total, updated = _set_concert_song_song_confirmed(ctx, active_concert_id, False, song_id=song_id)
-                    if total == 0:
-                        st.error("CONCERT_SONG 行が見つかりません。")
-                    else:
-                        st.success(f"✅ {updated}件を更新しました。")
-                        st.rerun()
+    # 確定状態を取得
+    is_confirmed = False
+    has_flag_key = bool(song_confirm_stats.get("flag_key"))
+    if has_flag_key:
+        target_norms = {_norm_notion_id(x) for x in _resolve_atlas_song_ids(ctx, concert_id, song_id)}
+        row_detail = next(
+            (d for d in song_confirm_stats["details"]
+             if {_norm_notion_id(x) for x in ctx["extract_relation_ids_any"](d["row"], CONCERT_SONG_SONG_REL_KEYS)}.intersection(target_norms)),
+            None
+        )
+        is_confirmed = row_detail["confirmed"] if row_detail else False
 
-        # 既存紐づき演奏会
-        existing_concert_ids = ctx["extract_relation_ids_any"](s, SONG_CONCERT_REL_KEYS)
+    confirm_badge = "✅" if is_confirmed else "⬜"
+    expander_label = f"{confirm_badge} {song_label}" + (f"　*{sub_cap}*" if sub_cap else "")
+
+    with st.expander(expander_label, expanded=False):
+        # 確定ボタン（行内）
+        if has_flag_key:
+            c_conf1, c_conf2 = st.columns(2)
+            if not is_confirmed:
+                if c_conf1.button("✅ 楽曲情報を確定", key=f"song_confirm_{concert_id}_{song_id}",
+                                   use_container_width=True, type="primary"):
+                    total, updated = _set_concert_song_song_confirmed(ctx, concert_id, True, song_id=song_id)
+                    st.success(f"✅ {updated}件を更新しました。") if updated else st.error("CONCERT_SONG 行が見つかりません。")
+                    st.rerun()
+            else:
+                if c_conf2.button("↩ 確定を解除", key=f"song_unconfirm_{concert_id}_{song_id}",
+                                   use_container_width=True):
+                    total, updated = _set_concert_song_song_confirmed(ctx, concert_id, False, song_id=song_id)
+                    st.success(f"✅ {updated}件を更新しました。") if updated else st.error("CONCERT_SONG 行が見つかりません。")
+                    st.rerun()
+
+        # 編集フォーム
+        existing_concert_ids   = ctx["extract_relation_ids_any"](s, SONG_CONCERT_REL_KEYS)
         existing_concert_names = [k for k, v in all_concert_opts.items() if v in existing_concert_ids]
-
         with st.form(f"song_edit_{song_id}", border=True):
-            title    = st.text_input("曲名 *", value=_song_name(s, ctx), key=f"se_title_{song_id}")
-            composer = st.text_input("作曲者", value=ctx["extract_prop_text_any"](s, SONG_COMPOSER_KEYS),
-                                     key=f"se_composer_{song_id}")
-            dur_str  = st.text_input(
-                "演奏時間",
-                value=_sec_to_mmss(int(float(dur_sec_str)) if dur_sec_str else None),
-                placeholder="例：5:30",
+            title   = st.text_input("曲名 *", value=song_label, key=f"se_title_{song_id}")
+            composer_v = st.text_input("作曲者", value=composer, key=f"se_composer_{song_id}")
+            dur_str = st.text_input(
+                "演奏時間", value=dur_disp or "", placeholder="例：5:30",
                 key=f"se_duration_{song_id}",
             )
             concert_sel = st.multiselect(
-                "紐づける演奏会",
-                list(all_concert_opts.keys()),
-                default=existing_concert_names,
-                key=f"se_concerts_{song_id}",
+                "紐づける演奏会", list(all_concert_opts.keys()),
+                default=existing_concert_names, key=f"se_concerts_{song_id}",
             )
             note = st.text_area("難易度メモ",
-                                value=ctx["extract_prop_text_any"](s, SONG_NOTE_KEYS),
+                                value=ctx["extract_prop_text_any"](s, SONG_NOTE_KEYS) or "",
                                 height=60, key=f"se_note_{song_id}")
-
             if st.form_submit_button("💾 更新", use_container_width=True):
                 if not title.strip():
                     st.error("曲名は必須です。")
@@ -944,7 +914,7 @@ def _render_song_editor(ctx: dict, s: dict, all_concert_opts: dict[str, str]):
                     concert_ids  = [all_concert_opts[n] for n in concert_sel if all_concert_opts.get(n)]
                     with st.spinner("更新中..."):
                         ok = _update_song(ctx, song_id, title.strip(), concert_ids,
-                                          composer, duration_sec, note)
+                                          composer_v, duration_sec, note)
                     if ok:
                         st.success("✅ 更新しました。")
                         _clear_song_cache()
@@ -953,66 +923,12 @@ def _render_song_editor(ctx: dict, s: dict, all_concert_opts: dict[str, str]):
                         st.error("❌ 更新に失敗しました。")
 
 
-
-def _upsert_partdef(
-    ctx: dict,
-    concert_id: str,
-    song_id: str,
-    song_name: str,
-    part_name: str,
-    inst_ids: list[str],
-    inst_names: list[str],
-    need_count: int,
-    note: str,
-    existing_id: str = "",
-) -> bool:
-    db_id = ctx["CONCERT_DB_PART_DEFINITION"]
-    t = ctx["get_prop_types"](db_id)
-    if not t:
-        st.error("パート定義DBのプロパティ取得に失敗しました。")
-        return False
-    clean_inst_ids = [x for x in (inst_ids or []) if x]
-    if not clean_inst_ids:
-        st.error("担当楽器を1つ以上選択してください。")
-        return False
-    apollo_song_ids = _resolve_apollo_song_ids(ctx, concert_id, song_id)
-    if apollo_song_ids:
-        target_song_id = apollo_song_ids[0]
-    else:
-        # APOLLO IDが取得できない場合はATLAS IDで代替（過渡期フォールバック）
-        st.warning("対応する APOLLO 演奏曲が見つからないため、ATLAS IDで代替登録します。出演登録フロー経由で APOLLO 演奏曲DBへの登録を確認してください。")
-        target_song_id = song_id
-    inst_label = " / ".join([x for x in (inst_names or []) if x]) or "楽器未設定"
-    props = {}
-    ctx["put_prop_any"](props, t, PARTDEF_RECORD_KEYS, f"{song_name} / {part_name} / {inst_label}")
-    ctx["put_prop_any"](props, t, PARTDEF_NAME_KEYS, part_name)
-    ctx["put_prop_any"](props, t, PARTDEF_CONCERT_REL_KEYS, concert_id)
-    ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS, target_song_id)
-    ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS, clean_inst_ids)
-    ctx["put_prop_any"](props, t, PARTDEF_NOTE_KEYS, note)
-    ctx["put_key_any"](
-        props,
-        t,
-        PARTDEF_KEY_KEYS,
-        concert_id,
-        target_song_id,
-        part_name,
-        "|".join(clean_inst_ids),
-        prefix="part",
-    )
-    if existing_id:
-        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{existing_id}", json={"properties": props})
-    else:
-        res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
-    return res is not None and res.status_code == 200
-
+# ============================================================
+# パート定義タブ
+# ============================================================
 
 def _render_partdef_tab(ctx: dict):
-    st.subheader("🧩 パート定義")
-    st.caption("楽曲ごとに、担当パート（楽器・必要人数）を明示管理します。")
-
-    # Streamlitのwidget keyへ直接代入すると例外になるため、
-    # 追加直後の検索語反映は「次回反映キー」を経由して先頭で適用する。
+    """パート定義タブ：曲選択→パート一覧→追加。楽器追加は楽器タブへ。"""
     pending_inst_search = st.session_state.pop("partdef_inst_search_next", "")
     if pending_inst_search:
         st.session_state["partdef_inst_search"] = pending_inst_search
@@ -1023,253 +939,301 @@ def _render_partdef_tab(ctx: dict):
     if not global_concert_id:
         st.info("サイドバーで演奏会を選択してください。")
         return
-    c_name = global_concert_name or "（選択中）"
     c_id = global_concert_id
-    st.caption(f"対象演奏会: {c_name}")
-    if not c_id:
-        return
 
     songs = _load_songs(ctx, c_id)
     if not songs:
-        st.info("この演奏会に紐づく楽曲がありません。先に楽曲を登録してください。")
+        st.info("この演奏会に楽曲がありません。先に「楽曲」タブで登録してください。")
         return
-    song_opts = {_song_name(s, ctx): s for s in songs}
-    s_name = st.selectbox("楽曲", list(song_opts.keys()), key="partdef_song_sel")
-    s = song_opts[s_name]
-    selected_apollo_song_id = s.get("id", "")
-    atlas_song_ids = _extract_apollo_atlas_song_ids(s, ctx)
-    s_id = atlas_song_ids[0] if atlas_song_ids else selected_apollo_song_id
 
     instruments = _load_instruments(ctx)
     if not instruments:
-        st.info("先に楽器種別を登録してください。")
+        st.info("楽器種別が登録されていません。先に「楽器種別」タブで登録してください。")
         return
     inst_opts_all = {
         _instrument_name(i, ctx): i.get("id", "")
         for i in sorted(instruments, key=lambda x: _instrument_name(x, ctx))
     }
 
-    st.caption("担当楽器は複数選択できます（例: `Tamb. + Guiro + A.Cym.`）。")
-    inst_search = st.text_input(
-        "楽器を検索",
-        value=st.session_state.get("partdef_inst_search", ""),
-        key="partdef_inst_search",
-        placeholder="例: snare / cymbal / tam",
-    ).strip().lower()
-    if inst_search:
-        inst_opts = {k: v for k, v in inst_opts_all.items() if inst_search in k.lower()}
-    else:
-        inst_opts = dict(inst_opts_all)
-
-    c_new1, c_new2, c_new3 = st.columns([4, 2, 2])
-    new_inst_name = c_new1.text_input(
-        "楽器マスタに新規追加",
-        value=st.session_state.get("partdef_new_inst_name", ""),
-        key="partdef_new_inst_name",
-        placeholder="候補に無い楽器名を入力",
-    ).strip()
-    new_inst_cat = c_new2.selectbox(
-        "カテゴリ",
-        INSTRUMENT_CATEGORIES,
-        key="partdef_new_inst_cat",
-    )
-    if c_new3.button("➕ 楽器を追加", use_container_width=True, key="partdef_add_inst_btn"):
-        if not new_inst_name:
-            st.warning("新規追加する楽器名を入力してください。")
-        else:
-            with st.spinner("楽器マスタに追加中..."):
-                ok_add = _create_instrument(ctx, new_inst_name, new_inst_cat, "")
-            if ok_add:
-                st.success(f"✅ 楽器マスタへ追加しました: {new_inst_name}")
-                st.session_state.pop("instrument_list", None)
-                st.session_state["partdef_inst_search_next"] = new_inst_name
-                st.rerun()
-            else:
-                st.error("❌ 楽器マスタへの追加に失敗しました。")
-
-    with st.form(f"partdef_new_{c_id}_{s_id}", border=True):
-        p_name = st.text_input("パート名 *", placeholder="例: Part1 1stTimp.")
-        i_names = st.multiselect(
-            "担当楽器（複数選択可）",
-            list(inst_opts.keys()),
-            help="候補が多いときは上の「楽器を検索」で絞り込んでください。",
-        )
-        need = st.number_input("必要人数", min_value=1, max_value=20, value=1, step=1)
-        note = st.text_input("備考", placeholder="任意")
-        if st.form_submit_button("💾 パートを追加", type="primary", use_container_width=True):
-            if not p_name.strip():
-                st.error("パート名は必須です。")
-            elif not i_names:
-                st.error("担当楽器を1つ以上選択してください。")
-            else:
-                ok = _upsert_partdef(
-                    ctx,
-                    concert_id=c_id,
-                    song_id=s_id,
-                    song_name=s_name,
-                    part_name=p_name.strip(),
-                    inst_ids=[inst_opts[n] for n in i_names if inst_opts.get(n)],
-                    inst_names=i_names,
-                    need_count=int(need),
-                    note=note,
-                )
-                if ok:
-                    _set_concert_song_partdef_completed(
-                        ctx,
-                        concert_id=c_id,
-                        song_id=s_id,
-                        completed=False,
-                    )
-                    st.success("✅ パート定義を追加しました。")
-                    st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
-                    st.rerun()
-                else:
-                    st.error("❌ 追加に失敗しました。")
+    # 曲選択
+    song_opts = {_song_name(s, ctx): s for s in songs}
+    s_name = st.selectbox("楽曲を選択", list(song_opts.keys()), key="partdef_song_sel")
+    s = song_opts[s_name]
+    selected_apollo_song_id = s.get("id", "")
+    atlas_song_ids = _extract_apollo_atlas_song_ids(s, ctx)
+    s_id = atlas_song_ids[0] if atlas_song_ids else selected_apollo_song_id
 
     st.divider()
-    st.markdown("### CONCERT_SONG への反映")
 
+    # CONCERT_SONG 定義完了状態
     cs_row = _find_concert_song_row(ctx, c_id, s_id)
     if cs_row:
-        cs_props = (cs_row.get("properties", {}) or {})
-        done_prop_name = ctx["find_prop_name"](ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT_SONG"]), CONCERT_SONG_DONE_KEYS)
-        current_done = False
-        if done_prop_name and done_prop_name in cs_props and cs_props[done_prop_name].get("type") == "checkbox":
-            current_done = bool(cs_props[done_prop_name].get("checkbox"))
-
-        st.caption(f"現在の定義完了状態: {'✅ 完了' if current_done else '⬜ 未完了'}")
-    else:
-        st.warning("CONCERT_SONG に対応する行が見つかりません。完了反映はできません。")
-
-    complete_note = st.text_input(
-        "完了時メモ（任意）",
-        key=f"concert_song_complete_note_{c_id}_{s_id}",
-        placeholder="例: 2026-03-30 パート定義確認済み",
-    )
-
-    c_done1, c_done2 = st.columns(2)
-
-    if c_done1.button("✅ この曲のパート定義を完了にする", use_container_width=True):
-        if not cs_row:
-            st.error("CONCERT_SONG 行が無いため、完了反映できません。")
-        else:
-            ok = _set_concert_song_partdef_completed(
-                ctx,
-                concert_id=c_id,
-                song_id=s_id,
-                completed=True,
-                note=complete_note,
-            )
-            if ok:
-                st.success("✅ CONCERT_SONG の『定義完了』を更新しました。")
-                st.rerun()
-            else:
-                st.error("❌ CONCERT_SONG の更新に失敗しました。")
-
-    if c_done2.button("↩ 完了を取り消す", use_container_width=True):
-        if not cs_row:
-            st.error("CONCERT_SONG 行が無いため、完了取消できません。")
-        else:
-            ok = _set_concert_song_partdef_completed(
-                ctx,
-                concert_id=c_id,
-                song_id=s_id,
-                completed=False,
-                note=complete_note,
-            )
-            if ok:
-                st.success("✅ CONCERT_SONG の『定義完了』を取り消しました。")
-                st.rerun()
-            else:
-                st.error("❌ CONCERT_SONG の更新に失敗しました。")
-
-    apollo_song_ids = _resolve_apollo_song_ids(ctx, c_id, s_id)
-    if apollo_song_ids:
-        st.caption(f"対応する APOLLO 演奏曲: {len(apollo_song_ids)} 件")
-    else:
-        st.warning("対応する APOLLO 演奏曲が見つかりません。出演登録フロー経由の演奏曲DB作成が必要です。")
-
-    part_rows = _load_partdefs(ctx, c_id, s_id)
-    st.caption(f"登録済みパート: {len(part_rows)}件")
-    if not part_rows:
-        return
-    for r in part_rows:
-        rid = r.get("id", "")
-        part_name_disp = (
-            ctx["extract_prop_text_any"](r, PARTDEF_NAME_KEYS)
-            or ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS)
-            or ctx["extract_title"](r)
+        cs_props      = cs_row.get("properties", {}) or {}
+        done_prop_name = ctx["find_prop_name"](
+            ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT_SONG"]), CONCERT_SONG_DONE_KEYS
         )
-        row_title = ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS) or part_name_disp
-        cur_inst_ids = ctx["extract_relation_ids_any"](r, PARTDEF_INST_REL_KEYS)
-        cur_inst_names = [k for k, v in inst_opts_all.items() if v in set(cur_inst_ids)]
-        cur_note = ctx["extract_prop_text_any"](r, PARTDEF_NOTE_KEYS)
-        with st.expander(row_title, expanded=True):
-            with st.form(f"partdef_edit_{rid}", border=True):
-                n_name = st.text_input("パート名 *", value=part_name_disp)
-                n_inst = st.multiselect(
-                    "担当楽器（複数選択可）",
-                    list(inst_opts.keys()),
-                    default=[x for x in cur_inst_names if x in inst_opts],
-                )
-                n_need = 1  # パートNoフィールド廃止のため固定
-                n_note = st.text_input("備考", value=cur_note)
-                c1, c2 = st.columns(2)
-                if c1.form_submit_button("💾 更新", use_container_width=True):
-                    if not n_inst:
-                        st.error("担当楽器を1つ以上選択してください。")
-                        ok = False
-                    else:
-                        ok = _upsert_partdef(
-                            ctx,
-                            concert_id=c_id,
-                            song_id=s_id,
-                            song_name=s_name,
-                            part_name=n_name.strip() or part_name_disp,
-                            inst_ids=[inst_opts[x] for x in n_inst if inst_opts.get(x)],
-                            inst_names=n_inst,
-                            need_count=int(n_need),
-                            note=n_note,
-                            existing_id=rid,
-                        )
+        current_done = (
+            bool(cs_props[done_prop_name].get("checkbox"))
+            if done_prop_name and done_prop_name in cs_props
+               and cs_props[done_prop_name].get("type") == "checkbox"
+            else False
+        )
+        badge = "✅ 定義完了" if current_done else "⬜ 未完了"
+        col_badge, col_btn1, col_btn2 = st.columns([3, 2, 2])
+        col_badge.markdown(f"**パート定義状態：{badge}**")
+        complete_note = st.text_input(
+            "完了メモ（任意）",
+            key=f"cs_complete_note_{c_id}_{s_id}",
+            placeholder="例: 2026-03-30 確認済み",
+        )
+        if not current_done:
+            if col_btn1.button("✅ 完了にする", use_container_width=True,
+                               key=f"cs_done_{c_id}_{s_id}", type="primary"):
+                ok = _set_concert_song_partdef_completed(ctx, c_id, s_id, True, note=complete_note)
+                st.success("✅ 更新しました。") if ok else st.error("❌ 更新に失敗しました。")
+                if ok: st.rerun()
+        else:
+            if col_btn2.button("↩ 完了を取り消す", use_container_width=True,
+                               key=f"cs_undone_{c_id}_{s_id}"):
+                ok = _set_concert_song_partdef_completed(ctx, c_id, s_id, False, note=complete_note)
+                st.success("✅ 更新しました。") if ok else st.error("❌ 更新に失敗しました。")
+                if ok: st.rerun()
+    else:
+        st.warning("CONCERT_SONG に対応する行がありません。完了フラグの更新はできません。")
+
+    st.divider()
+
+    # 楽器検索（パート定義タブ内の絞り込みのみ）
+    inst_search = st.text_input(
+        "楽器を絞り込む",
+        value=st.session_state.get("partdef_inst_search", ""),
+        key="partdef_inst_search",
+        placeholder="例: snare / cymbal",
+    ).strip().lower()
+    inst_opts = {k: v for k, v in inst_opts_all.items() if inst_search in k.lower()}         if inst_search else dict(inst_opts_all)
+    if not inst_opts:
+        st.warning("条件に一致する楽器がありません。「楽器種別」タブで追加してください。")
+
+    # パート追加フォーム
+    with st.expander("➕ パートを追加", expanded=False):
+        with st.form(f"partdef_new_{c_id}_{s_id}", border=True):
+            p_name = st.text_input("パート名 *", placeholder="例: Part1 1stTimp.")
+            i_names = st.multiselect(
+                "担当楽器（複数選択可）", list(inst_opts.keys()),
+                help="候補が多いときは上の絞り込みを使ってください。",
+            )
+            need = st.number_input("必要人数", min_value=1, max_value=20, value=1, step=1)
+            note = st.text_input("備考", placeholder="任意")
+            if st.form_submit_button("💾 追加", type="primary", use_container_width=True):
+                if not p_name.strip():
+                    st.error("パート名は必須です。")
+                elif not i_names:
+                    st.error("担当楽器を1つ以上選択してください。")
+                else:
+                    ok = _upsert_partdef(
+                        ctx, concert_id=c_id, song_id=s_id, song_name=s_name,
+                        part_name=p_name.strip(),
+                        inst_ids=[inst_opts[n] for n in i_names if inst_opts.get(n)],
+                        inst_names=i_names, need_count=int(need), note=note,
+                    )
                     if ok:
-                        _set_concert_song_partdef_completed(
-                            ctx,
-                            concert_id=c_id,
-                            song_id=s_id,
-                            completed=False,
-                        )
-                        st.success("✅ 更新しました。")
+                        _set_concert_song_partdef_completed(ctx, c_id, s_id, False)
+                        st.success("✅ パートを追加しました。")
                         st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
                         st.rerun()
-                    elif n_inst:
-                        st.error("❌ 更新に失敗しました。")
-                if c2.form_submit_button("🗑 削除", use_container_width=True):
-                    ok = _delete_page(ctx, rid)
-                    if ok:
-                        _set_concert_song_partdef_completed(
-                            ctx,
-                            concert_id=c_id,
-                            song_id=s_id,
-                            completed=False,
-                        )
-                        st.success("✅ 削除しました。")
-                        st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
-                        st.rerun()
                     else:
-                        st.error("❌ 削除に失敗しました。")
+                        st.error("❌ 追加に失敗しました。")
+
+    # 登録済みパート一覧
+    part_rows = _load_partdefs(ctx, c_id, s_id)
+    st.subheader(f"登録済みパート（{len(part_rows)}件）")
+    if not part_rows:
+        st.info("まだパートが登録されていません。上の「パートを追加」から登録してください。")
+    else:
+        for r in part_rows:
+            rid = r.get("id", "")
+            part_name_disp = (
+                ctx["extract_prop_text_any"](r, PARTDEF_NAME_KEYS)
+                or ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS)
+                or ctx["extract_title"](r)
+            )
+            row_title      = ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS) or part_name_disp
+            cur_inst_ids   = ctx["extract_relation_ids_any"](r, PARTDEF_INST_REL_KEYS)
+            cur_inst_names = [k for k, v in inst_opts_all.items() if v in set(cur_inst_ids)]
+            cur_note       = ctx["extract_prop_text_any"](r, PARTDEF_NOTE_KEYS) or ""
+            with st.expander(row_title, expanded=False):
+                with st.form(f"partdef_edit_{rid}", border=True):
+                    n_name = st.text_input("パート名 *", value=part_name_disp)
+                    n_inst = st.multiselect(
+                        "担当楽器（複数選択可）", list(inst_opts.keys()),
+                        default=[x for x in cur_inst_names if x in inst_opts],
+                    )
+                    n_note = st.text_input("備考", value=cur_note)
+                    c1, c2 = st.columns(2)
+                    if c1.form_submit_button("💾 更新", use_container_width=True):
+                        if not n_inst:
+                            st.error("担当楽器を1つ以上選択してください。")
+                        else:
+                            ok = _upsert_partdef(
+                                ctx, concert_id=c_id, song_id=s_id, song_name=s_name,
+                                part_name=n_name.strip() or part_name_disp,
+                                inst_ids=[inst_opts[x] for x in n_inst if inst_opts.get(x)],
+                                inst_names=n_inst, need_count=1, note=n_note,
+                                existing_id=rid,
+                            )
+                            if ok:
+                                _set_concert_song_partdef_completed(ctx, c_id, s_id, False)
+                                st.success("✅ 更新しました。")
+                                st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
+                                st.rerun()
+                            else:
+                                st.error("❌ 更新に失敗しました。")
+                    if c2.form_submit_button("🗑 削除", use_container_width=True):
+                        ok = _delete_page(ctx, rid)
+                        if ok:
+                            _set_concert_song_partdef_completed(ctx, c_id, s_id, False)
+                            st.success("✅ 削除しました。")
+                            st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
+                            st.rerun()
+                        else:
+                            st.error("❌ 削除に失敗しました。")
+
+    # デバッグ情報（通常時は非表示）
+    with st.expander("🔧 デバッグ情報", expanded=False):
+        apollo_song_ids = _resolve_apollo_song_ids(ctx, c_id, s_id)
+        if apollo_song_ids:
+            st.caption(f"対応する APOLLO 演奏曲ID: {len(apollo_song_ids)} 件")
+            for aid in apollo_song_ids:
+                st.caption(f"  - {aid}")
+        else:
+            st.warning("対応する APOLLO 演奏曲が見つかりません。出演登録フロー経由の登録が必要です。")
+        if cs_row:
+            st.caption(f"CONCERT_SONG ID: {cs_row.get('id', '')}")
 
 
+# ============================================================
+# 楽器種別タブ
+# ============================================================
 
 def _render_instrument_tab(ctx: dict):
+    """楽器種別タブ：楽器マスタの管理 + パート定義タブ向けの新規追加を統合。"""
     instruments = _load_instruments(ctx)
 
-    with st.expander("➕ 新規楽器種別を登録", expanded=(len(instruments) == 0)):
+    sub_list, sub_new = st.tabs(["📋 楽器一覧", "➕ 新規登録"])
+
+    # ── サブタブ: 楽器一覧 ──────────────────────────────────
+    with sub_list:
+        col_h, col_r = st.columns([8, 1])
+        col_h.subheader(f"楽器種別一覧（{len(instruments)}件）")
+        if col_r.button("🔄", key="refresh_instruments", help="再読み込み"):
+            st.session_state.pop("instrument_list", None)
+            st.rerun()
+
+        if not instruments:
+            st.info("楽器種別がまだ登録されていません。「新規登録」タブから追加してください。")
+            return
+
+        q = st.text_input(
+            "検索", value=st.session_state.get("instrument_search", ""),
+            key="instrument_search", placeholder="例: marimba / cymbal",
+        ).strip().lower()
+        edit_mode = st.toggle("編集モード", value=False, key="instrument_edit_mode")
+
+        filtered = instruments
+        if q:
+            def _hit(inst: dict) -> bool:
+                name = (_instrument_name(inst, ctx) or "").lower()
+                cat  = (ctx["extract_prop_text_any"](inst, INSTRUMENT_CATEGORY_KEYS) or "").lower()
+                memo = (ctx["extract_prop_text_any"](inst, INSTRUMENT_MEMO_KEYS) or "").lower()
+                return q in name or q in cat or q in memo
+            filtered = [i for i in instruments if _hit(i)]
+
+        st.caption(f"{len(filtered)} / {len(instruments)} 件表示")
+        if not filtered:
+            st.info("検索条件に一致する楽器がありません。")
+            return
+
+        # カテゴリごとにグループ表示
+        by_cat: dict[str, list] = {c: [] for c in INSTRUMENT_CATEGORIES}
+        for i in filtered:
+            cat = ctx["extract_prop_text_any"](i, INSTRUMENT_CATEGORY_KEYS) or "その他"
+            by_cat.setdefault(cat, []).append(i)
+
+        if not edit_mode:
+            # 読み取り専用
+            for cat in INSTRUMENT_CATEGORIES:
+                items = by_cat.get(cat, [])
+                if not items:
+                    continue
+                st.markdown(f"**{cat}**")
+                for inst in sorted(items, key=lambda x: _instrument_name(x, ctx)):
+                    label = _instrument_name(inst, ctx)
+                    memo  = ctx["extract_prop_text_any"](inst, INSTRUMENT_MEMO_KEYS)
+                    if memo:
+                        memo_html = f"- {label}  \n  <span style='color:#9aa0a6'>{memo}</span>"
+                        st.markdown(memo_html, unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"- {label}")
+        else:
+            # data_editorで一括編集
+            import pandas as pd
+            edit_rows: list[dict] = []
+            edit_meta: list[dict] = []
+            for cat in INSTRUMENT_CATEGORIES:
+                for inst in sorted(by_cat.get(cat, []), key=lambda x: _instrument_name(x, ctx)):
+                    iid      = inst.get("id", "")
+                    label    = _instrument_name(inst, ctx)
+                    cur_cat  = ctx["extract_prop_text_any"](inst, INSTRUMENT_CATEGORY_KEYS) or "その他"
+                    cur_memo = ctx["extract_prop_text_any"](inst, INSTRUMENT_MEMO_KEYS) or ""
+                    edit_rows.append({"楽器名": label, "カテゴリ": cur_cat, "メモ": cur_memo})
+                    edit_meta.append({"iid": iid, "iname": label, "icat": cur_cat, "imemo": cur_memo})
+
+            df_inst = pd.DataFrame(edit_rows)
+            edited_inst = st.data_editor(
+                df_inst, num_rows="fixed", use_container_width=True,
+                key=f"inst_edit_df_{q}",
+                column_config={
+                    "楽器名": st.column_config.TextColumn("楽器名", max_chars=50),
+                    "カテゴリ": st.column_config.SelectboxColumn("カテゴリ", options=INSTRUMENT_CATEGORIES),
+                    "メモ": st.column_config.TextColumn("メモ", max_chars=100),
+                },
+            )
+            if st.button("💾 まとめて保存", type="primary", use_container_width=True,
+                         key="inst_bulk_save"):
+                ok_n = ng_n = skip_n = 0
+                with st.spinner("保存中..."):
+                    df_reset = edited_inst.reset_index(drop=True)
+                    for idx, meta in enumerate(edit_meta):
+                        if idx >= len(df_reset):
+                            break
+                        row   = df_reset.iloc[idx]
+                        new_n = str(row.get("楽器名") or "").strip()
+                        new_c = str(row.get("カテゴリ") or "").strip()
+                        new_m = str(row.get("メモ") or "").strip()
+                        if not new_n:
+                            skip_n += 1
+                            continue
+                        if new_n == meta["iname"] and new_c == meta["icat"] and new_m == meta["imemo"]:
+                            skip_n += 1
+                            continue
+                        ok = _update_instrument(ctx, meta["iid"], new_n, new_c, new_m)
+                        ok_n  += 1 if ok else 0
+                        ng_n  += 0 if ok else 1
+                if ng_n == 0:
+                    st.success(f"✅ {ok_n}件を保存しました。（変更なし {skip_n}件はスキップ）")
+                else:
+                    st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+                st.session_state.pop("instrument_list", None)
+                st.rerun()
+
+    # ── サブタブ: 新規登録 ───────────────────────────────────
+    with sub_new:
+        st.subheader("楽器種別を新規登録")
+        st.caption("パート定義タブの楽器選択に反映されます。")
         with st.form("inst_new_form", border=True):
             name     = st.text_input("楽器名 *", placeholder="例：マリンバ", key="in_name")
             category = st.selectbox("カテゴリ", INSTRUMENT_CATEGORIES, key="in_cat")
             memo     = st.text_area("メモ", height=60, key="in_memo")
-
             if st.form_submit_button("💾 登録", use_container_width=True, type="primary"):
                 if not name.strip():
                     st.error("楽器名は必須です。")
@@ -1279,117 +1243,11 @@ def _render_instrument_tab(ctx: dict):
                     if ok:
                         st.success("✅ 楽器種別を登録しました。")
                         st.session_state.pop("instrument_list", None)
+                        # パート定義タブの検索語を新楽器名にセット
+                        st.session_state["partdef_inst_search_next"] = name.strip()
                         st.rerun()
                     else:
                         st.error("❌ 登録に失敗しました。")
-
-    st.divider()
-
-    if not instruments:
-        st.info("楽器種別がまだ登録されていません。")
-        return
-
-    col_h, col_r = st.columns([8, 1])
-    col_h.subheader(f"登録済み楽器種別（{len(instruments)}件）")
-    if col_r.button("🔄", key="refresh_instruments", help="再読み込み"):
-        st.session_state.pop("instrument_list", None)
-        st.rerun()
-
-    q = st.text_input(
-        "楽器種別を検索",
-        value=st.session_state.get("instrument_search", ""),
-        key="instrument_search",
-        placeholder="例: marimba / cymbal / membrane",
-    ).strip().lower()
-    edit_mode = st.toggle("編集フォームを表示（重い場合はOFF推奨）", value=False, key="instrument_edit_mode")
-
-    if q:
-        def _hit(inst: dict) -> bool:
-            name = (_instrument_name(inst, ctx) or "").lower()
-            cat = (ctx["extract_prop_text_any"](inst, INSTRUMENT_CATEGORY_KEYS) or "").lower()
-            memo = (ctx["extract_prop_text_any"](inst, INSTRUMENT_MEMO_KEYS) or "").lower()
-            return q in name or q in cat or q in memo
-        instruments = [i for i in instruments if _hit(i)]
-    st.caption(f"表示件数: {len(instruments)}")
-    if not instruments:
-        st.info("検索条件に一致する楽器種別がありません。")
-        return
-
-    # カテゴリごとにグループ表示
-    by_cat: dict[str, list] = {c: [] for c in INSTRUMENT_CATEGORIES}
-    for i in instruments:
-        cat = ctx["extract_prop_text_any"](i, INSTRUMENT_CATEGORY_KEYS) or "その他"
-        by_cat.setdefault(cat, []).append(i)
-
-    # 読み取り専用の軽量表示
-    if not edit_mode:
-        for cat in INSTRUMENT_CATEGORIES:
-            items = by_cat.get(cat, [])
-            if not items:
-                continue
-            st.markdown(f"**{cat}**")
-            for inst in sorted(items, key=lambda x: _instrument_name(x, ctx)):
-                label = _instrument_name(inst, ctx)
-                memo = ctx["extract_prop_text_any"](inst, INSTRUMENT_MEMO_KEYS)
-                if memo:
-                    st.markdown(f"- {label}  \n  <span style='color:#9aa0a6'>{memo}</span>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"- {label}")
-        return
-
-    import pandas as pd
-    # 全楽器をdata_editorで一括編集
-    edit_rows: list[dict] = []
-    edit_meta: list[dict] = []
-    for cat in INSTRUMENT_CATEGORIES:
-        for inst in sorted(by_cat.get(cat, []), key=lambda x: _instrument_name(x, ctx)):
-            iid   = inst.get("id", "")
-            label = _instrument_name(inst, ctx)
-            cur_cat  = ctx["extract_prop_text_any"](inst, INSTRUMENT_CATEGORY_KEYS) or "その他"
-            cur_memo = ctx["extract_prop_text_any"](inst, INSTRUMENT_MEMO_KEYS) or ""
-            edit_rows.append({"楽器名": label, "カテゴリ": cur_cat, "メモ": cur_memo})
-            edit_meta.append({"iid": iid, "iname": label, "icat": cur_cat, "imemo": cur_memo})
-
-    df_inst = pd.DataFrame(edit_rows)
-    edited_inst = st.data_editor(
-        df_inst,
-        num_rows="fixed",
-        use_container_width=True,
-        key=f"inst_edit_df_{q}",
-        column_config={
-            "楽器名": st.column_config.TextColumn("楽器名", max_chars=50),
-            "カテゴリ": st.column_config.SelectboxColumn(
-                "カテゴリ", options=INSTRUMENT_CATEGORIES,
-            ),
-            "メモ": st.column_config.TextColumn("メモ", max_chars=100),
-        },
-    )
-
-    if st.button("💾 まとめて保存", type="primary", use_container_width=True, key="inst_bulk_save"):
-        ok_n = ng_n = skip_n = 0
-        with st.spinner("保存中..."):
-            df_reset = edited_inst.reset_index(drop=True)
-            for idx, meta in enumerate(edit_meta):
-                if idx >= len(df_reset): break
-                row   = df_reset.iloc[idx]
-                new_n = str(row.get("楽器名") or "").strip()
-                new_c = str(row.get("カテゴリ") or "").strip()
-                new_m = str(row.get("メモ") or "").strip()
-                if not new_n:
-                    skip_n += 1
-                    continue
-                if new_n == meta["iname"] and new_c == meta["icat"] and new_m == meta["imemo"]:
-                    skip_n += 1
-                    continue
-                ok = _update_instrument(ctx, meta["iid"], new_n, new_c, new_m)
-                ok_n += 1 if ok else 0
-                ng_n += 0 if ok else 1
-        if ng_n == 0:
-            st.success(f"✅ {ok_n}件を保存しました。（変更なし {skip_n}件はスキップ）")
-        else:
-            st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
-        st.session_state.pop("instrument_list", None)
-        st.rerun()
 
 
 # ============================================================
@@ -1402,13 +1260,10 @@ def render(ctx: dict):
     if not global_concert_id:
         st.info("サイドバーで演奏会を選択してください。")
         return
-    tab_song, tab_partdef, tab_instrument = st.tabs(["楽曲", "パート定義", "楽器種別"])
-
+    tab_song, tab_partdef, tab_instrument = st.tabs(["🎵 楽曲", "🧩 パート定義", "🎹 楽器種別"])
     with tab_song:
         _render_song_tab(ctx)
-
     with tab_partdef:
         _render_partdef_tab(ctx)
-
     with tab_instrument:
         _render_instrument_tab(ctx)
