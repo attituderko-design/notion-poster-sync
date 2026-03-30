@@ -8,6 +8,31 @@ from concert.services.keys import *  # noqa: F401,F403
 
 APOLLO_ATLAS_SONG_REL_KEYS = ["演奏曲", "曲", "作品楽章", "作品", "ATLAS曲"]
 
+CONCERT_SONG_SONGINFO_KEYS = ["楽曲確定", "song_confirmed", "songs_confirmed"]
+
+
+def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> str:
+    key = ctx["find_prop_name"](type_map, candidates)
+    if key:
+        return key
+    norm_map = {str(k or "").replace(" ", "").replace("　", "").strip().lower(): k for k in (type_map or {}).keys()}
+    for c in candidates:
+        got = norm_map.get(str(c or "").replace(" ", "").replace("　", "").strip().lower())
+        if got:
+            return got
+    return ""
+
+
+def _extract_checkbox_value(page: dict, prop_name: str) -> bool:
+    if not page or not prop_name:
+        return False
+    meta = ((page.get("properties") or {}).get(prop_name) or {})
+    if meta.get("type") == "checkbox":
+        return bool(meta.get("checkbox"))
+    raw = str(meta or "").strip().lower()
+    return raw in {"true", "1", "yes", "on", "はい"}
+
+
 
 def _norm_notion_id(v: str) -> str:
     return (v or "").replace("-", "").strip().lower()
@@ -499,6 +524,160 @@ def _set_concert_song_partdef_completed(
     return res is not None and res.status_code == 200
 
 
+def _load_concert_song_rows(ctx: dict, concert_id: str) -> list[dict]:
+    if not concert_id or not ctx.get("CONCERT_DB_CONCERT_SONG"):
+        return []
+    key = f"concert_song_rows_{concert_id}"
+    if key not in st.session_state:
+        db_id = ctx["CONCERT_DB_CONCERT_SONG"]
+        type_map = ctx["get_prop_types"](db_id) or {}
+        rel_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_CONCERT_REL_KEYS)
+        rows = []
+        if rel_key:
+            rows = ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}})
+        if not rows:
+            rows = ctx["query_all"](db_id)
+        target = _norm_notion_id(concert_id)
+        filtered = []
+        for row in rows:
+            ids = ctx["extract_relation_ids_any"](row, [rel_key] if rel_key else CONCERT_SONG_CONCERT_REL_KEYS)
+            if any(_norm_notion_id(x) == target for x in ids):
+                filtered.append(row)
+        st.session_state[key] = filtered
+    return st.session_state.get(key, [])
+
+
+def _clear_concert_song_cache(concert_id: str = ""):
+    for k in list(st.session_state.keys()):
+        if k.startswith("concert_song_rows_") and (not concert_id or k == f"concert_song_rows_{concert_id}"):
+            st.session_state.pop(k, None)
+
+
+def _find_harmonia_concert_row(ctx: dict, concert_id: str) -> dict | None:
+    if not concert_id or not ctx.get("CONCERT_DB_HARMONIA_CONCERT"):
+        return None
+    db_id = ctx["CONCERT_DB_HARMONIA_CONCERT"]
+    type_map = ctx["get_prop_types"](db_id) or {}
+    rel_key = _find_prop_name_loose(ctx, type_map, HARMONIA_CONCERT_CONCERT_REL_KEYS)
+    rows = []
+    if rel_key:
+        rows = ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}})
+    if not rows:
+        rows = ctx["query_all"](db_id)
+    target = _norm_notion_id(concert_id)
+    for row in rows:
+        ids = ctx["extract_relation_ids_any"](row, [rel_key] if rel_key else HARMONIA_CONCERT_CONCERT_REL_KEYS)
+        if any(_norm_notion_id(x) == target for x in ids):
+            return row
+    return None
+
+
+def _set_harmonia_concert_checkbox(ctx: dict, concert_id: str, key_candidates: list[str], checked: bool) -> bool:
+    row = _find_harmonia_concert_row(ctx, concert_id)
+    if not row:
+        return False
+    row_id = row.get("id", "")
+    if not row_id:
+        return False
+    db_id = ctx["CONCERT_DB_HARMONIA_CONCERT"]
+    type_map = ctx["get_prop_types"](db_id) or {}
+    flag_key = _find_prop_name_loose(ctx, type_map, key_candidates)
+    if not flag_key:
+        return False
+    res = ctx["api_request"](
+        "patch",
+        f"https://api.notion.com/v1/pages/{row_id}",
+        json={"properties": {flag_key: {"checkbox": bool(checked)}}},
+    )
+    return res is not None and res.status_code == 200
+
+
+def _refresh_harmonia_song_info_status(ctx: dict, concert_id: str) -> bool:
+    rows = _load_concert_song_rows(ctx, concert_id)
+    if not rows:
+        return _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_SONG_INFO_KEYS, False)
+    db_id = ctx["CONCERT_DB_CONCERT_SONG"]
+    type_map = ctx["get_prop_types"](db_id) or {}
+    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_SONGINFO_KEYS)
+    if not flag_key:
+        return False
+    all_done = all(_extract_checkbox_value(r, flag_key) for r in rows)
+    return _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_SONG_INFO_KEYS, all_done)
+
+
+def _set_concert_song_song_confirmed(
+    ctx: dict,
+    concert_id: str,
+    checked: bool,
+    song_id: str = "",
+) -> tuple[int, int]:
+    rows = _load_concert_song_rows(ctx, concert_id)
+    if not rows or not ctx.get("CONCERT_DB_CONCERT_SONG"):
+        return 0, 0
+    db_id = ctx["CONCERT_DB_CONCERT_SONG"]
+    type_map = ctx["get_prop_types"](db_id) or {}
+    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_SONGINFO_KEYS)
+    if not flag_key:
+        return 0, 0
+
+    target_atlas_norms = {_norm_notion_id(x) for x in _resolve_atlas_song_ids(ctx, concert_id, song_id)} if song_id else set()
+
+    def _matches_song(row: dict) -> bool:
+        if not target_atlas_norms:
+            return True
+        row_song_ids = ctx["extract_relation_ids_any"](row, CONCERT_SONG_SONG_REL_KEYS)
+        row_song_norms = {_norm_notion_id(x) for x in row_song_ids if x}
+        return bool(row_song_norms.intersection(target_atlas_norms))
+
+    targets = [r for r in rows if _matches_song(r)]
+    updated = 0
+    for row in targets:
+        row_id = row.get("id", "")
+        if not row_id:
+            continue
+        res = ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{row_id}",
+            json={"properties": {flag_key: {"checkbox": bool(checked)}}},
+        )
+        if res is not None and res.status_code == 200:
+            updated += 1
+
+    _clear_concert_song_cache(concert_id)
+    _refresh_harmonia_song_info_status(ctx, concert_id)
+    return len(targets), updated
+
+
+def _get_concert_song_confirmation_stats(ctx: dict, concert_id: str) -> dict:
+    rows = _load_concert_song_rows(ctx, concert_id)
+    db_id = ctx.get("CONCERT_DB_CONCERT_SONG", "")
+    type_map = ctx["get_prop_types"](db_id) or {} if db_id else {}
+    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_SONGINFO_KEYS)
+    confirmed = 0
+    detail_rows = []
+    for row in rows:
+        atlas_song_ids = ctx["extract_relation_ids_any"](row, CONCERT_SONG_SONG_REL_KEYS)
+        song_names = []
+        for aid in atlas_song_ids:
+            apollo_ids = _resolve_apollo_song_ids(ctx, concert_id, aid)
+            matched = next((s for s in _load_songs(ctx, concert_id) if s.get("id", "") in set(apollo_ids)), None)
+            if matched:
+                song_names.append(_song_name(matched, ctx))
+        if not song_names:
+            song_names = atlas_song_ids or [row.get("id", "")]
+        is_done = _extract_checkbox_value(row, flag_key) if flag_key else False
+        confirmed += 1 if is_done else 0
+        detail_rows.append({"row": row, "name": " / ".join(song_names), "confirmed": is_done})
+    return {
+        "rows": rows,
+        "total": len(rows),
+        "confirmed": confirmed,
+        "unconfirmed": max(len(rows) - confirmed, 0),
+        "flag_key": flag_key,
+        "details": detail_rows,
+    }
+
+
 # ============================================================
 # 演奏時間ユーティリティ
 # ============================================================
@@ -538,6 +717,41 @@ def _render_song_tab(ctx: dict):
     filter_concert_id = global_concert_id
 
     songs = _load_songs(ctx, filter_concert_id)
+
+    st.markdown("### 楽曲情報の確定")
+    song_confirm_stats = _get_concert_song_confirmation_stats(ctx, filter_concert_id)
+    if not song_confirm_stats["rows"]:
+        st.info("この演奏会の CONCERT_SONG がまだありません。楽曲情報は未着手です。")
+    elif not song_confirm_stats["flag_key"]:
+        st.warning("CONCERT_SONG DB に『楽曲確定』プロパティが見つかりません。")
+    else:
+        st.caption(
+            f"楽曲確定 {song_confirm_stats['confirmed']} / {song_confirm_stats['total']} 曲"
+        )
+        pending_names = [d["name"] for d in song_confirm_stats["details"] if not d["confirmed"]]
+        if pending_names:
+            st.caption("未確定: " + "、".join(pending_names[:8]) + (" …" if len(pending_names) > 8 else ""))
+        c_sc1, c_sc2 = st.columns(2)
+        if c_sc1.button("✅ 楽曲情報を確定", use_container_width=True, key=f"song_confirm_all_{filter_concert_id}"):
+            total, updated = _set_concert_song_song_confirmed(ctx, filter_concert_id, True)
+            if total == 0:
+                st.error("CONCERT_SONG の対象行が見つかりません。")
+            elif updated == total:
+                st.success(f"✅ {updated}件の楽曲を確定しました。")
+                st.rerun()
+            else:
+                st.warning(f"⚠️ {updated} / {total} 件の更新に成功しました。")
+                st.rerun()
+        if c_sc2.button("↩ 楽曲情報確定を解除", use_container_width=True, key=f"song_unconfirm_all_{filter_concert_id}"):
+            total, updated = _set_concert_song_song_confirmed(ctx, filter_concert_id, False)
+            if total == 0:
+                st.error("CONCERT_SONG の対象行が見つかりません。")
+            elif updated == total:
+                st.success(f"✅ {updated}件の楽曲確定を解除しました。")
+                st.rerun()
+            else:
+                st.warning(f"⚠️ {updated} / {total} 件の更新に成功しました。")
+                st.rerun()
 
     with st.expander("➕ 新規楽曲を登録（簡易・手動）", expanded=(len(songs) == 0)):
         st.caption("※ ここで設定する「必要楽器」は曲側の必要編成（人数・台数）です。")
@@ -639,6 +853,30 @@ def _render_song_editor(ctx: dict, s: dict, all_concert_opts: dict[str, str]):
     caption    = f"{composer}　{dur_disp}" if composer or dur_disp else ""
 
     with st.expander(f"{song_label}　{f'*{caption}*' if caption else ''}", expanded=True):
+        concert_ids_current = list(all_concert_opts.values())
+        active_concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+        if active_concert_id:
+            song_confirm_stats = _get_concert_song_confirmation_stats(ctx, active_concert_id)
+            target_norms = {_norm_notion_id(x) for x in _resolve_atlas_song_ids(ctx, active_concert_id, song_id)}
+            row_detail = next((d for d in song_confirm_stats["details"] if {_norm_notion_id(x) for x in ctx["extract_relation_ids_any"](d["row"], CONCERT_SONG_SONG_REL_KEYS)}.intersection(target_norms)), None)
+            if row_detail and song_confirm_stats["flag_key"]:
+                st.caption(f"この曲の楽曲確定: {'✅ 確定' if row_detail['confirmed'] else '⬜ 未確定'}")
+                c1_song, c2_song = st.columns(2)
+                if c1_song.button("✅ この曲を確定", key=f"song_confirm_one_{active_concert_id}_{song_id}", use_container_width=True):
+                    total, updated = _set_concert_song_song_confirmed(ctx, active_concert_id, True, song_id=song_id)
+                    if total == 0:
+                        st.error("CONCERT_SONG 行が見つかりません。")
+                    else:
+                        st.success(f"✅ {updated}件を更新しました。")
+                        st.rerun()
+                if c2_song.button("↩ この曲の確定を解除", key=f"song_unconfirm_one_{active_concert_id}_{song_id}", use_container_width=True):
+                    total, updated = _set_concert_song_song_confirmed(ctx, active_concert_id, False, song_id=song_id)
+                    if total == 0:
+                        st.error("CONCERT_SONG 行が見つかりません。")
+                    else:
+                        st.success(f"✅ {updated}件を更新しました。")
+                        st.rerun()
+
         # 既存紐づき演奏会
         existing_concert_ids = ctx["extract_relation_ids_any"](s, SONG_CONCERT_REL_KEYS)
         existing_concert_names = [k for k, v in all_concert_opts.items() if v in existing_concert_ids]
