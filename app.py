@@ -8471,6 +8471,7 @@ if system_mode == "HARMONIA":
         "harmonia_player_info_confirm": ["奏者情報確定", "participant_confirmed", "player_info_confirmed"],
         "harmonia_required_inst_confirm": ["必要楽器確定", "required_instruments_confirmed", "required_inst_confirmed"],
         "harmonia_partdef_confirm": ["パート定義確定", "part_definition_confirmed", "partdef_confirmed"],
+        "harmonia_finance_confirm": ["収支確定", "finance_confirmed", "finance_fixed"],
         "concert_inst_concert_rel": ["演奏会", "FK演奏会", "concert"],
         "concert_inst_song_rel": ["演奏曲", "楽曲", "FK楽曲", "concert_song"],
     }
@@ -8510,7 +8511,7 @@ if system_mode == "HARMONIA":
         if ok:
             return "✅ 完了"
         if partial:
-            return "🟡 一部未完"
+            return "🟡 進行中"
         return "⚪ 未着手"
 
     def _h_collect_apollo_song_ids_for_concert(concert_id: str, atlas_song_ids: list[str]) -> set[str]:
@@ -8545,7 +8546,7 @@ if system_mode == "HARMONIA":
             "song_count": 0, "song_done_count": 0, "partdef_count": 0, "concert_instrument_count": 0, "unanswered_count": 0,
             "preference_pending_count": 0, "rental_unconfirmed_count": 0, "expense_confirmed_total": 0,
             "has_concert_day": False, "next_practice_label": "", "attendance_status_label": "⚪ 未着手",
-            "participant_header_confirmed": False, "required_inst_header_confirmed": False, "partdef_header_confirmed": False,
+            "participant_header_confirmed": False, "required_inst_header_confirmed": False, "partdef_header_confirmed": False, "finance_header_confirmed": False,
             "ownership_target_count": 0, "ownership_confirm_count": 0, "debug_lines": [],
             "attendance_status_reasons": [],
         }
@@ -8639,6 +8640,7 @@ if system_mode == "HARMONIA":
             stats["participant_header_confirmed"] = _h_bool(harmonia_row, _H_KEYS["harmonia_player_info_confirm"])
             stats["required_inst_header_confirmed"] = _h_bool(harmonia_row, _H_KEYS["harmonia_required_inst_confirm"])
             stats["partdef_header_confirmed"] = _h_bool(harmonia_row, _H_KEYS["harmonia_partdef_confirm"])
+            stats["finance_header_confirmed"] = _h_bool(harmonia_row, _H_KEYS["harmonia_finance_confirm"])
 
         participant_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PARTICIPANT"], None) if concert_ctx.get("CONCERT_DB_PARTICIPANT") else []
         selected_participants, participant_targets = [], {}
@@ -8690,7 +8692,7 @@ if system_mode == "HARMONIA":
         elif stats["unanswered_count"] == 0:
             stats["attendance_status_label"] = "✅ 完了"
         else:
-            stats["attendance_status_label"] = "🟡 一部未完"
+            stats["attendance_status_label"] = "🟡 進行中"
 
         pref_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PREFERENCE"], None) if concert_ctx.get("CONCERT_DB_PREFERENCE") else []
         pref_targets = set()
@@ -8736,7 +8738,7 @@ if system_mode == "HARMONIA":
             ("⑩ 各奏者パート希望の確定", 1.0 if (stats['participant_count'] > 0 and stats['preference_pending_count'] == 0) else (0.5 if stats['participant_count'] > 0 and stats['preference_pending_count'] < stats['participant_count'] else 0.0), f"希望未提出 {stats['preference_pending_count']} 人"),
             ("⑪ アサイン案の提示", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_proposal']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_proposal']) else 0.0), f"案提示 {stats['proposal_count']} / {len(filtered_cs)} 曲"),
             ("⑫ アサイン情報の確定", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_assign_confirm']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_assign_confirm']) else 0.0), f"アサイン確定 {stats['assign_confirm_count']} / {len(filtered_cs)} 曲"),
-            ("⑬ レンタル・収支", 1.0 if ((stats['rental_unconfirmed_count'] == 0) and (confirmed_expense_count > 0 or stats['expense_confirmed_total'] > 0)) else (0.5 if (stats['rental_unconfirmed_count'] > 0 or confirmed_expense_count > 0 or stats['expense_confirmed_total'] > 0) else 0.0), f"見積中 {stats['rental_unconfirmed_count']} 件 / 経費確定 ¥{stats['expense_confirmed_total']:,}"),
+            ("⑬ レンタル・収支", 1.0 if stats['finance_header_confirmed'] else (0.5 if (stats['rental_unconfirmed_count'] > 0 or confirmed_expense_count > 0 or stats['expense_confirmed_total'] > 0) else 0.0), f"見積未確定 {stats['rental_unconfirmed_count']} 件 / 経費確定 ¥{stats['expense_confirmed_total']:,}"),
         ]
         ratios = [x[1] for x in stats['step_items']]
         stats['overall_progress_ratio'] = sum(ratios) / len(ratios) if ratios else 0.0
@@ -8747,7 +8749,7 @@ if system_mode == "HARMONIA":
         st.progress(max(0.0, min(1.0, float(stats.get('overall_progress_ratio', 0.0)))))
         st.caption(f"総進捗 {int(round(float(stats.get('overall_progress_ratio', 0.0)) * 100))}%")
         for title, ratio, desc in stats.get("step_items", []):
-            badge = "✅ 完了" if ratio >= 1.0 else ("🟡 一部未完" if ratio > 0 else "⚪ 未着手")
+            badge = "✅ 完了" if ratio >= 1.0 else ("🟡 進行中" if ratio > 0 else "⚪ 未着手")
             st.markdown(f"**{title}**　{badge}")
             st.caption(desc)
             st.divider()
