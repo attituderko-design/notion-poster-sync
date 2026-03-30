@@ -70,15 +70,36 @@ def _set_concert_song_checkbox_for_concert(ctx: dict, concert_id: str, key_candi
         return 0, 0
     db_id = ctx["CONCERT_DB_CONCERT_SONG"]
     type_map = ctx["get_prop_types"](db_id) or {}
-    rel_key = ctx["find_prop_name"](type_map, ["演奏会", "FK演奏会", "concert"])
+    rel_candidates = ["演奏会", "FK演奏会", "concert"]
+    rel_key = _find_prop_name_loose(ctx, type_map, rel_candidates)
     flag_key = _find_prop_name_loose(ctx, type_map, key_candidates)
     if not flag_key:
         return 0, 0
-    rows = ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}}) if rel_key else ctx["query_all"](db_id)
-    rows = [r for r in rows if concert_id in ctx["extract_relation_ids_any"](r, [rel_key] if rel_key else ["演奏会", "FK演奏会", "concert"])]
+
+    target_concert_id = _normalize_page_id(concert_id)
+
+    def _matches_concert(row: dict) -> bool:
+        ids = ctx["extract_relation_ids_any"](row, [rel_key] if rel_key else rel_candidates)
+        return any(_normalize_page_id(x) == target_concert_id for x in ids)
+
+    rows = []
+    if rel_key:
+        rows = ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}})
+        rows = [r for r in rows if _matches_concert(r)]
+
+    if not rows:
+        rows = [r for r in ctx["query_all"](db_id) if _matches_concert(r)]
+
     updated = 0
     for row in rows:
-        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{row.get('id','')}", json={"properties": {flag_key: {"checkbox": bool(checked)}}})
+        row_id = row.get("id", "")
+        if not row_id:
+            continue
+        res = ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{row_id}",
+            json={"properties": {flag_key: {"checkbox": bool(checked)}}},
+        )
         if res is not None and res.status_code == 200:
             updated += 1
     return len(rows), updated
@@ -1485,7 +1506,7 @@ def _render_assign_tab(ctx: dict):
     if c1.button("✅ 所有楽器確定", key=f"ownership_confirm_{c_id}", use_container_width=True):
         total_rows, updated_rows = _set_concert_song_checkbox_for_concert(
             ctx, c_id,
-            ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed", "bring_confirmed", "bring_fixed"],
+            ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed"],
             True,
         )
         if total_rows == 0:
@@ -1497,7 +1518,7 @@ def _render_assign_tab(ctx: dict):
     if c2.button("↩ 所有楽器確定を解除", key=f"ownership_unconfirm_{c_id}", use_container_width=True):
         total_rows, updated_rows = _set_concert_song_checkbox_for_concert(
             ctx, c_id,
-            ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed", "bring_confirmed", "bring_fixed"],
+            ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed"],
             False,
         )
         if total_rows == 0:
