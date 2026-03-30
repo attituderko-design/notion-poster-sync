@@ -1234,6 +1234,21 @@ def _render_pi_master_tab(ctx: dict):
         st.rerun()
 
 
+def _load_concert_instruments_for_assign(ctx: dict, concert_id: str) -> list[dict]:
+    """所有楽器整理タブ用にCONCERT_INSTRUMENTを取得。"""
+    key = f"ci_assign_{concert_id}"
+    if key not in st.session_state:
+        db_id = ctx.get("CONCERT_DB_CONCERT_INSTRUMENT", "")
+        if not db_id:
+            st.session_state[key] = []
+        else:
+            t = ctx["get_prop_types"](db_id)
+            rel = ctx["find_prop_name"](t, CONCERT_INST_CONCERT_REL_KEYS) if t else ""
+            f = {"filter": {"property": rel, "relation": {"contains": concert_id}}} if rel else None
+            st.session_state[key] = ctx["query_all"](db_id, f)
+    return st.session_state.get(key, [])
+
+
 def _render_assign_tab(ctx: dict):
     st.caption("奏者ごとに所有楽器・台数を登録します。持参担当の設定は『練習日別持参担当』タブで行います。")
 
@@ -1289,17 +1304,29 @@ def _render_assign_tab(ctx: dict):
         st.info("打楽器パート（Perc）の参加者が登録されていません。出欠入力タブでパートを設定してください。")
         return
 
-    songs = _load_concert_songs(ctx, c_id)
+    # CONCERT_INSTRUMENTから必要楽器を取得（登録済みならこちらを優先）
+    ci_rows = _load_concert_instruments_for_assign(ctx, c_id)
     required_inst_ids = set()
 
-    for s in songs:
-        sid = s.get("id", "")
-        for part in _load_partdefs_for_song(ctx, sid):
-            iids = ctx["extract_relation_ids_any"](part, PARTDEF_INST_REL_KEYS)
-            if iids:
-                required_inst_ids.update([x for x in iids if x])
+    if ci_rows:
+        for ci in ci_rows:
+            iids = ctx["extract_relation_ids_any"](ci, CONCERT_INST_INST_REL_KEYS)
+            required_inst_ids.update([x for x in iids if x])
+        st.caption(f"必要楽器: CONCERT_INSTRUMENTから取得（{len(ci_rows)}件）")
+    else:
+        # フォールバック: PART_DEFINITIONから取得
+        songs = _load_concert_songs(ctx, c_id)
+        for s in songs:
+            sid = s.get("id", "")
+            for part in _load_partdefs_for_song(ctx, sid):
+                iids = ctx["extract_relation_ids_any"](part, PARTDEF_INST_REL_KEYS)
+                if iids:
+                    required_inst_ids.update([x for x in iids if x])
+        if required_inst_ids:
+            st.caption("必要楽器: パート定義から取得（CONCERT_INSTRUMENTが未登録）")
+
     if not required_inst_ids:
-        st.info("この演奏会の必要楽器（パート定義）が見つかりません。先に『楽曲・楽器管理』でパート定義を行ってください。")
+        st.info("この演奏会の必要楽器が見つかりません。先に『楽曲・楽器管理』でCONCERT_INSTRUMENTまたはパート定義を行ってください。")
         return
 
     inst_rows = _load_instruments(ctx)
