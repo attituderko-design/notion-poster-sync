@@ -8,19 +8,53 @@ from concert.services.keys import *  # noqa: F401,F403
 
 APOLLO_ATLAS_SONG_REL_KEYS = ["演奏曲", "曲", "作品楽章", "作品", "ATLAS曲"]
 
-CONCERT_SONG_SONGINFO_KEYS = ["楽曲確定", "song_confirmed", "songs_confirmed"]
+CONCERT_SONG_SONGINFO_KEYS = [
+    "楽曲確定",
+    "楽曲情報確定",
+    "曲確定",
+    "song_confirmed",
+    "songs_confirmed",
+    "song_info_confirmed",
+]
+
+
+def _norm_loose_label(v: str) -> str:
+    return str(v or "").replace(" ", "").replace("　", "").strip().lower()
 
 
 def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> str:
     key = ctx["find_prop_name"](type_map, candidates)
     if key:
         return key
-    norm_map = {str(k or "").replace(" ", "").replace("　", "").strip().lower(): k for k in (type_map or {}).keys()}
+    norm_map = {_norm_loose_label(k): k for k in (type_map or {}).keys()}
     for c in candidates:
-        got = norm_map.get(str(c or "").replace(" ", "").replace("　", "").strip().lower())
+        got = norm_map.get(_norm_loose_label(c))
         if got:
             return got
     return ""
+
+
+def _find_prop_name_from_rows_loose(rows: list[dict], candidates: list[str]) -> str:
+    if not rows:
+        return ""
+    for row in rows:
+        props = (row.get("properties") or {})
+        if not props:
+            continue
+        norm_map = {_norm_loose_label(k): k for k in props.keys()}
+        for c in candidates:
+            got = norm_map.get(_norm_loose_label(c))
+            if got:
+                return got
+    return ""
+
+
+def _clear_property_type_cache():
+    try:
+        from concert.services.notion_client import get_concert_db_property_types
+        get_concert_db_property_types.clear()
+    except Exception:
+        pass
 
 
 def _extract_checkbox_value(page: dict, prop_name: str) -> bool:
@@ -105,8 +139,9 @@ def _resolve_atlas_song_ids(ctx: dict, concert_id: str, song_id: str) -> list[st
 # ============================================================
 
 def _clear_song_cache():
+    _clear_property_type_cache()
     for k in list(st.session_state.keys()):
-        if k.startswith(("song_list", "instrument_list", "si_list_")):
+        if k.startswith(("song_list", "instrument_list", "si_list_", "concert_song_rows_")):
             st.session_state.pop(k, None)
     st.session_state.pop("songs_concert_list", None)
 
@@ -598,7 +633,7 @@ def _refresh_harmonia_song_info_status(ctx: dict, concert_id: str) -> bool:
         return _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_SONG_INFO_KEYS, False)
     db_id = ctx["CONCERT_DB_CONCERT_SONG"]
     type_map = ctx["get_prop_types"](db_id) or {}
-    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_SONGINFO_KEYS)
+    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_SONGINFO_KEYS) or _find_prop_name_from_rows_loose(rows, CONCERT_SONG_SONGINFO_KEYS)
     if not flag_key:
         return False
     all_done = all(_extract_checkbox_value(r, flag_key) for r in rows)
@@ -616,7 +651,7 @@ def _set_concert_song_song_confirmed(
         return 0, 0
     db_id = ctx["CONCERT_DB_CONCERT_SONG"]
     type_map = ctx["get_prop_types"](db_id) or {}
-    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_SONGINFO_KEYS)
+    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_SONGINFO_KEYS) or _find_prop_name_from_rows_loose(rows, CONCERT_SONG_SONGINFO_KEYS)
     if not flag_key:
         return 0, 0
 
@@ -652,7 +687,7 @@ def _get_concert_song_confirmation_stats(ctx: dict, concert_id: str) -> dict:
     rows = _load_concert_song_rows(ctx, concert_id)
     db_id = ctx.get("CONCERT_DB_CONCERT_SONG", "")
     type_map = ctx["get_prop_types"](db_id) or {} if db_id else {}
-    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_SONGINFO_KEYS)
+    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_SONGINFO_KEYS) or _find_prop_name_from_rows_loose(rows, CONCERT_SONG_SONGINFO_KEYS)
     confirmed = 0
     detail_rows = []
     for row in rows:
