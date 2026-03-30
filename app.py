@@ -8465,7 +8465,77 @@ if system_mode == "HARMONIA":
         "expense_concert_rel": ["演奏会", "FK演奏会", "concert"],
         "expense_amount": ["金額", "費用", "amount"],
         "expense_confirmed": ["確定", "confirmed", "確定フラグ"],
+        "harmonia_concert_rel": ["演奏会", "FK演奏会", "concert"],
+        "harmonia_managed": ["管理開始", "managed", "management_started"],
+        "harmonia_song_info": ["楽曲情報確定", "song_info_confirmed", "songs_confirmed"],
+        "harmonia_practice_info": ["練習情報確定", "practice_info_confirmed"],
+        "harmonia_practice_date": ["練習日確定", "practice_confirmed", "practice_fixed"],
+        "harmonia_required_inst": ["必要楽器確定", "required_instruments_confirmed"],
+        "harmonia_partdef": ["パート定義確定", "part_definition_confirmed", "definition_confirmed"],
+        "harmonia_participant": ["奏者情報確定", "participant_confirmed", "cast_confirmed"],
+        "harmonia_ownership": ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed"],
+        "harmonia_attendance": ["出欠確定", "attendance_confirmed"],
+        "harmonia_preference": ["希望入力確定", "preference_confirmed"],
+        "harmonia_bring": ["持参楽器確定", "bring_confirmed", "bring_fixed"],
+        "harmonia_proposal": ["案提示", "proposal_presented", "proposal"],
+        "harmonia_assign": ["アサイン確定", "assign_confirmed", "confirmed"],
+        "harmonia_finance": ["収支確定", "finance_confirmed", "budget_confirmed"],
+        "concert_song_song_info": ["楽曲確定", "song_confirmed", "songs_confirmed"],
     }
+
+
+
+    def _h_find_prop_name_loose(type_map: dict, candidates: list[str]) -> str:
+        key = concert_ctx["find_prop_name"](type_map, candidates)
+        if key:
+            return key
+        norm = {re.sub(r"\s+", "", str(k or "")).strip().lower(): k for k in (type_map or {}).keys()}
+        for c in candidates:
+            got = norm.get(re.sub(r"\s+", "", str(c or "")).strip().lower())
+            if got:
+                return got
+        return ""
+
+    def _h_load_harmonia_row(concert_id: str) -> dict:
+        db_id = concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
+        if not db_id or not concert_id:
+            return {}
+        t = concert_ctx["get_prop_types"](db_id) or {}
+        rel_key = _h_find_prop_name_loose(t, _H_KEYS["harmonia_concert_rel"])
+        rows = concert_ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}}) if rel_key else concert_ctx["query_all"](db_id)
+        target = concert_id.replace("-", "").lower()
+        for r in rows:
+            ids = concert_ctx["extract_relation_ids_any"](r, [rel_key] if rel_key else _H_KEYS["harmonia_concert_rel"]) or []
+            if any(str(x or "").replace("-", "").lower() == target for x in ids):
+                return r
+        return {}
+
+    def _h_create_harmonia_row(concert_row: dict) -> bool:
+        cid = (concert_row or {}).get("id", "")
+        if not cid:
+            return False
+        db_id = concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
+        if not db_id:
+            return False
+        t = concert_ctx["get_prop_types"](db_id) or {}
+        props = {}
+        concert_ctx["put_key_any"](props, t, ["concert_key", "harmonia_concert_key", "HARMONIA_CONCERT_KEY", "key"], cid, _harmony_concert_name(concert_row), prefix="harmonia")
+        concert_ctx["put_prop_any"](props, t, _H_KEYS["harmonia_concert_rel"], cid)
+        concert_ctx["put_prop_any"](props, t, _H_KEYS["harmonia_managed"], True)
+        res = concert_ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
+        return res is not None and res.status_code == 200
+
+    def _h_set_harmonia_checkbox(concert_id: str, key_names: list[str], checked: bool) -> bool:
+        row = _h_load_harmonia_row(concert_id)
+        if not row:
+            return False
+        db_id = concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
+        t = concert_ctx["get_prop_types"](db_id) or {}
+        flag_key = _h_find_prop_name_loose(t, key_names)
+        if not flag_key:
+            return False
+        res = concert_ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{row.get('id','')}", json={"properties": {flag_key: {"checkbox": bool(checked)}}})
+        return res is not None and res.status_code == 200
 
     def _h_text(page: dict, keys: list[str]) -> str:
         return concert_ctx["extract_prop_text_any"](page, keys) or ""
@@ -8581,6 +8651,7 @@ if system_mode == "HARMONIA":
             future.sort(key=lambda x: x[0])
             stats["next_practice_label"] = future[0][1]
 
+        harmonia_row = _h_load_harmonia_row(cid)
         concert_song_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_CONCERT_SONG"], None) if concert_ctx.get("CONCERT_DB_CONCERT_SONG") else []
         filtered_cs, song_ids = [], []
         for r in concert_song_rows:
@@ -8590,6 +8661,7 @@ if system_mode == "HARMONIA":
         song_id_set = {x for x in song_ids if x}
         stats["song_count"] = len(song_id_set)
         stats["song_done_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_done"]))
+        stats["song_info_confirm_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_song_info"]))
         stats["practice_confirm_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_practice_confirm"]))
         stats["ownership_confirm_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_ownership_confirm"]))
         stats["proposal_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_proposal"]))
@@ -9168,6 +9240,15 @@ if system_mode == "HARMONIA":
                 st.caption(f"📅 {c_date[:10]}")
             if c_loc:
                 st.caption(f"📍 {c_loc}")
+            harmonia_row = _h_load_harmonia_row(selected_concert_id)
+            if not harmonia_row:
+                st.warning("この演奏会はまだHARMONIA管理対象として登録されていません。")
+                if st.button("この演奏会をHARMONIAで管理しますか？", key=f"harmonia_manage_start_{selected_concert_id}", type="primary"):
+                    if _h_create_harmonia_row(selected_concert_row):
+                        st.success("✅ HARMONIA管理対象として登録しました。")
+                        st.rerun()
+                    else:
+                        st.error("HARMONIA_CONCERT の作成に失敗しました。")
             st.markdown("### 作業の流れ")
             _render_harmonia_progress_cards(_build_harmonia_progress(selected_concert_row))
         else:
