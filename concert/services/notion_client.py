@@ -645,6 +645,28 @@ def build_concert_ctx() -> dict:
                     ("any", PREF_PRIORITY_KEYS),
                 ],
             ),
+            (
+                "CONCERT_DB_HARMONIA_CONCERT",
+                "HARMONIA演奏会ヘッダDB",
+                [
+                    ("any", ["concert_key", "タイトル"]),
+                    ("relation", ["演奏会", "FK演奏会", "concert"], "CONCERT_DB_CONCERT"),
+                    ("any", ["管理開始"]),
+                    ("any", ["楽曲情報確定"]),
+                    ("any", ["練習情報確定"]),
+                    ("any", ["練習日確定"]),
+                    ("any", ["必要楽器確定"]),
+                    ("any", ["パート定義確定"]),
+                    ("any", ["奏者情報確定"]),
+                    ("any", ["所有楽器確定"]),
+                    ("any", ["出欠確定"]),
+                    ("any", ["希望入力確定"]),
+                    ("any", ["持参楽器確定"]),
+                    ("any", ["案提示"]),
+                    ("any", ["アサイン確定"]),
+                    ("any", ["収支確定"]),
+                ],
+            ),
         ]
 
         errors: list[str] = []
