@@ -8307,6 +8307,48 @@ if "concert" in _qp and "cid" in _qp:
     st.stop()
 
 # ============================================================
+# 管理者ログイン（アプリ全体ゲート）
+# ============================================================
+ADMIN_AUTH_ENABLED = bool(st.secrets.get("ADMIN_AUTH_ENABLED", False))
+ADMIN_USERNAME = str(st.secrets.get("ADMIN_USERNAME", ""))
+ADMIN_PASSWORD = str(st.secrets.get("ADMIN_PASSWORD", ""))
+
+
+def _clear_admin_auth_session():
+    for _k in (
+        "admin_authenticated",
+        "admin_auth_error",
+        "admin_login_username",
+        "admin_login_password",
+    ):
+        st.session_state.pop(_k, None)
+
+
+def _render_admin_login_gate() -> None:
+    st.markdown("## 管理者ログイン")
+    st.info("管理者のみアクセスできます。ID とパスワードを入力してください。")
+    with st.form("global_admin_login_form", clear_on_submit=False):
+        _uid = st.text_input("ID", key="admin_login_username")
+        _pwd = st.text_input("パスワード", type="password", key="admin_login_password")
+        _submitted = st.form_submit_button("ログイン", use_container_width=True, type="primary")
+    if _submitted:
+        if _uid == ADMIN_USERNAME and _pwd == ADMIN_PASSWORD:
+            st.session_state["admin_authenticated"] = True
+            st.session_state.pop("admin_auth_error", None)
+            st.session_state.pop("admin_login_password", None)
+            st.rerun()
+        else:
+            st.session_state["admin_authenticated"] = False
+            st.session_state["admin_auth_error"] = "ID またはパスワードが違います。"
+    if st.session_state.get("admin_auth_error"):
+        st.error(st.session_state["admin_auth_error"])
+
+
+if ADMIN_AUTH_ENABLED and not st.session_state.get("admin_authenticated", False):
+    _render_admin_login_gate()
+    st.stop()
+
+# ============================================================
 # システム切替（通常 / Concert）
 # ============================================================
 if st.session_state.get("system_mode") == "通常":
@@ -8405,12 +8447,11 @@ if system_mode == "HARMONIA":
         "concert_song_concert_rel": ["演奏会", "FK演奏会", "concert"],
         "concert_song_song_rel": ["曲", "楽曲", "演奏曲", "song"],
         "concert_song_done": ["定義完了", "definition_done", "完了"],
-        "partdef_song_rel": ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ", "曲", "song"],
-        "apollo_atlas_song_rel": ["演奏曲", "曲", "作品", "作品マスタ", "ATLAS曲"],
-        "participant_concert_rel": ["出演", "演奏会", "FK演奏会", "concert"],
+        "partdef_song_rel": ["曲", "楽曲", "演奏曲", "song"],
+        "participant_concert_rel": ["演奏会", "FK演奏会", "concert"],
         "participant_player_rel": ["奏者", "出演者", "player", "FK奏者"],
         "attendance_practice_rel": ["練習", "FK練習", "practice"],
-        "attendance_player_rel": ["演奏会参加者", "奏者", "出演者", "player", "FK奏者"],
+        "attendance_player_rel": ["奏者", "出演者", "player", "FK奏者"],
         "preference_player_rel": ["奏者", "出演者", "player", "FK奏者"],
         "preference_part_rel": ["パート定義", "part", "FKパート定義"],
         "rental_concert_rel": ["演奏会", "FK演奏会", "concert", "練習", "FK練習"],
@@ -8431,26 +8472,16 @@ if system_mode == "HARMONIA":
         if not raw:
             return None
         raw = raw.replace("Z", "+00:00")
-        dt = None
         try:
-            dt = datetime.fromisoformat(raw)
+            return datetime.fromisoformat(raw)
         except Exception:
             pass
-        if dt is None:
-            for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
-                try:
-                    dt = datetime.strptime(raw[:len(fmt)], fmt)
-                    break
-                except Exception:
-                    pass
-        if dt is None:
-            return None
-        if getattr(dt, "tzinfo", None) is not None:
+        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
             try:
-                dt = dt.astimezone(__import__('datetime').timezone.utc).replace(tzinfo=None)
+                return datetime.strptime(raw[:len(fmt)], fmt)
             except Exception:
-                dt = dt.replace(tzinfo=None)
-        return dt
+                pass
+        return None
 
     def _h_bool(page: dict, keys: list[str]) -> bool:
         props = (page.get("properties") or {}) if isinstance(page, dict) else {}
@@ -8468,31 +8499,6 @@ if system_mode == "HARMONIA":
             return "🟡 一部未完"
         return "⚪ 未着手"
 
-    def _h_collect_apollo_song_ids_for_concert(concert_id: str, atlas_song_ids: list[str]) -> set[str]:
-        """
-        CONCERT_SONG の ATLAS曲ID群に対応する APOLLO 行ID群を返す。
-        APOLLO.演奏曲 relation が ATLAS 向きである前提。
-        旧データ互換のため ATLAS 曲IDも候補に残す。
-        """
-        atlas_ids = [x for x in (atlas_song_ids or []) if x]
-        if not atlas_ids:
-            return set()
-        target_atlas_ids = set(atlas_ids)
-        out = set(target_atlas_ids)
-        song_db_id = concert_ctx.get("CONCERT_DB_SONG")
-        if not song_db_id:
-            return out
-        song_rows = concert_ctx["query_all"](song_db_id, None)
-        for row in song_rows:
-            row_id = row.get("id", "")
-            if concert_id and concert_id not in _h_rel(row, ["演奏会", "出演", "FK演奏会", "concert"]):
-                continue
-            rel_ids = set(_h_rel(row, _H_KEYS["apollo_atlas_song_rel"]))
-            if target_atlas_ids.intersection(rel_ids):
-                if row_id:
-                    out.add(row_id)
-        return out
-
     def _build_harmonia_progress(concert_row: dict | None) -> dict:
         stats = {
             "participant_count": 0,
@@ -8506,8 +8512,6 @@ if system_mode == "HARMONIA":
             "expense_confirmed_total": 0,
             "has_concert_day": False,
             "next_practice_label": "",
-            "attendance_status_label": "⚪ 未着手",
-            "attendance_status_reasons": [],
             "debug_lines": [],
         }
         dbg = stats["debug_lines"]
@@ -8520,28 +8524,23 @@ if system_mode == "HARMONIA":
             return stats
 
         practices = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PRACTICE"], None) if concert_ctx.get("CONCERT_DB_PRACTICE") else []
-        attendance_practice_ids = []
         regular_practice_ids = []
         future = []
         today = datetime.now().date()
         for p in practices:
             if cid not in _h_rel(p, _H_KEYS["practice_concert_rel"]):
                 continue
+            if _h_bool(p, _H_KEYS["practice_concert_day"]):
+                stats["has_concert_day"] = True
+                continue
             pid = p.get("id", "")
             if pid:
-                attendance_practice_ids.append(pid)
-            is_concert_day = _h_bool(p, _H_KEYS["practice_concert_day"])
-            if is_concert_day:
-                stats["has_concert_day"] = True
-            else:
-                if pid:
-                    regular_practice_ids.append(pid)
+                regular_practice_ids.append(pid)
             pdt_raw = _h_text(p, _H_KEYS["practice_date"])
             pdt = _h_parse_date(pdt_raw)
             if pdt and pdt.date() >= today:
                 future.append((pdt, f"{pdt_raw[:10]} {_h_text(p, _H_KEYS['practice_name'])}".strip()))
         stats["practice_count"] = len(regular_practice_ids)
-        stats["attendance_practice_count"] = len(attendance_practice_ids)
         if future:
             future.sort(key=lambda x: x[0])
             stats["next_practice_label"] = future[0][1]
@@ -8559,16 +8558,7 @@ if system_mode == "HARMONIA":
 
         if concert_ctx.get("CONCERT_DB_PART_DEFINITION"):
             pdefs = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PART_DEFINITION"], None)
-            target_song_ids = _h_collect_apollo_song_ids_for_concert(cid, list(song_id_set))
-            stats["partdef_count"] = sum(
-                1
-                for pd in pdefs
-                if (
-                    (not cid or cid in _h_rel(pd, ["演奏会", "出演", "FK演奏会", "concert"]))
-                    and target_song_ids.intersection(set(_h_rel(pd, _H_KEYS["partdef_song_rel"])))
-                )
-            )
-            dbg.append(f"partdef target_song_ids={len(target_song_ids)} partdef_count={stats['partdef_count']}")
+            stats["partdef_count"] = sum(1 for pd in pdefs if song_id_set.intersection(set(_h_rel(pd, _H_KEYS["partdef_song_rel"]))))
 
         participant_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PARTICIPANT"], None) if concert_ctx.get("CONCERT_DB_PARTICIPANT") else []
         selected_participants = []
@@ -8586,7 +8576,6 @@ if system_mode == "HARMONIA":
 
         attendance_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_ATTENDANCE"], None) if concert_ctx.get("CONCERT_DB_ATTENDANCE") else []
         answered = set()
-        stats["attendance_record_count"] = 0
         for a in attendance_rows:
             pr_ids = _h_rel(a, _H_KEYS["attendance_practice_rel"])
             if not pr_ids:
@@ -8594,30 +8583,12 @@ if system_mode == "HARMONIA":
             pr = pr_ids[0]
             if pr not in regular_practice_ids:
                 continue
-            row_has_target = False
             for rid in _h_rel(a, _H_KEYS["attendance_player_rel"]):
-                if rid:
-                    answered.add((rid, pr))
-                    row_has_target = True
-            if row_has_target:
-                stats["attendance_record_count"] += 1
+                answered.add((rid, pr))
         stats["unanswered_count"] = 0
         for _, targets in participant_targets.items():
             if regular_practice_ids and any(not any((t, pr) in answered for t in targets) for pr in regular_practice_ids):
                 stats["unanswered_count"] += 1
-        attendance_reasons = []
-        if stats["participant_count"] == 0:
-            attendance_reasons.append("奏者情報未入力")
-        if stats["practice_count"] == 0:
-            attendance_reasons.append("練習情報未入力")
-        stats["attendance_status_reasons"] = attendance_reasons
-        if attendance_reasons:
-            stats["attendance_status_label"] = "⚪ 未着手"
-        elif stats["unanswered_count"] == 0:
-            stats["attendance_status_label"] = "✅ 完了"
-        else:
-            stats["attendance_status_label"] = "🟡 一部未完"
-        dbg.append(f"attendance participants={stats['participant_count']} regular_practices={stats['practice_count']} answered_rows={stats['attendance_record_count']} unanswered={stats['unanswered_count']} reasons={' / '.join(attendance_reasons) if attendance_reasons else '-'}")
 
         pref_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PREFERENCE"], None) if concert_ctx.get("CONCERT_DB_PREFERENCE") else []
         pref_targets = set()
@@ -8655,9 +8626,8 @@ if system_mode == "HARMONIA":
              f"本番当日 {'あり' if stats['has_concert_day'] else '未作成'} / 練習 {stats['practice_count']} 回"),
             ("楽曲・パート定義", _h_badge(stats["song_count"] > 0 and stats["song_done_count"] == stats["song_count"], partial=(stats["song_count"] > 0 and stats["song_done_count"] > 0)),
              f"楽曲 {stats['song_count']} 曲 / 定義完了 {stats['song_done_count']} 曲 / パート定義 {stats['partdef_count']} 件"),
-            ("奏者・出欠", stats.get("attendance_status_label") or _h_badge(stats["participant_count"] > 0 and stats["unanswered_count"] == 0, partial=(stats["participant_count"] > 0)),
-             (f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"
-              + (f" / {' / '.join(stats.get('attendance_status_reasons', []))}" if stats.get('attendance_status_reasons') else ""))),
+            ("奏者・出欠", _h_badge(stats["participant_count"] > 0 and stats["unanswered_count"] == 0, partial=(stats["participant_count"] > 0)),
+             f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"),
             ("希望入力", _h_badge(stats["participant_count"] > 0 and stats["preference_pending_count"] == 0, partial=(stats["participant_count"] > 0 and stats["preference_pending_count"] < stats["participant_count"])),
              f"希望未提出 {stats['preference_pending_count']} 人"),
             ("レンタル・収支", "ℹ️ 進行中",
@@ -8688,12 +8658,11 @@ if system_mode == "HARMONIA":
         "concert_song_song_rel": ["曲", "楽曲", "演奏曲", "song"],
         "concert_song_done": ["定義完了", "definition_done", "完了"],
         "concert_song_order": ["曲順", "順番", "order"],
-        "partdef_song_rel": ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ", "曲", "song"],
-        "apollo_atlas_song_rel": ["演奏曲", "曲", "作品", "作品マスタ", "ATLAS曲"],
-        "participant_concert_rel": ["出演", "演奏会", "FK演奏会", "concert"],
+        "partdef_song_rel": ["曲", "楽曲", "演奏曲", "song"],
+        "participant_concert_rel": ["演奏会", "FK演奏会", "concert"],
         "participant_player_rel": ["奏者", "出演者", "player", "FK奏者"],
         "attendance_practice_rel": ["練習", "FK練習", "practice"],
-        "attendance_player_rel": ["演奏会参加者", "奏者", "出演者", "player", "FK奏者"],
+        "attendance_player_rel": ["奏者", "出演者", "player", "FK奏者"],
         "preference_player_rel": ["奏者", "出演者", "player", "FK奏者"],
         "preference_part_rel": ["パート定義", "part", "FKパート定義"],
         "rental_concert_rel": ["演奏会", "FK演奏会", "concert", "練習", "FK練習"],
@@ -8714,24 +8683,15 @@ if system_mode == "HARMONIA":
         if not raw:
             return None
         raw = raw.replace("Z", "+00:00")
-        dt = None
         for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
             try:
-                dt = datetime.strptime(raw[:len(fmt.replace('%z','+0000'))], fmt)
-                break
+                return datetime.strptime(raw[:len(fmt.replace('%z','+0000'))], fmt)
             except Exception:
                 pass
-        if dt is None:
-            try:
-                dt = datetime.fromisoformat(raw)
-            except Exception:
-                return None
-        if getattr(dt, "tzinfo", None) is not None:
-            try:
-                dt = dt.astimezone(__import__('datetime').timezone.utc).replace(tzinfo=None)
-            except Exception:
-                dt = dt.replace(tzinfo=None)
-        return dt
+        try:
+            return datetime.fromisoformat(raw)
+        except Exception:
+            return None
 
     def _h_bool(page: dict, keys: list[str]) -> bool:
         props = (page.get("properties") or {}) if isinstance(page, dict) else {}
@@ -8749,31 +8709,6 @@ if system_mode == "HARMONIA":
             return "🟡 一部未完"
         return "⚪ 未着手"
 
-    def _h_collect_apollo_song_ids_for_concert(concert_id: str, atlas_song_ids: list[str]) -> set[str]:
-        """
-        CONCERT_SONG の ATLAS曲ID群に対応する APOLLO 行ID群を返す。
-        APOLLO.演奏曲 relation が ATLAS 向きである前提。
-        旧データ互換のため ATLAS 曲IDも候補に残す。
-        """
-        atlas_ids = [x for x in (atlas_song_ids or []) if x]
-        if not atlas_ids:
-            return set()
-        target_atlas_ids = set(atlas_ids)
-        out = set(target_atlas_ids)
-        song_db_id = concert_ctx.get("CONCERT_DB_SONG")
-        if not song_db_id:
-            return out
-        song_rows = concert_ctx["query_all"](song_db_id, None)
-        for row in song_rows:
-            row_id = row.get("id", "")
-            if concert_id and concert_id not in _h_rel(row, ["演奏会", "出演", "FK演奏会", "concert"]):
-                continue
-            rel_ids = set(_h_rel(row, _H_KEYS["apollo_atlas_song_rel"]))
-            if target_atlas_ids.intersection(rel_ids):
-                if row_id:
-                    out.add(row_id)
-        return out
-
     def _build_harmonia_progress(concert_row: dict | None) -> dict:
         stats = {
             "participant_count": 0,
@@ -8787,8 +8722,6 @@ if system_mode == "HARMONIA":
             "expense_confirmed_total": 0,
             "has_concert_day": False,
             "next_practice_label": "",
-            "attendance_status_label": "⚪ 未着手",
-            "attendance_status_reasons": [],
             "debug_lines": [],
         }
         dbg = stats["debug_lines"]
@@ -8802,29 +8735,24 @@ if system_mode == "HARMONIA":
 
         # practices
         practices = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PRACTICE"], None) if concert_ctx.get("CONCERT_DB_PRACTICE") else []
-        attendance_practice_ids = []
         regular_practice_ids = []
         future = []
         today = datetime.now().date()
         for p in practices:
             if cid not in _h_rel(p, _H_KEYS["practice_concert_rel"]):
                 continue
-            pid = p.get("id", "")
-            if pid:
-                attendance_practice_ids.append(pid)
-            is_concert_day = _h_bool(p, _H_KEYS["practice_concert_day"])
-            if is_concert_day:
+            if _h_bool(p, _H_KEYS["practice_concert_day"]):
                 stats["has_concert_day"] = True
                 dbg.append(f"practice concert_day: {_h_text(p, _H_KEYS['practice_name'])}")
-            else:
-                if pid:
-                    regular_practice_ids.append(pid)
+                continue
+            pid = p.get("id", "")
+            if pid:
+                regular_practice_ids.append(pid)
             pdt_raw = _h_text(p, _H_KEYS["practice_date"])
             pdt = _h_parse_date(pdt_raw)
             if pdt and pdt.date() >= today:
                 future.append((pdt, f"{pdt_raw[:10]} {_h_text(p, _H_KEYS['practice_name'])}".strip()))
         stats["practice_count"] = len(regular_practice_ids)
-        stats["attendance_practice_count"] = len(attendance_practice_ids)
         if future:
             future.sort(key=lambda x: x[0])
             stats["next_practice_label"] = future[0][1]
@@ -8845,16 +8773,12 @@ if system_mode == "HARMONIA":
         # part definitions
         if concert_ctx.get("CONCERT_DB_PART_DEFINITION"):
             pdefs = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PART_DEFINITION"], None)
-            song_id_set = set(song_ids)
-            target_song_ids = _h_collect_apollo_song_ids_for_concert(cid, list(song_id_set))
             cnt = 0
+            song_id_set = set(song_ids)
             for pd in pdefs:
-                if cid and cid not in _h_rel(pd, ["演奏会", "出演", "FK演奏会", "concert"]):
-                    continue
-                if target_song_ids.intersection(set(_h_rel(pd, _H_KEYS["partdef_song_rel"]))):
+                if song_id_set.intersection(set(_h_rel(pd, _H_KEYS["partdef_song_rel"]))):
                     cnt += 1
             stats["partdef_count"] = cnt
-            dbg.append(f"partdef target_song_ids={len(target_song_ids)} partdef_count={stats['partdef_count']}")
 
         # participants
         participant_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PARTICIPANT"], None) if concert_ctx.get("CONCERT_DB_PARTICIPANT") else []
@@ -8874,7 +8798,6 @@ if system_mode == "HARMONIA":
         # attendance
         attendance_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_ATTENDANCE"], None) if concert_ctx.get("CONCERT_DB_ATTENDANCE") else []
         answered = set()
-        attendance_record_count = 0
         for a in attendance_rows:
             pr_ids = _h_rel(a, _H_KEYS["attendance_practice_rel"])
             if not pr_ids:
@@ -8882,32 +8805,13 @@ if system_mode == "HARMONIA":
             pr = pr_ids[0]
             if pr not in regular_practice_ids:
                 continue
-            row_has_target = False
             for rid in _h_rel(a, _H_KEYS["attendance_player_rel"]):
-                if rid:
-                    answered.add((rid, pr))
-                    row_has_target = True
-            if row_has_target:
-                attendance_record_count += 1
+                answered.add((rid, pr))
         unanswered = 0
         for _, targets in participant_targets.items():
             if regular_practice_ids and any(not any((t, pr) in answered for t in targets) for pr in regular_practice_ids):
                 unanswered += 1
         stats["unanswered_count"] = unanswered
-        stats["attendance_record_count"] = attendance_record_count
-        attendance_reasons = []
-        if stats["participant_count"] == 0:
-            attendance_reasons.append("奏者情報未入力")
-        if stats["practice_count"] == 0:
-            attendance_reasons.append("練習情報未入力")
-        stats["attendance_status_reasons"] = attendance_reasons
-        if attendance_reasons:
-            stats["attendance_status_label"] = "⚪ 未着手"
-        elif stats["unanswered_count"] == 0:
-            stats["attendance_status_label"] = "✅ 完了"
-        else:
-            stats["attendance_status_label"] = "🟡 一部未完"
-        dbg.append(f"attendance participants={stats['participant_count']} regular_practices={stats['practice_count']} answered_rows={attendance_record_count} unanswered={stats['unanswered_count']} reasons={' / '.join(attendance_reasons) if attendance_reasons else '-'}")
 
         # preference
         pref_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PREFERENCE"], None) if concert_ctx.get("CONCERT_DB_PREFERENCE") else []
@@ -8953,9 +8857,8 @@ if system_mode == "HARMONIA":
              f"本番当日 {'あり' if stats['has_concert_day'] else '未作成'} / 練習 {stats['practice_count']} 回"),
             ("楽曲・パート定義", _h_badge(stats["song_count"] > 0 and stats["song_done_count"] == stats["song_count"], partial=(stats["song_count"] > 0 and stats["song_done_count"] > 0)),
              f"楽曲 {stats['song_count']} 曲 / 定義完了 {stats['song_done_count']} 曲 / パート定義 {stats['partdef_count']} 件"),
-            ("奏者・出欠", stats.get("attendance_status_label") or _h_badge(stats["participant_count"] > 0 and stats["unanswered_count"] == 0, partial=(stats["participant_count"] > 0)),
-             (f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"
-              + (f" / {' / '.join(stats.get('attendance_status_reasons', []))}" if stats.get('attendance_status_reasons') else ""))),
+            ("奏者・出欠", _h_badge(stats["participant_count"] > 0 and stats["unanswered_count"] == 0, partial=(stats["participant_count"] > 0)),
+             f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"),
             ("希望入力", _h_badge(stats["participant_count"] > 0 and stats["preference_pending_count"] == 0, partial=(stats["participant_count"] > 0 and stats["preference_pending_count"] < stats["participant_count"])),
              f"希望未提出 {stats['preference_pending_count']} 人"),
             ("レンタル・収支", "ℹ️ 進行中",
@@ -9599,6 +9502,12 @@ for key, default in {
 # ============================================================
 with st.sidebar:
     st.header("ナビゲーション")
+    if ADMIN_AUTH_ENABLED and st.session_state.get("admin_authenticated", False):
+        st.caption("管理者ログイン中")
+        if st.button("ログアウト", key="global_admin_logout", use_container_width=True):
+            _clear_admin_auth_session()
+            st.rerun()
+        st.divider()
     with st.expander("📘 操作ガイド", expanded=False):
         guide_md = load_user_guide_markdown()
         if guide_md:
