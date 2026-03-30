@@ -1438,22 +1438,22 @@ def render(ctx: dict):
             st.rerun()
         cs_rows = _load_songs(ctx, filter_concert_id) if filter_concert_id else []
         if filter_concert_id and cs_rows:
-            st.caption("練習日が固まった時点で、CONCERT_SONG の『練習日確定』を一括更新できます。")
+            st.caption("各通常練習日の『日時設定済み + 練習日確定』をもとに、HARMONIA_CONCERT の『練習情報確定』/『練習日確定』を自動更新します。")
             c1, c2 = st.columns(2)
             if c1.button("✅ 練習日確定", key="practice_confirm_all", use_container_width=True):
-                total_rows, updated_rows = _set_concert_song_checkbox_for_concert(ctx, filter_concert_id, ["練習日確定", "practice_confirmed", "practice_fixed"], True)
+                total_rows, updated_rows = _set_all_practice_date_confirmed(ctx, filter_concert_id, True, ctx.get("SELECTED_CONCERT_NAME", ""))
                 if total_rows == 0:
-                    st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
+                    st.warning("通常練習の対象行が見つかりませんでした。")
                 else:
-                    st.success(f"✅ 練習日確定を反映しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
+                    st.success(f"✅ 練習日確定を反映しました。対象 {total_rows} 日 / 更新 {updated_rows} 日")
                     _clear_concert_cache(ctx)
                     st.rerun()
             if c2.button("↩ 練習日確定を解除", key="practice_unconfirm_all", use_container_width=True):
-                total_rows, updated_rows = _set_concert_song_checkbox_for_concert(ctx, filter_concert_id, ["練習日確定", "practice_confirmed", "practice_fixed"], False)
+                total_rows, updated_rows = _set_all_practice_date_confirmed(ctx, filter_concert_id, False, ctx.get("SELECTED_CONCERT_NAME", ""))
                 if total_rows == 0:
-                    st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
+                    st.warning("通常練習の対象行が見つかりませんでした。")
                 else:
-                    st.success(f"↩ 練習日確定を解除しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
+                    st.success(f"↩ 練習日確定を解除しました。対象 {total_rows} 日 / 更新 {updated_rows} 日")
                     _clear_concert_cache(ctx)
                     st.rerun()
 
@@ -1587,6 +1587,7 @@ def render(ctx: dict):
                     ok_n += 1 if ok else 0
                     ng_n += 0 if ok else 1
 
+            _refresh_harmonia_practice_info_status(ctx, filter_concert_id, ctx.get("SELECTED_CONCERT_NAME", ""))
             if ng_n == 0:
                 st.success(f"✅ {ok_n}件を保存しました。")
             else:

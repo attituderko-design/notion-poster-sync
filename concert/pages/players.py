@@ -894,7 +894,7 @@ def _render_attendance_tab(ctx: dict):
     all_players = _load_players(ctx)
     player_name_map = {p.get("id", ""): _player_name(p, ctx) for p in all_players}
 
-    st.markdown("### 演奏会参加者")
+    # 参加者データ取得（出欠入力に必要）
     participants = _load_participants(ctx, c_id)
     part_player_ids = []
     part_row_by_pid = {}
@@ -913,134 +913,9 @@ def _render_attendance_tab(ctx: dict):
             continue
         participant_id_by_player_id[pids[0]] = row.get("id", "")
 
-    if all_players:
-        selectable = { _player_name(p, ctx): p.get("id", "") for p in sorted(all_players, key=lambda x: _player_name(x, ctx)) if p.get("id") }
-        default_names = [name for name, pid in selectable.items() if pid in part_player_ids]
-        with st.form(f"participant_form_{c_id}", border=True):
-            sel_names = st.multiselect(
-                "この演奏会の参加者を選択",
-                list(selectable.keys()),
-                default=default_names,
-                key=f"participant_select_{c_id}",
-            )
-            extra_names = st.multiselect(
-                "エキストラ（参加費0円）",
-                list(selectable.keys()),
-                default=[name for name, pid in selectable.items()
-                         if pid in part_player_ids and
-                         ctx["extract_prop_text_any"](part_row_by_pid.get(pid, {}), PARTICIPANT_FEE_KEYS) == "0"],
-                key=f"participant_extra_{c_id}",
-                help="エキストラの方は参加費が0円で登録されます",
-            )
-            remove_unselected = st.checkbox("未選択の既存参加者をアーカイブ", value=False, key=f"participant_remove_{c_id}")
-            if st.form_submit_button("💾 参加者を保存", type="primary", use_container_width=True):
-                selected_ids = {selectable[n] for n in sel_names if selectable.get(n)}
-                extra_ids    = {selectable[n] for n in extra_names if selectable.get(n)}
-                ok_n, ng_n = 0, 0
-                # ATLASの確定参加費をsession_stateにキャッシュ
-                try:
-                    t_c   = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT"])
-                    res_c = ctx["api_request"]("get", f"https://api.notion.com/v1/pages/{c_id}")
-                    if res_c and res_c.status_code == 200:
-                        fee_key = ctx["find_prop_name"](t_c, CONCERT_CONFIRMED_FEE_KEYS) if t_c else None
-                        if fee_key:
-                            num = res_c.json().get("properties", {}).get(fee_key, {}).get("number")
-                            if num is not None:
-                                st.session_state[f"confirmed_fee_{c_id}"] = int(num)
-                except Exception:
-                    pass
-
-                for pid in selected_ids:
-                    pname = player_name_map.get(pid, pid)
-                    ex    = part_row_by_pid.get(pid)
-                    is_extra = pid in extra_ids
-                    ok = _upsert_participant(ctx, c_id, c_name, pid, pname,
-                                            ex.get("id", "") if ex else "",
-                                            is_extra=is_extra)
-                    ok_n += 1 if ok else 0
-                    ng_n += 0 if ok else 1
-                if remove_unselected:
-                    for pid, row in part_row_by_pid.items():
-                        if pid in selected_ids:
-                            continue
-                        ok = _archive_participant(ctx, row.get("id", ""))
-                        ok_n += 1 if ok else 0
-                        ng_n += 0 if ok else 1
-                if ng_n == 0:
-                    st.success(f"✅ 参加者更新完了: {ok_n}件")
-                else:
-                    st.warning(f"⚠️ 参加者更新: 成功 {ok_n} / 失敗 {ng_n}")
-                st.session_state.pop(f"participant_list_{c_id}", None)
-                st.rerun()
-
-    # ── 参加者別パート・役職設定 ──────────────────────────────
-    if part_player_ids:
-        st.markdown("### パート・役職設定")
-        st.caption("Notionに登録済みの選択肢が表示されます。新しい値はNotionに追加後、🔄で反映されます。")
-        part_opts = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_PART_KEYS)
-        role_opts = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_ROLE_KEYS)
-
-        import pandas as pd
-        pr_rows: list[dict] = []
-        pr_meta: list[dict] = []
-        for pid in part_player_ids:
-            pname = player_name_map.get(pid, pid)
-            row   = part_row_by_pid.get(pid, {})
-            rid   = row.get("id", "") if row else ""
-            cur_part = ctx["extract_prop_text_any"](row, PARTICIPANT_PART_KEYS) if row else ""
-            cur_role = ctx["extract_prop_text_any"](row, PARTICIPANT_ROLE_KEYS) if row else ""
-            pr_rows.append({"氏名": pname, "パート": cur_part, "役職": cur_role})
-            pr_meta.append({"rid": rid, "pid": pid, "cur_part": cur_part, "cur_role": cur_role})
-
-        df_pr = pd.DataFrame(pr_rows)
-        col_config_pr = {
-            "氏名":   st.column_config.TextColumn("氏名", disabled=True),
-            "パート": st.column_config.SelectboxColumn("パート", options=part_opts) if part_opts
-                       else st.column_config.TextColumn("パート", max_chars=30),
-            "役職":   st.column_config.SelectboxColumn("役職",  options=role_opts) if role_opts
-                       else st.column_config.TextColumn("役職",  max_chars=30),
-        }
-        pr_version = st.session_state.get(f"pr_editor_version_{c_id}", 0)
-        edited_pr = st.data_editor(
-            df_pr, num_rows="fixed", use_container_width=True,
-            key=f"pr_editor_{c_id}_{pr_version}",
-            column_config=col_config_pr,
-        )
-        if st.button("💾 パート・役職を保存", type="primary", use_container_width=True,
-                     key=f"pr_save_{c_id}"):
-            ok_n = ng_n = skip_n = 0
-            with st.spinner("保存中..."):
-                df_reset = edited_pr.reset_index(drop=True)
-                for idx, meta in enumerate(pr_meta):
-                    if idx >= len(df_reset): break
-                    row      = df_reset.iloc[idx]
-                    new_part = str(row.get("パート") or "").strip()
-                    new_role = str(row.get("役職")   or "").strip()
-                    if new_part == meta["cur_part"] and new_role == meta["cur_role"]:
-                        skip_n += 1
-                        continue
-                    if not meta["rid"]:
-                        skip_n += 1
-                        continue
-                    t_p  = ctx["get_prop_types"](ctx["CONCERT_DB_PARTICIPANT"])
-                    props: dict = {}
-                    ctx["put_prop_any"](props, t_p, PARTICIPANT_PART_KEYS, new_part)
-                    ctx["put_prop_any"](props, t_p, PARTICIPANT_ROLE_KEYS, new_role)
-                    res = ctx["api_request"]("patch",
-                        f"https://api.notion.com/v1/pages/{meta['rid']}",
-                        json={"properties": props})
-                    ok = res is not None and res.status_code == 200
-                    ok_n += 1 if ok else 0
-                    ng_n += 0 if ok else 1
-            if ng_n == 0:
-                st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
-            else:
-                st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
-            st.session_state[f"pr_editor_version_{c_id}"] = pr_version + 1
-            st.session_state.pop(f"participant_list_{c_id}", None)
-            st.rerun()
-
-        st.divider()
+    if not part_player_ids:
+        st.info("この演奏会の参加者がいません。「奏者管理」タブで参加者を登録してください。")
+        return
 
     def _d(p):
         x = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
@@ -1072,13 +947,19 @@ def _render_attendance_tab(ctx: dict):
         pid = participant_to_player.get(rel_id, rel_id)
         by_player[pid] = row
 
-    # 打楽器休み日は全員を自動で×固定にする
-    if practice_row and _is_truthy_text(ctx["extract_prop_text_any"](practice_row, PRACTICE_PERCUSSION_OFF_KEYS)):
-        fixed_note = "楽器手配の無い日のため全員×"
+    # 打楽器休み日は打楽器奏者のみ×固定、それ以外は自由設定
+    is_perc_off = practice_row and _is_truthy_text(
+        ctx["extract_prop_text_any"](practice_row, PRACTICE_PERCUSSION_OFF_KEYS)
+    )
+    if is_perc_off:
+        perc_player_ids = set(_filter_perc_players(ctx, [p.get("id","") for p in players], participants))
+        fixed_note = "打楽器休みのため×"
         changed = 0
         failed = 0
         for pl in sorted(players, key=lambda x: _player_name(x, ctx)):
             pid = pl.get("id", "")
+            if pid not in perc_player_ids:
+                continue  # 打楽器奏者以外はスキップ
             pname = _player_name(pl, ctx)
             ex = by_player.get(pid)
             cur_s = ctx["extract_prop_text_any"](ex, ATT_STATUS_KEYS) if ex else ""
@@ -1086,28 +967,20 @@ def _render_attendance_tab(ctx: dict):
             if cur_s == "×" and cur_n == fixed_note:
                 continue
             ok = _upsert_attendance(
-                ctx,
-                pid,
-                pname,
-                p_id,
-                p_name,
-                "×",
-                fixed_note,
+                ctx, pid, pname, p_id, p_name, "×", fixed_note,
                 ex.get("id", "") if ex else "",
                 participant_id_by_player_id.get(pid, ""),
             )
-            if ok:
-                changed += 1
-            else:
-                failed += 1
+            if ok: changed += 1
+            else:  failed += 1
         st.session_state.pop(f"attendance_list_{p_id}", None)
         if failed == 0:
-            st.info("この練習日は「打楽器休み」のため、出欠は全員「×」で自動固定されています。")
+            st.info("この練習日は「打楽器休み」のため、打楽器奏者の出欠は全員「×」で自動固定されています。")
             if changed > 0:
-                st.success(f"✅ 自動反映: {changed}件")
+                st.success(f"✅ 打楽器奏者の出欠を自動反映: {changed}件")
         else:
             st.warning(f"⚠️ 自動反映: 成功 {changed} / 失敗 {failed}")
-        return
+        # returnせずそのまま全員の出欠入力に進む
 
     statuses = ["○", "×", "△"]
     import pandas as pd
@@ -1569,24 +1442,80 @@ def _render_assign_tab(ctx: dict):
             _clear_player_cache()
             st.rerun()
 
-    st.caption("所有楽器の整理が固まった時点で、HARMONIA_CONCERT の『所有楽器確定』を更新できます。")
-    c1, c2 = st.columns(2)
-    if c1.button("✅ 所有楽器確定", key=f"ownership_confirm_{c_id}", use_container_width=True):
-        ok = _set_harmonia_concert_checkbox(ctx, c_id, HARMONIA_CONCERT_OWNERSHIP_KEYS, True, c_name)
-        if ok:
-            st.success("✅ 所有楽器確定を反映しました。")
-            _clear_player_cache()
+    st.divider()
+    st.markdown("### 所有楽器確定")
+    st.caption("各奏者の所有楽器整理が固まったら、CONCERT_CAST の『所有楽器確定』フラグを人ごとに更新します。")
+
+    participants_own = _load_participants(ctx, c_id)
+    own_rows: list[dict] = []
+    own_meta: list[dict] = []
+    t_part = ctx["get_prop_types"](ctx["CONCERT_DB_PARTICIPANT"])
+    own_key = ctx["find_prop_name"](t_part, ["所有楽器確定", "ownership_confirmed", "own_confirmed"]) if t_part else ""
+
+    for row in sorted(participants_own, key=lambda r: player_name_map.get(
+            (ctx["extract_relation_ids_any"](r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0], "")):
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if not pids:
+            continue
+        pid   = pids[0]
+        pname = player_name_map.get(pid, pid)
+        rid   = row.get("id", "")
+        props = row.get("properties", {}) or {}
+        cur_confirmed = False
+        if own_key and own_key in props and props[own_key].get("type") == "checkbox":
+            cur_confirmed = bool(props[own_key].get("checkbox"))
+        own_rows.append({"氏名": pname, "所有楽器確定": cur_confirmed})
+        own_meta.append({"rid": rid, "pid": pid, "cur": cur_confirmed})
+
+    if not own_key:
+        st.warning("CONCERT_CAST DB に『所有楽器確定』（チェックボックス型）プロパティが見つかりません。Notionで追加してください。")
+    elif own_rows:
+        import pandas as pd
+        df_own = pd.DataFrame(own_rows)
+        own_version = st.session_state.get(f"own_editor_version_{c_id}", 0)
+        edited_own = st.data_editor(
+            df_own, num_rows="fixed", use_container_width=True,
+            key=f"own_editor_{c_id}_{own_version}",
+            column_config={
+                "氏名": st.column_config.TextColumn("氏名", disabled=True),
+                "所有楽器確定": st.column_config.CheckboxColumn("所有楽器確定"),
+            },
+        )
+        col_own1, col_own2 = st.columns(2)
+        if col_own1.button("💾 所有楽器確定を保存", type="primary",
+                            use_container_width=True, key=f"own_save_{c_id}"):
+            ok_n = ng_n = skip_n = 0
+            df_reset = edited_own.reset_index(drop=True)
+            for idx, meta in enumerate(own_meta):
+                if idx >= len(df_reset): break
+                new_val = bool(df_reset.iloc[idx].get("所有楽器確定") or False)
+                if new_val == meta["cur"]:
+                    skip_n += 1; continue
+                res = ctx["api_request"]("patch",
+                    f"https://api.notion.com/v1/pages/{meta['rid']}",
+                    json={"properties": {own_key: {"checkbox": new_val}}})
+                ok = res is not None and res.status_code == 200
+                ok_n += 1 if ok else 0
+                ng_n += 0 if ok else 1
+            if ng_n == 0:
+                st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
+            else:
+                st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+            st.session_state[f"own_editor_version_{c_id}"] = own_version + 1
+            st.session_state.pop(f"participant_list_{c_id}", None)
             st.rerun()
-        else:
-            st.warning("HARMONIA_CONCERT の『所有楽器確定』列が見つからないか、更新に失敗しました。")
-    if c2.button("↩ 所有楽器確定を解除", key=f"ownership_unconfirm_{c_id}", use_container_width=True):
-        ok = _set_harmonia_concert_checkbox(ctx, c_id, HARMONIA_CONCERT_OWNERSHIP_KEYS, False, c_name)
-        if ok:
-            st.success("↩ 所有楽器確定を解除しました。")
-            _clear_player_cache()
-            st.rerun()
-        else:
-            st.warning("HARMONIA_CONCERT の『所有楽器確定』列が見つからないか、更新に失敗しました。")
+        # 全員確定したらHARMONIA_CONCERTにも反映
+        if col_own2.button("✅ 全員確定→HARMONIA_CONCERTに反映",
+                            use_container_width=True, key=f"own_all_confirm_{c_id}"):
+            all_confirmed = all(m["cur"] for m in own_meta)
+            ok = _set_harmonia_concert_checkbox(
+                ctx, c_id, HARMONIA_CONCERT_OWN_INST_KEYS, all_confirmed, c_name
+            )
+            if ok:
+                st.success("✅ HARMONIA_CONCERTの所有楽器確定を更新しました。")
+                st.rerun()
+            else:
+                st.warning("HARMONIA_CONCERT の更新に失敗しました。")
 
 
 def _render_practice_bring_tab(ctx: dict):
