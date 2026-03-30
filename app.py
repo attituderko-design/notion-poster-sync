@@ -8444,12 +8444,12 @@ if system_mode == "HARMONIA":
         "practice_date": ["日時", "日付", "出演日", "体験日", "リリース日"],
         "practice_name": ["名称", "練習名", "タイトル", "PK名称"],
         "practice_concert_day": ["本番当日", "本番日", "concert_day", "本番", "演奏会当日フラグ", "本番フラグ"],
+        "practice_date_confirm": ["練習日確定", "practice_date_confirmed", "practice_confirmed", "practice_fixed"],
         "concert_song_concert_rel": ["演奏会", "FK演奏会", "concert"],
         "concert_song_song_rel": ["曲", "楽曲", "演奏曲", "song"],
         "concert_song_done": ["定義完了", "definition_done", "完了"],
-        "concert_song_song_confirm": ["楽曲確定", "song_confirmed", "songs_confirmed"],
         "concert_song_practice_confirm": ["練習日確定", "practice_confirmed", "practice_fixed"],
-        "concert_song_ownership_confirm": ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed"],
+        "concert_song_ownership_confirm": ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed", "bring_confirmed", "bring_fixed"],
         "practice_bring_confirm": ["持参楽器確定", "bring_confirmed", "bring_fixed"],
         "concert_song_proposal": ["案提示", "proposal_presented", "proposal"],
         "concert_song_assign_confirm": ["アサイン確定", "assign_confirmed", "confirmed"],
@@ -8466,21 +8466,6 @@ if system_mode == "HARMONIA":
         "expense_concert_rel": ["演奏会", "FK演奏会", "concert"],
         "expense_amount": ["金額", "費用", "amount"],
         "expense_confirmed": ["確定", "confirmed", "確定フラグ"],
-        "harmonia_concert_rel": ["演奏会", "FK演奏会", "concert"],
-        "harmonia_managed": ["管理開始", "managed", "management_started"],
-        "harmonia_song_info": ["楽曲情報確定", "song_info_confirmed", "songs_confirmed"],
-        "harmonia_practice_info": ["練習情報確定", "practice_info_confirmed"],
-        "harmonia_practice_date": ["練習日確定", "practice_confirmed", "practice_fixed"],
-        "harmonia_required_inst": ["必要楽器確定", "required_instruments_confirmed"],
-        "harmonia_partdef": ["パート定義確定", "part_definition_confirmed", "definition_confirmed"],
-        "harmonia_participant": ["奏者情報確定", "participant_confirmed", "cast_confirmed"],
-        "harmonia_ownership": ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed"],
-        "harmonia_attendance": ["出欠確定", "attendance_confirmed"],
-        "harmonia_preference": ["希望入力確定", "preference_confirmed"],
-        "harmonia_bring": ["持参楽器確定", "bring_confirmed", "bring_fixed"],
-        "harmonia_proposal": ["案提示", "proposal_presented", "proposal"],
-        "harmonia_assign": ["アサイン確定", "assign_confirmed", "confirmed"],
-        "harmonia_finance": ["収支確定", "finance_confirmed"],
     }
 
     def _h_text(page: dict, keys: list[str]) -> str:
@@ -8546,50 +8531,11 @@ if system_mode == "HARMONIA":
                     out.add(row_id)
         return out
 
-    def _find_harmonia_row(concert_id: str) -> dict | None:
-        db_id = concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT")
-        if not db_id or not concert_id:
-            return None
-        rows = concert_ctx["query_all"](db_id, None)
-        for row in rows:
-            if concert_id in _h_rel(row, _H_KEYS["harmonia_concert_rel"]):
-                return row
-        return None
-
-    def _harmonia_flag(row: dict | None, key_name: str) -> bool:
-        return _h_bool(row or {}, _H_KEYS.get(key_name, [])) if row else False
-
-    def _create_harmonia_concert_row(concert_row: dict | None) -> tuple[bool, str]:
-        if not concert_row:
-            return False, "演奏会が選択されていません。"
-        db_id = concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT")
-        if not db_id:
-            return False, "HARMONIA_CONCERT DB が未設定です。"
-        cid = concert_row.get("id", "")
-        if not cid:
-            return False, "演奏会IDが取得できません。"
-        if _find_harmonia_row(cid):
-            return True, "既にHARMONIA管理対象です。"
-        type_map = concert_ctx["get_prop_types"](db_id) or {}
-        if not type_map:
-            return False, "HARMONIA_CONCERT DB のプロパティ取得に失敗しました。"
-        props = {}
-        concert_ctx["put_prop_any"](props, type_map, ["concert_key", "ConcertKey", "key"], f"harmonia_{cid}")
-        concert_ctx["put_prop_any"](props, type_map, _H_KEYS["harmonia_concert_rel"], cid)
-        concert_ctx["put_prop_any"](props, type_map, _H_KEYS["harmonia_managed"], True)
-        res = concert_ctx["api_request"](
-            "post",
-            "https://api.notion.com/v1/pages",
-            json={"parent": {"database_id": db_id}, "properties": props},
-        )
-        if res is not None and res.status_code == 200:
-            return True, "HARMONIA管理対象として登録しました。"
-        return False, f"登録に失敗しました。HTTP {getattr(res, 'status_code', 'N/A')}"
-
     def _build_harmonia_progress(concert_row: dict | None) -> dict:
         stats = {
             "participant_count": 0, "practice_count": 0, "attendance_practice_count": 0, "attendance_record_count": 0,
-            "song_count": 0, "song_confirm_count": 0, "song_done_count": 0, "partdef_count": 0, "unanswered_count": 0,
+            "practice_date_set_count": 0, "practice_date_confirm_count": 0, "practice_ready_count": 0,
+            "song_count": 0, "song_done_count": 0, "partdef_count": 0, "unanswered_count": 0,
             "preference_pending_count": 0, "rental_unconfirmed_count": 0, "expense_confirmed_total": 0,
             "has_concert_day": False, "next_practice_label": "", "attendance_status_label": "⚪ 未着手",
             "attendance_status_reasons": [], "debug_lines": [],
@@ -8612,6 +8558,9 @@ if system_mode == "HARMONIA":
         practices = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PRACTICE"], None) if concert_ctx.get("CONCERT_DB_PRACTICE") else []
         attendance_practice_ids, regular_practice_ids, future = [], [], []
         today = datetime.now().date()
+        practice_date_set_count = 0
+        practice_date_confirm_count = 0
+        practice_ready_count = 0
         for p in practices:
             if cid not in _h_rel(p, _H_KEYS["practice_concert_rel"]):
                 continue
@@ -8619,11 +8568,18 @@ if system_mode == "HARMONIA":
             if pid:
                 attendance_practice_ids.append(pid)
             is_concert_day = _h_bool(p, _H_KEYS["practice_concert_day"])
+            pdt_raw = _h_text(p, _H_KEYS["practice_date"])
+            has_date = bool((pdt_raw or "").strip())
             if is_concert_day:
                 stats["has_concert_day"] = True
             elif pid:
                 regular_practice_ids.append(pid)
-            pdt_raw = _h_text(p, _H_KEYS["practice_date"])
+                if has_date:
+                    practice_date_set_count += 1
+                if _h_bool(p, _H_KEYS["practice_date_confirm"]):
+                    practice_date_confirm_count += 1
+                if has_date and _h_bool(p, _H_KEYS["practice_date_confirm"]):
+                    practice_ready_count += 1
             pdt = _h_parse_date(pdt_raw)
             if pdt:
                 if getattr(pdt, "tzinfo", None) is not None:
@@ -8632,6 +8588,9 @@ if system_mode == "HARMONIA":
                     future.append((pdt, f"{pdt_raw[:10]} {_h_text(p, _H_KEYS['practice_name'])}".strip()))
         stats["practice_count"] = len(regular_practice_ids)
         stats["attendance_practice_count"] = len(attendance_practice_ids)
+        stats["practice_date_set_count"] = practice_date_set_count
+        stats["practice_date_confirm_count"] = practice_date_confirm_count
+        stats["practice_ready_count"] = practice_ready_count
         stats["practice_bring_confirm_count"] = sum(1 for p in practices if (p.get("id", "") in attendance_practice_ids and _h_bool(p, _H_KEYS["practice_bring_confirm"])))
         if future:
             future.sort(key=lambda x: x[0])
@@ -8645,7 +8604,6 @@ if system_mode == "HARMONIA":
                 song_ids.extend(_h_rel(r, _H_KEYS["concert_song_song_rel"]))
         song_id_set = {x for x in song_ids if x}
         stats["song_count"] = len(song_id_set)
-        stats["song_confirm_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_song_confirm"]))
         stats["song_done_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_done"]))
         stats["practice_confirm_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_practice_confirm"]))
         stats["ownership_confirm_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_ownership_confirm"]))
@@ -8732,40 +8690,22 @@ if system_mode == "HARMONIA":
                     pass
         stats["expense_confirmed_total"] = total
 
-        harmonia_row = _find_harmonia_row(cid)
         concert_name = _h_text(concert_row, ["名称","演奏会名","タイトル","PK名称"]) or concert_ctx["extract_title"](concert_row)
         concert_date = (_h_text(concert_row, ["日時","日付","出演日","体験日","リリース日"]) or "")[:10]
-        total_song_rows = len(filtered_cs)
-        total_attendance_days = stats['attendance_practice_count']
-        total_regular_practice_days = stats['practice_count']
-
-        song_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_song_info') else (0.5 if stats['song_count'] > 0 else 0.0)
-        practice_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_practice_info') else (0.5 if total_regular_practice_days > 0 else 0.0)
-        required_inst_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_required_inst') else (0.5 if stats['partdef_count'] > 0 else 0.0)
-        partdef_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_partdef') else (0.5 if stats['song_done_count'] > 0 else 0.0)
-        participant_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_participant') else (0.5 if stats['participant_count'] > 0 else 0.0)
-        ownership_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_ownership') else (0.5 if stats['ownership_confirm_count'] > 0 else 0.0)
-        bring_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_bring') else (0.5 if stats['practice_bring_confirm_count'] > 0 else 0.0)
-        attendance_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_attendance') else (0.5 if stats['participant_count'] > 0 and stats['attendance_record_count'] > 0 else 0.0)
-        preference_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_preference') else (0.5 if stats['participant_count'] > 0 and stats['preference_pending_count'] < stats['participant_count'] else 0.0)
-        proposal_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_proposal') else (0.5 if stats['proposal_count'] > 0 else 0.0)
-        assign_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_assign') else (0.5 if stats['assign_confirm_count'] > 0 else 0.0)
-        finance_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_finance') else (0.5 if (stats['rental_unconfirmed_count'] > 0 or confirmed_expense_count > 0 or stats['expense_confirmed_total'] > 0) else 0.0)
-
         stats["step_items"] = [
-            ("① 演奏会の確定", 1.0 if _harmonia_flag(harmonia_row, 'harmonia_managed') else 0.0, f"{concert_name or cid} / {concert_date or '日付未設定'}"),
-            ("② 楽曲情報の確定", song_ratio, f"CONCERT_SONG {stats['song_count']} 曲"),
-            ("③ 練習情報の確定", practice_ratio, f"通常練習 {total_regular_practice_days if _harmonia_flag(harmonia_row, 'harmonia_practice_info') else min(total_regular_practice_days, stats['practice_count'])} / {total_regular_practice_days} 日"),
-            ("④ 必要楽器の確定", required_inst_ratio, f"PART_DEFINITION {stats['partdef_count']} 件"),
-            ("⑤ パート定義の確定", partdef_ratio, f"定義完了 {stats['song_done_count']} / {total_song_rows} 曲"),
-            ("⑥ 奏者情報の確定", participant_ratio, f"CONCERT_CAST {stats['participant_count']} 人"),
-            ("⑦ 所有楽器の確定", ownership_ratio, f"所有楽器確定 {stats['ownership_confirm_count']} / {total_song_rows} 曲"),
-            ("⑧ 持参楽器の確定", bring_ratio, f"持参楽器確定 {stats['practice_bring_confirm_count']} / {stats['attendance_practice_count']} 回"),
-            ("⑨ 出欠の確定", attendance_ratio, f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"),
-            ("⑩ 各奏者パート希望の確定", preference_ratio, f"希望未提出 {stats['preference_pending_count']} 人"),
-            ("⑪ アサイン案の提示", proposal_ratio, f"案提示 {stats['proposal_count']} / {total_song_rows} 曲"),
-            ("⑫ アサイン情報の確定", assign_ratio, f"アサイン確定 {stats['assign_confirm_count']} / {total_song_rows} 曲"),
-            ("⑬ レンタル・収支", finance_ratio, f"見積中 {stats['rental_unconfirmed_count']} 件 / 経費確定 ¥{stats['expense_confirmed_total']:,}"),
+            ("① 演奏会の確定", 1.0 if cid else 0.0, f"{concert_name or cid} / {concert_date or '日付未設定'}"),
+            ("② 楽曲情報の確定", 1.0 if stats['song_count'] > 0 else 0.0, f"CONCERT_SONG {stats['song_count']} 曲"),
+            ("③ 練習情報の確定", 1.0 if (stats['practice_count'] > 0 and stats['practice_ready_count'] == stats['practice_count']) else (0.5 if (stats['practice_count'] > 0 and (stats['practice_ready_count'] > 0 or stats['practice_date_set_count'] > 0 or stats['practice_date_confirm_count'] > 0)) else 0.0), f"通常練習 {stats['practice_ready_count']} / {stats['practice_count']} 日"),
+            ("④ 必要楽器の確定", 1.0 if stats['partdef_count'] > 0 else 0.0, f"PART_DEFINITION {stats['partdef_count']} 件"),
+            ("⑤ パート定義の確定", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_done']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_done']) else 0.0), f"定義完了 {stats['song_done_count']} / {len(filtered_cs)} 曲"),
+            ("⑥ 奏者情報の確定", 1.0 if stats['participant_count'] > 0 else 0.0, f"CONCERT_CAST {stats['participant_count']} 人"),
+            ("⑦ 所有楽器の確定", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_ownership_confirm']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_ownership_confirm']) else 0.0), f"所有楽器確定 {stats['ownership_confirm_count']} / {len(filtered_cs)} 曲"),
+            ("⑧ 持参楽器の確定", 1.0 if (stats['attendance_practice_count'] > 0 and stats['practice_bring_confirm_count'] == stats['attendance_practice_count']) else (0.5 if stats['practice_bring_confirm_count'] > 0 else 0.0), f"持参楽器確定 {stats['practice_bring_confirm_count']} / {stats['attendance_practice_count']} 回"),
+            ("⑨ 出欠の確定", 1.0 if (not attendance_reasons and stats['participant_count'] > 0 and stats['unanswered_count'] == 0) else (0.5 if stats['participant_count'] > 0 and stats['attendance_record_count'] > 0 else 0.0), f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"),
+            ("⑩ 各奏者パート希望の確定", 1.0 if (stats['participant_count'] > 0 and stats['preference_pending_count'] == 0) else (0.5 if stats['participant_count'] > 0 and stats['preference_pending_count'] < stats['participant_count'] else 0.0), f"希望未提出 {stats['preference_pending_count']} 人"),
+            ("⑪ アサイン案の提示", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_proposal']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_proposal']) else 0.0), f"案提示 {stats['proposal_count']} / {len(filtered_cs)} 曲"),
+            ("⑫ アサイン情報の確定", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_assign_confirm']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_assign_confirm']) else 0.0), f"アサイン確定 {stats['assign_confirm_count']} / {len(filtered_cs)} 曲"),
+            ("⑬ レンタル・収支", 1.0 if ((stats['rental_unconfirmed_count'] == 0) and (confirmed_expense_count > 0 or stats['expense_confirmed_total'] > 0)) else (0.5 if (stats['rental_unconfirmed_count'] > 0 or confirmed_expense_count > 0 or stats['expense_confirmed_total'] > 0) else 0.0), f"見積中 {stats['rental_unconfirmed_count']} 件 / 経費確定 ¥{stats['expense_confirmed_total']:,}"),
         ]
         ratios = [x[1] for x in stats['step_items']]
         stats['overall_progress_ratio'] = sum(ratios) / len(ratios) if ratios else 0.0
@@ -9243,15 +9183,6 @@ if system_mode == "HARMONIA":
                 st.caption(f"📅 {c_date[:10]}")
             if c_loc:
                 st.caption(f"📍 {c_loc}")
-            if not _find_harmonia_row(selected_concert_id):
-                st.warning("この演奏会はまだ HARMONIA の管理対象として登録されていません。")
-                if st.button("この演奏会をHARMONIAで管理する", type="primary", use_container_width=True, key="harmonia_manage_start"):
-                    ok, msg = _create_harmonia_concert_row(selected_concert_row)
-                    if ok:
-                        st.success(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
             st.markdown("### 作業の流れ")
             _render_harmonia_progress_cards(_build_harmonia_progress(selected_concert_row))
         else:
