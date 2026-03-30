@@ -11,6 +11,11 @@ import requests
 
 
 
+try:
+    PRACTICE_DATE_CONFIRM_KEYS
+except NameError:
+    PRACTICE_DATE_CONFIRM_KEYS = ["練習日確定", "practice_date_confirmed", "practice_confirmed", "practice_fixed"]
+
 
 # ============================================================
 # ヘルパー
@@ -145,56 +150,54 @@ def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> s
     return ""
 
 
-
-
-def _load_harmonia_concert_row(ctx: dict, concert_id: str) -> dict:
-    if not concert_id or not ctx.get("CONCERT_DB_HARMONIA_CONCERT"):
-        return {}
-    db_id = ctx["CONCERT_DB_HARMONIA_CONCERT"]
-    t = ctx["get_prop_types"](db_id) or {}
-    rel_key = _find_prop_name_loose(ctx, t, HARMONIA_CONCERT_CONCERT_REL_KEYS)
-    target = _normalize_page_id(concert_id)
-    rows = []
-    if rel_key:
-        rows = ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}})
-    if not rows:
-        rows = ctx["query_all"](db_id)
-    for r in rows:
-        ids = ctx["extract_relation_ids_any"](r, [rel_key] if rel_key else HARMONIA_CONCERT_CONCERT_REL_KEYS)
-        if any(_normalize_page_id(x) == target for x in ids):
-            return r
-    return {}
-
-
-def _ensure_harmonia_concert_row(ctx: dict, concert_id: str, concert_name: str = "") -> tuple[dict, bool]:
-    row = _load_harmonia_concert_row(ctx, concert_id)
-    if row:
-        return row, False
-    db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
-    if not db_id:
-        return {}, False
-    t = ctx["get_prop_types"](db_id) or {}
-    props: dict = {}
-    ctx["put_key_any"](props, t, HARMONIA_CONCERT_KEY_KEYS, concert_id, concert_name or concert_id, prefix="harmonia")
-    ctx["put_prop_any"](props, t, HARMONIA_CONCERT_CONCERT_REL_KEYS, concert_id)
-    ctx["put_prop_any"](props, t, HARMONIA_CONCERT_MANAGED_KEYS, True)
-    res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
-    if res is not None and res.status_code == 200:
-        return res.json() or {}, True
-    return {}, False
-
-
-def _set_harmonia_concert_checkbox(ctx: dict, concert_id: str, key_candidates: list[str], checked: bool, concert_name: str = "") -> bool:
-    row, _ = _ensure_harmonia_concert_row(ctx, concert_id, concert_name)
-    if not row:
+def _set_practice_checkbox(ctx: dict, practice_id: str, key_candidates: list[str], checked: bool) -> bool:
+    if not practice_id or not ctx.get("CONCERT_DB_PRACTICE"):
         return False
-    db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
-    t = ctx["get_prop_types"](db_id) or {}
-    flag_key = _find_prop_name_loose(ctx, t, key_candidates)
+    db_id = ctx["CONCERT_DB_PRACTICE"]
+    type_map = ctx["get_prop_types"](db_id) or {}
+    flag_key = _find_prop_name_loose(ctx, type_map, key_candidates)
     if not flag_key:
         return False
-    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{row.get('id','')}", json={"properties": {flag_key: {"checkbox": bool(checked)}}})
+    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{practice_id}", json={"properties": {flag_key: {"checkbox": bool(checked)}}})
     return res is not None and res.status_code == 200
+
+
+def _practice_confirmation_stats(ctx: dict, concert_id: str) -> dict:
+    practices = _load_practices(ctx, concert_id) if concert_id else []
+    regular = [p for p in practices if not _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)]
+    confirmed = 0
+    dated = 0
+    ready = 0
+    for p in regular:
+        has_date = bool((ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS) or "").strip())
+        is_confirmed = _extract_bool_any(ctx, p, PRACTICE_DATE_CONFIRM_KEYS, False)
+        if has_date:
+            dated += 1
+        if is_confirmed:
+            confirmed += 1
+        if has_date and is_confirmed:
+            ready += 1
+    return {"rows": regular, "total": len(regular), "dated": dated, "confirmed": confirmed, "ready": ready}
+
+
+def _refresh_harmonia_practice_info_status(ctx: dict, concert_id: str, concert_name: str = "") -> bool:
+    stats = _practice_confirmation_stats(ctx, concert_id)
+    all_ready = bool(stats["total"] > 0 and stats["ready"] == stats["total"])
+    ok1 = _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PRACTICE_INFO_KEYS, all_ready, concert_name)
+    ok2 = _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PRACTICE_DATE_KEYS, all_ready, concert_name)
+    return ok1 or ok2
+
+
+def _set_all_practice_date_confirmed(ctx: dict, concert_id: str, checked: bool, concert_name: str = "") -> tuple[int, int]:
+    stats = _practice_confirmation_stats(ctx, concert_id)
+    updated = 0
+    for p in stats["rows"]:
+        if _set_practice_checkbox(ctx, p.get("id", ""), PRACTICE_DATE_CONFIRM_KEYS, checked):
+            updated += 1
+    _clear_concert_cache(ctx)
+    _refresh_harmonia_practice_info_status(ctx, concert_id, concert_name)
+    return stats["total"], updated
+
 
 def _set_concert_song_checkbox_for_concert(ctx: dict, concert_id: str, key_candidates: list[str], checked: bool) -> tuple[int, int]:
     if not concert_id or not ctx.get("CONCERT_DB_CONCERT_SONG"):
@@ -807,6 +810,7 @@ def _render_concert_form(ctx: dict, existing: dict | None = None):
         if ok:
             st.success(f"✅ 演奏会を{label}しました。")
             _clear_concert_cache(ctx)
+            _refresh_harmonia_practice_info_status(ctx, filter_concert_id, ctx.get("SELECTED_CONCERT_NAME", ""))
             st.rerun()
         else:
             st.error(f"❌ {label}に失敗しました。Notion の接続・プロパティ名を確認してください。")
@@ -1039,6 +1043,8 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
             st.session_state.pop(prefill_lon_key, None)
             st.session_state.pop(venue_list_key, None)
             _clear_concert_cache(ctx)
+            if concert_id:
+                _refresh_harmonia_practice_info_status(ctx, concert_id, ctx.get("SELECTED_CONCERT_NAME", ""))
             st.rerun()
         else:
             st.error(f"❌ {label}に失敗しました。")
@@ -1432,24 +1438,24 @@ def render(ctx: dict):
             st.rerun()
         cs_rows = _load_songs(ctx, filter_concert_id) if filter_concert_id else []
         if filter_concert_id and cs_rows:
-            st.caption("練習日が固まった時点で、HARMONIA_CONCERT の『練習日確定』を更新できます。")
+            st.caption("練習日が固まった時点で、CONCERT_SONG の『練習日確定』を一括更新できます。")
             c1, c2 = st.columns(2)
             if c1.button("✅ 練習日確定", key="practice_confirm_all", use_container_width=True):
-                ok = _set_harmonia_concert_checkbox(ctx, filter_concert_id, HARMONIA_CONCERT_PRACTICE_DATE_KEYS, True)
-                if ok:
-                    st.success("✅ 練習日確定を反映しました。")
+                total_rows, updated_rows = _set_concert_song_checkbox_for_concert(ctx, filter_concert_id, ["練習日確定", "practice_confirmed", "practice_fixed"], True)
+                if total_rows == 0:
+                    st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
+                else:
+                    st.success(f"✅ 練習日確定を反映しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
                     _clear_concert_cache(ctx)
                     st.rerun()
-                else:
-                    st.warning("HARMONIA_CONCERT の『練習日確定』列が見つからないか、更新に失敗しました。")
             if c2.button("↩ 練習日確定を解除", key="practice_unconfirm_all", use_container_width=True):
-                ok = _set_harmonia_concert_checkbox(ctx, filter_concert_id, HARMONIA_CONCERT_PRACTICE_DATE_KEYS, False)
-                if ok:
-                    st.success("↩ 練習日確定を解除しました。")
+                total_rows, updated_rows = _set_concert_song_checkbox_for_concert(ctx, filter_concert_id, ["練習日確定", "practice_confirmed", "practice_fixed"], False)
+                if total_rows == 0:
+                    st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
+                else:
+                    st.success(f"↩ 練習日確定を解除しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
                     _clear_concert_cache(ctx)
                     st.rerun()
-                else:
-                    st.warning("HARMONIA_CONCERT の『練習日確定』列が見つからないか、更新に失敗しました。")
 
         # 練習回（第N回練習）を優先して降順表示（未設定日時でも入力しやすくする）
         def _practice_round_no(p: dict) -> int:
@@ -1514,6 +1520,7 @@ def render(ctx: dict):
                 "会場住所":   paddr,
                 "本番日":     is_cd,
                 "打楽器休み": is_po,
+                "練習日確定": _extract_bool_any(ctx, p, PRACTICE_DATE_CONFIRM_KEYS, False),
                 "メモ":       pmemo,
             })
             prac_meta.append({"pid": pid, "pname": pname, "pdate": pdate})
@@ -1533,6 +1540,7 @@ def render(ctx: dict):
                 "会場住所":   st.column_config.TextColumn("会場住所"),
                 "本番日":     st.column_config.CheckboxColumn("本番日"),
                 "打楽器休み": st.column_config.CheckboxColumn("打楽器休み"),
+                "練習日確定": st.column_config.CheckboxColumn("練習日確定"),
                 "メモ":       st.column_config.TextColumn("メモ"),
             },
         )
@@ -1550,6 +1558,7 @@ def render(ctx: dict):
                     new_addr = str(row.get("会場住所") or "").strip()
                     new_cd   = bool(row.get("本番日") or False)
                     new_po   = bool(row.get("打楽器休み") or False)
+                    new_pd   = bool(row.get("練習日確定") or False)
                     new_memo = str(row.get("メモ") or "").strip()
 
                     # 日時のパース（"2026-04-25 19:00" → Notion date format）
@@ -1573,6 +1582,8 @@ def render(ctx: dict):
                     if ok and new_cd and not prac_df_rows[idx]["本番日"]:
                         # 本番フラグが新たにONになった→全参加者の出欠を○に自動登録
                         _auto_mark_concert_day_attendance(ctx, meta["pid"], filter_concert_id)
+                    if ok:
+                        _set_practice_checkbox(ctx, meta["pid"], PRACTICE_DATE_CONFIRM_KEYS, new_pd)
                     ok_n += 1 if ok else 0
                     ng_n += 0 if ok else 1
 
@@ -1594,6 +1605,36 @@ def render(ctx: dict):
                 label = "【本番当日】" + label
             with st.expander(label, expanded=False):
                 p_id_pdf = p.get("id", "")
+                p_is_concert_day = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
+                p_has_date = bool((ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS) or "").strip())
+                p_is_confirmed = _extract_bool_any(ctx, p, PRACTICE_DATE_CONFIRM_KEYS, False)
+                if p_is_concert_day:
+                    st.caption("本番日は練習情報確定の対象外です。")
+                else:
+                    st.caption(f"練習日確定: {'✅ 確定' if p_is_confirmed else '⬜ 未確定'} / {'日時設定済み' if p_has_date else '日時未設定'}")
+                    cc1, cc2 = st.columns(2)
+                    if cc1.button("✅ この練習日を確定", key=f"practice_confirm_one_{p_id_pdf}", use_container_width=True):
+                        if not p_has_date:
+                            st.error("日時未設定のため確定できません。")
+                        else:
+                            ok = _set_practice_checkbox(ctx, p_id_pdf, PRACTICE_DATE_CONFIRM_KEYS, True)
+                            _refresh_harmonia_practice_info_status(ctx, filter_concert_id, ctx.get("SELECTED_CONCERT_NAME", ""))
+                            if ok:
+                                st.success("✅ 練習日確定を更新しました。")
+                                _clear_concert_cache(ctx)
+                                st.rerun()
+                            else:
+                                st.error("❌ 練習日確定の更新に失敗しました。")
+                    if cc2.button("↩ この練習日の確定を解除", key=f"practice_unconfirm_one_{p_id_pdf}", use_container_width=True):
+                        ok = _set_practice_checkbox(ctx, p_id_pdf, PRACTICE_DATE_CONFIRM_KEYS, False)
+                        _refresh_harmonia_practice_info_status(ctx, filter_concert_id, ctx.get("SELECTED_CONCERT_NAME", ""))
+                        if ok:
+                            st.success("↩ 練習日確定を解除しました。")
+                            _clear_concert_cache(ctx)
+                            st.rerun()
+                        else:
+                            st.error("❌ 練習日確定の更新に失敗しました。")
+                st.divider()
                 # 演奏曲設定（multiselect必須のためexpander内に残す）
                 song_opts_e: dict = {}
                 if filter_concert_id:
