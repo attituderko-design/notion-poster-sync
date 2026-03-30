@@ -8407,10 +8407,10 @@ if system_mode == "HARMONIA":
         "concert_song_done": ["定義完了", "definition_done", "完了"],
         "partdef_song_rel": ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ", "曲", "song"],
         "apollo_atlas_song_rel": ["演奏曲", "曲", "作品", "作品マスタ", "ATLAS曲"],
-        "participant_concert_rel": ["演奏会", "FK演奏会", "concert"],
+        "participant_concert_rel": ["出演", "演奏会", "FK演奏会", "concert"],
         "participant_player_rel": ["奏者", "出演者", "player", "FK奏者"],
         "attendance_practice_rel": ["練習", "FK練習", "practice"],
-        "attendance_player_rel": ["奏者", "出演者", "player", "FK奏者"],
+        "attendance_player_rel": ["演奏会参加者", "奏者", "出演者", "player", "FK奏者"],
         "preference_player_rel": ["奏者", "出演者", "player", "FK奏者"],
         "preference_part_rel": ["パート定義", "part", "FKパート定義"],
         "rental_concert_rel": ["演奏会", "FK演奏会", "concert", "練習", "FK練習"],
@@ -8496,6 +8496,8 @@ if system_mode == "HARMONIA":
             "expense_confirmed_total": 0,
             "has_concert_day": False,
             "next_practice_label": "",
+            "attendance_status_label": "⚪ 未着手",
+            "attendance_status_reasons": [],
             "debug_lines": [],
         }
         dbg = stats["debug_lines"]
@@ -8508,23 +8510,28 @@ if system_mode == "HARMONIA":
             return stats
 
         practices = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PRACTICE"], None) if concert_ctx.get("CONCERT_DB_PRACTICE") else []
+        attendance_practice_ids = []
         regular_practice_ids = []
         future = []
         today = datetime.now().date()
         for p in practices:
             if cid not in _h_rel(p, _H_KEYS["practice_concert_rel"]):
                 continue
-            if _h_bool(p, _H_KEYS["practice_concert_day"]):
-                stats["has_concert_day"] = True
-                continue
             pid = p.get("id", "")
             if pid:
-                regular_practice_ids.append(pid)
+                attendance_practice_ids.append(pid)
+            is_concert_day = _h_bool(p, _H_KEYS["practice_concert_day"])
+            if is_concert_day:
+                stats["has_concert_day"] = True
+            else:
+                if pid:
+                    regular_practice_ids.append(pid)
             pdt_raw = _h_text(p, _H_KEYS["practice_date"])
             pdt = _h_parse_date(pdt_raw)
             if pdt and pdt.date() >= today:
                 future.append((pdt, f"{pdt_raw[:10]} {_h_text(p, _H_KEYS['practice_name'])}".strip()))
         stats["practice_count"] = len(regular_practice_ids)
+        stats["attendance_practice_count"] = len(attendance_practice_ids)
         if future:
             future.sort(key=lambda x: x[0])
             stats["next_practice_label"] = future[0][1]
@@ -8569,6 +8576,7 @@ if system_mode == "HARMONIA":
 
         attendance_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_ATTENDANCE"], None) if concert_ctx.get("CONCERT_DB_ATTENDANCE") else []
         answered = set()
+        stats["attendance_record_count"] = 0
         for a in attendance_rows:
             pr_ids = _h_rel(a, _H_KEYS["attendance_practice_rel"])
             if not pr_ids:
@@ -8576,12 +8584,30 @@ if system_mode == "HARMONIA":
             pr = pr_ids[0]
             if pr not in regular_practice_ids:
                 continue
+            row_has_target = False
             for rid in _h_rel(a, _H_KEYS["attendance_player_rel"]):
-                answered.add((rid, pr))
+                if rid:
+                    answered.add((rid, pr))
+                    row_has_target = True
+            if row_has_target:
+                stats["attendance_record_count"] += 1
         stats["unanswered_count"] = 0
         for _, targets in participant_targets.items():
             if regular_practice_ids and any(not any((t, pr) in answered for t in targets) for pr in regular_practice_ids):
                 stats["unanswered_count"] += 1
+        attendance_reasons = []
+        if stats["participant_count"] == 0:
+            attendance_reasons.append("奏者情報未入力")
+        if stats["practice_count"] == 0:
+            attendance_reasons.append("練習情報未入力")
+        stats["attendance_status_reasons"] = attendance_reasons
+        if attendance_reasons:
+            stats["attendance_status_label"] = "⚪ 未着手"
+        elif stats["unanswered_count"] == 0:
+            stats["attendance_status_label"] = "✅ 完了"
+        else:
+            stats["attendance_status_label"] = "🟡 一部未完"
+        dbg.append(f"attendance participants={stats['participant_count']} regular_practices={stats['practice_count']} answered_rows={stats['attendance_record_count']} unanswered={stats['unanswered_count']} reasons={' / '.join(attendance_reasons) if attendance_reasons else '-'}")
 
         pref_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PREFERENCE"], None) if concert_ctx.get("CONCERT_DB_PREFERENCE") else []
         pref_targets = set()
@@ -8619,8 +8645,9 @@ if system_mode == "HARMONIA":
              f"本番当日 {'あり' if stats['has_concert_day'] else '未作成'} / 練習 {stats['practice_count']} 回"),
             ("楽曲・パート定義", _h_badge(stats["song_count"] > 0 and stats["song_done_count"] == stats["song_count"], partial=(stats["song_count"] > 0 and stats["song_done_count"] > 0)),
              f"楽曲 {stats['song_count']} 曲 / 定義完了 {stats['song_done_count']} 曲 / パート定義 {stats['partdef_count']} 件"),
-            ("奏者・出欠", _h_badge(stats["participant_count"] > 0 and stats["unanswered_count"] == 0, partial=(stats["participant_count"] > 0)),
-             f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"),
+            ("奏者・出欠", stats.get("attendance_status_label") or _h_badge(stats["participant_count"] > 0 and stats["unanswered_count"] == 0, partial=(stats["participant_count"] > 0)),
+             (f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"
+              + (f" / {' / '.join(stats.get('attendance_status_reasons', []))}" if stats.get('attendance_status_reasons') else ""))),
             ("希望入力", _h_badge(stats["participant_count"] > 0 and stats["preference_pending_count"] == 0, partial=(stats["participant_count"] > 0 and stats["preference_pending_count"] < stats["participant_count"])),
              f"希望未提出 {stats['preference_pending_count']} 人"),
             ("レンタル・収支", "ℹ️ 進行中",
@@ -8653,10 +8680,10 @@ if system_mode == "HARMONIA":
         "concert_song_order": ["曲順", "順番", "order"],
         "partdef_song_rel": ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ", "曲", "song"],
         "apollo_atlas_song_rel": ["演奏曲", "曲", "作品", "作品マスタ", "ATLAS曲"],
-        "participant_concert_rel": ["演奏会", "FK演奏会", "concert"],
+        "participant_concert_rel": ["出演", "演奏会", "FK演奏会", "concert"],
         "participant_player_rel": ["奏者", "出演者", "player", "FK奏者"],
         "attendance_practice_rel": ["練習", "FK練習", "practice"],
-        "attendance_player_rel": ["奏者", "出演者", "player", "FK奏者"],
+        "attendance_player_rel": ["演奏会参加者", "奏者", "出演者", "player", "FK奏者"],
         "preference_player_rel": ["奏者", "出演者", "player", "FK奏者"],
         "preference_part_rel": ["パート定義", "part", "FKパート定義"],
         "rental_concert_rel": ["演奏会", "FK演奏会", "concert", "練習", "FK練習"],
@@ -8741,6 +8768,8 @@ if system_mode == "HARMONIA":
             "expense_confirmed_total": 0,
             "has_concert_day": False,
             "next_practice_label": "",
+            "attendance_status_label": "⚪ 未着手",
+            "attendance_status_reasons": [],
             "debug_lines": [],
         }
         dbg = stats["debug_lines"]
@@ -8754,24 +8783,29 @@ if system_mode == "HARMONIA":
 
         # practices
         practices = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PRACTICE"], None) if concert_ctx.get("CONCERT_DB_PRACTICE") else []
+        attendance_practice_ids = []
         regular_practice_ids = []
         future = []
         today = datetime.now().date()
         for p in practices:
             if cid not in _h_rel(p, _H_KEYS["practice_concert_rel"]):
                 continue
-            if _h_bool(p, _H_KEYS["practice_concert_day"]):
-                stats["has_concert_day"] = True
-                dbg.append(f"practice concert_day: {_h_text(p, _H_KEYS['practice_name'])}")
-                continue
             pid = p.get("id", "")
             if pid:
-                regular_practice_ids.append(pid)
+                attendance_practice_ids.append(pid)
+            is_concert_day = _h_bool(p, _H_KEYS["practice_concert_day"])
+            if is_concert_day:
+                stats["has_concert_day"] = True
+                dbg.append(f"practice concert_day: {_h_text(p, _H_KEYS['practice_name'])}")
+            else:
+                if pid:
+                    regular_practice_ids.append(pid)
             pdt_raw = _h_text(p, _H_KEYS["practice_date"])
             pdt = _h_parse_date(pdt_raw)
             if pdt and pdt.date() >= today:
                 future.append((pdt, f"{pdt_raw[:10]} {_h_text(p, _H_KEYS['practice_name'])}".strip()))
         stats["practice_count"] = len(regular_practice_ids)
+        stats["attendance_practice_count"] = len(attendance_practice_ids)
         if future:
             future.sort(key=lambda x: x[0])
             stats["next_practice_label"] = future[0][1]
@@ -8821,6 +8855,7 @@ if system_mode == "HARMONIA":
         # attendance
         attendance_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_ATTENDANCE"], None) if concert_ctx.get("CONCERT_DB_ATTENDANCE") else []
         answered = set()
+        attendance_record_count = 0
         for a in attendance_rows:
             pr_ids = _h_rel(a, _H_KEYS["attendance_practice_rel"])
             if not pr_ids:
@@ -8828,13 +8863,32 @@ if system_mode == "HARMONIA":
             pr = pr_ids[0]
             if pr not in regular_practice_ids:
                 continue
+            row_has_target = False
             for rid in _h_rel(a, _H_KEYS["attendance_player_rel"]):
-                answered.add((rid, pr))
+                if rid:
+                    answered.add((rid, pr))
+                    row_has_target = True
+            if row_has_target:
+                attendance_record_count += 1
         unanswered = 0
         for _, targets in participant_targets.items():
             if regular_practice_ids and any(not any((t, pr) in answered for t in targets) for pr in regular_practice_ids):
                 unanswered += 1
         stats["unanswered_count"] = unanswered
+        stats["attendance_record_count"] = attendance_record_count
+        attendance_reasons = []
+        if stats["participant_count"] == 0:
+            attendance_reasons.append("奏者情報未入力")
+        if stats["practice_count"] == 0:
+            attendance_reasons.append("練習情報未入力")
+        stats["attendance_status_reasons"] = attendance_reasons
+        if attendance_reasons:
+            stats["attendance_status_label"] = "⚪ 未着手"
+        elif stats["unanswered_count"] == 0:
+            stats["attendance_status_label"] = "✅ 完了"
+        else:
+            stats["attendance_status_label"] = "🟡 一部未完"
+        dbg.append(f"attendance participants={stats['participant_count']} regular_practices={stats['practice_count']} answered_rows={attendance_record_count} unanswered={stats['unanswered_count']} reasons={' / '.join(attendance_reasons) if attendance_reasons else '-'}")
 
         # preference
         pref_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PREFERENCE"], None) if concert_ctx.get("CONCERT_DB_PREFERENCE") else []
@@ -8880,8 +8934,9 @@ if system_mode == "HARMONIA":
              f"本番当日 {'あり' if stats['has_concert_day'] else '未作成'} / 練習 {stats['practice_count']} 回"),
             ("楽曲・パート定義", _h_badge(stats["song_count"] > 0 and stats["song_done_count"] == stats["song_count"], partial=(stats["song_count"] > 0 and stats["song_done_count"] > 0)),
              f"楽曲 {stats['song_count']} 曲 / 定義完了 {stats['song_done_count']} 曲 / パート定義 {stats['partdef_count']} 件"),
-            ("奏者・出欠", _h_badge(stats["participant_count"] > 0 and stats["unanswered_count"] == 0, partial=(stats["participant_count"] > 0)),
-             f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"),
+            ("奏者・出欠", stats.get("attendance_status_label") or _h_badge(stats["participant_count"] > 0 and stats["unanswered_count"] == 0, partial=(stats["participant_count"] > 0)),
+             (f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"
+              + (f" / {' / '.join(stats.get('attendance_status_reasons', []))}" if stats.get('attendance_status_reasons') else ""))),
             ("希望入力", _h_badge(stats["participant_count"] > 0 and stats["preference_pending_count"] == 0, partial=(stats["participant_count"] > 0 and stats["preference_pending_count"] < stats["participant_count"])),
              f"希望未提出 {stats['preference_pending_count']} 人"),
             ("レンタル・収支", "ℹ️ 進行中",
