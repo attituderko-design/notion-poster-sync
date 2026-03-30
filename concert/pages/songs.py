@@ -995,9 +995,19 @@ def _backfill_partdef_display_name(ctx: dict, concert_id: str, song_id: str) -> 
     「表示パート名」を抽出してバックフィルする。
     パート名フィールドの形式:「曲名 / パート名 / 楽器名...」から2番目の要素を取り出す。
     """
+    # キャッシュをクリアして最新のスキーマ・データを取得
+    _clear_property_type_cache()
+    st.session_state.pop(f"partdef_list_{concert_id}_{song_id}", None)
     rows = _load_partdefs(ctx, concert_id, song_id)
     ok_n = ng_n = 0
     t = ctx["get_prop_types"](ctx["CONCERT_DB_PART_DEFINITION"])
+    if not t:
+        return 0, len(rows)
+    # PARTDEF_DISPLAY_NAME_KEYSに対応するプロパティ名が存在するか確認
+    disp_key = ctx["find_prop_name"](t, PARTDEF_DISPLAY_NAME_KEYS)
+    if not disp_key:
+        st.error(f"PART_DEFINITION DB に '{PARTDEF_DISPLAY_NAME_KEYS[0]}' プロパティが見つかりません。Notionのスキーマを確認してください。")
+        return 0, len(rows)
     for r in rows:
         rid = r.get("id", "")
         if not rid:
@@ -1018,8 +1028,8 @@ def _backfill_partdef_display_name(ctx: dict, concert_id: str, song_id: str) -> 
             continue
         if not display_name:
             continue
-        props = {}
-        ctx["put_prop_any"](props, t, PARTDEF_DISPLAY_NAME_KEYS, display_name)
+        # 直接プロパティ名で書き込む（put_prop_anyの変換ミスを防ぐ）
+        props = {disp_key: {"rich_text": [{"text": {"content": display_name}}]}}
         res = ctx["api_request"]("patch",
             f"https://api.notion.com/v1/pages/{rid}",
             json={"properties": props})
@@ -1159,6 +1169,13 @@ def _render_partdef_tab(ctx: dict):
         st.warning("表示パート名が未設定のパートがあります。バックフィルで既存データに名前を反映できます。")
         if st.button("🔧 表示パート名をバックフィル", key=f"backfill_partdef_{c_id}_{s_id}"):
             with st.spinner("バックフィル中..."):
+                # DBスキーマのキャッシュをクリアして最新のプロパティ情報を取得
+                try:
+                    from concert.services.notion_client import get_concert_db_property_types
+                    get_concert_db_property_types.clear()
+                except Exception:
+                    pass
+                st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
                 ok_n, ng_n = _backfill_partdef_display_name(ctx, c_id, s_id)
             if ng_n == 0:
                 st.success(f"✅ {ok_n}件を更新しました。")
