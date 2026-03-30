@@ -712,6 +712,7 @@ def build_concert_ctx() -> dict:
                     "CONCERT_DB_PART_DEFINITION": "db_part_definition",
                     "CONCERT_DB_CONCERT_SONG": "db_concert_song",
                     "CONCERT_DB_PREFERENCE": "db_preference",
+                    "CONCERT_DB_HARMONIA_CONCERT": "db_harmonia_concert",
                 }.get(db_ctx_key, ""),
                 "",
             )
