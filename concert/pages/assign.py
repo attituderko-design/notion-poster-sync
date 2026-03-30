@@ -574,6 +574,7 @@ def _render_pref_tab(ctx: dict):
                    sorted(players, key=lambda x: _player_name(x, ctx))}
     col_sel, col_r = st.columns([8, 1])
     selected_player_name = col_sel.selectbox("奏者を選択", list(player_opts.keys()), key="pref_player_sel")
+    player_id = player_opts.get(selected_player_name, "")
     if col_r.button("🔄", key="pref_refresh", help="パート定義・希望データを再読み込み"):
         for k in list(st.session_state.keys()):
             if k.startswith("si_list_") or k.startswith("pi_list_"):
@@ -581,7 +582,6 @@ def _render_pref_tab(ctx: dict):
         if player_id:
             _bump_pref_editor_version(concert_id, player_id)
         st.rerun()
-    player_id = player_opts.get(selected_player_name, "")
     if not player_id:
         return
 
