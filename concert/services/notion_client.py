@@ -625,7 +625,7 @@ def build_concert_ctx() -> dict:
                 "演奏会×曲DB",
                 [
                     ("relation", ["演奏会", "FK演奏会", "concert"], "CONCERT_DB_CONCERT"),
-                    ("relation", ["曲", "楽曲", "演奏曲", "song"], "CONCERT_DB_SONG"),
+                    ("relation", ["曲", "楽曲", "演奏曲", "song"], "CONCERT_DB_CONCERT"),  # 曲はATLAS向き
                     ("any", ["定義完了", "definition_done"]),
                 ],
             ),
