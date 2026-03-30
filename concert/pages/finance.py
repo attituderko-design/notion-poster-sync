@@ -8,6 +8,7 @@ import math
 import io
 from datetime import date, timedelta
 from concert.services.keys import (
+    HARMONIA_CONCERT_KEY_KEYS, HARMONIA_CONCERT_CONCERT_REL_KEYS, HARMONIA_CONCERT_MANAGED_KEYS, HARMONIA_CONCERT_FINANCE_KEYS,
     CONCERT_NAME_KEYS, CONCERT_CONFIRMED_FEE_KEYS,
     PRACTICE_CONCERT_REL_KEYS,
     PARTICIPANT_RECORD_KEYS, PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
@@ -23,6 +24,22 @@ from concert.services.keys import (
     BILLING_TAX_RATE_KEYS, BILLING_SUBTOTAL_KEYS, BILLING_TAX_KEYS,
     BILLING_TOTAL_KEYS, BILLING_MODE_KEYS, BILLING_NOTE_KEYS,
 )
+
+
+def _normalize_page_id(v: str) -> str:
+    return (v or "").replace("-", "").strip().lower()
+
+
+def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> str:
+    key = ctx["find_prop_name"](type_map, candidates)
+    if key:
+        return key
+    norm_map = {str(k or "").replace(" ", "").replace("　", "").strip().lower(): k for k in (type_map or {}).keys()}
+    for c in candidates:
+        got = norm_map.get(str(c or "").replace(" ", "").replace("　", "").strip().lower())
+        if got:
+            return got
+    return ""
 
 
 # ============================================================
