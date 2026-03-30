@@ -570,6 +570,7 @@ def _upsert_partdef(
     inst_label = " / ".join([x for x in (inst_names or []) if x]) or "楽器未設定"
     props = {}
     ctx["put_prop_any"](props, t, PARTDEF_RECORD_KEYS, f"{song_name} / {part_name} / {inst_label}")
+    ctx["put_prop_any"](props, t, PARTDEF_NAME_KEYS, part_name)
     ctx["put_prop_any"](props, t, PARTDEF_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS, target_song_id)
     ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS, clean_inst_ids)
@@ -714,13 +715,18 @@ def _render_partdef_tab(ctx: dict):
         return
     for r in part_rows:
         rid = r.get("id", "")
-        p_name = ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS) or ctx["extract_title"](r)
+        part_name_disp = (
+            ctx["extract_prop_text_any"](r, PARTDEF_NAME_KEYS)
+            or ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS)
+            or ctx["extract_title"](r)
+        )
+        row_title = ctx["extract_prop_text_any"](r, PARTDEF_RECORD_KEYS) or part_name_disp
         cur_inst_ids = ctx["extract_relation_ids_any"](r, PARTDEF_INST_REL_KEYS)
         cur_inst_names = [k for k, v in inst_opts_all.items() if v in set(cur_inst_ids)]
         cur_note = ctx["extract_prop_text_any"](r, PARTDEF_NOTE_KEYS)
-        with st.expander(p_name, expanded=True):
+        with st.expander(row_title, expanded=True):
             with st.form(f"partdef_edit_{rid}", border=True):
-                n_name = st.text_input("パート名 *", value=p_name)
+                n_name = st.text_input("パート名 *", value=part_name_disp)
                 n_inst = st.multiselect(
                     "担当楽器（複数選択可）",
                     list(inst_opts.keys()),
@@ -739,7 +745,7 @@ def _render_partdef_tab(ctx: dict):
                             concert_id=c_id,
                             song_id=s_id,
                             song_name=s_name,
-                            part_name=n_name.strip() or p_name,
+                            part_name=n_name.strip() or part_name_disp,
                             inst_ids=[inst_opts[x] for x in n_inst if inst_opts.get(x)],
                             inst_names=n_inst,
                             need_count=int(n_need),
