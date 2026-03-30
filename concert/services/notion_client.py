@@ -152,6 +152,10 @@ def get_concert_secrets() -> dict:
         st.secrets.get("CONCERT_DB_HARMONIA_CONCERT", "")
         or _DEFAULT_CONCERT_DB_IDS.get("harmonia_concert", "")
     )
+    db_concert_instrument = (
+        st.secrets.get("CONCERT_DB_CONCERT_INSTRUMENT", "")
+        or _DEFAULT_CONCERT_DB_IDS.get("concert_instrument", "")
+    )
     required_db = {
         "演奏会DB": db_concert,
         "練習DB": db_practice,
@@ -168,6 +172,7 @@ def get_concert_secrets() -> dict:
         "スケジュールDB": db_schedule,
         "演奏会×曲DB": db_concert_song,
         "HARMONIA演奏会ヘッダDB": db_harmonia_concert,
+        "演奏会必要楽器DB": db_concert_instrument,
     }
     normalized_required_db = {
         name: _normalize_notion_id(val) for name, val in required_db.items()
@@ -194,7 +199,8 @@ def get_concert_secrets() -> dict:
         "db_expense":          _normalize_notion_id(db_expense),
         "db_billing":          _normalize_notion_id(db_billing),
         "db_concert_song":     normalized_required_db["演奏会×曲DB"],
-        "db_harmonia_concert": normalized_required_db["HARMONIA演奏会ヘッダDB"],
+        "db_harmonia_concert":       normalized_required_db["HARMONIA演奏会ヘッダDB"],
+        "db_concert_instrument":    normalized_required_db["演奏会必要楽器DB"],
     }
 
 
@@ -646,6 +652,17 @@ def build_concert_ctx() -> dict:
                 ],
             ),
             (
+                "CONCERT_DB_CONCERT_INSTRUMENT",
+                "演奏会必要楽器DB",
+                [
+                    ("any", CONCERT_INST_KEY_KEYS),
+                    ("relation", CONCERT_INST_CONCERT_REL_KEYS, "CONCERT_DB_CONCERT"),
+                    ("relation", CONCERT_INST_SONG_REL_KEYS,    "CONCERT_DB_CONCERT_SONG"),
+                    ("relation", CONCERT_INST_INST_REL_KEYS,    "CONCERT_DB_INSTRUMENT"),
+                    ("any", CONCERT_INST_COUNT_KEYS),
+                ],
+            ),
+            (
                 "CONCERT_DB_HARMONIA_CONCERT",
                 "HARMONIA演奏会ヘッダDB",
                 [
@@ -713,6 +730,7 @@ def build_concert_ctx() -> dict:
                     "CONCERT_DB_CONCERT_SONG": "db_concert_song",
                     "CONCERT_DB_PREFERENCE": "db_preference",
                     "CONCERT_DB_HARMONIA_CONCERT": "db_harmonia_concert",
+                    "CONCERT_DB_CONCERT_INSTRUMENT": "db_concert_instrument",
                 }.get(db_ctx_key, ""),
                 "",
             )
@@ -748,6 +766,8 @@ def build_concert_ctx() -> dict:
                                 "CONCERT_DB_PART_DEFINITION": "db_part_definition",
                                 "CONCERT_DB_CONCERT_SONG": "db_concert_song",
                                 "CONCERT_DB_PREFERENCE": "db_preference",
+                                "CONCERT_DB_HARMONIA_CONCERT": "db_harmonia_concert",
+                                "CONCERT_DB_CONCERT_INSTRUMENT": "db_concert_instrument",
                             }.get(target_ctx_key, ""),
                             "",
                         )

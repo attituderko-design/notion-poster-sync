@@ -217,3 +217,11 @@ HARMONIA_CONCERT_BRING_KEYS = ["持参楽器確定", "bring_confirmed"]
 HARMONIA_CONCERT_PLAN_KEYS = ["案提示", "proposal_presented"]
 HARMONIA_CONCERT_ASSIGN_KEYS = ["アサイン確定", "assign_confirmed"]
 HARMONIA_CONCERT_FINANCE_KEYS = ["収支確定", "finance_confirmed"]
+
+# ── CONCERT_INSTRUMENT（演奏会必要楽器）DB ──────────────────
+CONCERT_INST_KEY_KEYS         = ["concert_instrument_key", "タイトル"]
+CONCERT_INST_CONCERT_REL_KEYS = ["演奏会", "FK演奏会", "concert"]
+CONCERT_INST_SONG_REL_KEYS    = ["演奏曲", "CONCERT_SONG", "曲", "FK演奏曲"]
+CONCERT_INST_INST_REL_KEYS    = ["楽器", "楽器種別", "FK楽器", "instrument"]
+CONCERT_INST_COUNT_KEYS       = ["必要台数", "台数", "count", "required_count"]
+CONCERT_INST_NOTE_KEYS        = ["備考", "メモ", "note"]
