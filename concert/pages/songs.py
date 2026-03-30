@@ -967,6 +967,7 @@ def _upsert_partdef(
 
     props = {}
     ctx["put_prop_any"](props, t, PARTDEF_RECORD_KEYS,       record_title)
+    ctx["put_prop_any"](props, t, PARTDEF_NAME_KEYS,         record_title)  # 旧来の結合文字列
     ctx["put_prop_any"](props, t, PARTDEF_DISPLAY_NAME_KEYS, part_name)   # 純粋なパート名
     ctx["put_prop_any"](props, t, PARTDEF_CONCERT_REL_KEYS,  concert_id)
     ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS,     target_song_id)
