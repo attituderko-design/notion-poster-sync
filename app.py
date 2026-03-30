@@ -8737,9 +8737,10 @@ if system_mode == "HARMONIA":
         concert_date = (_h_text(concert_row, ["日時","日付","出演日","体験日","リリース日"]) or "")[:10]
         total_song_rows = len(filtered_cs)
         total_attendance_days = stats['attendance_practice_count']
+        total_regular_practice_days = stats['practice_count']
 
         song_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_song_info') else (0.5 if stats['song_count'] > 0 else 0.0)
-        practice_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_practice_info') else (0.5 if total_attendance_days > 0 else 0.0)
+        practice_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_practice_info') else (0.5 if total_regular_practice_days > 0 else 0.0)
         required_inst_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_required_inst') else (0.5 if stats['partdef_count'] > 0 else 0.0)
         partdef_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_partdef') else (0.5 if stats['song_done_count'] > 0 else 0.0)
         participant_ratio = 1.0 if _harmonia_flag(harmonia_row, 'harmonia_participant') else (0.5 if stats['participant_count'] > 0 else 0.0)
@@ -8754,7 +8755,7 @@ if system_mode == "HARMONIA":
         stats["step_items"] = [
             ("① 演奏会の確定", 1.0 if _harmonia_flag(harmonia_row, 'harmonia_managed') else 0.0, f"{concert_name or cid} / {concert_date or '日付未設定'}"),
             ("② 楽曲情報の確定", song_ratio, f"CONCERT_SONG {stats['song_count']} 曲"),
-            ("③ 練習情報の確定", practice_ratio, f"PRACTICE {total_attendance_days if _harmonia_flag(harmonia_row, 'harmonia_practice_info') else min(total_attendance_days, stats['practice_count'])} / {total_attendance_days} 日"),
+            ("③ 練習情報の確定", practice_ratio, f"通常練習 {total_regular_practice_days if _harmonia_flag(harmonia_row, 'harmonia_practice_info') else min(total_regular_practice_days, stats['practice_count'])} / {total_regular_practice_days} 日"),
             ("④ 必要楽器の確定", required_inst_ratio, f"PART_DEFINITION {stats['partdef_count']} 件"),
             ("⑤ パート定義の確定", partdef_ratio, f"定義完了 {stats['song_done_count']} / {total_song_rows} 曲"),
             ("⑥ 奏者情報の確定", participant_ratio, f"CONCERT_CAST {stats['participant_count']} 人"),
