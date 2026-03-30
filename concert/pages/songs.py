@@ -357,6 +357,92 @@ def _delete_page(ctx: dict, page_id: str) -> bool:
     return res is not None and res.status_code == 200
 
 
+def _find_concert_song_row(ctx: dict, concert_id: str, song_id: str) -> dict | None:
+    """
+    CONCERT_SONG DB から、指定の 演奏会 + 曲(ATLAS) に対応する1行を返す。
+    """
+    db_id = ctx.get("CONCERT_DB_CONCERT_SONG")
+    if not db_id or not concert_id or not song_id:
+        return None
+
+    type_map = ctx["get_prop_types"](db_id)
+    if not type_map:
+        return None
+
+    concert_rel = ctx["find_prop_name"](type_map, CONCERT_SONG_CONCERT_REL_KEYS)
+    song_rel = ctx["find_prop_name"](type_map, CONCERT_SONG_SONG_REL_KEYS)
+
+    rows = ctx["query_all"](db_id)
+    for row in rows:
+        ok = True
+
+        if concert_rel:
+            ok = concert_id in ctx["extract_relation_ids"](row, concert_rel)
+        if ok and song_rel:
+            ok = song_id in ctx["extract_relation_ids"](row, song_rel)
+
+        if ok:
+            return row
+
+    return None
+
+
+def _set_concert_song_partdef_completed(
+    ctx: dict,
+    concert_id: str,
+    song_id: str,
+    completed: bool = True,
+    note: str = "",
+) -> bool:
+    """
+    CONCERT_SONG.定義完了 を更新する。
+    note が指定された場合は 備考 も更新する。
+    """
+    row = _find_concert_song_row(ctx, concert_id, song_id)
+    if not row:
+        st.error("CONCERT_SONG に対応する行が見つかりません。演奏会と曲の紐づきを確認してください。")
+        return False
+
+    page_id = row.get("id", "")
+    if not page_id:
+        st.error("CONCERT_SONG の対象ページIDが取得できませんでした。")
+        return False
+
+    db_id = ctx["CONCERT_DB_CONCERT_SONG"]
+    type_map = ctx["get_prop_types"](db_id)
+    if not type_map:
+        st.error("CONCERT_SONG DB のプロパティ取得に失敗しました。")
+        return False
+
+    props: dict = {}
+
+    done_prop = ctx["find_prop_name"](type_map, ["定義完了"])
+    if done_prop:
+        props[done_prop] = {"checkbox": bool(completed)}
+    else:
+        st.error("CONCERT_SONG DB に『定義完了』プロパティが見つかりません。")
+        return False
+
+    if note.strip():
+        note_prop = ctx["find_prop_name"](type_map, ["備考"])
+        if note_prop:
+            props[note_prop] = {
+                "rich_text": [
+                    {
+                        "type": "text",
+                        "text": {"content": note.strip()},
+                    }
+                ]
+            }
+
+    res = ctx["api_request"](
+        "patch",
+        f"https://api.notion.com/v1/pages/{page_id}",
+        json={"properties": props},
+    )
+    return res is not None and res.status_code == 200
+
+
 # ============================================================
 # 演奏時間ユーティリティ
 # ============================================================
@@ -697,11 +783,74 @@ def _render_partdef_tab(ctx: dict):
                     note=note,
                 )
                 if ok:
+                    _set_concert_song_partdef_completed(
+                        ctx,
+                        concert_id=c_id,
+                        song_id=s_id,
+                        completed=False,
+                    )
                     st.success("✅ パート定義を追加しました。")
                     st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
                     st.rerun()
                 else:
                     st.error("❌ 追加に失敗しました。")
+
+    st.divider()
+    st.markdown("### CONCERT_SONG への反映")
+
+    cs_row = _find_concert_song_row(ctx, c_id, s_id)
+    if cs_row:
+        cs_props = (cs_row.get("properties", {}) or {})
+        done_prop_name = "定義完了"
+        current_done = False
+        if done_prop_name in cs_props and cs_props[done_prop_name].get("type") == "checkbox":
+            current_done = bool(cs_props[done_prop_name].get("checkbox"))
+
+        st.caption(f"現在の定義完了状態: {'✅ 完了' if current_done else '⬜ 未完了'}")
+    else:
+        st.warning("CONCERT_SONG に対応する行が見つかりません。完了反映はできません。")
+
+    complete_note = st.text_input(
+        "完了時メモ（任意）",
+        key=f"concert_song_complete_note_{c_id}_{s_id}",
+        placeholder="例: 2026-03-30 パート定義確認済み",
+    )
+
+    c_done1, c_done2 = st.columns(2)
+
+    if c_done1.button("✅ この曲のパート定義を完了にする", use_container_width=True):
+        if not cs_row:
+            st.error("CONCERT_SONG 行が無いため、完了反映できません。")
+        else:
+            ok = _set_concert_song_partdef_completed(
+                ctx,
+                concert_id=c_id,
+                song_id=s_id,
+                completed=True,
+                note=complete_note,
+            )
+            if ok:
+                st.success("✅ CONCERT_SONG の『定義完了』を更新しました。")
+                st.rerun()
+            else:
+                st.error("❌ CONCERT_SONG の更新に失敗しました。")
+
+    if c_done2.button("↩ 完了を取り消す", use_container_width=True):
+        if not cs_row:
+            st.error("CONCERT_SONG 行が無いため、完了取消できません。")
+        else:
+            ok = _set_concert_song_partdef_completed(
+                ctx,
+                concert_id=c_id,
+                song_id=s_id,
+                completed=False,
+                note=complete_note,
+            )
+            if ok:
+                st.success("✅ CONCERT_SONG の『定義完了』を取り消しました。")
+                st.rerun()
+            else:
+                st.error("❌ CONCERT_SONG の更新に失敗しました。")
 
     apollo_song_ids = _resolve_apollo_song_ids(ctx, c_id, s_id)
     if apollo_song_ids:
@@ -753,6 +902,12 @@ def _render_partdef_tab(ctx: dict):
                             existing_id=rid,
                         )
                     if ok:
+                        _set_concert_song_partdef_completed(
+                            ctx,
+                            concert_id=c_id,
+                            song_id=s_id,
+                            completed=False,
+                        )
                         st.success("✅ 更新しました。")
                         st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
                         st.rerun()
@@ -761,6 +916,12 @@ def _render_partdef_tab(ctx: dict):
                 if c2.form_submit_button("🗑 削除", use_container_width=True):
                     ok = _delete_page(ctx, rid)
                     if ok:
+                        _set_concert_song_partdef_completed(
+                            ctx,
+                            concert_id=c_id,
+                            song_id=s_id,
+                            completed=False,
+                        )
                         st.success("✅ 削除しました。")
                         st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
                         st.rerun()
