@@ -746,6 +746,8 @@ def _refresh_harmonia_partdef_status(ctx: dict, concert_id: str) -> bool:
     全曲完了なら HARMONIA_CONCERT の『パート定義確定』をTrueに、
     1件でも未完了なら False に更新する。
     """
+    # キャッシュをクリアしてNotionの最新値を取得する
+    _clear_concert_song_cache(concert_id)
     rows = _load_concert_song_rows(ctx, concert_id)
     if not rows:
         return _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PARTDEF_KEYS, False)
