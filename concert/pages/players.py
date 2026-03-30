@@ -1450,7 +1450,7 @@ def _render_assign_tab(ctx: dict):
     own_rows: list[dict] = []
     own_meta: list[dict] = []
     t_part = ctx["get_prop_types"](ctx["CONCERT_DB_PARTICIPANT"])
-    own_key = ctx["find_prop_name"](t_part, ["所有楽器確定", "ownership_confirmed", "own_confirmed"]) if t_part else ""
+    own_key = ctx["find_prop_name"](t_part, PARTICIPANT_OWN_CONFIRM_KEYS) if t_part else ""
 
     for row in sorted(participants_own, key=lambda r: player_name_map.get(
             (ctx["extract_relation_ids_any"](r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0], "")):
