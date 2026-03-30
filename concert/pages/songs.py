@@ -6,6 +6,70 @@ import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
 
 
+APOLLO_ATLAS_SONG_REL_KEYS = ["演奏曲", "曲", "作品楽章", "作品", "ATLAS曲"]
+
+
+def _norm_notion_id(v: str) -> str:
+    return (v or "").replace("-", "").strip().lower()
+
+
+def _extract_apollo_atlas_song_ids(song_row: dict, ctx: dict) -> list[str]:
+    """
+    APOLLO（演奏曲）行が参照している ATLAS 曲ID を返す。
+    現行DBでは APOLLO.演奏曲 relation が ATLAS 向き。
+    """
+    if not song_row:
+        return []
+    return ctx["extract_relation_ids_any"](song_row, APOLLO_ATLAS_SONG_REL_KEYS)
+
+
+def _resolve_atlas_song_ids(ctx: dict, concert_id: str, song_id: str) -> list[str]:
+    """
+    入力 song_id が APOLLO 行ID / ATLAS 曲ID のどちらでも、
+    対応する ATLAS 曲IDの配列を返す。
+    """
+    if not song_id:
+        return []
+
+    target_norm = _norm_notion_id(song_id)
+    out: list[str] = []
+    seen: set[str] = set()
+
+    rows = _load_songs(ctx, concert_id)
+    if concert_id:
+        extra = _load_songs(ctx, "")
+        rows = rows + [r for r in extra if r.get("id", "") not in {x.get("id", "") for x in rows}]
+
+    for row in rows:
+        rid = row.get("id", "")
+        atlas_ids = _extract_apollo_atlas_song_ids(row, ctx)
+        atlas_norms = {_norm_notion_id(x) for x in atlas_ids if x}
+        rid_norm = _norm_notion_id(rid)
+
+        # APOLLO行ID指定
+        if rid_norm and rid_norm == target_norm:
+            for aid in atlas_ids:
+                an = _norm_notion_id(aid)
+                if aid and an not in seen:
+                    seen.add(an)
+                    out.append(aid)
+
+        # すでにATLAS曲ID指定
+        if target_norm in atlas_norms:
+            for aid in atlas_ids:
+                an = _norm_notion_id(aid)
+                if aid and an not in seen:
+                    seen.add(an)
+                    out.append(aid)
+
+    if out:
+        return out
+
+    # 最終救済: すでにATLAS曲IDだった可能性
+    return [song_id]
+
+
+
 
 
 
@@ -63,14 +127,14 @@ def _load_concerts(ctx) -> list[dict]:
 
 def _load_songs(ctx, concert_id: str = "") -> list[dict]:
     """
-    演奏会に紐づく楽曲をCONCERT_SONG経由で取得する。
-    CONCERT_SONGが空の場合はAPOLLO（CONCERT_DB_SONG）から直接取得してフォールバック。
+    演奏会に紐づく楽曲を CONCERT_SONG 経由で取得する。
+    CONCERT_SONG.曲 は ATLAS 向き、APOLLO.演奏曲 relation も ATLAS 向きで対応付ける。
     """
     key = f"song_list_{concert_id}"
     if key not in st.session_state:
-        songs = []
+        songs: list[dict] = []
+
         if concert_id and ctx.get("CONCERT_DB_CONCERT_SONG"):
-            # CONCERT_SONG経由で取得（曲リレーション先はATLAS）
             cs_type_map = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT_SONG"])
             cs_concert_rel = ctx["find_prop_name"](cs_type_map, CONCERT_SONG_CONCERT_REL_KEYS)
             cs_filter = None
@@ -79,35 +143,38 @@ def _load_songs(ctx, concert_id: str = "") -> list[dict]:
             cs_rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT_SONG"], cs_filter)
 
             if cs_rows:
-                # CONCERT_SONGの曲リレーションからATLAS曲IDを収集
-                atlas_song_ids = []
+                atlas_song_ids: list[str] = []
                 for cs in cs_rows:
-                    sids = ctx["extract_relation_ids_any"](cs, CONCERT_SONG_SONG_REL_KEYS)
-                    atlas_song_ids.extend(sids)
-                atlas_song_ids = list(dict.fromkeys(atlas_song_ids))  # 重複除去・順序保持
+                    atlas_song_ids.extend(ctx["extract_relation_ids_any"](cs, CONCERT_SONG_SONG_REL_KEYS))
+                atlas_song_ids = list(dict.fromkeys([x for x in atlas_song_ids if x]))
 
                 if atlas_song_ids:
-                    # ATLASの曲IDに対応するAPOLLO曲行を取得
+                    atlas_id_set = {_norm_notion_id(sid) for sid in atlas_song_ids}
                     all_apollo = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
-                    atlas_id_set = set(sid.replace("-", "").lower() for sid in atlas_song_ids)
-                    # APOLLOのATLASリレーションで対応する曲を絞り込む
+
                     for row in all_apollo:
-                        rel_ids = ctx["extract_relation_ids_any"](row, SONG_CONCERT_REL_KEYS)
-                        rel_norm = {r.replace("-", "").lower() for r in rel_ids}
-                        if rel_norm.intersection(atlas_id_set):
-                            songs.append(row)
-                    # APOLLOで見つからない場合はATLAS IDをそのまま仮レコードとして追加（過渡期救済）
-                    found_rel_ids = set()
+                        apollo_atlas_ids = ctx["extract_relation_ids_any"](row, APOLLO_ATLAS_SONG_REL_KEYS)
+                        apollo_atlas_norm = {_norm_notion_id(x) for x in apollo_atlas_ids if x}
+                        if not apollo_atlas_norm.intersection(atlas_id_set):
+                            continue
+
+                        # 演奏会 relation があるなら対象演奏会にも一致させる
+                        concert_rel_ids = ctx["extract_relation_ids_any"](row, SONG_CONCERT_REL_KEYS)
+                        if concert_rel_ids and concert_id not in concert_rel_ids:
+                            continue
+
+                        songs.append(row)
+
+                    found_atlas_norms = set()
                     for row in songs:
-                        rel_ids = ctx["extract_relation_ids_any"](row, SONG_CONCERT_REL_KEYS)
-                        found_rel_ids.update(r.replace("-", "").lower() for r in rel_ids)
-                    missing = [sid for sid in atlas_song_ids
-                               if sid.replace("-", "").lower() not in found_rel_ids]
+                        found_atlas_norms.update(
+                            _norm_notion_id(x) for x in ctx["extract_relation_ids_any"](row, APOLLO_ATLAS_SONG_REL_KEYS) if x
+                        )
+                    missing = [sid for sid in atlas_song_ids if _norm_notion_id(sid) not in found_atlas_norms]
                     if missing:
                         st.caption(f"⚠️ APOLLO未登録の曲が{len(missing)}件あります（ATLAS IDで表示）")
 
         if not songs:
-            # フォールバック: CONCERT_SONGが空またはAPOLLO取得失敗時はAPOLLOから直接取得
             f = None
             if concert_id:
                 type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
@@ -122,70 +189,32 @@ def _load_songs(ctx, concert_id: str = "") -> list[dict]:
 
 def _resolve_apollo_song_ids(ctx, concert_id: str, atlas_song_id: str) -> list[str]:
     """
-    画面上の曲ID（ATLAS / CONCERT_SONG側）に対応する APOLLO 演奏曲DB行IDを返す。
-    APOLLO.演奏曲 relation が ATLAS 演奏曲を向いている前提。
+    ATLAS曲IDに対応する APOLLO 演奏曲DB行IDを返す。
+    入力がすでに APOLLO 行ID の場合もそのまま救済する。
     """
     if not atlas_song_id:
         return []
-    def _norm_id(v: str) -> str:
-        return (v or "").replace("-", "").strip().lower()
 
-    target_norm = _norm_id(atlas_song_id)
-    def _main_title(v: str) -> str:
-        s = (v or "").strip().lower()
-        if not s:
-            return ""
-        for sep in ("：", ":", " - ", " / "):
-            if sep in s:
-                s = s.split(sep, 1)[0].strip()
-                break
-        return s
+    target_norm = _norm_notion_id(atlas_song_id)
+    out: list[str] = []
+    seen: set[str] = set()
 
-    out = []
-    seen = set()
-    link_keys = list(dict.fromkeys((CONCERT_SONG_SONG_REL_KEYS or []) + (PARTDEF_SONG_REL_KEYS or [])))
-    # 1) 対象演奏会で先に探索
     rows = _load_songs(ctx, concert_id)
-    # 2) 演奏会relation欠落データ救済のため全件も探索対象に追加
     if concert_id:
-        rows = rows + [r for r in _load_songs(ctx, "") if r.get("id", "") not in {x.get("id", "") for x in rows}]
-
-    row_by_norm_id = {_norm_id(r.get("id", "")): r for r in rows if r.get("id", "")}
-    selected_row = row_by_norm_id.get(target_norm)
-    selected_title = _main_title(_song_name(selected_row, ctx) if selected_row else "")
-    selected_rel_ids = set(ctx["extract_relation_ids_any"](selected_row, link_keys)) if selected_row else set()
+        extra = _load_songs(ctx, "")
+        rows = rows + [r for r in extra if r.get("id", "") not in {x.get("id", "") for x in rows}]
 
     for row in rows:
         rid = row.get("id", "")
-        rid_norm = _norm_id(rid)
-        # 既に APOLLO 行ID が選択されているケース（旧/新フロー混在の救済）
-        if rid_norm and rid_norm == target_norm:
-            if rid and rid not in seen:
-                seen.add(rid)
-                out.append(rid)
-            continue
+        rid_norm = _norm_notion_id(rid)
+        atlas_ids = _extract_apollo_atlas_song_ids(row, ctx)
+        atlas_norms = {_norm_notion_id(x) for x in atlas_ids if x}
 
-        rel_ids = ctx["extract_relation_ids_any"](row, link_keys)
-        rel_norm = {_norm_id(x) for x in rel_ids if x}
-        if target_norm in rel_norm:
+        if rid_norm == target_norm or target_norm in atlas_norms:
             if rid and rid not in seen:
                 seen.add(rid)
                 out.append(rid)
-            continue
 
-        # 同一作品の楽章行を補足（作品マスタ/楽章relation、または主タイトル一致）
-        if selected_rel_ids and set(rel_ids).intersection(selected_rel_ids):
-            if rid and rid not in seen:
-                seen.add(rid)
-                out.append(rid)
-            continue
-        if selected_title:
-            row_title = _main_title(_song_name(row, ctx))
-            if row_title and row_title == selected_title:
-                if rid and rid not in seen:
-                    seen.add(rid)
-                    out.append(rid)
-    # 3) それでも不明なら現行選択IDを最終救済として返す
     if not out and atlas_song_id:
         out = [atlas_song_id]
     return out
@@ -360,10 +389,37 @@ def _delete_page(ctx: dict, page_id: str) -> bool:
 def _find_concert_song_row(ctx: dict, concert_id: str, song_id: str) -> dict | None:
     """
     CONCERT_SONG DB から、指定の 演奏会 + 曲(ATLAS) に対応する1行を返す。
+    song_id は APOLLO 行ID / ATLAS 曲ID のどちらでも受ける。
     """
     db_id = ctx.get("CONCERT_DB_CONCERT_SONG")
     if not db_id or not concert_id or not song_id:
         return None
+
+    type_map = ctx["get_prop_types"](db_id)
+    if not type_map:
+        return None
+
+    concert_rel = ctx["find_prop_name"](type_map, CONCERT_SONG_CONCERT_REL_KEYS)
+    song_rel = ctx["find_prop_name"](type_map, CONCERT_SONG_SONG_REL_KEYS)
+    target_atlas_ids = _resolve_atlas_song_ids(ctx, concert_id, song_id)
+    target_atlas_norms = {_norm_notion_id(x) for x in target_atlas_ids if x}
+
+    rows = ctx["query_all"](db_id)
+    for row in rows:
+        ok = True
+
+        if concert_rel:
+            row_concert_ids = ctx["extract_relation_ids"](row, concert_rel)
+            ok = concert_id in row_concert_ids
+
+        if ok and song_rel:
+            row_song_norms = {_norm_notion_id(x) for x in ctx["extract_relation_ids"](row, song_rel)}
+            ok = bool(row_song_norms.intersection(target_atlas_norms))
+
+        if ok:
+            return row
+
+    return None
 
     type_map = ctx["get_prop_types"](db_id)
     if not type_map:
@@ -416,7 +472,7 @@ def _set_concert_song_partdef_completed(
 
     props: dict = {}
 
-    done_prop = ctx["find_prop_name"](type_map, ["定義完了"])
+    done_prop = ctx["find_prop_name"](type_map, CONCERT_SONG_DONE_KEYS)
     if done_prop:
         props[done_prop] = {"checkbox": bool(completed)}
     else:
@@ -424,7 +480,7 @@ def _set_concert_song_partdef_completed(
         return False
 
     if note.strip():
-        note_prop = ctx["find_prop_name"](type_map, ["備考"])
+        note_prop = ctx["find_prop_name"](type_map, CONCERT_SONG_NOTE_KEYS)
         if note_prop:
             props[note_prop] = {
                 "rich_text": [
@@ -707,7 +763,9 @@ def _render_partdef_tab(ctx: dict):
     song_opts = {_song_name(s, ctx): s for s in songs}
     s_name = st.selectbox("楽曲", list(song_opts.keys()), key="partdef_song_sel")
     s = song_opts[s_name]
-    s_id = s.get("id", "")
+    selected_apollo_song_id = s.get("id", "")
+    atlas_song_ids = _extract_apollo_atlas_song_ids(s, ctx)
+    s_id = atlas_song_ids[0] if atlas_song_ids else selected_apollo_song_id
 
     instruments = _load_instruments(ctx)
     if not instruments:
@@ -801,9 +859,9 @@ def _render_partdef_tab(ctx: dict):
     cs_row = _find_concert_song_row(ctx, c_id, s_id)
     if cs_row:
         cs_props = (cs_row.get("properties", {}) or {})
-        done_prop_name = "定義完了"
+        done_prop_name = ctx["find_prop_name"](ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT_SONG"]), CONCERT_SONG_DONE_KEYS)
         current_done = False
-        if done_prop_name in cs_props and cs_props[done_prop_name].get("type") == "checkbox":
+        if done_prop_name and done_prop_name in cs_props and cs_props[done_prop_name].get("type") == "checkbox":
             current_done = bool(cs_props[done_prop_name].get("checkbox"))
 
         st.caption(f"現在の定義完了状態: {'✅ 完了' if current_done else '⬜ 未完了'}")
