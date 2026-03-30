@@ -8431,16 +8431,26 @@ if system_mode == "HARMONIA":
         if not raw:
             return None
         raw = raw.replace("Z", "+00:00")
+        dt = None
         try:
-            return datetime.fromisoformat(raw)
+            dt = datetime.fromisoformat(raw)
         except Exception:
             pass
-        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
+        if dt is None:
+            for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    dt = datetime.strptime(raw[:len(fmt)], fmt)
+                    break
+                except Exception:
+                    pass
+        if dt is None:
+            return None
+        if getattr(dt, "tzinfo", None) is not None:
             try:
-                return datetime.strptime(raw[:len(fmt)], fmt)
+                dt = dt.astimezone(__import__('datetime').timezone.utc).replace(tzinfo=None)
             except Exception:
-                pass
-        return None
+                dt = dt.replace(tzinfo=None)
+        return dt
 
     def _h_bool(page: dict, keys: list[str]) -> bool:
         props = (page.get("properties") or {}) if isinstance(page, dict) else {}
@@ -8704,15 +8714,24 @@ if system_mode == "HARMONIA":
         if not raw:
             return None
         raw = raw.replace("Z", "+00:00")
+        dt = None
         for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
             try:
-                return datetime.strptime(raw[:len(fmt.replace('%z','+0000'))], fmt)
+                dt = datetime.strptime(raw[:len(fmt.replace('%z','+0000'))], fmt)
+                break
             except Exception:
                 pass
-        try:
-            return datetime.fromisoformat(raw)
-        except Exception:
-            return None
+        if dt is None:
+            try:
+                dt = datetime.fromisoformat(raw)
+            except Exception:
+                return None
+        if getattr(dt, "tzinfo", None) is not None:
+            try:
+                dt = dt.astimezone(__import__('datetime').timezone.utc).replace(tzinfo=None)
+            except Exception:
+                dt = dt.replace(tzinfo=None)
+        return dt
 
     def _h_bool(page: dict, keys: list[str]) -> bool:
         props = (page.get("properties") or {}) if isinstance(page, dict) else {}
