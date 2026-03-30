@@ -8405,7 +8405,8 @@ if system_mode == "HARMONIA":
         "concert_song_concert_rel": ["演奏会", "FK演奏会", "concert"],
         "concert_song_song_rel": ["曲", "楽曲", "演奏曲", "song"],
         "concert_song_done": ["定義完了", "definition_done", "完了"],
-        "partdef_song_rel": ["曲", "楽曲", "演奏曲", "song"],
+        "partdef_song_rel": ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ", "曲", "song"],
+        "apollo_atlas_song_rel": ["演奏曲", "曲", "作品", "作品マスタ", "ATLAS曲"],
         "participant_concert_rel": ["演奏会", "FK演奏会", "concert"],
         "participant_player_rel": ["奏者", "出演者", "player", "FK奏者"],
         "attendance_practice_rel": ["練習", "FK練習", "practice"],
@@ -8456,6 +8457,31 @@ if system_mode == "HARMONIA":
         if partial:
             return "🟡 一部未完"
         return "⚪ 未着手"
+
+    def _h_collect_apollo_song_ids_for_concert(concert_id: str, atlas_song_ids: list[str]) -> set[str]:
+        """
+        CONCERT_SONG の ATLAS曲ID群に対応する APOLLO 行ID群を返す。
+        APOLLO.演奏曲 relation が ATLAS 向きである前提。
+        旧データ互換のため ATLAS 曲IDも候補に残す。
+        """
+        atlas_ids = [x for x in (atlas_song_ids or []) if x]
+        if not atlas_ids:
+            return set()
+        target_atlas_ids = set(atlas_ids)
+        out = set(target_atlas_ids)
+        song_db_id = concert_ctx.get("CONCERT_DB_SONG")
+        if not song_db_id:
+            return out
+        song_rows = concert_ctx["query_all"](song_db_id, None)
+        for row in song_rows:
+            row_id = row.get("id", "")
+            if concert_id and concert_id not in _h_rel(row, ["演奏会", "出演", "FK演奏会", "concert"]):
+                continue
+            rel_ids = set(_h_rel(row, _H_KEYS["apollo_atlas_song_rel"]))
+            if target_atlas_ids.intersection(rel_ids):
+                if row_id:
+                    out.add(row_id)
+        return out
 
     def _build_harmonia_progress(concert_row: dict | None) -> dict:
         stats = {
@@ -8516,7 +8542,16 @@ if system_mode == "HARMONIA":
 
         if concert_ctx.get("CONCERT_DB_PART_DEFINITION"):
             pdefs = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PART_DEFINITION"], None)
-            stats["partdef_count"] = sum(1 for pd in pdefs if song_id_set.intersection(set(_h_rel(pd, _H_KEYS["partdef_song_rel"]))))
+            target_song_ids = _h_collect_apollo_song_ids_for_concert(cid, list(song_id_set))
+            stats["partdef_count"] = sum(
+                1
+                for pd in pdefs
+                if (
+                    (not cid or cid in _h_rel(pd, ["演奏会", "出演", "FK演奏会", "concert"]))
+                    and target_song_ids.intersection(set(_h_rel(pd, _H_KEYS["partdef_song_rel"])))
+                )
+            )
+            dbg.append(f"partdef target_song_ids={len(target_song_ids)} partdef_count={stats['partdef_count']}")
 
         participant_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PARTICIPANT"], None) if concert_ctx.get("CONCERT_DB_PARTICIPANT") else []
         selected_participants = []
@@ -8616,7 +8651,8 @@ if system_mode == "HARMONIA":
         "concert_song_song_rel": ["曲", "楽曲", "演奏曲", "song"],
         "concert_song_done": ["定義完了", "definition_done", "完了"],
         "concert_song_order": ["曲順", "順番", "order"],
-        "partdef_song_rel": ["曲", "楽曲", "演奏曲", "song"],
+        "partdef_song_rel": ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ", "曲", "song"],
+        "apollo_atlas_song_rel": ["演奏曲", "曲", "作品", "作品マスタ", "ATLAS曲"],
         "participant_concert_rel": ["演奏会", "FK演奏会", "concert"],
         "participant_player_rel": ["奏者", "出演者", "player", "FK奏者"],
         "attendance_practice_rel": ["練習", "FK練習", "practice"],
@@ -8666,6 +8702,31 @@ if system_mode == "HARMONIA":
         if partial:
             return "🟡 一部未完"
         return "⚪ 未着手"
+
+    def _h_collect_apollo_song_ids_for_concert(concert_id: str, atlas_song_ids: list[str]) -> set[str]:
+        """
+        CONCERT_SONG の ATLAS曲ID群に対応する APOLLO 行ID群を返す。
+        APOLLO.演奏曲 relation が ATLAS 向きである前提。
+        旧データ互換のため ATLAS 曲IDも候補に残す。
+        """
+        atlas_ids = [x for x in (atlas_song_ids or []) if x]
+        if not atlas_ids:
+            return set()
+        target_atlas_ids = set(atlas_ids)
+        out = set(target_atlas_ids)
+        song_db_id = concert_ctx.get("CONCERT_DB_SONG")
+        if not song_db_id:
+            return out
+        song_rows = concert_ctx["query_all"](song_db_id, None)
+        for row in song_rows:
+            row_id = row.get("id", "")
+            if concert_id and concert_id not in _h_rel(row, ["演奏会", "出演", "FK演奏会", "concert"]):
+                continue
+            rel_ids = set(_h_rel(row, _H_KEYS["apollo_atlas_song_rel"]))
+            if target_atlas_ids.intersection(rel_ids):
+                if row_id:
+                    out.add(row_id)
+        return out
 
     def _build_harmonia_progress(concert_row: dict | None) -> dict:
         stats = {
@@ -8731,12 +8792,16 @@ if system_mode == "HARMONIA":
         # part definitions
         if concert_ctx.get("CONCERT_DB_PART_DEFINITION"):
             pdefs = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PART_DEFINITION"], None)
-            cnt = 0
             song_id_set = set(song_ids)
+            target_song_ids = _h_collect_apollo_song_ids_for_concert(cid, list(song_id_set))
+            cnt = 0
             for pd in pdefs:
-                if song_id_set.intersection(set(_h_rel(pd, _H_KEYS["partdef_song_rel"]))):
+                if cid and cid not in _h_rel(pd, ["演奏会", "出演", "FK演奏会", "concert"]):
+                    continue
+                if target_song_ids.intersection(set(_h_rel(pd, _H_KEYS["partdef_song_rel"]))):
                     cnt += 1
             stats["partdef_count"] = cnt
+            dbg.append(f"partdef target_song_ids={len(target_song_ids)} partdef_count={stats['partdef_count']}")
 
         # participants
         participant_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PARTICIPANT"], None) if concert_ctx.get("CONCERT_DB_PARTICIPANT") else []
