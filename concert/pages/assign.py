@@ -626,7 +626,7 @@ def _render_pref_tab(ctx: dict):
             cur_p = ctx["extract_prop_text_any"](existing, PREF_PRIORITY_KEYS) if existing else "未回答"
             if cur_p not in PRIORITY_OPTIONS:
                 cur_p = "未回答"
-            status = "🟢" if has_record else "🔴"
+            status = "" if has_record else "🔴"
 
             all_pref_rows.append({"状態": status, "曲": sname, "パート": label, "希望": cur_p})
             all_pref_meta.append({
@@ -1134,9 +1134,9 @@ def _render_solver_tab(ctx: dict):
 
             # 採用ボタン
             st.divider()
-            if st.button(f"📝 この案を『案提示』として反映",
+            if st.button(f"✅ この案を採用してNotionに書き込む",
                          key=f"adopt_{result['label']}", type="primary"):
-                _write_assignments_to_notion(ctx, result["assignments"], result["pref_map"], mark_stage="proposal")
+                _write_assignments_to_notion(ctx, result["assignments"], result["pref_map"])
 
 
 def _render_assignment_html(items: list[dict], pref_map: dict) -> str:
@@ -1286,78 +1286,10 @@ def _render_player_score_html(scores: dict, fb_counts: dict, names: dict,
 </div>"""
 
 
-def _update_concert_song_flags(ctx: dict, concert_id: str, *, proposal=None, confirmed=None) -> tuple[int, int, int, list[str]]:
-    db_id = (ctx.get("CONCERT_DB_CONCERT_SONG") or "").strip()
-    if not db_id or not concert_id:
-        return 0, 0, 0, ["CONCERT_SONG DB または演奏会IDが取得できません。"]
-
-    type_map = ctx["get_prop_types"](db_id)
-    proposal_prop = _find_prop_name_loose(ctx, type_map, ["案提示", "案提示済", "proposal", "proposal_shown", "proposal_done"])
-    confirm_prop = _find_prop_name_loose(ctx, type_map, ["アサイン確定", "確定", "confirmed", "確定フラグ", "採用", "採用済", "合意", "アサイン完了", "assignment_done", "assign_done"])
-    concert_prop = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_CONCERT_REL_KEYS)
-
-    missing = []
-    if proposal is not None and not proposal_prop:
-        missing.append("案提示")
-    if confirmed is not None and not confirm_prop:
-        missing.append("アサイン確定")
-    if not concert_prop:
-        missing.append("演奏会relation")
-    if missing:
-        return 0, 0, 0, [f"CONCERT_SONG の必要プロパティが見つかりません: {' / '.join(missing)}"]
-
-    rows = ctx["query_all"](db_id)
-    target_rows = [
-        r for r in rows
-        if concert_id in (ctx["extract_relation_ids_any"](r, [concert_prop]) or [])
-    ]
-    if not target_rows:
-        return 0, 0, 0, ["対象演奏会の CONCERT_SONG 行が見つかりませんでした。"]
-
-    ok = fail = 0
-    errors = []
-    for row in target_rows:
-        props = {}
-        if proposal is not None:
-            ctx["put_prop_any"](props, type_map, [proposal_prop], bool(proposal))
-        if confirmed is not None:
-            ctx["put_prop_any"](props, type_map, [confirm_prop], bool(confirmed))
-        if not props:
-            continue
-        res = ctx["api_request"](
-            "patch",
-            f"https://api.notion.com/v1/pages/{row.get('id','')}",
-            json={"properties": props},
-        )
-        if res is not None and res.status_code == 200:
-            ok += 1
-        else:
-            fail += 1
-            errors.append(row.get("id", ""))
-    return ok, fail, len(target_rows), errors
-
-
-def _clear_assignment_flags(ctx: dict, concert_id: str, rows: list[dict], type_map: dict) -> tuple[int, int]:
-    ok = fail = 0
-    for r in rows:
-        rid = r.get("id", "")
-        props: dict = {}
-        ctx["put_prop_any"](props, type_map, PI_ASSIGN_KEYS, False)
-        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{rid}", json={"properties": props})
-        if res and res.status_code == 200:
-            ok += 1
-        else:
-            fail += 1
-    if rows:
-        _update_concert_song_flags(ctx, concert_id, proposal=False, confirmed=False)
-    return ok, fail
-
-
-def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: dict, *, mark_stage: str = "proposal"):
+def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: dict):
     """採用した割当をPlayerInstrumentの担当フラグに書き込む。
-    mark_stage:
-      - proposal: 案提示として反映（CONCERT_SONG.案提示=True, アサイン確定=False）
-      - confirm : アサイン確定として反映（CONCERT_SONG.案提示=True, アサイン確定=True）
+    レコードの一意キー：演奏会 + 奏者 + パート定義（曲+楽器+パートを包含）
+    同一奏者が同一楽器で複数曲を担当する場合も正しく区別できる。
     """
     db_id    = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
     type_map = ctx["get_prop_types"](db_id)
@@ -1440,18 +1372,7 @@ def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: d
                 fail += 1
 
     if fail == 0:
-        if mark_stage == "confirm":
-            cs_ok, cs_fail, cs_total, cs_errors = _update_concert_song_flags(ctx, concert_id, proposal=True, confirmed=True)
-            if cs_fail == 0:
-                st.success(f"✅ {ok}件の担当フラグを書き込み、CONCERT_SONG {cs_ok}/{cs_total} 曲をアサイン確定にしました。")
-            else:
-                st.warning(f"⚠️ 担当フラグ {ok}件成功。CONCERT_SONG 更新は {cs_ok}/{cs_total} 件成功、{cs_fail} 件失敗。")
-        else:
-            cs_ok, cs_fail, cs_total, cs_errors = _update_concert_song_flags(ctx, concert_id, proposal=True, confirmed=False)
-            if cs_fail == 0:
-                st.success(f"✅ {ok}件の担当フラグを書き込み、CONCERT_SONG {cs_ok}/{cs_total} 曲を案提示にしました。")
-            else:
-                st.warning(f"⚠️ 担当フラグ {ok}件成功。CONCERT_SONG 更新は {cs_ok}/{cs_total} 件成功、{cs_fail} 件失敗。")
+        st.success(f"✅ {ok}件の担当フラグを書き込みました。")
         _clear_assign_cache()
     else:
         st.warning(f"⚠️ {ok}件成功、{fail}件失敗。")
@@ -1470,8 +1391,6 @@ def _render_result_tab(ctx: dict):
         st.info("サイドバーで演奏会を選択してください。")
         return
     st.caption(f"対象演奏会: {concert_name or concert_id}")
-
-    st.info("案提示は CONCERT_SONG の『案提示』、確定は『アサイン確定』に全曲フラグを書き込みます。")
 
     col_h, col_r = st.columns([8, 1])
     col_h.subheader("担当パート一覧")
@@ -1521,29 +1440,19 @@ def _render_result_tab(ctx: dict):
                     if ext_any(r, PI_ASSIGN_KEYS) == "True"
                     and (not concert_id or concert_id in ext_rel(r, PI_CONCERT_REL_KEYS))
                 ]
-                ok, fail = _clear_assignment_flags(ctx, concert_id, all_rows, t_map)
+                ok = fail = 0
+                for r in all_rows:
+                    rid = r.get("id","")
+                    props: dict = {}
+                    ctx["put_prop_any"](props, t_map, PI_ASSIGN_KEYS, False)
+                    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{rid}",
+                                             json={"properties": props})
+                    if res and res.status_code == 200: ok += 1
+                    else: fail += 1
             st.success(f"✅ {ok}件リセットしました。")
             _clear_assign_cache()
             st.rerun()
         return
-
-    col_stage1, col_stage2 = st.columns(2)
-    if col_stage1.button("📝 現在の担当を『案提示』として保存", key="mark_proposal_from_result", use_container_width=True):
-        proposal_ok, proposal_fail, proposal_total, _ = _update_concert_song_flags(ctx, concert_id, proposal=True, confirmed=False)
-        if proposal_fail == 0:
-            st.success(f"✅ CONCERT_SONG {proposal_ok}/{proposal_total} 曲を案提示にしました。")
-        else:
-            st.warning(f"⚠️ CONCERT_SONG は {proposal_ok}/{proposal_total} 件成功、{proposal_fail} 件失敗。")
-        _clear_assign_cache()
-        st.rerun()
-    if col_stage2.button("✅ 現在の担当を『アサイン確定』として保存", key="mark_confirm_from_result", type="primary", use_container_width=True):
-        confirm_ok, confirm_fail, confirm_total, _ = _update_concert_song_flags(ctx, concert_id, proposal=True, confirmed=True)
-        if confirm_fail == 0:
-            st.success(f"✅ CONCERT_SONG {confirm_ok}/{confirm_total} 曲をアサイン確定にしました。")
-        else:
-            st.warning(f"⚠️ CONCERT_SONG は {confirm_ok}/{confirm_total} 件成功、{confirm_fail} 件失敗。")
-        _clear_assign_cache()
-        st.rerun()
 
     # パート定義を先読みしてpart_id → song_idのマップを作る
     pd_all = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
@@ -1635,7 +1544,15 @@ def _render_result_tab(ctx: dict):
     st.divider()
     if st.button("🗑️ 全担当フラグをリセット", key="reset_assign_bottom", type="secondary"):
         with st.spinner("リセット中..."):
-            ok, fail = _clear_assignment_flags(ctx, concert_id, assigned_rows, t_map)
+            ok = fail = 0
+            for r in assigned_rows:
+                rid = r.get("id","")
+                props: dict = {}
+                ctx["put_prop_any"](props, t_map, PI_ASSIGN_KEYS, False)
+                res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{rid}",
+                                         json={"properties": props})
+                if res and res.status_code == 200: ok += 1
+                else: fail += 1
         st.success(f"✅ {ok}件リセットしました。")
         _clear_assign_cache()
         st.rerun()

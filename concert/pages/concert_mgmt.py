@@ -133,6 +133,37 @@ def _clear_concert_cache(ctx):
         st.session_state.pop(k, None)
 
 
+def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> str:
+    key = ctx["find_prop_name"](type_map, candidates)
+    if key:
+        return key
+    norm_map = {re.sub(r"\s+", "", str(k or "")).strip().lower(): k for k in (type_map or {}).keys()}
+    for c in candidates:
+        got = norm_map.get(re.sub(r"\s+", "", str(c or "")).strip().lower())
+        if got:
+            return got
+    return ""
+
+
+def _set_concert_song_checkbox_for_concert(ctx: dict, concert_id: str, key_candidates: list[str], checked: bool) -> tuple[int, int]:
+    if not concert_id or not ctx.get("CONCERT_DB_CONCERT_SONG"):
+        return 0, 0
+    db_id = ctx["CONCERT_DB_CONCERT_SONG"]
+    type_map = ctx["get_prop_types"](db_id) or {}
+    rel_key = ctx["find_prop_name"](type_map, ["演奏会", "FK演奏会", "concert"])
+    flag_key = _find_prop_name_loose(ctx, type_map, key_candidates)
+    if not flag_key:
+        return 0, 0
+    rows = ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}}) if rel_key else ctx["query_all"](db_id)
+    rows = [r for r in rows if concert_id in ctx["extract_relation_ids_any"](r, [rel_key] if rel_key else ["演奏会", "FK演奏会", "concert"])]
+    updated = 0
+    for row in rows:
+        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{row.get('id','')}", json={"properties": {flag_key: {"checkbox": bool(checked)}}})
+        if res is not None and res.status_code == 200:
+            updated += 1
+    return len(rows), updated
+
+
 def _backfill_pk_for_db(
     ctx: dict,
     db_id: str,
@@ -1348,6 +1379,26 @@ def render(ctx: dict):
                 if k.startswith("practice_list_"):
                     st.session_state.pop(k, None)
             st.rerun()
+        cs_rows = _load_songs(ctx, filter_concert_id) if filter_concert_id else []
+        if filter_concert_id and cs_rows:
+            st.caption("練習日が固まった時点で、CONCERT_SONG の『練習日確定』を一括更新できます。")
+            c1, c2 = st.columns(2)
+            if c1.button("✅ 練習日確定", key="practice_confirm_all", use_container_width=True):
+                total_rows, updated_rows = _set_concert_song_checkbox_for_concert(ctx, filter_concert_id, ["練習日確定", "practice_confirmed", "practice_fixed"], True)
+                if total_rows == 0:
+                    st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
+                else:
+                    st.success(f"✅ 練習日確定を反映しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
+                    _clear_concert_cache(ctx)
+                    st.rerun()
+            if c2.button("↩ 練習日確定を解除", key="practice_unconfirm_all", use_container_width=True):
+                total_rows, updated_rows = _set_concert_song_checkbox_for_concert(ctx, filter_concert_id, ["練習日確定", "practice_confirmed", "practice_fixed"], False)
+                if total_rows == 0:
+                    st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
+                else:
+                    st.success(f"↩ 練習日確定を解除しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
+                    _clear_concert_cache(ctx)
+                    st.rerun()
 
         # 練習回（第N回練習）を優先して降順表示（未設定日時でも入力しやすくする）
         def _practice_round_no(p: dict) -> int:

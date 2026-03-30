@@ -53,6 +53,37 @@ def _is_truthy_text(v: str) -> bool:
     return str(v or "").strip().lower() in {"true", "1", "yes", "on", "はい"}
 
 
+def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> str:
+    key = ctx["find_prop_name"](type_map, candidates)
+    if key:
+        return key
+    norm_map = {str(k or "").replace(" ", "").replace("　", "").strip().lower(): k for k in (type_map or {}).keys()}
+    for c in candidates:
+        got = norm_map.get(str(c or "").replace(" ", "").replace("　", "").strip().lower())
+        if got:
+            return got
+    return ""
+
+
+def _set_concert_song_checkbox_for_concert(ctx: dict, concert_id: str, key_candidates: list[str], checked: bool) -> tuple[int, int]:
+    if not concert_id or not ctx.get("CONCERT_DB_CONCERT_SONG"):
+        return 0, 0
+    db_id = ctx["CONCERT_DB_CONCERT_SONG"]
+    type_map = ctx["get_prop_types"](db_id) or {}
+    rel_key = ctx["find_prop_name"](type_map, ["演奏会", "FK演奏会", "concert"])
+    flag_key = _find_prop_name_loose(ctx, type_map, key_candidates)
+    if not flag_key:
+        return 0, 0
+    rows = ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}}) if rel_key else ctx["query_all"](db_id)
+    rows = [r for r in rows if concert_id in ctx["extract_relation_ids_any"](r, [rel_key] if rel_key else ["演奏会", "FK演奏会", "concert"])]
+    updated = 0
+    for row in rows:
+        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{row.get('id','')}", json={"properties": {flag_key: {"checkbox": bool(checked)}}})
+        if res is not None and res.status_code == 200:
+            updated += 1
+    return len(rows), updated
+
+
 def _practice_rel_prop_candidates(type_map: dict, ctx: dict) -> list[str]:
     out = []
     rel = ctx["find_prop_name"](type_map, PRACTICE_CONCERT_REL_KEYS)
@@ -1730,6 +1761,25 @@ def _render_practice_bring_tab(ctx: dict):
             if k.startswith("pi_practice_"):
                 st.session_state.pop(k, None)
         st.rerun()
+
+    st.caption("持参可能楽器が固まった時点で、CONCERT_SONG の『持参楽器確定』を一括更新できます。")
+    c1, c2 = st.columns(2)
+    if c1.button("✅ 持参楽器確定", key=f"bring_confirm_{c_id}", use_container_width=True):
+        total_rows, updated_rows = _set_concert_song_checkbox_for_concert(ctx, c_id, ["持参楽器確定", "bring_confirmed", "bring_fixed"], True)
+        if total_rows == 0:
+            st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
+        else:
+            st.success(f"✅ 持参楽器確定を反映しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
+            _clear_player_cache()
+            st.rerun()
+    if c2.button("↩ 持参楽器確定を解除", key=f"bring_unconfirm_{c_id}", use_container_width=True):
+        total_rows, updated_rows = _set_concert_song_checkbox_for_concert(ctx, c_id, ["持参楽器確定", "bring_confirmed", "bring_fixed"], False)
+        if total_rows == 0:
+            st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
+        else:
+            st.success(f"↩ 持参楽器確定を解除しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
+            _clear_player_cache()
+            st.rerun()
 
 
 def _filter_perc_players(ctx, player_ids: list[str], participants: list[dict]) -> list[str]:
