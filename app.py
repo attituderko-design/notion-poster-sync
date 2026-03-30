@@ -8448,7 +8448,8 @@ if system_mode == "HARMONIA":
         "concert_song_song_rel": ["曲", "楽曲", "演奏曲", "song"],
         "concert_song_done": ["定義完了", "definition_done", "完了"],
         "concert_song_practice_confirm": ["練習日確定", "practice_confirmed", "practice_fixed"],
-        "concert_song_bring_confirm": ["持参楽器確定", "bring_confirmed", "bring_fixed"],
+        "concert_song_ownership_confirm": ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed", "bring_confirmed", "bring_fixed"],
+        "practice_bring_confirm": ["持参楽器確定", "bring_confirmed", "bring_fixed"],
         "concert_song_proposal": ["案提示", "proposal_presented", "proposal"],
         "concert_song_assign_confirm": ["アサイン確定", "assign_confirmed", "confirmed"],
         "partdef_song_rel": ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ", "曲", "song"],
@@ -8575,6 +8576,7 @@ if system_mode == "HARMONIA":
                     future.append((pdt, f"{pdt_raw[:10]} {_h_text(p, _H_KEYS['practice_name'])}".strip()))
         stats["practice_count"] = len(regular_practice_ids)
         stats["attendance_practice_count"] = len(attendance_practice_ids)
+        stats["practice_bring_confirm_count"] = sum(1 for p in practices if (p.get("id", "") in attendance_practice_ids and _h_bool(p, _H_KEYS["practice_bring_confirm"])))
         if future:
             future.sort(key=lambda x: x[0])
             stats["next_practice_label"] = future[0][1]
@@ -8589,7 +8591,7 @@ if system_mode == "HARMONIA":
         stats["song_count"] = len(song_id_set)
         stats["song_done_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_done"]))
         stats["practice_confirm_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_practice_confirm"]))
-        stats["bring_confirm_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_bring_confirm"]))
+        stats["ownership_confirm_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_ownership_confirm"]))
         stats["proposal_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_proposal"]))
         stats["assign_confirm_count"] = sum(1 for r in filtered_cs if _h_bool(r, _H_KEYS["concert_song_assign_confirm"]))
 
@@ -8682,12 +8684,13 @@ if system_mode == "HARMONIA":
             ("④ 必要楽器の確定", 1.0 if stats['partdef_count'] > 0 else 0.0, f"PART_DEFINITION {stats['partdef_count']} 件"),
             ("⑤ パート定義の確定", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_done']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_done']) else 0.0), f"定義完了 {stats['song_done_count']} / {len(filtered_cs)} 曲"),
             ("⑥ 奏者情報の確定", 1.0 if stats['participant_count'] > 0 else 0.0, f"CONCERT_CAST {stats['participant_count']} 人"),
-            ("⑦ 持参可能楽器の確定", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_bring_confirm']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_bring_confirm']) else 0.0), f"持参楽器確定 {stats['bring_confirm_count']} / {len(filtered_cs)} 曲"),
-            ("⑧ 出欠の確定", 1.0 if (not attendance_reasons and stats['participant_count'] > 0 and stats['unanswered_count'] == 0) else (0.5 if stats['participant_count'] > 0 and stats['attendance_record_count'] > 0 else 0.0), f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"),
-            ("⑨ 各奏者パート希望の確定", 1.0 if (stats['participant_count'] > 0 and stats['preference_pending_count'] == 0) else (0.5 if stats['participant_count'] > 0 and stats['preference_pending_count'] < stats['participant_count'] else 0.0), f"希望未提出 {stats['preference_pending_count']} 人"),
-            ("⑩ アサイン案の提示", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_proposal']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_proposal']) else 0.0), f"案提示 {stats['proposal_count']} / {len(filtered_cs)} 曲"),
-            ("⑪ アサイン情報の確定", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_assign_confirm']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_assign_confirm']) else 0.0), f"アサイン確定 {stats['assign_confirm_count']} / {len(filtered_cs)} 曲"),
-            ("⑫ レンタル・収支", 1.0 if ((stats['rental_unconfirmed_count'] == 0) and (confirmed_expense_count > 0 or stats['expense_confirmed_total'] > 0)) else (0.5 if (stats['rental_unconfirmed_count'] > 0 or confirmed_expense_count > 0 or stats['expense_confirmed_total'] > 0) else 0.0), f"見積中 {stats['rental_unconfirmed_count']} 件 / 経費確定 ¥{stats['expense_confirmed_total']:,}"),
+            ("⑦ 所有楽器の確定", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_ownership_confirm']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_ownership_confirm']) else 0.0), f"所有楽器確定 {stats['ownership_confirm_count']} / {len(filtered_cs)} 曲"),
+            ("⑧ 持参楽器の確定", 1.0 if (stats['attendance_practice_count'] > 0 and stats['practice_bring_confirm_count'] == stats['attendance_practice_count']) else (0.5 if stats['practice_bring_confirm_count'] > 0 else 0.0), f"持参楽器確定 {stats['practice_bring_confirm_count']} / {stats['attendance_practice_count']} 回"),
+            ("⑨ 出欠の確定", 1.0 if (not attendance_reasons and stats['participant_count'] > 0 and stats['unanswered_count'] == 0) else (0.5 if stats['participant_count'] > 0 and stats['attendance_record_count'] > 0 else 0.0), f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"),
+            ("⑩ 各奏者パート希望の確定", 1.0 if (stats['participant_count'] > 0 and stats['preference_pending_count'] == 0) else (0.5 if stats['participant_count'] > 0 and stats['preference_pending_count'] < stats['participant_count'] else 0.0), f"希望未提出 {stats['preference_pending_count']} 人"),
+            ("⑪ アサイン案の提示", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_proposal']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_proposal']) else 0.0), f"案提示 {stats['proposal_count']} / {len(filtered_cs)} 曲"),
+            ("⑫ アサイン情報の確定", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_assign_confirm']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_assign_confirm']) else 0.0), f"アサイン確定 {stats['assign_confirm_count']} / {len(filtered_cs)} 曲"),
+            ("⑬ レンタル・収支", 1.0 if ((stats['rental_unconfirmed_count'] == 0) and (confirmed_expense_count > 0 or stats['expense_confirmed_total'] > 0)) else (0.5 if (stats['rental_unconfirmed_count'] > 0 or confirmed_expense_count > 0 or stats['expense_confirmed_total'] > 0) else 0.0), f"見積中 {stats['rental_unconfirmed_count']} 件 / 経費確定 ¥{stats['expense_confirmed_total']:,}"),
         ]
         ratios = [x[1] for x in stats['step_items']]
         stats['overall_progress_ratio'] = sum(ratios) / len(ratios) if ratios else 0.0
