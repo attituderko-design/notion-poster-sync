@@ -62,15 +62,61 @@ def _load_concerts(ctx) -> list[dict]:
 
 
 def _load_songs(ctx, concert_id: str = "") -> list[dict]:
+    """
+    演奏会に紐づく楽曲をCONCERT_SONG経由で取得する。
+    CONCERT_SONGが空の場合はAPOLLO（CONCERT_DB_SONG）から直接取得してフォールバック。
+    """
     key = f"song_list_{concert_id}"
     if key not in st.session_state:
-        f = None
-        if concert_id:
-            type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
-            rel_prop = ctx["find_prop_name"](type_map, SONG_CONCERT_REL_KEYS)
-            if rel_prop:
-                f = {"filter": {"property": rel_prop, "relation": {"contains": concert_id}}}
-        st.session_state[key] = ctx["query_all"](ctx["CONCERT_DB_SONG"], f)
+        songs = []
+        if concert_id and ctx.get("CONCERT_DB_CONCERT_SONG"):
+            # CONCERT_SONG経由で取得（曲リレーション先はATLAS）
+            cs_type_map = ctx["get_prop_types"](ctx["CONCERT_DB_CONCERT_SONG"])
+            cs_concert_rel = ctx["find_prop_name"](cs_type_map, CONCERT_SONG_CONCERT_REL_KEYS)
+            cs_filter = None
+            if cs_concert_rel:
+                cs_filter = {"filter": {"property": cs_concert_rel, "relation": {"contains": concert_id}}}
+            cs_rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT_SONG"], cs_filter)
+
+            if cs_rows:
+                # CONCERT_SONGの曲リレーションからATLAS曲IDを収集
+                atlas_song_ids = []
+                for cs in cs_rows:
+                    sids = ctx["extract_relation_ids_any"](cs, CONCERT_SONG_SONG_REL_KEYS)
+                    atlas_song_ids.extend(sids)
+                atlas_song_ids = list(dict.fromkeys(atlas_song_ids))  # 重複除去・順序保持
+
+                if atlas_song_ids:
+                    # ATLASの曲IDに対応するAPOLLO曲行を取得
+                    all_apollo = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
+                    atlas_id_set = set(sid.replace("-", "").lower() for sid in atlas_song_ids)
+                    # APOLLOのATLASリレーションで対応する曲を絞り込む
+                    for row in all_apollo:
+                        rel_ids = ctx["extract_relation_ids_any"](row, SONG_CONCERT_REL_KEYS)
+                        rel_norm = {r.replace("-", "").lower() for r in rel_ids}
+                        if rel_norm.intersection(atlas_id_set):
+                            songs.append(row)
+                    # APOLLOで見つからない場合はATLAS IDをそのまま仮レコードとして追加（過渡期救済）
+                    found_rel_ids = set()
+                    for row in songs:
+                        rel_ids = ctx["extract_relation_ids_any"](row, SONG_CONCERT_REL_KEYS)
+                        found_rel_ids.update(r.replace("-", "").lower() for r in rel_ids)
+                    missing = [sid for sid in atlas_song_ids
+                               if sid.replace("-", "").lower() not in found_rel_ids]
+                    if missing:
+                        st.caption(f"⚠️ APOLLO未登録の曲が{len(missing)}件あります（ATLAS IDで表示）")
+
+        if not songs:
+            # フォールバック: CONCERT_SONGが空またはAPOLLO取得失敗時はAPOLLOから直接取得
+            f = None
+            if concert_id:
+                type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
+                rel_prop = ctx["find_prop_name"](type_map, SONG_CONCERT_REL_KEYS)
+                if rel_prop:
+                    f = {"filter": {"property": rel_prop, "relation": {"contains": concert_id}}}
+            songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], f)
+
+        st.session_state[key] = songs
     return st.session_state.get(key, [])
 
 
@@ -152,36 +198,46 @@ def _load_instruments(ctx) -> list[dict]:
 
 
 def _load_partdefs(ctx, concert_id: str = "", song_id: str = "") -> list[dict]:
+    """
+    パート定義を取得する。
+
+    song_id は画面上の ATLAS 曲ID。
+    PART_DEFINITION.演奏曲 は APOLLO 向きのため、_resolve_apollo_song_ids() で変換する。
+    変換失敗時は ATLAS ID をそのまま使って旧データを救済する。
+
+    フィルタ優先順位:
+      1. 演奏会 + APOLLO曲ID（正常系）
+      2. 演奏会 + ATLAS曲ID（旧データ互換・フォールバック）
+      3. APOLLO曲IDのみ（演奏会relation未設定の旧データ救済）
+    """
     key = f"partdef_list_{concert_id}_{song_id}"
     if key not in st.session_state:
         rows = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"])
-        t = ctx["get_prop_types"](ctx["CONCERT_DB_PART_DEFINITION"])
+        t     = ctx["get_prop_types"](ctx["CONCERT_DB_PART_DEFINITION"])
         c_rel = ctx["find_prop_name"](t, PARTDEF_CONCERT_REL_KEYS)
         s_rel = ctx["find_prop_name"](t, PARTDEF_SONG_REL_KEYS)
 
+        # ATLAS曲ID → APOLLO曲IDに変換（旧データ互換で両方を候補に含める）
         target_song_ids = set()
         if song_id:
-            # 画面上の song_id は ATLAS 演奏曲ID。
-            # PART_DEFINITION.演奏曲 は APOLLO 向きなので変換が必要。
-            target_song_ids.update(_resolve_apollo_song_ids(ctx, concert_id, song_id))
-            # 旧データ互換
-            target_song_ids.add(song_id)
+            apollo_ids = _resolve_apollo_song_ids(ctx, concert_id, song_id)
+            target_song_ids.update(apollo_ids)
+            target_song_ids.add(song_id)  # ATLAS IDも候補に（旧データ互換）
 
-        out = []
-        for r in rows:
+        def _matches(r: dict) -> bool:
             ok = True
             if concert_id and c_rel:
                 ok = concert_id in ctx["extract_relation_ids"](r, c_rel)
             if ok and target_song_ids and s_rel:
                 ok = bool(target_song_ids.intersection(set(ctx["extract_relation_ids"](r, s_rel))))
-            if ok:
-                out.append(r)
+            return ok
 
-        # 演奏会relation未設定の旧データ救済
+        out = [r for r in rows if _matches(r)]
+
+        # 演奏会relationが未設定の旧データを救済（曲IDのみでマッチ）
         if not out and target_song_ids and s_rel:
-            for r in rows:
-                if bool(target_song_ids.intersection(set(ctx["extract_relation_ids"](r, s_rel)))):
-                    out.append(r)
+            out = [r for r in rows
+                   if bool(target_song_ids.intersection(set(ctx["extract_relation_ids"](r, s_rel))))]
 
         st.session_state[key] = out
     return st.session_state.get(key, [])
@@ -505,10 +561,12 @@ def _upsert_partdef(
         st.error("担当楽器を1つ以上選択してください。")
         return False
     apollo_song_ids = _resolve_apollo_song_ids(ctx, concert_id, song_id)
-    if not apollo_song_ids:
-        st.error("対応する APOLLO 演奏曲が見つかりません。出演登録フロー経由で APOLLO 演奏曲DB行が作成されているか確認してください。")
-        return False
-    target_song_id = apollo_song_ids[0]
+    if apollo_song_ids:
+        target_song_id = apollo_song_ids[0]
+    else:
+        # APOLLO IDが取得できない場合はATLAS IDで代替（過渡期フォールバック）
+        st.warning("対応する APOLLO 演奏曲が見つからないため、ATLAS IDで代替登録します。出演登録フロー経由で APOLLO 演奏曲DBへの登録を確認してください。")
+        target_song_id = song_id
     inst_label = " / ".join([x for x in (inst_names or []) if x]) or "楽器未設定"
     props = {}
     ctx["put_prop_any"](props, t, PARTDEF_RECORD_KEYS, f"{song_name} / {part_name} / {inst_label}")
