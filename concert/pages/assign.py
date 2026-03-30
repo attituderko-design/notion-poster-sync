@@ -147,7 +147,7 @@ def _clear_assign_cache():
             "pref_list_", "participant_list_",
         )):
             st.session_state.pop(k, None)
-        if k.startswith("pref_editor_version_"):
+        if k.startswith("pref_editor_version_") or k.startswith("pref_editor_"):
             st.session_state.pop(k, None)
 
 
@@ -193,6 +193,10 @@ def _load_player_instruments(ctx, concert_id: str) -> list[dict]:
     """PREFERENCEから演奏会参加者経由で希望データを取得する。
     PREFERENCEには演奏会リレーションがないため、
     先に演奏会参加者IDセットを取得してフィルタする。
+
+    注意:
+    - Notion APIから返る archived / in_trash 行は既存回答として扱わない
+    - 希望順位が空の行も既存回答として扱わない
     """
     key = f"pi_list_{concert_id}"
     if key not in st.session_state:
@@ -215,9 +219,17 @@ def _load_player_instruments(ctx, concert_id: str) -> list[dict]:
             player_rel = ctx["find_prop_name"](t, PREF_PLAYER_REL_KEYS)
             filtered = []
             for r in all_prefs:
+                # Notion上で削除済み（archived / ゴミ箱）は除外
+                if r.get("archived") or r.get("in_trash"):
+                    continue
                 pids = ctx["extract_relation_ids"](r, player_rel) if player_rel else []
-                if pids and pids[0] in participant_ids:
-                    filtered.append(r)
+                if not (pids and pids[0] in participant_ids):
+                    continue
+                # 希望順位が空のレコードは既存回答として扱わない
+                priority_str = (ctx["extract_prop_text_any"](r, PREF_PRIORITY_KEYS) or "").strip()
+                if not priority_str:
+                    continue
+                filtered.append(r)
             st.session_state[key] = filtered
     return st.session_state.get(key, [])
 
@@ -577,7 +589,7 @@ def _render_pref_tab(ctx: dict):
     player_id = player_opts.get(selected_player_name, "")
     if col_r.button("🔄", key="pref_refresh", help="パート定義・希望データを再読み込み"):
         for k in list(st.session_state.keys()):
-            if k.startswith("si_list_") or k.startswith("pi_list_"):
+            if k.startswith("si_list_") or k.startswith("pi_list_") or k.startswith("pref_editor_"):
                 st.session_state.pop(k, None)
         if player_id:
             _bump_pref_editor_version(concert_id, player_id)
