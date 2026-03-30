@@ -740,6 +740,24 @@ def _refresh_harmonia_song_info_status(ctx: dict, concert_id: str) -> bool:
     return _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_SONG_INFO_KEYS, all_done)
 
 
+def _refresh_harmonia_partdef_status(ctx: dict, concert_id: str) -> bool:
+    """
+    CONCERT_SONGの『定義完了』フラグを全件チェックし、
+    全曲完了なら HARMONIA_CONCERT の『パート定義確定』をTrueに、
+    1件でも未完了なら False に更新する。
+    """
+    rows = _load_concert_song_rows(ctx, concert_id)
+    if not rows:
+        return _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PARTDEF_KEYS, False)
+    db_id = ctx["CONCERT_DB_CONCERT_SONG"]
+    type_map = ctx["get_prop_types"](db_id) or {}
+    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_DONE_KEYS)                or _find_prop_name_from_rows_loose(rows, CONCERT_SONG_DONE_KEYS)
+    if not flag_key:
+        return False
+    all_done = all(_extract_checkbox_value(r, flag_key) for r in rows)
+    return _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PARTDEF_KEYS, all_done)
+
+
 def _set_concert_song_song_confirmed(
     ctx: dict,
     concert_id: str,
@@ -1470,14 +1488,24 @@ def _render_partdef_tab(ctx: dict):
             if col_btn1.button("✅ 完了にする", use_container_width=True,
                                key=f"cs_done_{c_id}_{s_id}", type="primary"):
                 ok = _set_concert_song_partdef_completed(ctx, c_id, s_id, True, note=complete_note)
-                st.success("✅ 更新しました。") if ok else st.error("❌ 更新に失敗しました。")
-                if ok: st.rerun()
+                if ok:
+                    _refresh_harmonia_partdef_status(ctx, c_id)
+                    _clear_concert_song_cache(c_id)
+                    st.success("✅ 更新しました。")
+                    st.rerun()
+                else:
+                    st.error("❌ 更新に失敗しました。")
         else:
             if col_btn2.button("↩ 完了を取り消す", use_container_width=True,
                                key=f"cs_undone_{c_id}_{s_id}"):
                 ok = _set_concert_song_partdef_completed(ctx, c_id, s_id, False, note=complete_note)
-                st.success("✅ 更新しました。") if ok else st.error("❌ 更新に失敗しました。")
-                if ok: st.rerun()
+                if ok:
+                    _refresh_harmonia_partdef_status(ctx, c_id)
+                    _clear_concert_song_cache(c_id)
+                    st.success("✅ 更新しました。")
+                    st.rerun()
+                else:
+                    st.error("❌ 更新に失敗しました。")
     else:
         st.warning("CONCERT_SONG に対応する行がありません。完了フラグの更新はできません。")
 
