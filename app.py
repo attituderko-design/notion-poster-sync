@@ -8457,9 +8457,7 @@ if system_mode == "HARMONIA":
         "apollo_atlas_song_rel": ["演奏曲", "曲", "楽曲", "作品マスタ", "ATLAS曲", "song"],
         "participant_concert_rel": ["出演", "演奏会", "FK演奏会", "concert"],
         "participant_player_rel": ["出演者", "奏者", "player", "FK奏者"],
-        "participant_ownership_confirm": ["所有楽器確定", "ownership_confirmed", "own_confirmed"],
-        "harmonia_concert_rel": ["演奏会", "FK演奏会", "concert"],
-        "harmonia_ownership_confirm": ["所有楽器確定", "ownership_confirmed"],
+        "participant_own_confirm": ["所有楽器確定", "ownership_confirmed", "own_confirmed"],
         "attendance_practice_rel": ["練習", "FK練習", "practice"],
         "attendance_player_rel": ["演奏会参加者", "奏者", "出演者", "player", "FK奏者"],
         "preference_player_rel": ["演奏会参加者", "奏者", "出演者", "player", "FK奏者"],
@@ -8469,6 +8467,12 @@ if system_mode == "HARMONIA":
         "expense_concert_rel": ["演奏会", "FK演奏会", "concert"],
         "expense_amount": ["金額", "費用", "amount"],
         "expense_confirmed": ["確定", "confirmed", "確定フラグ"],
+        "harmonia_concert_rel": ["演奏会", "FK演奏会", "concert"],
+        "harmonia_player_info_confirm": ["奏者情報確定", "participant_confirmed", "player_info_confirmed"],
+        "harmonia_required_inst_confirm": ["必要楽器確定", "required_instruments_confirmed", "required_inst_confirmed"],
+        "harmonia_partdef_confirm": ["パート定義確定", "part_definition_confirmed", "partdef_confirmed"],
+        "concert_inst_concert_rel": ["演奏会", "FK演奏会", "concert"],
+        "concert_inst_song_rel": ["演奏曲", "楽曲", "FK楽曲", "concert_song"],
     }
 
     def _h_text(page: dict, keys: list[str]) -> str:
@@ -8509,21 +8513,6 @@ if system_mode == "HARMONIA":
             return "🟡 一部未完"
         return "⚪ 未着手"
 
-    def _h_norm_id(v: str) -> str:
-        return (v or "").replace("-", "").strip().lower()
-
-    def _h_find_harmonia_row(concert_id: str) -> dict | None:
-        db_id = concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT")
-        if not db_id or not concert_id:
-            return None
-        target = _h_norm_id(concert_id)
-        rows = concert_ctx["query_all"](db_id, None)
-        for row in rows:
-            rels = _h_rel(row, _H_KEYS["harmonia_concert_rel"])
-            if any(_h_norm_id(rid) == target for rid in rels):
-                return row
-        return None
-
     def _h_collect_apollo_song_ids_for_concert(concert_id: str, atlas_song_ids: list[str]) -> set[str]:
         """
         CONCERT_SONG.曲（ATLAS曲ID）から、ホーム画面集計用の対象曲ID集合を作る。
@@ -8553,11 +8542,12 @@ if system_mode == "HARMONIA":
         stats = {
             "participant_count": 0, "practice_count": 0, "attendance_practice_count": 0, "attendance_record_count": 0,
             "practice_date_set_count": 0, "practice_date_confirm_count": 0, "practice_ready_count": 0,
-            "song_count": 0, "song_done_count": 0, "partdef_count": 0, "unanswered_count": 0,
+            "song_count": 0, "song_done_count": 0, "partdef_count": 0, "concert_instrument_count": 0, "unanswered_count": 0,
             "preference_pending_count": 0, "rental_unconfirmed_count": 0, "expense_confirmed_total": 0,
-            "ownership_confirm_count": 0, "ownership_target_count": 0, "ownership_header_confirmed": False,
             "has_concert_day": False, "next_practice_label": "", "attendance_status_label": "⚪ 未着手",
-            "attendance_status_reasons": [], "debug_lines": [],
+            "participant_header_confirmed": False, "required_inst_header_confirmed": False, "partdef_header_confirmed": False,
+            "ownership_target_count": 0, "ownership_confirm_count": 0, "debug_lines": [],
+            "attendance_status_reasons": [],
         }
         dbg = stats["debug_lines"]
         if not concert_row:
@@ -8634,6 +8624,22 @@ if system_mode == "HARMONIA":
             target_song_ids = _h_collect_apollo_song_ids_for_concert(cid, list(song_id_set))
             stats["partdef_count"] = sum(1 for pd in pdefs if ((not cid or cid in _h_rel(pd, ["演奏会", "出演", "FK演奏会", "concert"])) and target_song_ids.intersection(set(_h_rel(pd, _H_KEYS["partdef_song_rel"])))) )
 
+        if concert_ctx.get("CONCERT_DB_CONCERT_INSTRUMENT"):
+            ci_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_CONCERT_INSTRUMENT"], None)
+            stats["concert_instrument_count"] = sum(1 for r in ci_rows if cid in _h_rel(r, _H_KEYS["concert_inst_concert_rel"]))
+
+        harmonia_row = None
+        if concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT"):
+            hc_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_HARMONIA_CONCERT"], None)
+            for hr in hc_rows:
+                if cid in _h_rel(hr, _H_KEYS["harmonia_concert_rel"]):
+                    harmonia_row = hr
+                    break
+        if harmonia_row:
+            stats["participant_header_confirmed"] = _h_bool(harmonia_row, _H_KEYS["harmonia_player_info_confirm"])
+            stats["required_inst_header_confirmed"] = _h_bool(harmonia_row, _H_KEYS["harmonia_required_inst_confirm"])
+            stats["partdef_header_confirmed"] = _h_bool(harmonia_row, _H_KEYS["harmonia_partdef_confirm"])
+
         participant_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PARTICIPANT"], None) if concert_ctx.get("CONCERT_DB_PARTICIPANT") else []
         selected_participants, participant_targets = [], {}
         for p in participant_rows:
@@ -8647,11 +8653,11 @@ if system_mode == "HARMONIA":
             participant_targets[p.get("id", "")] = {x for x in targets if x}
         stats["participant_count"] = len(selected_participants)
         stats["ownership_target_count"] = stats["participant_count"]
-        stats["ownership_confirm_count"] = sum(1 for p in selected_participants if _h_bool(p, _H_KEYS["participant_ownership_confirm"]))
-        harmonia_row = _h_find_harmonia_row(cid)
-        stats["ownership_header_confirmed"] = _h_bool(harmonia_row, _H_KEYS["harmonia_ownership_confirm"]) if harmonia_row else False
-        if stats["ownership_header_confirmed"] and stats["ownership_target_count"] > 0:
-            stats["ownership_confirm_count"] = stats["ownership_target_count"]
+        participant_own_confirm_count = 0
+        for p in selected_participants:
+            if _h_bool(p, _H_KEYS["participant_own_confirm"]):
+                participant_own_confirm_count += 1
+        stats["ownership_confirm_count"] = participant_own_confirm_count
 
         attendance_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_ATTENDANCE"], None) if concert_ctx.get("CONCERT_DB_ATTENDANCE") else []
         answered = set()
@@ -8721,10 +8727,10 @@ if system_mode == "HARMONIA":
             ("① 演奏会の確定", 1.0 if cid else 0.0, f"{concert_name or cid} / {concert_date or '日付未設定'}"),
             ("② 楽曲情報の確定", 1.0 if stats['song_count'] > 0 else 0.0, f"CONCERT_SONG {stats['song_count']} 曲"),
             ("③ 練習情報の確定", 1.0 if (stats['practice_count'] > 0 and stats['practice_ready_count'] == stats['practice_count']) else (0.5 if (stats['practice_count'] > 0 and (stats['practice_ready_count'] > 0 or stats['practice_date_set_count'] > 0 or stats['practice_date_confirm_count'] > 0)) else 0.0), f"通常練習 {stats['practice_ready_count']} / {stats['practice_count']} 日"),
-            ("④ 必要楽器の確定", 1.0 if stats['partdef_count'] > 0 else 0.0, f"PART_DEFINITION {stats['partdef_count']} 件"),
-            ("⑤ パート定義の確定", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_done']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_done']) else 0.0), f"定義完了 {stats['song_done_count']} / {len(filtered_cs)} 曲"),
-            ("⑥ 奏者情報の確定", 1.0 if stats['participant_count'] > 0 else 0.0, f"CONCERT_CAST {stats['participant_count']} 人"),
-            ("⑦ 所有楽器の確定", 1.0 if stats['ownership_header_confirmed'] else (0.5 if stats['ownership_confirm_count'] > 0 else 0.0), f"所有楽器確定 {stats['ownership_confirm_count']} / {stats['ownership_target_count']} 人"),
+            ("④ 奏者情報の確定", 1.0 if stats['participant_header_confirmed'] else (0.5 if stats['participant_count'] > 0 else 0.0), f"CONCERT_CAST {stats['participant_count']} 人"),
+            ("⑤ 必要楽器の確定", 1.0 if stats['required_inst_header_confirmed'] else (0.5 if stats['concert_instrument_count'] > 0 else 0.0), f"CONCERT_INSTRUMENT {stats['concert_instrument_count']} 件"),
+            ("⑥ パート定義の確定", 1.0 if stats['partdef_header_confirmed'] else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_done']) or stats['partdef_count'] > 0 else 0.0), f"PART_DEFINITION {stats['partdef_count']} 件"),
+            ("⑦ 所有楽器の確定", 1.0 if stats['ownership_confirm_count'] > 0 and stats['ownership_confirm_count'] == stats['ownership_target_count'] else (0.5 if stats['ownership_confirm_count'] > 0 else 0.0), f"所有楽器確定 {stats['ownership_confirm_count']} / {stats['ownership_target_count']} 人"),
             ("⑧ 持参楽器の確定", 1.0 if (stats['attendance_practice_count'] > 0 and stats['practice_bring_confirm_count'] == stats['attendance_practice_count']) else (0.5 if stats['practice_bring_confirm_count'] > 0 else 0.0), f"持参楽器確定 {stats['practice_bring_confirm_count']} / {stats['attendance_practice_count']} 回"),
             ("⑨ 出欠の確定", 1.0 if (not attendance_reasons and stats['participant_count'] > 0 and stats['unanswered_count'] == 0) else (0.5 if stats['participant_count'] > 0 and stats['attendance_record_count'] > 0 else 0.0), f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"),
             ("⑩ 各奏者パート希望の確定", 1.0 if (stats['participant_count'] > 0 and stats['preference_pending_count'] == 0) else (0.5 if stats['participant_count'] > 0 and stats['preference_pending_count'] < stats['participant_count'] else 0.0), f"希望未提出 {stats['preference_pending_count']} 人"),
