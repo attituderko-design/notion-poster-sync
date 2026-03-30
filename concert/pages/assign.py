@@ -147,6 +147,8 @@ def _clear_assign_cache():
             "pref_list_", "participant_list_",
         )):
             st.session_state.pop(k, None)
+        if k.startswith("pref_editor_version_"):
+            st.session_state.pop(k, None)
 
 
 def _load_players(ctx) -> list[dict]:
@@ -231,6 +233,15 @@ def _concert_name(c, ctx) -> str:
 
 def _player_name(p, ctx) -> str:
     return ctx["extract_prop_text_any"](p, PLAYER_NAME_KEYS) or ctx["extract_title"](p) or p.get("id", "")
+
+
+def _get_pref_editor_version(concert_id: str, player_id: str) -> int:
+    return int(st.session_state.get(f"pref_editor_version_{concert_id}_{player_id}", 0))
+
+
+def _bump_pref_editor_version(concert_id: str, player_id: str) -> None:
+    key = f"pref_editor_version_{concert_id}_{player_id}"
+    st.session_state[key] = int(st.session_state.get(key, 0)) + 1
 
 
 def _song_name(s, ctx) -> str:
@@ -567,6 +578,8 @@ def _render_pref_tab(ctx: dict):
         for k in list(st.session_state.keys()):
             if k.startswith("si_list_") or k.startswith("pi_list_"):
                 st.session_state.pop(k, None)
+        if player_id:
+            _bump_pref_editor_version(concert_id, player_id)
         st.rerun()
     player_id = player_opts.get(selected_player_name, "")
     if not player_id:
@@ -617,11 +630,12 @@ def _render_pref_tab(ctx: dict):
         return
 
     df_pref = pd.DataFrame(all_pref_rows)
+    pref_editor_version = _get_pref_editor_version(concert_id, player_id)
     edited_pref = st.data_editor(
         df_pref,
         num_rows="fixed",
         use_container_width=True,
-        key=f"pref_editor_{player_id}_{concert_id}",
+        key=f"pref_editor_{player_id}_{concert_id}_{pref_editor_version}",
         column_config={
             "状態": st.column_config.TextColumn("状態", disabled=True, width="small"),
             "曲":   st.column_config.TextColumn("曲", disabled=True),
@@ -690,8 +704,11 @@ def _render_pref_tab(ctx: dict):
         if fail_count == 0:
             st.success(f"✅ {ok_count}件を保存しました。")
             st.session_state.pop(f"pi_list_{concert_id}", None)
+            _bump_pref_editor_version(concert_id, player_id)
         else:
             st.warning(f"⚠️ {ok_count}件成功、{fail_count}件失敗。")
+            st.session_state.pop(f"pi_list_{concert_id}", None)
+            _bump_pref_editor_version(concert_id, player_id)
         st.rerun()
 
 
