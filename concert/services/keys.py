@@ -181,6 +181,7 @@ PARTICIPANT_ROLE_KEYS     = ["役職_音楽", "役職", "Role"]
 PARTICIPANT_ROLE_OPS_KEYS = ["役職_運営", "RoleOps"]
 PARTICIPANT_FEE_KEYS      = ["参加費", "Fee"]
 PARTICIPANT_PAID_KEYS     = ["入金済", "Paid"]
+PARTICIPANT_OWN_CONFIRM_KEYS = ["所有楽器確定", "ownership_confirmed", "own_confirmed"]
 
 # ── ATLAS（CONCERT DB）追加フィールド ────────────────────────
 CONCERT_CONFIRMED_FEE_KEYS = ["確定参加費", "ConfirmedFee"]
