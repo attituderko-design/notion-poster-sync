@@ -150,6 +150,109 @@ def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> s
     return ""
 
 
+def _load_harmonia_concert_row(ctx: dict, concert_id: str) -> dict | None:
+    if not concert_id or not ctx.get("CONCERT_DB_HARMONIA_CONCERT"):
+        return None
+    db_id = ctx["CONCERT_DB_HARMONIA_CONCERT"]
+    type_map = ctx["get_prop_types"](db_id) or {}
+    rel_key = _find_prop_name_loose(ctx, type_map, HARMONIA_CONCERT_CONCERT_REL_KEYS)
+
+    try:
+        rows = (
+            ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}})
+            if rel_key
+            else ctx["query_all"](db_id)
+        )
+    except Exception:
+        rows = ctx["query_all"](db_id)
+
+    target = _normalize_page_id(concert_id)
+    rel_candidates = [rel_key] if rel_key else HARMONIA_CONCERT_CONCERT_REL_KEYS
+    for row in rows:
+        rel_ids = ctx["extract_relation_ids_any"](row, rel_candidates)
+        if any(_normalize_page_id(x) == target for x in rel_ids):
+            return row
+    return None
+
+
+def _ensure_harmonia_concert_row(ctx: dict, concert_id: str, concert_name: str = "") -> dict | None:
+    row = _load_harmonia_concert_row(ctx, concert_id)
+    if row is not None:
+        return row
+    if not concert_id or not ctx.get("CONCERT_DB_HARMONIA_CONCERT"):
+        return None
+
+    db_id = ctx["CONCERT_DB_HARMONIA_CONCERT"]
+    type_map = ctx["get_prop_types"](db_id) or {}
+    props: dict = {}
+
+    rel_written = False
+    try:
+        rel_written = bool(ctx["put_prop_any"](props, type_map, HARMONIA_CONCERT_CONCERT_REL_KEYS, concert_id))
+    except Exception:
+        rel_written = False
+    if not rel_written:
+        for k, t in (type_map or {}).items():
+            if t == "relation" and (("演奏会" in str(k)) or ("出演" in str(k)) or ("concert" in str(k).lower())):
+                try:
+                    ctx["put_prop"](props, type_map, k, concert_id)
+                    rel_written = True
+                    break
+                except Exception:
+                    pass
+
+    key_written = False
+    try:
+        key_written = bool(ctx["put_key_any"](props, type_map, HARMONIA_CONCERT_KEY_KEYS, concert_id, concert_name or concert_id, prefix="harmonia_concert"))
+    except Exception:
+        key_written = False
+    if not key_written:
+        title_key = ""
+        for k, t in (type_map or {}).items():
+            if t == "title":
+                title_key = k
+                break
+        if title_key:
+            try:
+                ctx["put_prop"](props, type_map, title_key, concert_name or f"harmonia_concert:{concert_id}")
+            except Exception:
+                pass
+
+    res = ctx["api_request"](
+        "post",
+        "https://api.notion.com/v1/pages",
+        json={"parent": {"database_id": db_id}, "properties": props},
+    )
+    if res is None or res.status_code != 200:
+        return None
+    return (res.json() or {})
+
+
+def _set_harmonia_concert_checkbox(
+    ctx: dict,
+    concert_id: str,
+    key_candidates: list[str],
+    checked: bool,
+    concert_name: str = "",
+) -> bool:
+    row = _ensure_harmonia_concert_row(ctx, concert_id, concert_name)
+    if not row:
+        return False
+    db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT")
+    if not db_id:
+        return False
+    type_map = ctx["get_prop_types"](db_id) or {}
+    flag_key = _find_prop_name_loose(ctx, type_map, key_candidates)
+    if not flag_key:
+        return False
+    res = ctx["api_request"](
+        "patch",
+        f"https://api.notion.com/v1/pages/{row.get('id','')}",
+        json={"properties": {flag_key: {"checkbox": bool(checked)}}},
+    )
+    return res is not None and res.status_code == 200
+
+
 def _set_practice_checkbox(ctx: dict, practice_id: str, key_candidates: list[str], checked: bool) -> bool:
     if not practice_id or not ctx.get("CONCERT_DB_PRACTICE"):
         return False
