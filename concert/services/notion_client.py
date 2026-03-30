@@ -51,8 +51,8 @@ _DEFAULT_CONCERT_DB_IDS = {
     "rental": "32c6e5f3-8885-8072-9131-ceaff635b895",       # レンタル見積 Rental
     "part_definition": "32c4532d7d56803ba3e1c8c87d1cd0dc",  # パート定義DB
     "preference": "32c4532d7d5680b1902dce3555590db3",       # 希望入力DB
-    "billing": "",                                           # 見積/請求DB（任意）
-    "concert_song": "",                                      # 演奏会×曲 管理DB
+    "billing": "3314532d7d5680fb9cdbebd1d2730e62",          # 見積/請求DB（任意）
+    "concert_song": "3324532d7d5680f38f0fccc3adae9860",     # 演奏会×曲 管理DB
 }
 
 _NOTION_ID_PATTERN = re.compile(
