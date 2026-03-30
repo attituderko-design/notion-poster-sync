@@ -4,7 +4,6 @@ concert/pages/finance.py
 """
 import streamlit as st
 import pandas as pd
-import math
 import io
 from datetime import date, timedelta
 from concert.services.keys import (
@@ -523,7 +522,7 @@ def _render_expense_tab(ctx, concert_id: str, concert_name: str):
 # ============================================================
 
 def _render_budget_tab(ctx, concert_id: str):
-    st.caption("経費の積み上げから1人あたり参加費を試算します。")
+    st.caption("想定参加費 × 試算人数で集まる金額を確認し、想定予算との差額を見ます。")
 
     # ATLASの確定参加費を表示
     current_fee = _read_concert_fee(ctx, concert_id)
@@ -540,8 +539,10 @@ def _render_budget_tab(ctx, concert_id: str):
     by_type: dict[str, int] = {}
     for r in expenses:
         amt_s = ext(r, EXPENSE_AMOUNT_KEYS) or "0"
-        try: amt = int(float(amt_s))
-        except: amt = 0
+        try:
+            amt = int(float(amt_s))
+        except Exception:
+            amt = 0
         conf = ext(r, EXPENSE_CONFIRMED_KEYS) == "True"
         type_ = ext(r, EXPENSE_TYPE_KEYS) or "その他"
         total_estimate += amt
@@ -565,33 +566,48 @@ def _render_budget_tab(ctx, concert_id: str):
     st.markdown("### 参加費試算")
 
     col1, col2 = st.columns(2)
-    col1.metric("経費合計（全見積）", f"¥{total_estimate:,}")
-    col1.metric("経費合計（確定済）", f"¥{total_confirmed:,}")
-    col2.metric("参加予定人数", f"{n_members}人")
+    col1.metric("想定予算（全見積）", f"¥{total_estimate:,}")
+    col1.metric("想定予算（確定済）", f"¥{total_confirmed:,}")
+    col2.metric("現在の奏者数", f"{n_members}人")
 
-    st.markdown("**調整・試算**")
-    extra = st.number_input("追加バッファ（円）", min_value=0, step=1000, value=0, key="budget_extra",
-                             help="予備費や端数調整用")
-    manual_members = st.number_input("試算人数（変更可）", min_value=1, value=max(n_members, 1), step=1,
-                                      key="budget_members")
-    round_unit = st.selectbox("端数処理（円単位）", [100, 500, 1000, 5000], index=2, key="budget_round")
+    st.markdown("**試算条件**")
+    manual_members = st.number_input(
+        "試算人数（変更可）",
+        min_value=1,
+        value=max(n_members, 1),
+        step=1,
+        key="budget_members",
+    )
+    assumed_fee_default = current_fee if current_fee > 0 else 10000
+    assumed_fee = st.number_input(
+        "想定参加費（円）",
+        min_value=0,
+        step=100,
+        value=assumed_fee_default,
+        key="budget_assumed_fee",
+        help="この金額を全員から集める想定で試算します。",
+    )
 
-    total_with_extra = total_estimate + extra
-    per_person_raw   = total_with_extra / manual_members if manual_members > 0 else 0
-    per_person = math.ceil(per_person_raw / round_unit) * round_unit
+    collected_total = int(assumed_fee) * int(manual_members)
+    diff_vs_budget = collected_total - total_estimate
 
     st.markdown("---")
     c1, c2, c3 = st.columns(3)
-    c1.metric("総額（バッファ込）",   f"¥{total_with_extra:,}")
-    c2.metric("1人あたり（切り上げ）", f"¥{per_person:,}")
-    c3.metric("徴収総額",             f"¥{per_person * manual_members:,}")
+    c1.metric("想定参加費", f"¥{int(assumed_fee):,}")
+    c2.metric("集まる想定額", f"¥{collected_total:,}")
+    c3.metric("想定予算との差額", f"¥{diff_vs_budget:,}")
 
-    surplus = per_person * manual_members - total_with_extra
-    st.caption(f"余剰：¥{surplus:,}（徴収総額 - 経費総額）")
+    if diff_vs_budget >= 0:
+        st.caption(f"想定予算に対して **+¥{diff_vs_budget:,}** です。")
+    else:
+        st.caption(f"想定予算に対して **-¥{abs(diff_vs_budget):,}** です。")
 
     # 参加費を一括設定
-    if st.button(f"💸 全員の参加費を ¥{per_person:,} に設定する",
-                 key="budget_apply", use_container_width=True):
+    if st.button(
+        f"💸 全員の参加費を ¥{int(assumed_fee):,} に設定する",
+        key="budget_apply",
+        use_container_width=True,
+    ):
         ok_n = ng_n = 0
         with st.spinner("設定中..."):
             for r in cast_rows:
@@ -599,15 +615,17 @@ def _render_budget_tab(ctx, concert_id: str):
                 part = ext(r, PARTICIPANT_PART_KEYS) or ""
                 role = ext(r, PARTICIPANT_ROLE_KEYS) or ""
                 paid = ext(r, PARTICIPANT_PAID_KEYS) == "True"
-                ok   = _update_cast_finance(ctx, rid, part, role, per_person, paid)
+                role_ops = ext(r, PARTICIPANT_ROLE_OPS_KEYS) or ""
+                ok   = _update_cast_finance(ctx, rid, part, role, int(assumed_fee), paid, role_ops=role_ops)
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
         if ng_n == 0:
-            # ATLASの確定参加費フィールドに書き込む
-            _write_concert_fee(ctx, concert_id, per_person)
-            # session_stateにも保存（新規参加者登録時の自動セット用）
-            st.session_state[f"confirmed_fee_{concert_id}"] = per_person
-            st.success(f"✅ {ok_n}人の参加費を ¥{per_person:,} に設定しました。新規参加者登録時も自動で ¥{per_person:,} が入力されます。")
+            _write_concert_fee(ctx, concert_id, int(assumed_fee))
+            st.session_state[f"confirmed_fee_{concert_id}"] = int(assumed_fee)
+            st.success(
+                f"✅ {ok_n}人の参加費を ¥{int(assumed_fee):,} に設定しました。"
+                f" 新規参加者登録時も自動で ¥{int(assumed_fee):,} が入力されます。"
+            )
         else:
             st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
         _clear_finance_cache(concert_id)
