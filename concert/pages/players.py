@@ -84,6 +84,22 @@ def _set_concert_song_checkbox_for_concert(ctx: dict, concert_id: str, key_candi
     return len(rows), updated
 
 
+def _set_practice_checkbox(ctx: dict, practice_id: str, key_candidates: list[str], checked: bool) -> bool:
+    if not practice_id or not ctx.get("CONCERT_DB_PRACTICE"):
+        return False
+    db_id = ctx["CONCERT_DB_PRACTICE"]
+    type_map = ctx["get_prop_types"](db_id) or {}
+    flag_key = _find_prop_name_loose(ctx, type_map, key_candidates)
+    if not flag_key:
+        return False
+    res = ctx["api_request"](
+        "patch",
+        f"https://api.notion.com/v1/pages/{practice_id}",
+        json={"properties": {flag_key: {"checkbox": bool(checked)}}},
+    )
+    return res is not None and res.status_code == 200
+
+
 def _practice_rel_prop_candidates(type_map: dict, ctx: dict) -> list[str]:
     out = []
     rel = ctx["find_prop_name"](type_map, PRACTICE_CONCERT_REL_KEYS)
@@ -1464,6 +1480,33 @@ def _render_assign_tab(ctx: dict):
             _clear_player_cache()
             st.rerun()
 
+    st.caption("所有楽器の整理が固まった時点で、CONCERT_SONG の『所有楽器確定』を一括更新できます。")
+    c1, c2 = st.columns(2)
+    if c1.button("✅ 所有楽器確定", key=f"ownership_confirm_{c_id}", use_container_width=True):
+        total_rows, updated_rows = _set_concert_song_checkbox_for_concert(
+            ctx, c_id,
+            ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed", "bring_confirmed", "bring_fixed"],
+            True,
+        )
+        if total_rows == 0:
+            st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
+        else:
+            st.success(f"✅ 所有楽器確定を反映しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
+            _clear_player_cache()
+            st.rerun()
+    if c2.button("↩ 所有楽器確定を解除", key=f"ownership_unconfirm_{c_id}", use_container_width=True):
+        total_rows, updated_rows = _set_concert_song_checkbox_for_concert(
+            ctx, c_id,
+            ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed", "bring_confirmed", "bring_fixed"],
+            False,
+        )
+        if total_rows == 0:
+            st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
+        else:
+            st.success(f"↩ 所有楽器確定を解除しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
+            _clear_player_cache()
+            st.rerun()
+
 
 def _render_practice_bring_tab(ctx: dict):
     """練習日を選んで楽器ごとの持参担当を設定するタブ。"""
@@ -1762,24 +1805,24 @@ def _render_practice_bring_tab(ctx: dict):
                 st.session_state.pop(k, None)
         st.rerun()
 
-    st.caption("持参可能楽器が固まった時点で、CONCERT_SONG の『持参楽器確定』を一括更新できます。")
+    st.caption("この練習回の持参担当が固まった時点で、PRACTICE の『持参楽器確定』を更新できます。")
     c1, c2 = st.columns(2)
-    if c1.button("✅ 持参楽器確定", key=f"bring_confirm_{c_id}", use_container_width=True):
-        total_rows, updated_rows = _set_concert_song_checkbox_for_concert(ctx, c_id, ["持参楽器確定", "bring_confirmed", "bring_fixed"], True)
-        if total_rows == 0:
-            st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
-        else:
-            st.success(f"✅ 持参楽器確定を反映しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
+    if c1.button("✅ この練習回を持参楽器確定", key=f"bring_confirm_{c_id}_{pr_id}", use_container_width=True):
+        ok = _set_practice_checkbox(ctx, pr_id, ["持参楽器確定", "bring_confirmed", "bring_fixed"], True)
+        if ok:
+            st.success("✅ この練習回を持参楽器確定にしました。")
             _clear_player_cache()
             st.rerun()
-    if c2.button("↩ 持参楽器確定を解除", key=f"bring_unconfirm_{c_id}", use_container_width=True):
-        total_rows, updated_rows = _set_concert_song_checkbox_for_concert(ctx, c_id, ["持参楽器確定", "bring_confirmed", "bring_fixed"], False)
-        if total_rows == 0:
-            st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
         else:
-            st.success(f"↩ 持参楽器確定を解除しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
+            st.warning("PRACTICE の『持参楽器確定』列が見つからないか、更新に失敗しました。")
+    if c2.button("↩ この練習回の持参楽器確定を解除", key=f"bring_unconfirm_{c_id}_{pr_id}", use_container_width=True):
+        ok = _set_practice_checkbox(ctx, pr_id, ["持参楽器確定", "bring_confirmed", "bring_fixed"], False)
+        if ok:
+            st.success("↩ この練習回の持参楽器確定を解除しました。")
             _clear_player_cache()
             st.rerun()
+        else:
+            st.warning("PRACTICE の『持参楽器確定』列が見つからないか、更新に失敗しました。")
 
 
 def _filter_perc_players(ctx, player_ids: list[str], participants: list[dict]) -> list[str]:
