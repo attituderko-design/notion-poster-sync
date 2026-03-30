@@ -1526,35 +1526,38 @@ def _render_partdef_tab(ctx: dict):
     if not inst_opts:
         st.warning("条件に一致する楽器がありません。「楽器種別」タブで追加してください。")
 
-    # パート追加フォーム
-    with st.expander("➕ パートを追加", expanded=False):
-        with st.form(f"partdef_new_{c_id}_{s_id}", border=True):
-            p_name = st.text_input("パート名 *", placeholder="例: Part1 1stTimp.")
-            i_names = st.multiselect(
-                "担当楽器（複数選択可）", list(inst_opts.keys()),
-                help="候補が多いときは上の絞り込みを使ってください。",
-            )
-            need = st.number_input("必要人数", min_value=1, max_value=20, value=1, step=1)
-            note = st.text_input("備考", placeholder="任意")
-            if st.form_submit_button("💾 追加", type="primary", use_container_width=True):
-                if not p_name.strip():
-                    st.error("パート名は必須です。")
-                elif not i_names:
-                    st.error("担当楽器を1つ以上選択してください。")
-                else:
-                    ok = _upsert_partdef(
-                        ctx, concert_id=c_id, song_id=s_id, song_name=s_name,
-                        part_name=p_name.strip(),
-                        inst_ids=[inst_opts[n] for n in i_names if inst_opts.get(n)],
-                        inst_names=i_names, need_count=int(need), note=note,
-                    )
-                    if ok:
-                        _set_concert_song_partdef_completed(ctx, c_id, s_id, False)
-                        st.success("✅ パートを追加しました。")
-                        st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
-                        st.rerun()
+    # パート追加フォーム（定義完了時は非表示）
+    if current_done:
+        st.caption("パートを追加するには、先に「↩ 完了を取り消す」で定義を未完了に戻してください。")
+    else:
+        with st.expander("➕ パートを追加", expanded=False):
+            with st.form(f"partdef_new_{c_id}_{s_id}", border=True):
+                p_name = st.text_input("パート名 *", placeholder="例: Part1 1stTimp.")
+                i_names = st.multiselect(
+                    "担当楽器（複数選択可）", list(inst_opts.keys()),
+                    help="候補が多いときは上の絞り込みを使ってください。",
+                )
+                need = st.number_input("必要人数", min_value=1, max_value=20, value=1, step=1)
+                note = st.text_input("備考", placeholder="任意")
+                if st.form_submit_button("💾 追加", type="primary", use_container_width=True):
+                    if not p_name.strip():
+                        st.error("パート名は必須です。")
+                    elif not i_names:
+                        st.error("担当楽器を1つ以上選択してください。")
                     else:
-                        st.error("❌ 追加に失敗しました。")
+                        ok = _upsert_partdef(
+                            ctx, concert_id=c_id, song_id=s_id, song_name=s_name,
+                            part_name=p_name.strip(),
+                            inst_ids=[inst_opts[n] for n in i_names if inst_opts.get(n)],
+                            inst_names=i_names, need_count=int(need), note=note,
+                        )
+                        if ok:
+                            _set_concert_song_partdef_completed(ctx, c_id, s_id, False)
+                            st.success("✅ パートを追加しました。")
+                            st.session_state.pop(f"partdef_list_{c_id}_{s_id}", None)
+                            st.rerun()
+                        else:
+                            st.error("❌ 追加に失敗しました。")
 
     # 登録済みパート一覧
     part_rows = _load_partdefs(ctx, c_id, s_id)
