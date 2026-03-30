@@ -29,6 +29,57 @@ from concert.services.keys import (
 # キャッシュ
 # ============================================================
 
+
+
+def _load_harmonia_concert_row(ctx: dict, concert_id: str) -> dict:
+    if not concert_id or not ctx.get("CONCERT_DB_HARMONIA_CONCERT"):
+        return {}
+    db_id = ctx["CONCERT_DB_HARMONIA_CONCERT"]
+    t = ctx["get_prop_types"](db_id) or {}
+    rel_key = _find_prop_name_loose(ctx, t, HARMONIA_CONCERT_CONCERT_REL_KEYS)
+    target = _normalize_page_id(concert_id)
+    rows = []
+    if rel_key:
+        rows = ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}})
+    if not rows:
+        rows = ctx["query_all"](db_id)
+    for r in rows:
+        ids = ctx["extract_relation_ids_any"](r, [rel_key] if rel_key else HARMONIA_CONCERT_CONCERT_REL_KEYS)
+        if any(_normalize_page_id(x) == target for x in ids):
+            return r
+    return {}
+
+
+def _ensure_harmonia_concert_row(ctx: dict, concert_id: str, concert_name: str = "") -> tuple[dict, bool]:
+    row = _load_harmonia_concert_row(ctx, concert_id)
+    if row:
+        return row, False
+    db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
+    if not db_id:
+        return {}, False
+    t = ctx["get_prop_types"](db_id) or {}
+    props: dict = {}
+    ctx["put_key_any"](props, t, HARMONIA_CONCERT_KEY_KEYS, concert_id, concert_name or concert_id, prefix="harmonia")
+    ctx["put_prop_any"](props, t, HARMONIA_CONCERT_CONCERT_REL_KEYS, concert_id)
+    ctx["put_prop_any"](props, t, HARMONIA_CONCERT_MANAGED_KEYS, True)
+    res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
+    if res is not None and res.status_code == 200:
+        return res.json() or {}, True
+    return {}, False
+
+
+def _set_harmonia_concert_checkbox(ctx: dict, concert_id: str, key_candidates: list[str], checked: bool, concert_name: str = "") -> bool:
+    row, _ = _ensure_harmonia_concert_row(ctx, concert_id, concert_name)
+    if not row:
+        return False
+    db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
+    t = ctx["get_prop_types"](db_id) or {}
+    flag_key = _find_prop_name_loose(ctx, t, key_candidates)
+    if not flag_key:
+        return False
+    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{row.get('id','')}", json={"properties": {flag_key: {"checkbox": bool(checked)}}})
+    return res is not None and res.status_code == 200
+
 def _clear_finance_cache(concert_id: str = ""):
     for k in list(st.session_state.keys()):
         if k.startswith(("expense_list_", "cast_list_", "billing_list_")):
@@ -946,6 +997,22 @@ def render(ctx: dict):
         st.info("サイドバーで演奏会を選択してください。")
         return
     st.caption(f"対象演奏会: {concert_name or concert_id}")
+
+    c1, c2 = st.columns(2)
+    if c1.button("✅ 収支確定", key=f"finance_confirm_{concert_id}", use_container_width=True):
+        if _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_FINANCE_KEYS, True, concert_name):
+            st.success("✅ 収支確定を反映しました。")
+            _clear_finance_cache(concert_id)
+            st.rerun()
+        else:
+            st.warning("HARMONIA_CONCERT の『収支確定』列が見つからないか、更新に失敗しました。")
+    if c2.button("↩ 収支確定を解除", key=f"finance_unconfirm_{concert_id}", use_container_width=True):
+        if _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_FINANCE_KEYS, False, concert_name):
+            st.success("↩ 収支確定を解除しました。")
+            _clear_finance_cache(concert_id)
+            st.rerun()
+        else:
+            st.warning("HARMONIA_CONCERT の『収支確定』列が見つからないか、更新に失敗しました。")
 
     tab_expense, tab_budget, tab_billing, tab_payment, tab_pdf = st.tabs(
         ["経費管理", "予算計算機", "見積・請求計算", "振込管理", "収支報告PDF"]

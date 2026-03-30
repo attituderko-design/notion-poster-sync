@@ -65,6 +65,57 @@ def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> s
     return ""
 
 
+
+
+def _load_harmonia_concert_row(ctx: dict, concert_id: str) -> dict:
+    if not concert_id or not ctx.get("CONCERT_DB_HARMONIA_CONCERT"):
+        return {}
+    db_id = ctx["CONCERT_DB_HARMONIA_CONCERT"]
+    t = ctx["get_prop_types"](db_id) or {}
+    rel_key = _find_prop_name_loose(ctx, t, HARMONIA_CONCERT_CONCERT_REL_KEYS)
+    target = _normalize_page_id(concert_id)
+    rows = []
+    if rel_key:
+        rows = ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}})
+    if not rows:
+        rows = ctx["query_all"](db_id)
+    for r in rows:
+        ids = ctx["extract_relation_ids_any"](r, [rel_key] if rel_key else HARMONIA_CONCERT_CONCERT_REL_KEYS)
+        if any(_normalize_page_id(x) == target for x in ids):
+            return r
+    return {}
+
+
+def _ensure_harmonia_concert_row(ctx: dict, concert_id: str, concert_name: str = "") -> tuple[dict, bool]:
+    row = _load_harmonia_concert_row(ctx, concert_id)
+    if row:
+        return row, False
+    db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
+    if not db_id:
+        return {}, False
+    t = ctx["get_prop_types"](db_id) or {}
+    props: dict = {}
+    ctx["put_key_any"](props, t, HARMONIA_CONCERT_KEY_KEYS, concert_id, concert_name or concert_id, prefix="harmonia")
+    ctx["put_prop_any"](props, t, HARMONIA_CONCERT_CONCERT_REL_KEYS, concert_id)
+    ctx["put_prop_any"](props, t, HARMONIA_CONCERT_MANAGED_KEYS, True)
+    res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
+    if res is not None and res.status_code == 200:
+        return res.json() or {}, True
+    return {}, False
+
+
+def _set_harmonia_concert_checkbox(ctx: dict, concert_id: str, key_candidates: list[str], checked: bool, concert_name: str = "") -> bool:
+    row, _ = _ensure_harmonia_concert_row(ctx, concert_id, concert_name)
+    if not row:
+        return False
+    db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
+    t = ctx["get_prop_types"](db_id) or {}
+    flag_key = _find_prop_name_loose(ctx, t, key_candidates)
+    if not flag_key:
+        return False
+    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{row.get('id','')}", json={"properties": {flag_key: {"checkbox": bool(checked)}}})
+    return res is not None and res.status_code == 200
+
 def _set_concert_song_checkbox_for_concert(ctx: dict, concert_id: str, key_candidates: list[str], checked: bool) -> tuple[int, int]:
     if not concert_id or not ctx.get("CONCERT_DB_CONCERT_SONG"):
         return 0, 0
@@ -777,6 +828,7 @@ def _render_player_tab(ctx: dict):
             st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
         else:
             st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+        _set_harmonia_concert_checkbox(ctx, global_concert_id, HARMONIA_CONCERT_PARTICIPANT_KEYS, ok_n > 0 or len(df_reset) > 0, global_concert_name)
         st.session_state[f"cast_editor_version_{global_concert_id}"] = cast_version + 1
         st.session_state.pop(f"participant_list_{global_concert_id}", None)
         st.rerun()
@@ -1123,6 +1175,22 @@ def _render_attendance_tab(ctx: dict):
             st.success(f"✅ {ok_n}件の出欠を保存しました。")
         else:
             st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗しました。")
+        if fail_count == 0 if False else True:
+            pass
+        all_parts = _load_participants(ctx, c_id)
+        regular_practices = [p for p in _load_practices(ctx, c_id) if not _is_truthy_text(ctx["extract_prop_text_any"](p, PRACTICE_CONCERT_DAY_KEYS))]
+        all_att = []
+        for _p in regular_practices:
+            all_att.extend(_load_attendance(ctx, _p.get("id", "")))
+        part_ids = {r.get("id", "") for r in all_parts if r.get("id", "")}
+        answered_pairs = set()
+        for a in all_att:
+            prs = ctx["extract_relation_ids_any"](a, ATT_PRACTICE_REL_KEYS)
+            pls = ctx["extract_relation_ids_any"](a, ATT_PLAYER_REL_KEYS)
+            if prs and pls:
+                answered_pairs.add((pls[0], prs[0]))
+        attendance_complete = bool(all_parts and regular_practices) and all(any((pid, pr.get("id","")) in answered_pairs for pid in [part.get("id","")] + ctx["extract_relation_ids_any"](part, PARTICIPANT_PLAYER_REL_KEYS)) for part in all_parts for pr in regular_practices)
+        _set_harmonia_concert_checkbox(ctx, c_id, HARMONIA_CONCERT_ATTENDANCE_KEYS, attendance_complete, c_name)
         st.session_state.pop(f"attendance_list_{p_id}", None)
         st.rerun()
 
@@ -1501,32 +1569,24 @@ def _render_assign_tab(ctx: dict):
             _clear_player_cache()
             st.rerun()
 
-    st.caption("所有楽器の整理が固まった時点で、CONCERT_SONG の『所有楽器確定』を一括更新できます。")
+    st.caption("所有楽器の整理が固まった時点で、HARMONIA_CONCERT の『所有楽器確定』を更新できます。")
     c1, c2 = st.columns(2)
     if c1.button("✅ 所有楽器確定", key=f"ownership_confirm_{c_id}", use_container_width=True):
-        total_rows, updated_rows = _set_concert_song_checkbox_for_concert(
-            ctx, c_id,
-            ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed"],
-            True,
-        )
-        if total_rows == 0:
-            st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
-        else:
-            st.success(f"✅ 所有楽器確定を反映しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
+        ok = _set_harmonia_concert_checkbox(ctx, c_id, HARMONIA_CONCERT_OWNERSHIP_KEYS, True, c_name)
+        if ok:
+            st.success("✅ 所有楽器確定を反映しました。")
             _clear_player_cache()
             st.rerun()
+        else:
+            st.warning("HARMONIA_CONCERT の『所有楽器確定』列が見つからないか、更新に失敗しました。")
     if c2.button("↩ 所有楽器確定を解除", key=f"ownership_unconfirm_{c_id}", use_container_width=True):
-        total_rows, updated_rows = _set_concert_song_checkbox_for_concert(
-            ctx, c_id,
-            ["所有楽器確定", "ownership_confirmed", "owned_instruments_confirmed", "own_fixed"],
-            False,
-        )
-        if total_rows == 0:
-            st.warning("CONCERT_SONG の対象行が見つかりませんでした。")
-        else:
-            st.success(f"↩ 所有楽器確定を解除しました。対象 {total_rows} 曲 / 更新 {updated_rows} 曲")
+        ok = _set_harmonia_concert_checkbox(ctx, c_id, HARMONIA_CONCERT_OWNERSHIP_KEYS, False, c_name)
+        if ok:
+            st.success("↩ 所有楽器確定を解除しました。")
             _clear_player_cache()
             st.rerun()
+        else:
+            st.warning("HARMONIA_CONCERT の『所有楽器確定』列が見つからないか、更新に失敗しました。")
 
 
 def _render_practice_bring_tab(ctx: dict):
@@ -1831,6 +1891,9 @@ def _render_practice_bring_tab(ctx: dict):
     if c1.button("✅ この練習回を持参楽器確定", key=f"bring_confirm_{c_id}_{pr_id}", use_container_width=True):
         ok = _set_practice_checkbox(ctx, pr_id, ["持参楽器確定", "bring_confirmed", "bring_fixed"], True)
         if ok:
+            all_pr = _load_practices(ctx, c_id)
+            all_checked = bool(all_pr) and all(_is_truthy_text(ctx["extract_prop_text_any"](p, ["持参楽器確定", "bring_confirmed", "bring_fixed"])) for p in all_pr)
+            _set_harmonia_concert_checkbox(ctx, c_id, HARMONIA_CONCERT_BRING_KEYS, all_checked, c_name)
             st.success("✅ この練習回を持参楽器確定にしました。")
             _clear_player_cache()
             st.rerun()
@@ -1839,6 +1902,7 @@ def _render_practice_bring_tab(ctx: dict):
     if c2.button("↩ この練習回の持参楽器確定を解除", key=f"bring_unconfirm_{c_id}_{pr_id}", use_container_width=True):
         ok = _set_practice_checkbox(ctx, pr_id, ["持参楽器確定", "bring_confirmed", "bring_fixed"], False)
         if ok:
+            _set_harmonia_concert_checkbox(ctx, c_id, HARMONIA_CONCERT_BRING_KEYS, False, c_name)
             st.success("↩ この練習回の持参楽器確定を解除しました。")
             _clear_player_cache()
             st.rerun()

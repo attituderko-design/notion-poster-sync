@@ -71,6 +71,57 @@ def _find_prop_name_loose(ctx, type_map: dict, candidates: list[str]) -> str:
     return ""
 
 
+
+
+def _load_harmonia_concert_row(ctx: dict, concert_id: str) -> dict:
+    if not concert_id or not ctx.get("CONCERT_DB_HARMONIA_CONCERT"):
+        return {}
+    db_id = ctx["CONCERT_DB_HARMONIA_CONCERT"]
+    t = ctx["get_prop_types"](db_id) or {}
+    rel_key = _find_prop_name_loose(ctx, t, HARMONIA_CONCERT_CONCERT_REL_KEYS)
+    target = _normalize_page_id(concert_id)
+    rows = []
+    if rel_key:
+        rows = ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}})
+    if not rows:
+        rows = ctx["query_all"](db_id)
+    for r in rows:
+        ids = ctx["extract_relation_ids_any"](r, [rel_key] if rel_key else HARMONIA_CONCERT_CONCERT_REL_KEYS)
+        if any(_normalize_page_id(x) == target for x in ids):
+            return r
+    return {}
+
+
+def _ensure_harmonia_concert_row(ctx: dict, concert_id: str, concert_name: str = "") -> tuple[dict, bool]:
+    row = _load_harmonia_concert_row(ctx, concert_id)
+    if row:
+        return row, False
+    db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
+    if not db_id:
+        return {}, False
+    t = ctx["get_prop_types"](db_id) or {}
+    props: dict = {}
+    ctx["put_key_any"](props, t, HARMONIA_CONCERT_KEY_KEYS, concert_id, concert_name or concert_id, prefix="harmonia")
+    ctx["put_prop_any"](props, t, HARMONIA_CONCERT_CONCERT_REL_KEYS, concert_id)
+    ctx["put_prop_any"](props, t, HARMONIA_CONCERT_MANAGED_KEYS, True)
+    res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
+    if res is not None and res.status_code == 200:
+        return res.json() or {}, True
+    return {}, False
+
+
+def _set_harmonia_concert_checkbox(ctx: dict, concert_id: str, key_candidates: list[str], checked: bool, concert_name: str = "") -> bool:
+    row, _ = _ensure_harmonia_concert_row(ctx, concert_id, concert_name)
+    if not row:
+        return False
+    db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
+    t = ctx["get_prop_types"](db_id) or {}
+    flag_key = _find_prop_name_loose(ctx, t, key_candidates)
+    if not flag_key:
+        return False
+    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{row.get('id','')}", json={"properties": {flag_key: {"checkbox": bool(checked)}}})
+    return res is not None and res.status_code == 200
+
 def _load_concerts(ctx) -> list[dict]:
     if "concert_list" not in st.session_state:
         rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT"])
@@ -713,6 +764,12 @@ def _render_pref_tab(ctx: dict):
                 ok_count += 1 if ok else 0
                 fail_count += 0 if ok else 1
 
+        part_ids = {r.get("id","") for r in _load_participants(ctx, concert_id)}
+        pref_rows_after = _load_preferences(ctx, concert_id) if "_load_preferences" in globals() else []
+        pref_player_ids = set()
+        for _r in pref_rows_after:
+            pref_player_ids.update(ctx["extract_relation_ids_any"](_r, PREF_PLAYER_REL_KEYS))
+        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PREFERENCE_KEYS, bool(part_ids) and part_ids.issubset(pref_player_ids), selected_concert)
         if fail_count == 0:
             st.success(f"✅ {ok_count}件を保存しました。")
             st.session_state.pop(f"pi_list_{concert_id}", None)
@@ -1371,6 +1428,9 @@ def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: d
             else:
                 fail += 1
 
+    if concert_id:
+        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PROPOSAL_KEYS, fail == 0 and ok > 0)
+        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, False)
     if fail == 0:
         st.success(f"✅ {ok}件の担当フラグを書き込みました。")
         _clear_assign_cache()
@@ -1449,6 +1509,8 @@ def _render_result_tab(ctx: dict):
                                              json={"properties": props})
                     if res and res.status_code == 200: ok += 1
                     else: fail += 1
+            _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PROPOSAL_KEYS, False, concert_name)
+            _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, False, concert_name)
             st.success(f"✅ {ok}件リセットしました。")
             _clear_assign_cache()
             st.rerun()
@@ -1541,6 +1603,14 @@ def _render_result_tab(ctx: dict):
                         else:
                             st.error("❌ 更新に失敗しました。")
 
+    if st.button("✅ この演奏会のアサインを確定", key=f"assign_confirm_{concert_id}", type="primary", use_container_width=True):
+        if _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PROPOSAL_KEYS, True, concert_name) and _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, True, concert_name):
+            st.success("✅ アサイン確定を反映しました。")
+            _clear_assign_cache()
+            st.rerun()
+        else:
+            st.warning("HARMONIA_CONCERT の『案提示』または『アサイン確定』列が見つからないか、更新に失敗しました。")
+
     st.divider()
     if st.button("🗑️ 全担当フラグをリセット", key="reset_assign_bottom", type="secondary"):
         with st.spinner("リセット中..."):
@@ -1553,6 +1623,8 @@ def _render_result_tab(ctx: dict):
                                          json={"properties": props})
                 if res and res.status_code == 200: ok += 1
                 else: fail += 1
+        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PROPOSAL_KEYS, False, concert_name)
+        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, False, concert_name)
         st.success(f"✅ {ok}件リセットしました。")
         _clear_assign_cache()
         st.rerun()
