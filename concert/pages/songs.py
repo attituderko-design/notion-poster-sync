@@ -2,6 +2,7 @@
 concert.pages.songs
 楽曲・楽器種別の登録、曲別必要楽器（SongInstrument）の設定画面。
 """
+import pandas as pd
 import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
 
@@ -1103,6 +1104,7 @@ def _render_concert_instrument_section(ctx: dict, c_id: str, cs_row: dict | None
     """
     CONCERT_INSTRUMENTの参照・管理UI。
     パート定義タブの曲選択直後に表示する。
+    data_editorで一括編集できるようにする。
     """
     db_id = ctx.get("CONCERT_DB_CONCERT_INSTRUMENT", "")
     if not db_id:
@@ -1112,7 +1114,6 @@ def _render_concert_instrument_section(ctx: dict, c_id: str, cs_row: dict | None
     cs_id = cs_row.get("id", "") if cs_row else ""
 
     ci_rows = _load_concert_instruments(ctx, c_id)
-    # この曲に紐づくCONCERT_INSTRUMENTを絞り込む
     if cs_id:
         ci_for_song = [
             r for r in ci_rows
@@ -1122,6 +1123,10 @@ def _render_concert_instrument_section(ctx: dict, c_id: str, cs_row: dict | None
         ci_for_song = []
 
     instruments = _load_instruments(ctx)
+    inst_names = [
+        _instrument_name(i, ctx)
+        for i in sorted(instruments, key=lambda x: _instrument_name(x, ctx))
+    ]
     inst_opts = {
         _instrument_name(i, ctx): i.get("id", "")
         for i in sorted(instruments, key=lambda x: _instrument_name(x, ctx))
@@ -1132,69 +1137,123 @@ def _render_concert_instrument_section(ctx: dict, c_id: str, cs_row: dict | None
     if not cs_id:
         st.warning("CONCERT_SONG に対応する行がないため、必要楽器の登録ができません。")
         return
+    if not inst_opts:
+        st.warning("楽器種別が未登録のため、必要楽器を編集できません。")
+        return
 
-    # 登録済み一覧
-    if ci_for_song:
-        st.caption(f"登録済み: {len(ci_for_song)}件")
-        for r in ci_for_song:
-            rid   = r.get("id", "")
-            iids  = ctx["extract_relation_ids_any"](r, CONCERT_INST_INST_REL_KEYS) or []
-            iname = inst_name_by_id.get(iids[0], iids[0]) if iids else "（楽器未設定）"
-            cnt_s = ctx["extract_prop_text_any"](r, CONCERT_INST_COUNT_KEYS) or "1"
-            try: cnt = int(float(cnt_s))
-            except: cnt = 1
-            rnote = ctx["extract_prop_text_any"](r, CONCERT_INST_NOTE_KEYS) or ""
-            label = f"🎹 {iname}　×{cnt}" + (f"　{rnote}" if rnote else "")
-            with st.expander(label, expanded=False):
-                with st.form(f"ci_edit_{rid}", border=True):
-                    n_inst  = st.selectbox("楽器", list(inst_opts.keys()),
-                                           index=list(inst_opts.keys()).index(iname) if iname in inst_opts else 0)
-                    n_count = st.number_input("必要台数", min_value=1, max_value=99, value=cnt, step=1)
-                    n_note  = st.text_input("備考", value=rnote)
-                    c1, c2 = st.columns(2)
-                    if c1.form_submit_button("💾 更新", use_container_width=True):
-                        ok = _upsert_concert_instrument(
-                            ctx, c_id, cs_id,
-                            inst_opts.get(n_inst, ""), n_inst,
-                            int(n_count), n_note, existing_id=rid,
-                        )
-                        if ok:
-                            st.success("✅ 更新しました。")
-                            _clear_concert_instrument_cache(c_id)
-                            st.rerun()
-                        else:
-                            st.error("❌ 更新に失敗しました。")
-                    if c2.form_submit_button("🗑 削除", use_container_width=True):
-                        res = ctx["api_request"]("patch",
-                            f"https://api.notion.com/v1/pages/{rid}",
-                            json={"archived": True})
-                        if res and res.status_code == 200:
-                            st.success("✅ 削除しました。")
-                            _clear_concert_instrument_cache(c_id)
-                            st.rerun()
-                        else:
-                            st.error("❌ 削除に失敗しました。")
-    else:
-        st.caption("必要楽器がまだ登録されていません。")
+    base_rows: list[dict] = []
+    for r in ci_for_song:
+        rid = r.get("id", "")
+        iids = ctx["extract_relation_ids_any"](r, CONCERT_INST_INST_REL_KEYS) or []
+        iname = inst_name_by_id.get(iids[0], iids[0]) if iids else ""
+        cnt_s = ctx["extract_prop_text_any"](r, CONCERT_INST_COUNT_KEYS) or "1"
+        try:
+            cnt = int(float(cnt_s))
+        except Exception:
+            cnt = 1
+        rnote = ctx["extract_prop_text_any"](r, CONCERT_INST_NOTE_KEYS) or ""
+        base_rows.append({
+            "_id": rid,
+            "楽器": iname,
+            "必要台数": max(cnt, 1),
+            "備考": rnote,
+            "削除": False,
+        })
 
-    # 新規追加フォーム
-    with st.expander("➕ 必要楽器を追加", expanded=(len(ci_for_song) == 0)):
-        with st.form(f"ci_new_{c_id}_{cs_id}", border=True):
-            n_inst  = st.selectbox("楽器 *", list(inst_opts.keys()))
-            n_count = st.number_input("必要台数", min_value=1, max_value=99, value=1, step=1)
-            n_note  = st.text_input("備考", placeholder="任意")
-            if st.form_submit_button("💾 追加", type="primary", use_container_width=True):
-                ok = _upsert_concert_instrument(
-                    ctx, c_id, cs_id,
-                    inst_opts.get(n_inst, ""), n_inst,
-                    int(n_count), n_note,
-                )
-                if ok:
-                    st.success("✅ 必要楽器を追加しました。")
-                    _clear_concert_instrument_cache(c_id)
-                    st.rerun()
-                else:
-                    st.error("❌ 追加に失敗しました。")
+    if not base_rows:
+        base_rows = [{"_id": "", "楽器": "", "必要台数": 1, "備考": "", "削除": False}]
+
+    st.caption(f"登録済み: {len(ci_for_song)}件")
+    editor_df = pd.DataFrame(base_rows)
+    edited_df = st.data_editor(
+        editor_df,
+        key=f"concert_instrument_editor_{c_id}_{cs_id}",
+        hide_index=True,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_order=["楽器", "必要台数", "備考", "削除"],
+        column_config={
+            "楽器": st.column_config.SelectboxColumn(
+                "楽器",
+                options=inst_names,
+                required=False,
+                width="medium",
+            ),
+            "必要台数": st.column_config.NumberColumn(
+                "必要台数",
+                min_value=1,
+                max_value=99,
+                step=1,
+                required=True,
+                width="small",
+            ),
+            "備考": st.column_config.TextColumn("備考", width="large"),
+            "削除": st.column_config.CheckboxColumn("削除"),
+            "_id": None,
+        },
+    )
+
+    if st.button("💾 必要楽器を保存", key=f"save_concert_instrument_{c_id}_{cs_id}", type="primary", use_container_width=True):
+        rows = edited_df.to_dict("records") if edited_df is not None else []
+        ok_count = 0
+        delete_count = 0
+
+        for row in rows:
+            rid = str(row.get("_id", "") or "").strip()
+            inst_name = str(row.get("楽器", "") or "").strip()
+            note = str(row.get("備考", "") or "").strip()
+            delete_flag = bool(row.get("削除", False))
+
+            raw_count = row.get("必要台数", 1)
+            try:
+                count = int(float(raw_count))
+            except Exception:
+                st.error(f"必要台数が不正です: {raw_count}")
+                return
+            count = max(count, 1)
+
+            if delete_flag:
+                if rid:
+                    res = ctx["api_request"](
+                        "patch",
+                        f"https://api.notion.com/v1/pages/{rid}",
+                        json={"archived": True},
+                    )
+                    if not (res and res.status_code == 200):
+                        st.error(f"削除に失敗しました: {inst_name or rid}")
+                        return
+                    delete_count += 1
+                continue
+
+            if not inst_name:
+                if rid or note or count != 1:
+                    st.error("楽器が未選択の行があります。不要な行は削除にチェックを入れるか、空のまま追加しないでください。")
+                    return
+                continue
+
+            instrument_id = inst_opts.get(inst_name, "")
+            if not instrument_id:
+                st.error(f"未登録の楽器が選択されています: {inst_name}")
+                return
+
+            ok = _upsert_concert_instrument(
+                ctx,
+                c_id,
+                cs_id,
+                instrument_id,
+                inst_name,
+                count,
+                note,
+                existing_id=rid,
+            )
+            if not ok:
+                st.error(f"保存に失敗しました: {inst_name}")
+                return
+            ok_count += 1
+
+        _clear_concert_instrument_cache(c_id)
+        st.success(f"✅ 保存しました（更新/追加: {ok_count}件、削除: {delete_count}件）")
+        st.rerun()
 
 
 def _render_partdef_tab(ctx: dict):
