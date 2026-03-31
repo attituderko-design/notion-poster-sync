@@ -25,6 +25,7 @@ def _clear_rental_cache():
         if k.startswith("rental_list_"):
             st.session_state.pop(k, None)
     st.session_state.pop("rental_concert_list", None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
 
 
 def _concert_media_values(c: dict) -> list[str]:

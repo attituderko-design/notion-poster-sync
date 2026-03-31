@@ -43,6 +43,7 @@ def _clear_player_cache():
     for k in list(st.session_state.keys()):
         if k.startswith(("player_list", "attendance_list_", "pi_list_", "participant_list_", "practice_list_")):
             st.session_state.pop(k, None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
 
 
 def _normalize_page_id(v: str) -> str:

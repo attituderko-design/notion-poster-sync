@@ -71,6 +71,7 @@ def _clear_property_type_cache():
         get_concert_db_property_types.clear()
     except Exception:
         pass
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
 
 
 def _extract_checkbox_value(page: dict, prop_name: str) -> bool:
@@ -160,6 +161,7 @@ def _clear_song_cache():
         if k.startswith(("song_list", "instrument_list", "si_list_", "concert_song_rows_")):
             st.session_state.pop(k, None)
     st.session_state.pop("songs_concert_list", None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
 
 
 def _concert_media_values(c: dict) -> list[str]:
@@ -686,6 +688,7 @@ def _clear_concert_song_cache(concert_id: str = ""):
     for k in list(st.session_state.keys()):
         if k.startswith("concert_song_rows_") and (not concert_id or k == f"concert_song_rows_{concert_id}"):
             st.session_state.pop(k, None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
 
 
 def _find_harmonia_concert_row(ctx: dict, concert_id: str) -> dict | None:
@@ -1160,6 +1163,7 @@ def _clear_concert_instrument_cache(concert_id: str = ""):
     for k in list(st.session_state.keys()):
         if k.startswith("concert_inst_list") and (not concert_id or concert_id in k):
             st.session_state.pop(k, None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
 
 
 def _upsert_concert_instrument(

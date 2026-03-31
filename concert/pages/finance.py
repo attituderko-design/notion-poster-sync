@@ -101,6 +101,7 @@ def _clear_finance_cache(concert_id: str = ""):
         if k.startswith(("expense_list_", "cast_list_", "billing_list_")):
             if not concert_id or concert_id in k:
                 st.session_state.pop(k, None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
 
 
 def _write_concert_fee(ctx, concert_id: str, fee: int) -> bool:
@@ -186,6 +187,7 @@ def _load_billing_rows(ctx, concert_id: str) -> list[dict]:
 
 def _clear_billing_cache(concert_id: str):
     st.session_state.pop(f"billing_list_{concert_id}", None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
 
 
 def _save_billing_record(

@@ -136,6 +136,7 @@ def _clear_concert_cache(ctx):
         pass
     for k in ["concertmgmt_concert_list", "practice_list"]:
         st.session_state.pop(k, None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
 
 
 def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> str:
@@ -1302,6 +1303,7 @@ def _clear_schedule_cache(practice_id: str = ""):
     for k in list(st.session_state.keys()):
         if k.startswith("schedule_list_") and (not practice_id or practice_id in k):
             st.session_state.pop(k, None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
 
 
 def _upsert_schedule(ctx, practice_id: str, practice_name: str,

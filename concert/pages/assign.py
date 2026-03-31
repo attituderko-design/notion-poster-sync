@@ -15,8 +15,6 @@ import re
 # 定数
 # ============================================================
 
-HARMONIA_CONCERT_PROPOSAL_KEYS = ["案提示", "proposal_presented"]  # keys.pyのPLAN_KEYSと同値
-
 PRIORITY_OPTIONS = ["未回答", "第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
 PRIORITY_TO_INT  = {
     "第1希望": 1,
@@ -202,6 +200,7 @@ def _clear_assign_cache():
             st.session_state.pop(k, None)
         if k.startswith("pref_editor_version_") or k.startswith("pref_editor_"):
             st.session_state.pop(k, None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
 
 
 def _normalize_page_id(v: str) -> str:
