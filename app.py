@@ -9426,12 +9426,19 @@ if system_mode == "HARMONIA":
         st.stop()
 
     concert_mgmt.render_sidebar_summary_pdf(concert_ctx)
-    try:
-        from concert.pages.form import render_url_generator
-        with st.sidebar.expander("📋 奏者フォームURL", expanded=False):
-            render_url_generator(concert_ctx, concert_ctx.get("SELECTED_CONCERT_ID",""), concert_ctx.get("SELECTED_CONCERT_NAME",""))
-    except Exception:
-        pass
+    with st.sidebar.expander("📋 奏者フォームURL", expanded=False):
+        st.caption("選択中の演奏会に紐づく奏者入力フォームへの導線です。")
+        try:
+            from concert.pages.form import render_url_generator
+            render_url_generator(
+                concert_ctx,
+                concert_ctx.get("SELECTED_CONCERT_ID", ""),
+                concert_ctx.get("SELECTED_CONCERT_NAME", ""),
+            )
+        except Exception as _form_url_error:
+            st.error("フォームURL生成機能を読み込めませんでした。")
+            st.caption(str(_form_url_error))
+            st.code(f"concert_id={concert_ctx.get('SELECTED_CONCERT_ID', '')}")
 
     if concert_page == "練習管理":
         concert_mgmt.render(concert_ctx)
