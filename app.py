@@ -8471,6 +8471,8 @@ if system_mode == "HARMONIA":
         "harmonia_player_info_confirm": ["奏者情報確定", "participant_confirmed", "player_info_confirmed"],
         "harmonia_required_inst_confirm": ["必要楽器確定", "required_instruments_confirmed", "required_inst_confirmed"],
         "harmonia_partdef_confirm": ["パート定義確定", "part_definition_confirmed", "partdef_confirmed"],
+        "harmonia_proposal":        ["案提示", "proposal_presented", "proposal"],
+        "harmonia_assign_confirm":  ["アサイン確定", "assign_confirmed", "confirmed"],
         "harmonia_finance_confirm": ["収支確定", "finance_confirmed", "finance_fixed"],
         "concert_inst_concert_rel": ["演奏会", "FK演奏会", "concert"],
         "concert_inst_song_rel": ["演奏曲", "楽曲", "FK楽曲", "concert_song"],
@@ -8547,6 +8549,7 @@ if system_mode == "HARMONIA":
             "preference_pending_count": 0, "rental_unconfirmed_count": 0, "expense_confirmed_total": 0,
             "has_concert_day": False, "next_practice_label": "", "attendance_status_label": "⚪ 未着手",
             "participant_header_confirmed": False, "required_inst_header_confirmed": False, "partdef_header_confirmed": False, "finance_header_confirmed": False,
+            "proposal_header_done": False, "assign_header_confirmed": False,
             "ownership_target_count": 0, "ownership_confirm_count": 0, "debug_lines": [],
             "attendance_status_reasons": [],
         }
@@ -8640,7 +8643,9 @@ if system_mode == "HARMONIA":
             stats["participant_header_confirmed"] = _h_bool(harmonia_row, _H_KEYS["harmonia_player_info_confirm"])
             stats["required_inst_header_confirmed"] = _h_bool(harmonia_row, _H_KEYS["harmonia_required_inst_confirm"])
             stats["partdef_header_confirmed"] = _h_bool(harmonia_row, _H_KEYS["harmonia_partdef_confirm"])
-            stats["finance_header_confirmed"] = _h_bool(harmonia_row, _H_KEYS["harmonia_finance_confirm"])
+            stats["finance_header_confirmed"]   = _h_bool(harmonia_row, _H_KEYS["harmonia_finance_confirm"])
+            stats["proposal_header_done"]       = _h_bool(harmonia_row, _H_KEYS["harmonia_proposal"])
+            stats["assign_header_confirmed"]    = _h_bool(harmonia_row, _H_KEYS["harmonia_assign_confirm"])
 
         participant_rows = concert_ctx["query_all"](concert_ctx["CONCERT_DB_PARTICIPANT"], None) if concert_ctx.get("CONCERT_DB_PARTICIPANT") else []
         selected_participants, participant_targets = [], {}
@@ -8736,8 +8741,8 @@ if system_mode == "HARMONIA":
             ("⑧ 持参楽器の確定", 1.0 if (stats['attendance_practice_count'] > 0 and stats['practice_bring_confirm_count'] == stats['attendance_practice_count']) else (0.5 if stats['practice_bring_confirm_count'] > 0 else 0.0), f"持参楽器確定 {stats['practice_bring_confirm_count']} / {stats['attendance_practice_count']} 回"),
             ("⑨ 出欠の確定", 1.0 if (not attendance_reasons and stats['participant_count'] > 0 and stats['unanswered_count'] == 0) else (0.5 if stats['participant_count'] > 0 and stats['attendance_record_count'] > 0 else 0.0), f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"),
             ("⑩ 各奏者パート希望の確定", 1.0 if (stats['participant_count'] > 0 and stats['preference_pending_count'] == 0) else (0.5 if stats['participant_count'] > 0 and stats['preference_pending_count'] < stats['participant_count'] else 0.0), f"希望未提出 {stats['preference_pending_count']} 人"),
-            ("⑪ アサイン案の提示", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_proposal']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_proposal']) else 0.0), f"案提示 {stats['proposal_count']} / {len(filtered_cs)} 曲"),
-            ("⑫ アサイン情報の確定", 1.0 if _all_checked(filtered_cs, _H_KEYS['concert_song_assign_confirm']) else (0.5 if _any_checked(filtered_cs, _H_KEYS['concert_song_assign_confirm']) else 0.0), f"アサイン確定 {stats['assign_confirm_count']} / {len(filtered_cs)} 曲"),
+            ("⑪ アサイン案の提示", 1.0 if stats['proposal_header_done'] else 0.0, "案提示済み" if stats['proposal_header_done'] else "未着手"),
+            ("⑫ アサイン情報の確定", 1.0 if stats['assign_header_confirmed'] else (0.5 if stats['proposal_header_done'] else 0.0), "アサイン確定済み" if stats['assign_header_confirmed'] else ("案提示済み・確定待ち" if stats['proposal_header_done'] else "未着手")),
             ("⑬ レンタル・収支", 1.0 if stats['finance_header_confirmed'] else (0.5 if (stats['rental_unconfirmed_count'] > 0 or confirmed_expense_count > 0 or stats['expense_confirmed_total'] > 0) else 0.0), f"見積未確定 {stats['rental_unconfirmed_count']} 件 / 経費確定 ¥{stats['expense_confirmed_total']:,}"),
         ]
         ratios = [x[1] for x in stats['step_items']]
