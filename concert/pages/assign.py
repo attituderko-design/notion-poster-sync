@@ -203,10 +203,10 @@ def _clear_assign_cache():
 
 
 def _is_perc_part(part_name: str) -> bool:
-    """パート名が打楽器（Perc）かどうかを判定する。未設定の場合はPercとみなす。"""
+    """パート名が打楽器（Perc）かどうかを判定する。未設定の場合は対象外とする。"""
     name = (part_name or "").strip().lower()
     if not name:
-        return True  # 未設定は対象に含める
+        return False  # パート未設定はPercでないとみなす
     return name in ("perc", "percussion", "打楽器")
 
 
@@ -855,9 +855,9 @@ def _render_solver_tab(ctx: dict):
                 _all_participants = sorted(_part_to_pl.items(), key=lambda x: x[1])
                 st.session_state[f"assign_all_participants_{concert_id}"] = _all_participants
 
-                # 公平性・降り番評価は参加者DB全員（希望未提出も含む）を対象に
-                all_pids = sorted({pid for pid, _ in _all_participants} |
-                                  {p.player_id for p in prefs})
+                # 公平性・降り番評価はCONCERT_CASTの打楽器奏者のみを対象に
+                # （CONCERT_CASTに入っていない奏者は除外）
+                all_pids = sorted({pid for pid, _ in _all_participants})
                 st.session_state[f"assign_all_pids_{concert_id}"] = all_pids
                 pref_map = {(p.player_id, p.song_id, p.part_id): p for p in prefs}
                 # 複数初期解で最良を採用（走査順ランダム化）
