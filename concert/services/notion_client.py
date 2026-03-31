@@ -290,6 +290,19 @@ def get_concert_db_schema(db_id: str, api_key: str) -> dict:
 # ページネーション対応クエリ
 # ============================================================
 
+@st.cache_data(ttl=300, show_spinner=False)
+def query_concert_db_all_cached(db_id: str, api_key: str, filter_json: str = "") -> list:
+    """
+    全件取得（TTL=300秒キャッシュ付き）。
+    filter_jsonはjson.dumps済みの文字列。キャッシュキーとして使用。
+    書き込み後はst.cache_data.clear()で即時無効化すること。
+    """
+    import json
+    headers = get_concert_headers(api_key)
+    filter_payload = json.loads(filter_json) if filter_json else None
+    return query_concert_db_all(db_id, headers, filter_payload)
+
+
 def query_concert_db_all(db_id: str, headers: dict, filter_payload: dict | None = None) -> list:
     """全件取得（ページネーション自動処理）。"""
     if not db_id:
@@ -583,7 +596,9 @@ def build_concert_ctx() -> dict:
         return concert_api_request(method, url, headers=headers, **kwargs)
 
     def _query_all(db_id, filter_payload=None):
-        return query_concert_db_all(db_id, headers, filter_payload)
+        import json
+        filter_json = json.dumps(filter_payload, ensure_ascii=False, sort_keys=True) if filter_payload else ""
+        return query_concert_db_all_cached(db_id, api_key, filter_json)
 
     def _get_prop_types(db_id):
         return get_concert_db_property_types(db_id, api_key)
@@ -797,10 +812,8 @@ def build_concert_ctx() -> dict:
         "CONCERT_DB_CONCERT_EXPENSE":  secrets["db_expense"],
         "CONCERT_DB_BILLING":          secrets["db_billing"],
         "CONCERT_DB_CONCERT_SONG":     secrets["db_concert_song"],
-        "CONCERT_DB_HARMONIA_CONCERT":        secrets["db_harmonia_concert"],
-        "CONCERT_DB_CONCERT_INSTRUMENT":      secrets["db_concert_instrument"],
-        "CONCERT_DB_CONCERT_ASSIGNMENT":      secrets["db_concert_assignment"],
-        "CONCERT_DB_PI_MASTER":               secrets["db_pi_master"],
+        "CONCERT_DB_HARMONIA_CONCERT":  secrets["db_harmonia_concert"],
+        "CONCERT_DB_PI_MASTER":         secrets["db_pi_master"],
         "query_all":                   _query_all,
         "get_prop_types":              _get_prop_types,
         "get_db_schema":               _get_db_schema,
