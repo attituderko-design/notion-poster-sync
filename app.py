@@ -9341,7 +9341,9 @@ if system_mode == "HARMONIA":
                         else:
                             st.error("❌ レコードの作成に失敗しました。HARMONIA_CONCERT DBの設定を確認してください。")
                     if _col_no.button("キャンセル", key="harmonia_start_no", use_container_width=True):
-                        st.session_state["concert_page_index"] = 0
+                        concert_ctx["SELECTED_CONCERT_ID"] = ""
+                        concert_ctx["SELECTED_CONCERT_NAME"] = ""
+                        st.session_state.pop("harmonia_global_concert_name", None)
                         st.rerun()
             else:
                 # ── 進捗カード ───────────────────────────────────
