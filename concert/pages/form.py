@@ -638,13 +638,29 @@ def render_form(ctx, concert_id: str):
         st.rerun()
         return
 
-    # ── STEP 0: プライバシーポリシー同意 ─────────────────────
-    if step == 1 and not st.session_state.get("form_privacy_agreed"):
+    # ── STEP 0: 新規登録 / ログイン 選択 ─────────────────────
+    if step == 1 and not st.session_state.get("form_auth_verified") and not st.session_state.get("form_auth_mode"):
         st.subheader("はじめに")
+        col_new, col_login = st.columns(2)
+        if col_new.button("📝 新規登録", use_container_width=True, type="primary", key="mode_new"):
+            st.session_state["form_auth_mode"] = "new"
+            st.rerun()
+        if col_login.button("🔑 ログイン", use_container_width=True, key="mode_login"):
+            st.session_state["form_auth_mode"] = "login"
+            st.rerun()
+        return
+
+    # ── STEP 0a: プライバシーポリシー同意（新規登録のみ） ─────
+    auth_mode = st.session_state.get("form_auth_mode", "new")
+    if step == 1 and not st.session_state.get("form_auth_verified") and auth_mode == "new" and not st.session_state.get("form_privacy_agreed"):
+        st.subheader("プライバシーポリシー")
         st.markdown(_PRIVACY_POLICY)
-        if st.button("✅ 同意して入力を開始する", type="primary",
-                     use_container_width=True, key="privacy_agree"):
+        col_agree, col_back = st.columns(2)
+        if col_agree.button("✅ 同意して進む", type="primary", use_container_width=True, key="privacy_agree"):
             st.session_state["form_privacy_agreed"] = True
+            st.rerun()
+        if col_back.button("← 戻る", use_container_width=True, key="privacy_back"):
+            st.session_state.pop("form_auth_mode", None)
             st.rerun()
         return
 
@@ -653,7 +669,10 @@ def render_form(ctx, concert_id: str):
 
         # メールアドレス入力フェーズ
         if not st.session_state.get("auth_email_submitted"):
-            st.subheader("メールアドレスを入力してください")
+            if auth_mode == "login":
+                st.subheader("ログイン")
+            else:
+                st.subheader("メールアドレスを入力してください")
             with st.form("auth_email_form"):
                 auth_email = st.text_input("メールアドレス *", placeholder="yamada@example.com")
                 submitted_email = st.form_submit_button("次へ", type="primary",
@@ -670,6 +689,10 @@ def render_form(ctx, concert_id: str):
                          if (ext(p, PLAYER_EMAIL_KEYS) or "").strip().lower() == email_input),
                         None
                     )
+                # ログインモードで未登録メールの場合
+                if auth_mode == "login" and not matched:
+                    st.error("このメールアドレスは登録されていません。新規登録からお進みください。")
+                    return
                 has_password = bool(
                     matched and ext(matched, PLAYER_PASSWORD_HASH_KEYS)
                 ) if matched else False
@@ -680,6 +703,10 @@ def render_form(ctx, concert_id: str):
                     "auth_has_password":    has_password,
                     "auth_email_submitted": True,
                 })
+                st.rerun()
+            if st.button("← 戻る", key="email_back"):
+                st.session_state.pop("form_auth_mode", None)
+                st.session_state.pop("form_privacy_agreed", None)
                 st.rerun()
             return
 
