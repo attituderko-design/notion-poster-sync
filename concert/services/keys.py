@@ -214,7 +214,8 @@ HARMONIA_CONCERT_OWN_INST_KEYS = ["所有楽器確定", "ownership_confirmed"]
 HARMONIA_CONCERT_ATTENDANCE_KEYS = ["出欠確定", "attendance_confirmed"]
 HARMONIA_CONCERT_PREFERENCE_KEYS = ["希望入力確定", "preference_confirmed"]
 HARMONIA_CONCERT_BRING_KEYS = ["持参楽器確定", "bring_confirmed"]
-HARMONIA_CONCERT_PLAN_KEYS = ["案提示", "proposal_presented"]
+HARMONIA_CONCERT_PLAN_KEYS     = ["案提示", "proposal_presented"]
+HARMONIA_CONCERT_PROPOSAL_KEYS = HARMONIA_CONCERT_PLAN_KEYS  # 別名（assign.py互換）
 HARMONIA_CONCERT_ASSIGN_KEYS = ["アサイン確定", "assign_confirmed"]
 HARMONIA_CONCERT_FINANCE_KEYS = ["収支確定", "finance_confirmed"]
 
