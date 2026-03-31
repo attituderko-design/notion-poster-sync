@@ -8374,20 +8374,25 @@ if system_mode != _prev_mode:
 if system_mode == "HARMONIA":
     st.sidebar.caption("ArtéMis HARMONIA")
     st.sidebar.divider()
+    _concert_page_options = [
+        "🏠 ホーム",
+        "練習管理",
+        "楽曲・楽器管理",
+        "奏者・出欠・持参楽器",
+        "アサイン検討",
+        "レンタル管理",
+        "収支・振込管理",
+        "🧪 テストデータ管理",
+    ]
+    _concert_page_index = st.session_state.get("concert_page_index", 0)
     concert_page = st.sidebar.radio(
         "ページ",
-        [
-            "🏠 ホーム",
-            "練習管理",
-            "楽曲・楽器管理",
-            "奏者・出欠・持参楽器",
-            "アサイン検討",
-            "レンタル管理",
-            "収支・振込管理",
-            "🧪 テストデータ管理",
-        ],
+        _concert_page_options,
+        index=_concert_page_index,
         key="concert_page_radio",
     )
+    # radioの選択が変わったらindexも同期
+    st.session_state["concert_page_index"] = _concert_page_options.index(concert_page)
     if not CONCERT_SYSTEM_AVAILABLE:
         st.error("HARMONIA System のモジュールを読み込めませんでした。")
         if CONCERT_IMPORT_ERROR:
@@ -8781,7 +8786,13 @@ if system_mode == "HARMONIA":
                 c1.caption(_desc)
                 if _dest:
                     if c2.button(f"→ {_dest}", key="home_next_action_btn", use_container_width=True):
-                        st.session_state["concert_page_radio"] = _dest
+                        _concert_page_options = [
+                            "🏠 ホーム", "練習管理", "楽曲・楽器管理",
+                            "奏者・出欠・持参楽器", "アサイン検討",
+                            "レンタル管理", "収支・振込管理", "🧪 テストデータ管理",
+                        ]
+                        if _dest in _concert_page_options:
+                            st.session_state["concert_page_index"] = _concert_page_options.index(_dest)
                         st.rerun()
 
         st.markdown("---")
@@ -9291,16 +9302,51 @@ if system_mode == "HARMONIA":
             st.session_state[_preload_key] = True
         # ─────────────────────────────────────────────────────────
         if selected_concert_row:
+            _c_name = _harmony_concert_name(selected_concert_row)
+            _c_date = concert_ctx["extract_prop_text_any"](selected_concert_row, ["日時", "日付", "出演日", "体験日", "リリース日"])
+            _c_loc  = concert_ctx["extract_prop_text_any"](selected_concert_row, ["ロケーション", "会場", "会場名", "場所"])
+
+            # HARMONIA_CONCERT レコードの有無を確認
+            _hc_rows = concert_ctx["query_all"](concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT", ""), None) if concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT") else []
+            _hc_row = next(
+                (r for r in _hc_rows if selected_concert_id in concert_ctx["extract_relation_ids_any"](r, ["演奏会", "FK演奏会", "concert"])),
+                None
+            )
+            _is_managed = bool(_hc_row) and concert_ctx["extract_prop_text_any"](_hc_row, ["管理開始", "managed", "management_started"]) == "True"
+
             st.markdown("### 現在選択中の演奏会")
-            st.markdown(f"**{_harmony_concert_name(selected_concert_row)}**")
-            c_date = concert_ctx["extract_prop_text_any"](selected_concert_row, ["日時", "日付", "出演日", "体験日", "リリース日"])
-            c_loc = concert_ctx["extract_prop_text_any"](selected_concert_row, ["ロケーション", "会場", "会場名", "場所"])
-            if c_date:
-                st.caption(f"📅 {c_date[:10]}")
-            if c_loc:
-                st.caption(f"📍 {c_loc}")
-            st.markdown("### 作業の流れ")
-            _render_harmonia_progress_cards(_build_harmonia_progress(selected_concert_row))
+            st.markdown(f"**{_c_name}**")
+            if _c_date:
+                st.caption(f"📅 {_c_date[:10]}")
+            if _c_loc:
+                st.caption(f"📍 {_c_loc}")
+
+            if not _is_managed:
+                # ── 管理開始プロンプト ────────────────────────────
+                st.divider()
+                with st.container(border=True):
+                    st.markdown("#### 🎯 この演奏会をHARMONIAで管理しますか？")
+                    st.caption("管理を開始すると、練習・楽曲・アサインなどの情報をHARMONIAで一元管理できます。")
+                    _col_yes, _col_no, _ = st.columns([2, 2, 4])
+                    if _col_yes.button("✅ 管理を開始する", type="primary", key="harmonia_start_yes", use_container_width=True):
+                        with st.spinner("HARMONIA_CONCERTにレコードを作成中..."):
+                            from concert.pages.players import _ensure_harmonia_concert_row
+                            _row, _created = _ensure_harmonia_concert_row(concert_ctx, selected_concert_id, _c_name)
+                        if _row:
+                            for _k in [k for k in st.session_state if k.startswith("harmonia_preloaded_")]:
+                                st.session_state.pop(_k, None)
+                            st.cache_data.clear()
+                            st.success(f"✅ HARMONIAの管理を開始しました：{_c_name}")
+                            st.rerun()
+                        else:
+                            st.error("❌ レコードの作成に失敗しました。HARMONIA_CONCERT DBの設定を確認してください。")
+                    if _col_no.button("キャンセル", key="harmonia_start_no", use_container_width=True):
+                        st.session_state["concert_page_index"] = 0
+                        st.rerun()
+            else:
+                # ── 進捗カード ───────────────────────────────────
+                st.markdown("### 作業の流れ")
+                _render_harmonia_progress_cards(_build_harmonia_progress(selected_concert_row))
         else:
             st.info("サイドバーの『演奏会フィルタ』で演奏会を選択してください。")
         st.stop()
