@@ -8795,16 +8795,16 @@ if system_mode == "HARMONIA":
                 title, r, desc = items[item_idx]
                 with cols[col_idx]:
                     if r >= 1.0:
-                        bg = "#e8f5e9"; icon = "✅"; label = "完了"
+                        border = "2px solid #4caf50"; icon = "✅"; label = "完了"; label_color = "#4caf50"
                     elif r > 0:
-                        bg = "#fff8e1"; icon = "🟡"; label = "進行中"
+                        border = "2px solid #ffa726"; icon = "🟡"; label = "進行中"; label_color = "#ffa726"
                     else:
-                        bg = "#f5f5f5"; icon = "⚪"; label = "未着手"
+                        border = "1px solid #555"; icon = "⚪"; label = "未着手"; label_color = "#888"
                     st.markdown(
-                        f"""<div style='background:{bg};border-radius:8px;padding:10px 12px;margin-bottom:4px;min-height:80px'>
-                        <div style='font-size:0.75rem;color:#666'>{icon} {label}</div>
+                        f"""<div style='border:{border};border-radius:8px;padding:10px 12px;margin-bottom:4px;min-height:80px'>
+                        <div style='font-size:0.75rem;color:{label_color}'>{icon} {label}</div>
                         <div style='font-weight:600;font-size:0.9rem;margin:2px 0'>{title}</div>
-                        <div style='font-size:0.75rem;color:#555'>{desc}</div>
+                        <div style='font-size:0.75rem;opacity:0.7'>{desc}</div>
                         </div>""",
                         unsafe_allow_html=True,
                     )
