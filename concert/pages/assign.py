@@ -1358,45 +1358,30 @@ def _render_player_score_html(scores: dict, fb_counts: dict, names: dict,
 
 
 def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: dict):
-    """採用した割当をPlayerInstrumentの担当フラグに書き込む。
-    レコードの一意キー：演奏会 + 奏者 + パート定義（曲+楽器+パートを包含）
-    同一奏者が同一楽器で複数曲を担当する場合も正しく区別できる。
+    """採用した割当をCONCERT_ASSIGNMENTに書き込む。
+    レコードの一意キー：演奏会 + 奏者 + パート定義
     """
-    db_id    = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
+    db_id    = ctx.get("CONCERT_DB_CONCERT_ASSIGNMENT", "")
+    if not db_id:
+        st.error("CONCERT_ASSIGNMENT DBが未設定です。secrets.tomlに CONCERT_DB_CONCERT_ASSIGNMENT を追加してください。")
+        return
     type_map = ctx["get_prop_types"](db_id)
     if not type_map:
-        st.error("PlayerInstrument DBのプロパティ取得に失敗しました。")
+        st.error("CONCERT_ASSIGNMENT DBのプロパティ取得に失敗しました。")
         return
 
     concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
 
-    # 書き込み前に既存の担当フラグを全リセット
+    # 書き込み前にこの演奏会の既存レコードをアーカイブ（全リセット）
     if concert_id:
         existing = ctx["query_all"](db_id)
-        with st.spinner("既存の担当フラグをリセット中..."):
+        with st.spinner("既存のアサインをリセット中..."):
             for r in existing:
-                c_ids = ctx["extract_relation_ids_any"](r, PI_CONCERT_REL_KEYS)
+                c_ids = ctx["extract_relation_ids_any"](r, ASSIGNMENT_CONCERT_REL_KEYS)
                 if concert_id not in (c_ids or []):
                     continue
-                if ctx["extract_prop_text_any"](r, PI_ASSIGN_KEYS) != "True":
-                    continue
-                props: dict = {}
-                ctx["put_prop_any"](props, type_map, PI_ASSIGN_KEYS, False)
                 ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{r.get('id','')}",
-                                   json={"properties": props})
-
-    # 既存レコードを「奏者+パート定義」で引ける辞書を構築
-    all_pi = ctx["query_all"](db_id)
-    # key: (player_id, part_id) → row
-    existing_map: dict[tuple[str, str], dict] = {}
-    for r in all_pi:
-        c_ids = ctx["extract_relation_ids_any"](r, PI_CONCERT_REL_KEYS)
-        if concert_id and concert_id not in (c_ids or []):
-            continue
-        p_ids   = ctx["extract_relation_ids_any"](r, PI_PLAYER_REL_KEYS)
-        pt_ids  = ctx["extract_relation_ids_any"](r, PI_PART_REL_KEYS)
-        if p_ids and pt_ids:
-            existing_map[(p_ids[0], pt_ids[0])] = r
+                                   json={"archived": True})
 
     ok = fail = 0
     with st.spinner("Notionに書き込み中..."):
@@ -1407,36 +1392,18 @@ def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: d
             inst_id   = a.get("instrument_id", "")
 
             props: dict = {}
-            ctx["put_prop_any"](props, type_map, PI_ASSIGN_KEYS, True)
-            ctx["put_prop_any"](props, type_map, PI_NOTE_KEYS, a.get("part_name", ""))
-
-            existing_row = existing_map.get((player_id, part_id))
-            if existing_row:
-                # 既存レコードを更新
-                rid = existing_row.get("id", "")
-                res = ctx["api_request"]("patch",
-                                         f"https://api.notion.com/v1/pages/{rid}",
-                                         json={"properties": props})
-            else:
-                # 新規作成：奏者+パート定義+演奏会+楽器+演奏曲を保存
-                ctx["put_key_any"](props, type_map, ASSIGN_KEY_KEYS,
-                                   concert_id, player_id, part_id, prefix="assign")
-                ctx["put_prop_any"](props, type_map, PI_RECORD_KEYS,
-                                    f"{a['player_name']} × {a['song_name']} × {a['part_name']}")
-                ctx["put_prop_any"](props, type_map, PI_PLAYER_REL_KEYS,  player_id)
-                ctx["put_prop_any"](props, type_map, PI_INST_REL_KEYS,    inst_id)
-                ctx["put_prop_any"](props, type_map, PI_CONCERT_REL_KEYS, concert_id)
-                ctx["put_prop_any"](props, type_map, PI_PART_REL_KEYS,    part_id)
-                ctx["put_prop_any"](props, type_map, PI_SONG_REL_KEYS,    song_id)
-                res = ctx["api_request"]("post",
-                                         "https://api.notion.com/v1/pages",
-                                         json={"parent": {"database_id": db_id},
-                                               "properties": props})
-                if res and res.status_code == 200:
-                    # 新規作成したレコードをexisting_mapに追加
-                    new_id = res.json().get("id", "")
-                    if new_id:
-                        existing_map[(player_id, part_id)] = {"id": new_id}
+            ctx["put_key_any"](props, type_map, ASSIGNMENT_KEY_KEYS,
+                               concert_id, player_id, part_id, prefix="assign")
+            ctx["put_prop_any"](props, type_map, ASSIGNMENT_CONCERT_REL_KEYS, concert_id)
+            ctx["put_prop_any"](props, type_map, ASSIGNMENT_PLAYER_REL_KEYS,  player_id)
+            ctx["put_prop_any"](props, type_map, ASSIGNMENT_PARTDEF_REL_KEYS, part_id)
+            ctx["put_prop_any"](props, type_map, ASSIGNMENT_SONG_REL_KEYS,    song_id)
+            ctx["put_prop_any"](props, type_map, ASSIGNMENT_INST_REL_KEYS,    inst_id)
+            ctx["put_prop_any"](props, type_map, ASSIGNMENT_FLAG_KEYS,        True)
+            ctx["put_prop_any"](props, type_map, ASSIGNMENT_NOTE_KEYS,
+                                f"{a.get('player_name','')} × {a.get('song_name','')} × {a.get('part_name','')}")
+            res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
+                                     json={"parent": {"database_id": db_id}, "properties": props})
             if res and res.status_code == 200:
                 ok += 1
             else:
@@ -1446,7 +1413,7 @@ def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: d
         _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PROPOSAL_KEYS, fail == 0 and ok > 0)
         _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, False)
     if fail == 0:
-        st.success(f"✅ {ok}件の担当フラグを書き込みました。")
+        st.success(f"✅ {ok}件のアサインを書き込みました。")
         _clear_assign_cache()
     else:
         st.warning(f"⚠️ {ok}件成功、{fail}件失敗。")
@@ -1487,19 +1454,22 @@ def _render_result_tab(ctx: dict):
     song_name_map   = {s.get("id"): _song_name(s, ctx) for s in songs}
     song_id_set     = {s.get("id") for s in songs}
 
-    db_id   = ctx["CONCERT_DB_PLAYER_INSTRUMENT"]
+    db_id = ctx.get("CONCERT_DB_CONCERT_ASSIGNMENT", "")
+    if not db_id:
+        st.warning("CONCERT_ASSIGNMENT DBが未設定です。")
+        return
     t_map   = ctx["get_prop_types"](db_id)
     ext_any = ctx["extract_prop_text_any"]
     ext_rel = ctx["extract_relation_ids_any"]
 
-    # 担当フラグ=Trueのレコードを取得（演奏会フィルタ）
-    pi_rows = ctx["query_all"](db_id)
+    # この演奏会のアサインレコードを取得
+    all_rows = ctx["query_all"](db_id)
     assigned_rows = []
-    for r in pi_rows:
-        c_ids = ext_rel(r, PI_CONCERT_REL_KEYS)
+    for r in all_rows:
+        c_ids = ext_rel(r, ASSIGNMENT_CONCERT_REL_KEYS)
         if concert_id and c_ids and concert_id not in c_ids:
             continue
-        if ext_any(r, PI_ASSIGN_KEYS) == "True":
+        if ext_any(r, ASSIGNMENT_FLAG_KEYS) == "True":
             assigned_rows.append(r)
 
     if not assigned_rows:
@@ -1517,10 +1487,8 @@ def _render_result_tab(ctx: dict):
                 ok = fail = 0
                 for r in all_rows:
                     rid = r.get("id","")
-                    props: dict = {}
-                    ctx["put_prop_any"](props, t_map, PI_ASSIGN_KEYS, False)
                     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{rid}",
-                                             json={"properties": props})
+                                             json={"archived": True})
                     if res and res.status_code == 200: ok += 1
                     else: fail += 1
             _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PROPOSAL_KEYS, False, concert_name)
@@ -1545,12 +1513,12 @@ def _render_result_tab(ctx: dict):
     by_song: dict[str, list] = defaultdict(list)
     for r in assigned_rows:
         # 優先1: 演奏曲リレーションから直接取得
-        s_ids = ext_rel(r, PI_SONG_REL_KEYS)
+        s_ids = ext_rel(r, ASSIGNMENT_SONG_REL_KEYS)
         matched_sid = s_ids[0] if s_ids and s_ids[0] in song_id_set else ""
 
         # フォールバック: パート定義リレーション経由
         if not matched_sid:
-            pt_ids = ext_rel(r, PI_PART_REL_KEYS)
+            pt_ids = ext_rel(r, ASSIGNMENT_PARTDEF_REL_KEYS)
             if pt_ids:
                 matched_sid = partdef_to_song.get(pt_ids[0], "")
 
@@ -1580,11 +1548,11 @@ def _render_result_tab(ctx: dict):
                 continue
             for r in rows:
                 rid   = r.get("id","")
-                p_ids = ext_rel(r, PI_PLAYER_REL_KEYS)
-                i_ids = ext_rel(r, PI_INST_REL_KEYS)
+                p_ids = ext_rel(r, ASSIGNMENT_PLAYER_REL_KEYS)
+                i_ids = ext_rel(r, ASSIGNMENT_INST_REL_KEYS)
                 cur_pname = player_name_map.get(p_ids[0], "不明") if p_ids else "不明"
                 cur_iname = inst_name_map.get(i_ids[0], "不明") if i_ids else "不明"
-                note      = ext_any(r, PI_NOTE_KEYS) or ""
+                note      = ext_any(r, ASSIGNMENT_NOTE_KEYS) or ""
 
                 with st.form(f"assign_edit_{rid}", border=False):
                     c1, c2, c3, c4 = st.columns([3, 3, 4, 1])
@@ -1604,9 +1572,9 @@ def _render_result_tab(ctx: dict):
                         new_pid = player_opts.get(new_pname, p_ids[0] if p_ids else "")
                         new_iid = inst_opts.get(new_iname, i_ids[0] if i_ids else "")
                         props: dict = {}
-                        ctx["put_prop_any"](props, t_map, PI_PLAYER_REL_KEYS, new_pid)
-                        ctx["put_prop_any"](props, t_map, PI_INST_REL_KEYS,   new_iid)
-                        ctx["put_prop_any"](props, t_map, PI_NOTE_KEYS,       new_note)
+                        ctx["put_prop_any"](props, t_map, ASSIGNMENT_PLAYER_REL_KEYS, new_pid)
+                        ctx["put_prop_any"](props, t_map, ASSIGNMENT_INST_REL_KEYS,   new_iid)
+                        ctx["put_prop_any"](props, t_map, ASSIGNMENT_NOTE_KEYS,       new_note)
                         res = ctx["api_request"]("patch",
                                                   f"https://api.notion.com/v1/pages/{rid}",
                                                   json={"properties": props})
@@ -1632,9 +1600,8 @@ def _render_result_tab(ctx: dict):
             for r in assigned_rows:
                 rid = r.get("id","")
                 props: dict = {}
-                ctx["put_prop_any"](props, t_map, PI_ASSIGN_KEYS, False)
                 res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{rid}",
-                                         json={"properties": props})
+                                         json={"archived": True})
                 if res and res.status_code == 200: ok += 1
                 else: fail += 1
         _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PROPOSAL_KEYS, False, concert_name)
