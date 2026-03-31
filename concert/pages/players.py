@@ -44,6 +44,8 @@ def _clear_player_cache():
         if k.startswith(("player_list", "attendance_list_", "pi_list_", "participant_list_", "practice_list_")):
             st.session_state.pop(k, None)
     st.cache_data.clear()  # Notionクエリキャッシュを無効化
+    for _k in [k for k in st.session_state if k.startswith("harmonia_preloaded_")]:
+        st.session_state.pop(_k, None)  # 次回ホームで再プリフェッチ
 
 
 def _normalize_page_id(v: str) -> str:

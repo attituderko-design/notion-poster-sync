@@ -72,6 +72,8 @@ def _clear_property_type_cache():
     except Exception:
         pass
     st.cache_data.clear()  # Notionクエリキャッシュを無効化
+    for _k in [k for k in st.session_state if k.startswith("harmonia_preloaded_")]:
+        st.session_state.pop(_k, None)  # 次回ホームで再プリフェッチ
 
 
 def _extract_checkbox_value(page: dict, prop_name: str) -> bool:
@@ -162,6 +164,8 @@ def _clear_song_cache():
             st.session_state.pop(k, None)
     st.session_state.pop("songs_concert_list", None)
     st.cache_data.clear()  # Notionクエリキャッシュを無効化
+    for _k in [k for k in st.session_state if k.startswith("harmonia_preloaded_")]:
+        st.session_state.pop(_k, None)  # 次回ホームで再プリフェッチ
 
 
 def _concert_media_values(c: dict) -> list[str]:
@@ -689,6 +693,8 @@ def _clear_concert_song_cache(concert_id: str = ""):
         if k.startswith("concert_song_rows_") and (not concert_id or k == f"concert_song_rows_{concert_id}"):
             st.session_state.pop(k, None)
     st.cache_data.clear()  # Notionクエリキャッシュを無効化
+    for _k in [k for k in st.session_state if k.startswith("harmonia_preloaded_")]:
+        st.session_state.pop(_k, None)  # 次回ホームで再プリフェッチ
 
 
 def _find_harmonia_concert_row(ctx: dict, concert_id: str) -> dict | None:
@@ -1164,6 +1170,8 @@ def _clear_concert_instrument_cache(concert_id: str = ""):
         if k.startswith("concert_inst_list") and (not concert_id or concert_id in k):
             st.session_state.pop(k, None)
     st.cache_data.clear()  # Notionクエリキャッシュを無効化
+    for _k in [k for k in st.session_state if k.startswith("harmonia_preloaded_")]:
+        st.session_state.pop(_k, None)  # 次回ホームで再プリフェッチ
 
 
 def _upsert_concert_instrument(
