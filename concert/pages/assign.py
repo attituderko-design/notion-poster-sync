@@ -1153,15 +1153,11 @@ def _render_solver_tab(ctx: dict):
             player_names: dict[str, str]       = {}
             player_unassigned: dict[str, int]  = defaultdict(int)
 
-            # まず全奏者の名前をplayersリストから初期化（希望未提出者も含む）
-            for _p in players:
-                _pid = _p.get("id","")
-                if _pid:
-                    player_names[_pid] = _player_name(_p, ctx)
-            # session_stateから_all_participantsを取得して名前を補完
+            # 表示対象はCONCERT_CASTの打楽器奏者のみ（_all_participants）
             _ap = st.session_state.get(f"assign_all_participants_{concert_id}", [])
+            _valid_pids = {pid for pid, _ in _ap}
             for _pid, _pname in _ap:
-                if _pid and _pname and _pid not in player_names:
+                if _pid and _pname:
                     player_names[_pid] = _pname
 
             # 割当済みスコアと曲セットを集計
@@ -1174,7 +1170,8 @@ def _render_solver_tab(ctx: dict):
                 player_scores[a["player_id"]] += sc
                 if a["source"] in ("fallback", "swap"):
                     player_fb[a["player_id"]] += 1
-                player_names[a["player_id"]] = a["player_name"]
+                if a["player_id"] in _valid_pids:
+                    player_names[a["player_id"]] = a["player_name"]
                 assigned_songs_per_player[a["player_id"]].add(a["song_id"])
 
             # 希望不成立：希望を出した曲のうち割り当てられなかった曲数（曲単位）
@@ -1192,10 +1189,11 @@ def _render_solver_tab(ctx: dict):
                 if unmet > 0:
                     player_unassigned[pid] = unmet
 
-            # 希望を出した奏者全員を表示対象に
+            # pref_mapからの名前補完はCONCERT_CAST内の人のみ
             for pk_str, pref in result["pref_map"].items():
-                if pref["priority"] > 0 and pref["player_id"] not in player_names:
-                    player_names[pref["player_id"]] = pref["player_name"]
+                pid = pref["player_id"]
+                if pref["priority"] > 0 and pid in _valid_pids and pid not in player_names:
+                    player_names[pid] = pref["player_name"]
 
             st.markdown(_render_player_score_html(
                 player_scores, player_fb, player_names, player_unassigned),
