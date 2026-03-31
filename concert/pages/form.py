@@ -879,7 +879,7 @@ def render_form(ctx, concert_id: str):
 
         if not practices:
             st.info("練習日が登録されていません。")
-            st.session_state["form_step"] = 3 if IS_PERC(part) else 5
+            st.session_state["form_step"] = 3 if partdefs else 5
             if st.button("次へ →", type="primary", use_container_width=True):
                 st.rerun()
             return
@@ -902,7 +902,16 @@ def render_form(ctx, concert_id: str):
                 pr_venue = ext(p, PRACTICE_VENUE_KEYS) or ""
                 date_disp = pr_date[:10] if pr_date else "日時未設定"
                 time_disp = pr_date[11:16] if len(pr_date) > 10 else ""
-                label = f"**{pr_name}**　{date_disp}"
+                # 曜日を追加
+                weekday_jp = ""
+                if pr_date and len(pr_date) >= 10:
+                    try:
+                        from datetime import date as _date
+                        _d = _date.fromisoformat(pr_date[:10])
+                        weekday_jp = ["月","火","水","木","金","土","日"][_d.weekday()]
+                    except Exception:
+                        pass
+                label = f"**{pr_name}**　{date_disp}{'（' + weekday_jp + '）' if weekday_jp else ''}"
                 if time_disp: label += f" {time_disp}"
                 if pr_venue:  label += f"　📍 {pr_venue}"
                 st.markdown(label)
@@ -923,18 +932,18 @@ def render_form(ctx, concert_id: str):
         if submitted:
             st.session_state["form_att"]  = att
             st.session_state["form_att_comment"] = att_comment
-            st.session_state["form_step"] = 3 if IS_PERC(part) else 5
+            st.session_state["form_step"] = 3 if partdefs else 5
             st.rerun()
 
-    # ── STEP 3: パート希望（Percのみ） ───────────────────────
+    # ── STEP 3: パート希望（パート定義が存在する場合） ──────────
     elif step == 3:
         st.subheader("Step 3 / パート希望を入力してください")
-        st.caption("希望するパートに第1希望〜第3希望を入力してください。それ以外のパートは「希望なし/降り番でも可」を選択してください。")
+        st.caption("希望・NGのあるパートだけ入力してください。入力しないパートは「希望なし/降り番でも可」として扱われます。")
 
         if not partdefs:
             st.info("パート定義がまだ登録されていません。スキップします。")
             st.session_state["form_pref"] = {}
-            st.session_state["form_step"] = 4
+            st.session_state["form_step"] = 4 if IS_PERC(part) else 5
             st.rerun()
             return
 
@@ -947,22 +956,41 @@ def render_form(ctx, concert_id: str):
             sid = sids[0] if sids else "__none__"
             pd_by_song[sid].append(pd)
 
-        with st.form("step3"):
-            pref: dict[str, str] = {}
-            for sid, pds in pd_by_song.items():
-                sname = song_name_map.get(sid, "曲目未設定")
-                st.markdown(f"**🎵 {sname}**")
-                for pd in pds:
-                    pd_id   = pd.get("id","")
-                    pd_name = ext(pd, PARTDEF_NAME_KEYS) or pd_id
-                    val = st.selectbox(pd_name, PRIORITY_OPTS, index=3, key=f"pref_{pd_id}")
-                    pref[pd_id] = val
-                st.divider()
-            submitted = st.form_submit_button("次へ →", type="primary",
-                                              use_container_width=True)
-        if submitted:
-            st.session_state["form_pref"] = pref
-            st.session_state["form_step"] = 4
+        # セッションから既存の希望を読み込む
+        pref: dict[str, str] = dict(st.session_state.get("form_pref") or {})
+
+        for sid, pds in pd_by_song.items():
+            sname = song_name_map.get(sid, "曲目未設定")
+            st.markdown(f"**🎵 {sname}**")
+            for pd in pds:
+                pd_id   = pd.get("id","")
+                pd_name = ext(pd, PARTDEF_NAME_KEYS) or pd_id
+                cur_val = pref.get(pd_id, "希望なし/降り番でも可")
+                col_name, col_sel = st.columns([3, 3])
+                col_name.markdown(f"<div style='padding-top:8px'>{pd_name}</div>",
+                                  unsafe_allow_html=True)
+                new_val = col_sel.selectbox(
+                    pd_name, PRIORITY_OPTS,
+                    index=PRIORITY_OPTS.index(cur_val) if cur_val in PRIORITY_OPTS else 3,
+                    key=f"pref_{pd_id}",
+                    label_visibility="collapsed",
+                )
+                pref[pd_id] = new_val
+            st.divider()
+
+        # 入力内容をリアルタイムでセッションに反映
+        st.session_state["form_pref"] = pref
+
+        # 入力済みパートのサマリ
+        active = {pd_id: v for pd_id, v in pref.items() if v not in ("希望なし/降り番でも可", "")}
+        if active:
+            pd_name_map = {pd.get("id",""): ext(pd, PARTDEF_NAME_KEYS) or "" for pd in partdefs}
+            with st.expander(f"入力済み: {len(active)}パート", expanded=False):
+                for pd_id, v in active.items():
+                    st.caption(f"{pd_name_map.get(pd_id, pd_id)}：{v}")
+
+        if st.button("次へ →", type="primary", use_container_width=True, key="step3_next"):
+            st.session_state["form_step"] = 4 if IS_PERC(part) else 5
             st.rerun()
 
     # ── STEP 4: 所有楽器（Percのみ） ─────────────────────────
@@ -1056,7 +1084,9 @@ def render_form(ctx, concert_id: str):
             for e in errors:
                 st.error(e)
         else:
-            st.balloons()
+            if not st.session_state.get("form_balloons_done"):
+                st.balloons()
+                st.session_state["form_balloons_done"] = True
             st.success(f"✅ 送信完了！ {ok_n}件のデータが登録されました。")
         st.markdown(f"**{player_name}** さん、ありがとうございました。")
         st.info("このページを閉じて構いません。")
