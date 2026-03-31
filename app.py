@@ -9212,6 +9212,37 @@ if system_mode == "HARMONIA":
     if concert_page == "🏠 ホーム":
         st.header("🏠 HARMONIAホーム")
         st.caption("演奏会の選択・変更はサイドバーで行います。")
+
+        # ── プリフェッチ（初回のみ）──────────────────────────────
+        _preload_key = f"harmonia_preloaded_{concert_ctx.get('CONCERT_DB_CONCERT', '')[:8]}"
+        if _preload_key not in st.session_state:
+            _preload_dbs = [
+                ("CONCERT_DB_CONCERT",            None),
+                ("CONCERT_DB_PRACTICE",           None),
+                ("CONCERT_DB_SONG",               None),
+                ("CONCERT_DB_INSTRUMENT",         None),
+                ("CONCERT_DB_PLAYER",             None),
+                ("CONCERT_DB_PARTICIPANT",        None),
+                ("CONCERT_DB_PART_DEFINITION",    None),
+                ("CONCERT_DB_CONCERT_SONG",       None),
+                ("CONCERT_DB_HARMONIA_CONCERT",   None),
+                ("CONCERT_DB_CONCERT_INSTRUMENT", None),
+                ("CONCERT_DB_PREFERENCE",         None),
+                ("CONCERT_DB_PLAYER_INSTRUMENT",  None),
+            ]
+            _preload_total = len(_preload_dbs)
+            _progress = st.progress(0, text="🎵 演奏会データを収集中...")
+            for _i, (_db_key, _f) in enumerate(_preload_dbs):
+                _db_id = concert_ctx.get(_db_key, "")
+                if _db_id:
+                    try:
+                        concert_ctx["query_all"](_db_id, _f)
+                    except Exception:
+                        pass
+                _progress.progress((_i + 1) / _preload_total, text=f"🎵 演奏会データを収集中... ({_i + 1}/{_preload_total})")
+            _progress.empty()
+            st.session_state[_preload_key] = True
+        # ─────────────────────────────────────────────────────────
         if selected_concert_row:
             st.markdown("### 現在選択中の演奏会")
             st.markdown(f"**{_harmony_concert_name(selected_concert_row)}**")
