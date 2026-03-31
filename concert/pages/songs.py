@@ -740,26 +740,6 @@ def _refresh_harmonia_song_info_status(ctx: dict, concert_id: str) -> bool:
     return _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_SONG_INFO_KEYS, all_done)
 
 
-def _refresh_harmonia_partdef_status(ctx: dict, concert_id: str) -> bool:
-    """
-    CONCERT_SONGの『定義完了』フラグを全件チェックし、
-    全曲完了なら HARMONIA_CONCERT の『パート定義確定』をTrueに、
-    1件でも未完了なら False に更新する。
-    """
-    # キャッシュをクリアしてNotionの最新値を取得する
-    _clear_concert_song_cache(concert_id)
-    rows = _load_concert_song_rows(ctx, concert_id)
-    if not rows:
-        return _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PARTDEF_KEYS, False)
-    db_id = ctx["CONCERT_DB_CONCERT_SONG"]
-    type_map = ctx["get_prop_types"](db_id) or {}
-    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_DONE_KEYS)                or _find_prop_name_from_rows_loose(rows, CONCERT_SONG_DONE_KEYS)
-    if not flag_key:
-        return False
-    all_done = all(_extract_checkbox_value(r, flag_key) for r in rows)
-    return _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PARTDEF_KEYS, all_done)
-
-
 def _set_concert_song_song_confirmed(
     ctx: dict,
     concert_id: str,
@@ -1490,30 +1470,18 @@ def _render_partdef_tab(ctx: dict):
             if col_btn1.button("✅ 完了にする", use_container_width=True,
                                key=f"cs_done_{c_id}_{s_id}", type="primary"):
                 ok = _set_concert_song_partdef_completed(ctx, c_id, s_id, True, note=complete_note)
-                if ok:
-                    _refresh_harmonia_partdef_status(ctx, c_id)
-                    _clear_concert_song_cache(c_id)
-                    st.success("✅ 更新しました。")
-                    st.rerun()
-                else:
-                    st.error("❌ 更新に失敗しました。")
+                st.success("✅ 更新しました。") if ok else st.error("❌ 更新に失敗しました。")
+                if ok: st.rerun()
         else:
             if col_btn2.button("↩ 完了を取り消す", use_container_width=True,
                                key=f"cs_undone_{c_id}_{s_id}"):
                 ok = _set_concert_song_partdef_completed(ctx, c_id, s_id, False, note=complete_note)
-                if ok:
-                    _refresh_harmonia_partdef_status(ctx, c_id)
-                    _clear_concert_song_cache(c_id)
-                    st.success("✅ 更新しました。")
-                    st.rerun()
-                else:
-                    st.error("❌ 更新に失敗しました。")
+                st.success("✅ 更新しました。") if ok else st.error("❌ 更新に失敗しました。")
+                if ok: st.rerun()
     else:
         st.warning("CONCERT_SONG に対応する行がありません。完了フラグの更新はできません。")
 
-    st.divider()
-    st.info("必要楽器の編集・確定は『必要楽器整理』タブに分離しました。")
-    st.divider()
+
 
     # 楽器検索（パート定義タブ内の絞り込みのみ）
     inst_search = st.text_input(
@@ -1802,12 +1770,12 @@ def render(ctx: dict):
     if not global_concert_id:
         st.info("サイドバーで演奏会を選択してください。")
         return
-    tab_song, tab_partdef, tab_concert_inst, tab_instrument = st.tabs(["🎵 楽曲", "🧩 パート定義", "🎹 必要楽器整理", "🎼 楽器種別"])
+    tab_song, tab_concert_inst, tab_partdef, tab_instrument = st.tabs(["🎵 楽曲", "🎹 必要楽器整理", "🧩 パート定義", "🎼 楽器種別"])
     with tab_song:
         _render_song_tab(ctx)
-    with tab_partdef:
-        _render_partdef_tab(ctx)
     with tab_concert_inst:
         _render_concert_instrument_tab(ctx)
+    with tab_partdef:
+        _render_partdef_tab(ctx)
     with tab_instrument:
         _render_instrument_tab(ctx)
