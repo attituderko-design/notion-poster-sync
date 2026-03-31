@@ -9325,6 +9325,16 @@ if system_mode == "HARMONIA":
                 # ── 管理開始プロンプト ────────────────────────────
                 st.divider()
                 with st.container(border=True):
+                    # カバー画像を取得して表示
+                    _cover = selected_concert_row.get("cover") or {}
+                    _cover_type = _cover.get("type", "")
+                    _cover_url = ""
+                    if _cover_type == "external":
+                        _cover_url = (_cover.get("external") or {}).get("url", "")
+                    elif _cover_type == "file":
+                        _cover_url = (_cover.get("file") or {}).get("url", "")
+                    if _cover_url:
+                        st.image(_cover_url, use_container_width=True)
                     st.markdown("#### 🎯 この演奏会をHARMONIAで管理しますか？")
                     st.caption("管理を開始すると、練習・楽曲・アサインなどの情報をHARMONIAで一元管理できます。")
                     _col_yes, _col_no, _ = st.columns([2, 2, 4])
@@ -9347,6 +9357,15 @@ if system_mode == "HARMONIA":
                         st.rerun()
             else:
                 # ── 進捗カード ───────────────────────────────────
+                _cover2 = selected_concert_row.get("cover") or {}
+                _cover2_type = _cover2.get("type", "")
+                _cover2_url = ""
+                if _cover2_type == "external":
+                    _cover2_url = (_cover2.get("external") or {}).get("url", "")
+                elif _cover2_type == "file":
+                    _cover2_url = (_cover2.get("file") or {}).get("url", "")
+                if _cover2_url:
+                    st.image(_cover2_url, use_container_width=True)
                 st.markdown("### 作業の流れ")
                 _render_harmonia_progress_cards(_build_harmonia_progress(selected_concert_row))
         else:
