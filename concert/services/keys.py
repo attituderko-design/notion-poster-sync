@@ -35,6 +35,7 @@ PLAYER_LINE_KEYS          = ["LINE ID", "LINE", "Line"]
 PLAYER_RECEIVE_KEYS       = ["受信", "メール受信", "前日共有受信"]
 PLAYER_MEMO_KEYS          = ["メモ", "備考"]
 PLAYER_KEY_KEYS           = ["player_key", "PlayerKey", "奏者キー", "PK奏者キー"]
+PLAYER_PASSWORD_HASH_KEYS = ["password_hash", "パスワードハッシュ"]
 
 # ── CONCERT_CAST（演奏会参加者）DB ───────────────────────────
 PARTICIPANT_RECORD_KEYS      = ["タイトル", "participant_key", "PK参加者"]
