@@ -15,6 +15,8 @@ import re
 # 定数
 # ============================================================
 
+HARMONIA_CONCERT_PROPOSAL_KEYS = ["案提示", "proposal_presented"]  # keys.pyのPLAN_KEYSと同値
+
 PRIORITY_OPTIONS = ["未回答", "第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
 PRIORITY_TO_INT  = {
     "第1希望": 1,
