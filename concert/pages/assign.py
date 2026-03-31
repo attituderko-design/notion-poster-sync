@@ -832,6 +832,10 @@ def _render_solver_tab(ctx: dict):
                     _pids = ctx["extract_relation_ids_any"](_r, PARTICIPANT_PLAYER_REL_KEYS)
                     if _pids:
                         _pid = _pids[0]
+                        # 打楽器パート（Perc系）のみを対象にする
+                        _ppart = (ctx["extract_prop_text_any"](_r, PARTICIPANT_PART_KEYS) or "").strip()
+                        if not _is_perc_part(_ppart):
+                            continue
                         _pobj = next((p for p in players if p.get("id","") == _pid), None)
                         _pname = _player_name(_pobj, ctx) if _pobj else ""
                         # playersリストにない場合はPERFORMER DBから直接取得
