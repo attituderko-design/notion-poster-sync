@@ -20,7 +20,7 @@ from concert.services.keys import (
     SONG_NAME_KEYS, SONG_CREATOR_KEYS, SONG_CONCERT_REL_KEYS,
     INSTRUMENT_NAME_KEYS,
     PLAYER_NAME_KEYS, PLAYER_HN_KEYS, PLAYER_EMAIL_KEYS, PLAYER_RECEIVE_KEYS,
-    PLAYER_PHONE_KEYS, PLAYER_LINE_KEYS,
+    PLAYER_PHONE_KEYS, PLAYER_LINE_KEYS, PLAYER_PASSWORD_HASH_KEYS,
     ATTENDANCE_KEY_KEYS, ATT_RECORD_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS, ATT_NOTE_KEYS,
     PI_PARTICIPANT_REL_KEYS, PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
     PREFERENCE_KEY_KEYS, PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
@@ -29,7 +29,7 @@ from concert.services.keys import (
 from concert.services.relation_utils import find_relation_prop
 
 _TOKEN_SECRET = "harmonia_form_2024"
-PRIORITY_OPTS = ["第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
+PRIORITY_OPTS = ["未回答", "第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
 ATT_OPTS      = ["○", "△", "×"]
 OTHER_PART    = "一覧にない（管理者に連絡）"
 IS_PERC       = lambda p: (p or "").lower() in ("perc", "percussion", "打楽器")
@@ -81,6 +81,81 @@ def _is_code_valid() -> bool:
     if not expires:
         return False
     return datetime.now() < expires
+
+# ── パスワード管理 ────────────────────────────────────────────
+
+def _hash_password(password: str) -> str:
+    """パスワードをSHA-256ハッシュ化して返す。"""
+    return hashlib.sha256(password.strip().encode()).hexdigest()
+
+def _verify_password(entered: str, stored_hash: str) -> bool:
+    """パスワードを検証する。"""
+    if not entered or not stored_hash:
+        return False
+    return hmac.compare_digest(_hash_password(entered), stored_hash)
+
+def _save_password_hash(ctx: dict, player_id: str, password: str) -> bool:
+    """PERFORMERのpassword_hashを更新する。"""
+    t_pl = ctx["get_prop_types"](ctx["CONCERT_DB_PLAYER"])
+    if not t_pl:
+        return False
+    props: dict = {}
+    ctx["put_prop_any"](props, t_pl, PLAYER_PASSWORD_HASH_KEYS, _hash_password(password))
+    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{player_id}",
+                              json={"properties": props})
+    return res is not None and res.status_code == 200
+
+def _get_proposal_flag(ctx: dict, concert_id: str) -> bool:
+    """HARMONIA_CONCERTの「案提示」フラグを取得する。"""
+    try:
+        hc_db = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
+        if not hc_db:
+            return False
+        hc_rows = ctx["query_all"](hc_db, None)
+        hc_row = next(
+            (r for r in hc_rows
+             if concert_id in ctx["extract_relation_ids_any"](r, ["演奏会", "FK演奏会", "concert"])),
+            None
+        )
+        if not hc_row:
+            return False
+        return ctx["extract_prop_text_any"](hc_row, ["案提示", "proposal_presented"]) == "True"
+    except Exception:
+        return False
+
+def _load_existing_prefs(ctx: dict, concert_id: str, player_id: str, partdefs: list) -> dict[str, str]:
+    """既存のPREFERENCEデータを取得してpd_id→priorityのdictを返す。"""
+    try:
+        pref_db = ctx.get("CONCERT_DB_PREFERENCE", "")
+        if not pref_db:
+            return {}
+        all_pref = ctx["query_all"](pref_db, None)
+        # cast_idも考慮
+        all_cast = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+        cast_id = ""
+        for r in all_cast:
+            pids = ctx["extract_relation_ids_any"](r, PARTICIPANT_PLAYER_REL_KEYS)
+            cids = ctx["extract_relation_ids_any"](r, PARTICIPANT_CONCERT_REL_KEYS)
+            if player_id in pids and concert_id in cids:
+                cast_id = r.get("id", "")
+                break
+        targets = {player_id}
+        if cast_id:
+            targets.add(cast_id)
+        pd_ids = {pd.get("id", "") for pd in partdefs}
+        result: dict[str, str] = {}
+        for r in all_pref:
+            pl_ids = set(ctx["extract_relation_ids_any"](r, PREF_PLAYER_REL_KEYS))
+            pt_ids = ctx["extract_relation_ids_any"](r, PREF_PART_REL_KEYS)
+            if not pl_ids.intersection(targets):
+                continue
+            if not pt_ids or pt_ids[0] not in pd_ids:
+                continue
+            priority = ctx["extract_prop_text_any"](r, PREF_PRIORITY_KEYS) or "未回答"
+            result[pt_ids[0]] = priority
+        return result
+    except Exception:
+        return {}
 
 # ── トークン ──────────────────────────────────────────────────
 
@@ -573,28 +648,21 @@ def render_form(ctx, concert_id: str):
             st.rerun()
         return
 
-    # ── STEP 0b: メール認証 ───────────────────────────────────
+    # ── STEP 0b: 認証（既登録者→パスワード / 新規→マジックコード） ──
     if step == 1 and not st.session_state.get("form_auth_verified"):
-        st.subheader("メールアドレスで本人確認")
-        st.caption("登録済みのメールアドレスに6桁の確認コードを送ります。")
 
-        # コード送信フォーム
-        if not st.session_state.get("auth_code_sent"):
+        # メールアドレス入力フェーズ
+        if not st.session_state.get("auth_email_submitted"):
+            st.subheader("メールアドレスを入力してください")
             with st.form("auth_email_form"):
                 auth_email = st.text_input("メールアドレス *", placeholder="yamada@example.com")
-                submitted_email = st.form_submit_button("確認コードを送信", type="primary",
+                submitted_email = st.form_submit_button("次へ", type="primary",
                                                          use_container_width=True)
             if submitted_email:
                 if not auth_email.strip():
                     st.error("メールアドレスを入力してください。")
                     return
                 email_input = auth_email.strip().lower()
-                # レート制限: 同一セッションで10秒以内の連続送信を禁止
-                last_sent = st.session_state.get("auth_last_sent")
-                if last_sent and (datetime.now() - last_sent).total_seconds() < 10:
-                    st.warning("少し時間をおいてから再試行してください。")
-                    return
-                # DB照合
                 with st.spinner("確認中..."):
                     players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
                     matched = next(
@@ -602,35 +670,97 @@ def render_form(ctx, concert_id: str):
                          if (ext(p, PLAYER_EMAIL_KEYS) or "").strip().lower() == email_input),
                         None
                     )
-                # 既存・新規どちらもコード送信
-                code = _generate_code()
-                ok   = _send_magic_code(ctx, email_input, code, c_name)
-                if ok:
+                has_password = bool(
+                    matched and ext(matched, PLAYER_PASSWORD_HASH_KEYS)
+                ) if matched else False
+                st.session_state.update({
+                    "auth_email":           email_input,
+                    "auth_player_id":       matched.get("id","") if matched else None,
+                    "auth_is_existing":     matched is not None,
+                    "auth_has_password":    has_password,
+                    "auth_email_submitted": True,
+                })
+                st.rerun()
+            return
+
+        auth_email   = st.session_state.get("auth_email", "")
+        is_existing  = st.session_state.get("auth_is_existing", False)
+        has_password = st.session_state.get("auth_has_password", False)
+        existing_pid = st.session_state.get("auth_player_id")
+
+        # ── 既登録者 × パスワードあり → パスワードログイン ──
+        if is_existing and has_password and not st.session_state.get("auth_code_sent"):
+            players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+            matched_player = next((p for p in players if p.get("id") == existing_pid), None)
+            pname_display = ext(matched_player, PLAYER_NAME_KEYS) if matched_player else ""
+            st.subheader(f"おかえりなさい、{pname_display} さん" if pname_display else "パスワードでログイン")
+            st.caption(f"メールアドレス: {auth_email}")
+            with st.form("auth_password_form"):
+                entered_pw = st.text_input("パスワード", type="password")
+                col_ok, col_forgot = st.columns(2)
+                submitted_pw     = col_ok.form_submit_button("ログイン", type="primary", use_container_width=True)
+                submitted_forgot = col_forgot.form_submit_button("パスワードを忘れた", use_container_width=True)
+            if submitted_pw:
+                stored_hash = ext(matched_player, PLAYER_PASSWORD_HASH_KEYS) if matched_player else ""
+                if _verify_password(entered_pw, stored_hash):
                     st.session_state.update({
-                        "auth_email":        email_input,
-                        "auth_code_hash":    _hash_code(code),  # ハッシュのみ保存
-                        "auth_code_expires": datetime.now() + timedelta(minutes=_CODE_EXPIRY_MINUTES),
-                        "auth_attempts":     0,
-                        "auth_code_sent":    True,
-                        "auth_last_sent":    datetime.now(),     # レート制限用
-                        "auth_player_id":    matched.get("id","") if matched else None,  # IDのみ
-                        "auth_is_existing":  matched is not None,
+                        "form_auth_verified":     True,
+                        "form_auth_email":        auth_email,
+                        "form_player_id":         existing_pid,
+                        "form_player_name":       pname_display,
+                        "form_is_new":            False,
+                        "form_is_existing_auth":  True,
                     })
                     st.rerun()
                 else:
-                    st.error("メール送信に失敗しました。メールアドレスを確認するか、管理者にお問い合わせください。")
+                    st.error("パスワードが違います。")
+            if submitted_forgot:
+                # マジックコードによるリセットフローへ
+                st.session_state["auth_reset_mode"] = True
+                st.rerun()
+            return
+
+        # ── パスワードリセット or 新規 or パスワード未設定 → マジックコード ──
+        is_reset = st.session_state.get("auth_reset_mode", False)
+        if is_reset:
+            st.subheader("パスワードをリセット")
+            st.caption("登録済みのメールアドレスに確認コードを送ります。")
+        elif is_existing and not has_password:
+            st.subheader("初回ログイン")
+            st.caption("確認コードを送りますので、ログイン後にパスワードを設定してください。")
+        else:
+            st.subheader("メールアドレスで本人確認")
+            st.caption("確認コードを送ります。")
+
+        if not st.session_state.get("auth_code_sent"):
+            last_sent = st.session_state.get("auth_last_sent")
+            if last_sent and (datetime.now() - last_sent).total_seconds() < 10:
+                st.warning("少し時間をおいてから再試行してください。")
+                return
+            code = _generate_code()
+            ok   = _send_magic_code(ctx, auth_email, code, c_name)
+            if ok:
+                st.session_state.update({
+                    "auth_code_hash":    _hash_code(code),
+                    "auth_code_expires": datetime.now() + timedelta(minutes=_CODE_EXPIRY_MINUTES),
+                    "auth_attempts":     0,
+                    "auth_code_sent":    True,
+                    "auth_last_sent":    datetime.now(),
+                })
+                st.rerun()
+            else:
+                st.error("メール送信に失敗しました。管理者にお問い合わせください。")
             return
 
         # コード入力フォーム
-        auth_email = st.session_state.get("auth_email", "")
-        attempts   = st.session_state.get("auth_attempts", 0)
-        st.info("確認コードをメールで送信しました。メールが届かない場合は迷惑メールフォルダをご確認ください。")
+        attempts = st.session_state.get("auth_attempts", 0)
+        st.info("確認コードをメールで送信しました。迷惑メールフォルダもご確認ください。")
         st.caption(f"送信先: {auth_email}")
 
         if not _is_code_valid():
             st.warning("確認コードの有効期限が切れました。最初からやり直してください。")
             for k in ["auth_code_sent","auth_code_hash","auth_code_expires",
-                        "auth_attempts","auth_last_sent","auth_player_id","auth_is_existing"]:
+                      "auth_attempts","auth_last_sent","auth_reset_mode","auth_email_submitted"]:
                 st.session_state.pop(k, None)
             st.rerun()
             return
@@ -642,7 +772,6 @@ def render_form(ctx, concert_id: str):
             submitted_resend = col_resend.form_submit_button("再送信", use_container_width=True)
 
         if submitted_resend:
-            # レート制限: 60秒以内の再送を禁止
             last_sent = st.session_state.get("auth_last_sent")
             if last_sent and (datetime.now() - last_sent).total_seconds() < 60:
                 remaining_sec = int(60 - (datetime.now() - last_sent).total_seconds())
@@ -665,30 +794,26 @@ def render_form(ctx, concert_id: str):
         if submitted_code:
             stored_hash = st.session_state.get("auth_code_hash", "")
             if _verify_code(entered_code, stored_hash):
-                # 認証成功: IDのみから奏者情報を取得
-                existing_pid = st.session_state.get("auth_player_id")
-                is_existing  = st.session_state.get("auth_is_existing", False)
-                st.session_state["form_auth_verified"] = True
-                st.session_state["form_auth_email"]    = auth_email
-                # コードは認証後に破棄
                 for k in ["auth_code_hash","auth_code_expires","auth_attempts",
                            "auth_code_sent","auth_last_sent"]:
                     st.session_state.pop(k, None)
+                st.session_state["form_auth_verified"] = True
+                st.session_state["form_auth_email"]    = auth_email
                 if is_existing and existing_pid:
-                    # 既存奏者: DBから名前のみ取得
                     players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
-                    matched_player = next(
-                        (p for p in players if p.get("id") == existing_pid), None
-                    )
+                    matched_player = next((p for p in players if p.get("id") == existing_pid), None)
                     st.session_state["form_player_id"]   = existing_pid
                     st.session_state["form_player_name"] = (
                         ext(matched_player, PLAYER_NAME_KEYS) if matched_player else ""
                     )
                     st.session_state["form_is_new"]           = False
                     st.session_state["form_is_existing_auth"] = True
+                    # パスワード未設定 or リセット → パスワード設定フラグ
+                    st.session_state["form_need_set_password"] = True
                 else:
                     st.session_state["form_is_new"]           = True
                     st.session_state["form_is_existing_auth"] = False
+                st.session_state.pop("auth_reset_mode", None)
                 st.rerun()
             else:
                 attempts += 1
@@ -698,7 +823,7 @@ def render_form(ctx, concert_id: str):
                     st.error("確認コードを3回間違えました。最初からやり直してください。")
                     for k in ["auth_code_hash","auth_code_expires","auth_attempts",
                                "auth_code_sent","auth_last_sent","auth_player_id",
-                               "auth_is_existing"]:
+                               "auth_is_existing","auth_email_submitted"]:
                         st.session_state.pop(k, None)
                     st.rerun()
                 else:
@@ -707,37 +832,45 @@ def render_form(ctx, concert_id: str):
 
     # ── STEP 1: 氏名・連絡先・パート ──────────────────────────
     if step == 1:
-        # 既存奏者の場合: 現在の登録状況を表示してStep2へ
+        # ── パスワード設定が必要な場合（初回マジックコード認証後） ──
+        if st.session_state.get("form_need_set_password") and st.session_state.get("form_is_existing_auth"):
+            pname = st.session_state.get("form_player_name", "")
+            st.subheader(f"{pname} さん、パスワードを設定してください")
+            st.caption("次回から、メールアドレスとパスワードでログインできます。")
+            with st.form("set_password_form"):
+                pw1 = st.text_input("パスワード（6文字以上）", type="password")
+                pw2 = st.text_input("パスワード（確認）", type="password")
+                col_set, col_skip = st.columns(2)
+                submitted_set  = col_set.form_submit_button("設定する", type="primary", use_container_width=True)
+                submitted_skip = col_skip.form_submit_button("スキップ", use_container_width=True)
+            if submitted_set:
+                if len(pw1.strip()) < 6:
+                    st.error("パスワードは6文字以上で入力してください。")
+                elif pw1 != pw2:
+                    st.error("パスワードが一致しません。")
+                else:
+                    pid = st.session_state.get("form_player_id", "")
+                    ok = _save_password_hash(ctx, pid, pw1)
+                    if ok:
+                        st.session_state.pop("form_need_set_password", None)
+                        st.success("✅ パスワードを設定しました。")
+                        st.rerun()
+                    else:
+                        st.error("パスワードの設定に失敗しました。スキップして進んでください。")
+            if submitted_skip:
+                st.session_state.pop("form_need_set_password", None)
+                st.rerun()
+            return
+
+        # ── 既存奏者: メニュー形式 ────────────────────────────
         if st.session_state.get("form_is_existing_auth"):
             pname = st.session_state.get("form_player_name", "")
+            pid   = st.session_state.get("form_player_id", "")
             st.subheader(f"こんにちは、{pname} さん")
-            st.caption("現在の登録状況を確認してから、出欠・希望の入力に進んでください。")
 
-            pid = st.session_state.get("form_player_id", "")
+            # パートをセット
             players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
             player  = next((p for p in players if p.get("id") == pid), {})
-
-            # 基本情報表示
-            with st.expander("登録情報", expanded=True):
-                _email = ext(player, PLAYER_EMAIL_KEYS) or "未登録"
-                _hn    = ext(player, PLAYER_HN_KEYS)    or "未登録"
-                st.caption(f"メールアドレス: {_email}")
-                st.caption(f"H.N.: {_hn}")
-
-            # 出欠状況表示
-            if practices:
-                with st.expander("現在の出欠登録状況", expanded=True):
-                    _, p_to_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
-                    for pr in practices:
-                        pr_id   = pr.get("id","")
-                        pr_name = ext(pr, PRACTICE_NAME_KEYS) or ext(pr, PRACTICE_DATE_KEYS) or pr_id
-                        pr_date = ext(pr, PRACTICE_DATE_KEYS) or ""
-                        status  = (p_to_att_map.get(pr_id, {}) or {}).get("status", "未回答")
-                        label   = f"{pr_date[:10] if pr_date else ''} {pr_name}".strip()
-                        st.caption(f"{label}：**{status}**")
-
-            st.divider()
-            # パートをセット（Step2用）
             participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
             my_part = ""
             for row in participant_rows:
@@ -750,8 +883,32 @@ def render_form(ctx, concert_id: str):
                 my_part = ext(player, ["パート", "Part"]) or ""
             st.session_state["form_player_part"] = my_part
 
-            if st.button("出欠・希望の入力へ進む →", type="primary",
-                         use_container_width=True, key="existing_to_step2"):
+            # 案提示フラグ確認
+            proposal_done = _get_proposal_flag(ctx, concert_id)
+
+            # ── 出欠サマリ ──────────────────────────────────
+            _, p_to_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
+            att_answered = sum(1 for pr in practices
+                               if (p_to_att_map.get(pr.get("id",""), {}) or {}).get("status","") not in ("", "未回答"))
+            att_total    = len(practices)
+
+            # ── 希望サマリ ──────────────────────────────────
+            existing_pref = _load_existing_prefs(ctx, concert_id, pid, partdefs)
+            pref_answered = sum(1 for v in existing_pref.values() if v not in ("未回答", ""))
+            pref_total    = len(partdefs)
+
+            # ── サマリカード ─────────────────────────────────
+            with st.container(border=True):
+                c1, c2 = st.columns(2)
+                att_status = "✅ 完了" if att_answered == att_total and att_total > 0 else f"⚠️ {att_answered}/{att_total}回 回答済"
+                pref_status = "✅ 完了" if pref_answered == pref_total and pref_total > 0 else (f"⚠️ {pref_answered}/{pref_total}パート 回答済" if pref_total > 0 else "—")
+                c1.metric("出欠", att_status)
+                c2.metric("パート希望", pref_status)
+
+            st.divider()
+
+            # ── メニューボタン ──────────────────────────────
+            if st.button("📅 出欠を入力・変更する", use_container_width=True, key="menu_att"):
                 _, existing_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
                 preload_att: dict[str, str] = {}
                 preload_comment: dict[str, str] = {}
@@ -761,10 +918,39 @@ def render_form(ctx, concert_id: str):
                 st.session_state.update({
                     "form_att": preload_att,
                     "form_att_comment": preload_comment,
-                    "form_pref": {},
-                    "form_own":  {},
                     "form_step": 2,
+                    "form_menu_mode": True,  # メニューから来たフラグ
                 })
+                st.rerun()
+
+            if partdefs:
+                if proposal_done:
+                    st.button("🎵 パート希望（アサイン案提示中のため変更不可）",
+                              use_container_width=True, disabled=True, key="menu_pref_disabled")
+                    st.caption("アサイン案が提示されています。変更が必要な場合は管理者にご連絡ください。")
+                else:
+                    if st.button("🎵 パート希望を入力・変更する", use_container_width=True, key="menu_pref"):
+                        st.session_state.update({
+                            "form_pref": existing_pref,  # 既存データをプリロード
+                            "form_step": 3,
+                            "form_menu_mode": True,
+                        })
+                        st.rerun()
+
+            if IS_PERC(my_part):
+                if st.button("🥁 所有楽器を入力・変更する", use_container_width=True, key="menu_own"):
+                    st.session_state.update({
+                        "form_own":  {},
+                        "form_step": 4,
+                        "form_menu_mode": True,
+                    })
+                    st.rerun()
+
+            st.divider()
+            if st.button("🔓 ログアウト", use_container_width=True, key="menu_logout"):
+                for k in list(st.session_state.keys()):
+                    if k.startswith("form_") or k.startswith("auth_"):
+                        st.session_state.pop(k, None)
                 st.rerun()
             return
         # 新規奏者の場合: 名前・パート入力
@@ -932,7 +1118,11 @@ def render_form(ctx, concert_id: str):
         if submitted:
             st.session_state["form_att"]  = att
             st.session_state["form_att_comment"] = att_comment
-            st.session_state["form_step"] = 3 if partdefs else 5
+            if st.session_state.get("form_menu_mode"):
+                # メニューから来た場合は送信→完了→メニューに戻る
+                st.session_state["form_step"] = 6
+            else:
+                st.session_state["form_step"] = 3 if partdefs else 5
             st.rerun()
 
     # ── STEP 3: パート希望（パート定義が存在する場合） ──────────
@@ -990,7 +1180,10 @@ def render_form(ctx, concert_id: str):
                     st.caption(f"{pd_name_map.get(pd_id, pd_id)}：{v}")
 
         if st.button("次へ →", type="primary", use_container_width=True, key="step3_next"):
-            st.session_state["form_step"] = 4 if IS_PERC(part) else 5
+            if st.session_state.get("form_menu_mode"):
+                st.session_state["form_step"] = 6
+            else:
+                st.session_state["form_step"] = 4 if IS_PERC(part) else 5
             st.rerun()
 
     # ── STEP 4: 所有楽器（Percのみ） ─────────────────────────
@@ -1016,7 +1209,10 @@ def render_form(ctx, concert_id: str):
                                               use_container_width=True)
         if submitted:
             st.session_state["form_own"]  = own
-            st.session_state["form_step"] = 5
+            if st.session_state.get("form_menu_mode"):
+                st.session_state["form_step"] = 6
+            else:
+                st.session_state["form_step"] = 5
             st.rerun()
 
     # ── STEP 5: 確認・送信 ───────────────────────────────────
@@ -1089,7 +1285,19 @@ def render_form(ctx, concert_id: str):
                 st.session_state["form_balloons_done"] = True
             st.success(f"✅ 送信完了！ {ok_n}件のデータが登録されました。")
         st.markdown(f"**{player_name}** さん、ありがとうございました。")
-        st.info("このページを閉じて構いません。")
+
+        # メニューモードの場合はメニューに戻るボタンを表示
+        if st.session_state.get("form_menu_mode"):
+            if st.button("← メニューに戻る", use_container_width=True, key="back_to_menu"):
+                st.session_state.update({
+                    "form_step": 1,
+                    "form_notified": False,
+                    "form_balloons_done": False,
+                    "form_menu_mode": False,
+                })
+                st.rerun()
+        else:
+            st.info("このページを閉じて構いません。")
 
         # 通知用に入力内容を退避（この後 session_state をクリアするため）
         att_dict_snapshot = dict(st.session_state.get("form_att", {}) or {})
@@ -1136,8 +1344,14 @@ def render_form(ctx, concert_id: str):
                                 lines.append(f"    コメント: {cmt}")
                     if pref_dict:
                         lines.append("")
-                        lines.append("【希望】（件数のみ）")
-                        lines.append(f"  希望登録数: {len(pref_dict)}件")
+                        lines.append("【パート希望】")
+                        pd_name_map = {
+                            pd.get("id",""): ext(pd, PARTDEF_NAME_KEYS) or ""
+                            for pd in (st.session_state.get("form_partdefs") or [])
+                        }
+                        for pd_id, priority in pref_dict.items():
+                            if priority not in ("未回答", ""):
+                                lines.append(f"  {pd_name_map.get(pd_id, pd_id[:8])}: {priority}")
                     send_text_to_all(
                         ctx,
                         [{"name": "管理者", "email": admin_email}],
