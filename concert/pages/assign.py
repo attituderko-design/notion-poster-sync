@@ -202,6 +202,10 @@ def _clear_assign_cache():
             st.session_state.pop(k, None)
 
 
+def _normalize_page_id(v: str) -> str:
+    return (v or "").replace("-", "").strip().lower()
+
+
 def _is_perc_part(part_name: str) -> bool:
     """パート名が打楽器（Perc）かどうかを判定する。未設定の場合は対象外とする。"""
     name = (part_name or "").strip().lower()
