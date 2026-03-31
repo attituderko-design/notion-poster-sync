@@ -200,9 +200,6 @@ def _clear_assign_cache():
             st.session_state.pop(k, None)
         if k.startswith("pref_editor_version_") or k.startswith("pref_editor_"):
             st.session_state.pop(k, None)
-    st.cache_data.clear()  # Notionクエリキャッシュを無効化
-    for _k in [k for k in st.session_state if k.startswith("harmonia_preloaded_")]:
-        st.session_state.pop(_k, None)  # 次回ホームで再プリフェッチ
 
 
 def _normalize_page_id(v: str) -> str:
@@ -1541,8 +1538,20 @@ def _render_result_tab(ctx: dict):
         if matched_sid:
             by_song[matched_sid].append(r)
 
-    for song in sorted(songs, key=lambda x: _song_name(x, ctx)):
+    # 演奏曲フィルタ
+    _sorted_songs = sorted(songs, key=lambda x: _song_name(x, ctx))
+    _song_filter_opts = {"（全曲）": ""} | {_song_name(s, ctx): s.get("id", "") for s in _sorted_songs}
+    _selected_song_label = st.selectbox(
+        "演奏曲を絞り込む",
+        list(_song_filter_opts.keys()),
+        key="result_song_filter",
+    )
+    _selected_song_id = _song_filter_opts.get(_selected_song_label, "")
+
+    for song in _sorted_songs:
         sid   = song.get("id","")
+        if _selected_song_id and sid != _selected_song_id:
+            continue
         sname = _song_name(song, ctx)
         rows  = by_song.get(sid, [])
         with st.expander(f"**{sname}**　{len(rows)}パート", expanded=True):
