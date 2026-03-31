@@ -8751,16 +8751,63 @@ if system_mode == "HARMONIA":
         return stats
 
     def _render_harmonia_progress_cards(stats: dict):
-        st.progress(max(0.0, min(1.0, float(stats.get('overall_progress_ratio', 0.0)))))
-        st.caption(f"総進捗 {int(round(float(stats.get('overall_progress_ratio', 0.0)) * 100))}%")
-        for title, ratio, desc in stats.get("step_items", []):
-            badge = "✅ 完了" if ratio >= 1.0 else ("🟡 進行中" if ratio > 0 else "⚪ 未着手")
-            st.markdown(f"**{title}**　{badge}")
-            st.caption(desc)
-            st.divider()
-        with st.expander("暫定デバッグログ", expanded=False):
-            for line in stats.get("debug_lines", []):
-                st.text(line)
+        # ── 全体進捗バー ──────────────────────────────────────
+        ratio = max(0.0, min(1.0, float(stats.get("overall_progress_ratio", 0.0))))
+        pct   = int(round(ratio * 100))
+        st.progress(ratio)
+        st.caption(f"総進捗　{pct}%　（{sum(1 for _, r, _ in stats.get('step_items', []) if r >= 1.0)} / {len(stats.get('step_items', []))} ステップ完了）")
+
+        # ── 次アクションへのショートカット ───────────────────
+        next_action = None
+        _page_map = {
+            "③": "練習管理", "④": "奏者・出欠・持参楽器", "⑤": "楽曲・楽器管理",
+            "⑥": "楽曲・楽器管理", "⑦": "奏者・出欠・持参楽器", "⑧": "奏者・出欠・持参楽器",
+            "⑨": "奏者・出欠・持参楽器", "⑩": "アサイン検討", "⑪": "アサイン検討",
+            "⑫": "アサイン検討", "⑬": "レンタル管理",
+        }
+        for title, r, desc in stats.get("step_items", []):
+            if r < 1.0:
+                next_action = (title, r, desc)
+                break
+        if next_action:
+            _title, _r, _desc = next_action
+            _badge = "🟡 進行中" if _r > 0 else "⚪ 未着手"
+            _num = _title[:2] if _title else ""
+            _dest = _page_map.get(_num, "")
+            with st.container(border=True):
+                st.caption("💡 次のアクション")
+                c1, c2 = st.columns([6, 2])
+                c1.markdown(f"**{_title}**　{_badge}")
+                c1.caption(_desc)
+                if _dest:
+                    if c2.button(f"→ {_dest}", key="home_next_action_btn", use_container_width=True):
+                        st.session_state["concert_page_radio"] = _dest
+                        st.rerun()
+
+        st.markdown("---")
+
+        # ── ステップグリッド（3列）────────────────────────────
+        items = stats.get("step_items", [])
+        cols_per_row = 3
+        for row_start in range(0, len(items), cols_per_row):
+            cols = st.columns(cols_per_row)
+            for col_idx, item_idx in enumerate(range(row_start, min(row_start + cols_per_row, len(items)))):
+                title, r, desc = items[item_idx]
+                with cols[col_idx]:
+                    if r >= 1.0:
+                        bg = "#e8f5e9"; icon = "✅"; label = "完了"
+                    elif r > 0:
+                        bg = "#fff8e1"; icon = "🟡"; label = "進行中"
+                    else:
+                        bg = "#f5f5f5"; icon = "⚪"; label = "未着手"
+                    st.markdown(
+                        f"""<div style='background:{bg};border-radius:8px;padding:10px 12px;margin-bottom:4px;min-height:80px'>
+                        <div style='font-size:0.75rem;color:#666'>{icon} {label}</div>
+                        <div style='font-weight:600;font-size:0.9rem;margin:2px 0'>{title}</div>
+                        <div style='font-size:0.75rem;color:#555'>{desc}</div>
+                        </div>""",
+                        unsafe_allow_html=True,
+                    )
 
 
     def _cleanup_harmonia_smoketest_pages() -> dict:
