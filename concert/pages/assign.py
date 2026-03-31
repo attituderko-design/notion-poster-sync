@@ -202,6 +202,14 @@ def _clear_assign_cache():
             st.session_state.pop(k, None)
 
 
+def _is_perc_part(part_name: str) -> bool:
+    """パート名が打楽器（Perc）かどうかを判定する。未設定の場合はPercとみなす。"""
+    name = (part_name or "").strip().lower()
+    if not name:
+        return True  # 未設定は対象に含める
+    return name in ("perc", "percussion", "打楽器")
+
+
 def _load_players(ctx) -> list[dict]:
     if "player_list" not in st.session_state:
         st.session_state["player_list"] = ctx["query_all"](ctx["CONCERT_DB_PLAYER"])
