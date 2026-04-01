@@ -12,6 +12,7 @@ CONCERT_VENUE_KEYS        = ["会場", "場所", "会場名", "Venue"]
 CONCERT_ADDRESS_KEYS      = ["住所", "Address"]
 CONCERT_MEMO_KEYS         = ["メモ", "備考", "Memo"]
 CONCERT_KEY_KEYS          = ["concert_key", "ConcertKey", "演奏会キー", "PK演奏会キー"]
+CONCERT_CAST_MEMBERS_KEYS = ["キャスト・関係者", "キャスト", "関係者", "cast_members", "organizer"]
 
 # ── PRACTICE（練習）DB ───────────────────────────────────────
 PRACTICE_NAME_KEYS        = ["練習名", "タイトル", "PK練習名"]
