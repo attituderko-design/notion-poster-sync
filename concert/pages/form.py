@@ -1531,13 +1531,46 @@ def render_form(ctx, concert_id: str = ""):
                 # 練習情報PDF（Leader以上）
                 if practices:
                     st.markdown("**📄 練習情報PDF（全練習回）**")
+
+                    # スケジュール・レンタル・持参情報を事前取得してステータス判定
+                    _all_sched  = ctx["query_all"](ctx.get("CONCERT_DB_SCHEDULE","") or "", None) if ctx.get("CONCERT_DB_SCHEDULE") else []
+                    _all_rental = ctx["query_all"](ctx.get("CONCERT_DB_RENTAL","") or "", None) if ctx.get("CONCERT_DB_RENTAL") else []
+                    _all_pi     = ctx["query_all"](ctx.get("CONCERT_DB_PLAYER_INSTRUMENT","") or "", None) if ctx.get("CONCERT_DB_PLAYER_INSTRUMENT") else []
+
                     for _pr in practices:
                         _pr_id   = _pr.get("id","")
                         _pr_name = ext(_pr, PRACTICE_NAME_KEYS) or "練習"
                         _pr_date = (ext(_pr, PRACTICE_DATE_KEYS) or "")[:10]
                         _pdf_key = f"form_pdf_bytes_{_pr_id}"
-                        _col_a, _col_b = st.columns([3,2])
-                        _col_a.caption(f"{_pr_date}　{_pr_name}")
+
+                        # ── ステータス判定 ──────────────────────
+                        _venue_ok   = bool(ext(_pr, PRACTICE_VENUE_KEYS))
+                        _sched_ok   = any(
+                            _pr_id in ctx["extract_relation_ids_any"](r, ["練習","FK練習","practice"])
+                            for r in _all_sched
+                        )
+                        _rental_ok  = any(
+                            _pr_id in ctx["extract_relation_ids_any"](r, ["練習","FK練習","practice"])
+                            and ctx["extract_prop_text_any"](r, ["確定フラグ","確定","Confirmed"]) == "True"
+                            for r in _all_rental
+                        )
+                        _bring_ok   = any(
+                            _pr_id in ctx["extract_relation_ids_any"](r, ["練習","FK練習","practice"])
+                            and ctx["extract_prop_text_any"](r, ["持参担当","持参担当フラグ"]) == "True"
+                            for r in _all_pi
+                        )
+                        _inst_ok = _rental_ok or _bring_ok
+
+                        def _badge(ok: bool, label: str) -> str:
+                            return f"{'✅' if ok else '⚠️'} {label}"
+
+                        _col_a, _col_b = st.columns([3, 2])
+                        _col_a.caption(f"**{_pr_date}　{_pr_name}**")
+                        _col_a.caption(
+                            f"{_badge(_venue_ok,'会場')}　"
+                            f"{_badge(_sched_ok,'スケジュール')}　"
+                            f"{_badge(_inst_ok,'レンタル/持参')}"
+                        )
                         if _pdf_key not in st.session_state:
                             if _col_b.button("生成", key=f"leader_gen_{_pr_id}", use_container_width=True):
                                 with st.spinner("生成中..."):
@@ -1555,6 +1588,34 @@ def render_form(ctx, concert_id: str = ""):
                                 key=f"leader_dl_{_pr_id}",
                                 use_container_width=True,
                             )
+
+                # ── 楽譜URLリンク ──────────────────────────────
+                # 自分のパートに関連するパート定義の楽譜URL（パート別優先、なければ曲全体）を表示
+                _score_links: list[tuple[str,str]] = []  # (label, url)
+                for _pd in partdefs:
+                    # 自分のパートのパート定義のみ
+                    _pd_pm_ids = ctx["extract_relation_ids_any"](_pd, PARTDEF_PART_REL_KEYS)
+                    if _pd_pm_ids and _pd_pm_ids[0] == my_part_master_id:
+                        _pd_url = ctx["extract_prop_text_any"](_pd, ["楽譜URL","score_url","ScoreURL"]) or ""
+                        _pd_label = ctx["extract_prop_text_any"](_pd, PARTDEF_NAME_KEYS) or "楽譜"
+                        if _pd_url:
+                            _score_links.append((_pd_label, _pd_url))
+                        else:
+                            # パート別URLがなければ曲全体のURLを探す
+                            _pd_song_ids = ctx["extract_relation_ids_any"](_pd, PARTDEF_SONG_REL_KEYS)
+                            if _pd_song_ids:
+                                _song = next((s for s in songs if s.get("id") == _pd_song_ids[0]), None)
+                                if _song:
+                                    _song_url = ctx["extract_prop_text_any"](_song, ["楽譜URL","score_url","ScoreURL"]) or ""
+                                    _song_name_lbl = ctx["extract_prop_text_any"](_song, SONG_NAME_KEYS) or "楽譜"
+                                    if _song_url:
+                                        _score_links.append((f"{_song_name_lbl}（全体）", _song_url))
+
+                if _score_links:
+                    st.divider()
+                    st.markdown("**🎼 楽譜リンク**")
+                    for _lbl, _url in _score_links:
+                        st.markdown(f"[📄 {_lbl}]({_url})")
 
             # Manager専用メニュー
             if user_role >= ROLE_MANAGER:
@@ -1633,6 +1694,30 @@ def render_form(ctx, concert_id: str = ""):
                         if st.button("🔄 PDFを再生成", key=f"regen_pdf_{pr_id_next}", use_container_width=True):
                             st.session_state.pop(_pdf_key, None)
                             st.rerun()
+
+            # ── 楽譜リンク（全ロール共通：自パートのもの） ──────
+            _player_score_links: list[tuple[str,str]] = []
+            for _pd in partdefs:
+                _pd_pm_ids = ctx["extract_relation_ids_any"](_pd, PARTDEF_PART_REL_KEYS)
+                if _pd_pm_ids and _pd_pm_ids[0] == my_part_master_id:
+                    _pd_url = ctx["extract_prop_text_any"](_pd, ["楽譜URL","score_url","ScoreURL"]) or ""
+                    _pd_lbl = ctx["extract_prop_text_any"](_pd, PARTDEF_NAME_KEYS) or "楽譜"
+                    if _pd_url:
+                        _player_score_links.append((_pd_lbl, _pd_url))
+                    else:
+                        _pd_song_ids = ctx["extract_relation_ids_any"](_pd, PARTDEF_SONG_REL_KEYS)
+                        if _pd_song_ids:
+                            _s = next((s for s in songs if s.get("id") == _pd_song_ids[0]), None)
+                            if _s:
+                                _s_url = ctx["extract_prop_text_any"](_s, ["楽譜URL","score_url","ScoreURL"]) or ""
+                                _s_lbl = ctx["extract_prop_text_any"](_s, SONG_NAME_KEYS) or "楽譜"
+                                if _s_url:
+                                    _player_score_links.append((f"{_s_lbl}（全体）", _s_url))
+            if _player_score_links:
+                st.divider()
+                st.markdown("**🎼 楽譜リンク**")
+                for _lbl, _url in _player_score_links:
+                    st.markdown(f"[📄 {_lbl}]({_url})")
 
             st.divider()
             if st.button("🔓 ログアウト", use_container_width=True, key="menu_logout"):

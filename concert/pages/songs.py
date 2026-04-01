@@ -386,7 +386,8 @@ def _get_global_concert_filter(ctx: dict, concert_opts: dict[str, str]) -> tuple
 # ============================================================
 
 def _create_song(ctx: dict, title: str, concert_ids: list[str],
-                 composer: str, duration_sec: int | None, note: str) -> bool:
+                 composer: str, duration_sec: int | None, note: str,
+                 score_url: str = "") -> bool:
     db_id    = ctx["CONCERT_DB_SONG"]
     type_map = ctx["get_prop_types"](db_id)
     if not type_map:
@@ -400,6 +401,8 @@ def _create_song(ctx: dict, title: str, concert_ids: list[str],
     if duration_sec is not None:
         ctx["put_prop_any"](props, type_map, SONG_DURATION_KEYS, duration_sec)
     ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
+    if score_url.strip():
+        ctx["put_prop_any"](props, type_map, SONG_SCORE_URL_KEYS, score_url.strip())
     ctx["put_key_any"](props, type_map, SONG_KEY_KEYS, title, composer, prefix="song")
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages",
                              json={"parent": {"database_id": db_id}, "properties": props})
@@ -407,7 +410,8 @@ def _create_song(ctx: dict, title: str, concert_ids: list[str],
 
 
 def _update_song(ctx: dict, page_id: str, title: str, concert_ids: list[str],
-                 composer: str, duration_sec: int | None, note: str) -> bool:
+                 composer: str, duration_sec: int | None, note: str,
+                 score_url: str = "") -> bool:
     type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
     props: dict = {}
     ctx["put_prop_any"](props, type_map, SONG_NAME_KEYS, title)
@@ -417,6 +421,8 @@ def _update_song(ctx: dict, page_id: str, title: str, concert_ids: list[str],
     if duration_sec is not None:
         ctx["put_prop_any"](props, type_map, SONG_DURATION_KEYS, duration_sec)
     ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
+    if score_url.strip():
+        ctx["put_prop_any"](props, type_map, SONG_SCORE_URL_KEYS, score_url.strip())
     ctx["put_key_any"](props, type_map, SONG_KEY_KEYS, title, composer, prefix="song")
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
@@ -934,6 +940,7 @@ def _render_song_tab(ctx: dict):
                 default=[k for k, v in all_concert_opts.items() if v == filter_concert_id],
                 key="sn_concerts",
             )
+            score_url_new = st.text_input("楽譜URL（全体）", placeholder="例: https://imslp.org/...", key="sn_score_url")
             note = st.text_area("難易度メモ", height=60, key="sn_note")
             if st.form_submit_button("💾 登録", use_container_width=True, type="primary"):
                 if not title.strip():
@@ -942,7 +949,7 @@ def _render_song_tab(ctx: dict):
                     duration_sec = _mmss_to_sec(duration_str)
                     concert_ids  = [all_concert_opts[n] for n in concert_sel if all_concert_opts.get(n)]
                     with st.spinner("登録中..."):
-                        ok = _create_song(ctx, title.strip(), concert_ids, composer, duration_sec, note)
+                        ok = _create_song(ctx, title.strip(), concert_ids, composer, duration_sec, note, score_url_new)
                     if ok:
                         st.success("✅ 楽曲を登録しました。")
                         _clear_song_cache()
@@ -1012,6 +1019,10 @@ def _render_song_row(
                 "紐づける演奏会", list(all_concert_opts.keys()),
                 default=existing_concert_names, key=f"se_concerts_{song_id}",
             )
+            cur_score_url = ctx["extract_prop_text_any"](s, SONG_SCORE_URL_KEYS) or ""
+            score_url_v = st.text_input("楽譜URL（全体）", value=cur_score_url,
+                                        placeholder="例: https://imslp.org/...",
+                                        key=f"se_score_url_{song_id}")
             note = st.text_area("難易度メモ",
                                 value=ctx["extract_prop_text_any"](s, SONG_NOTE_KEYS) or "",
                                 height=60, key=f"se_note_{song_id}")
@@ -1023,7 +1034,7 @@ def _render_song_row(
                     concert_ids  = [all_concert_opts[n] for n in concert_sel if all_concert_opts.get(n)]
                     with st.spinner("更新中..."):
                         ok = _update_song(ctx, song_id, title.strip(), concert_ids,
-                                          composer_v, duration_sec, note)
+                                          composer_v, duration_sec, note, score_url_v)
                     if ok:
                         st.success("✅ 更新しました。")
                         _clear_song_cache()
@@ -1047,6 +1058,7 @@ def _upsert_partdef(
     need_count: int,
     note: str,
     existing_id: str = "",
+    score_url: str = "",
 ) -> bool:
     """
     パート定義を新規作成または更新する。
@@ -1082,6 +1094,8 @@ def _upsert_partdef(
     ctx["put_prop_any"](props, t, PARTDEF_SONG_REL_KEYS,     target_song_id)
     ctx["put_prop_any"](props, t, PARTDEF_INST_REL_KEYS,     clean_inst_ids)
     ctx["put_prop_any"](props, t, PARTDEF_NOTE_KEYS,         note)
+    if score_url.strip():
+        ctx["put_prop_any"](props, t, PARTDEF_SCORE_URL_KEYS, score_url.strip())
     ctx["put_key_any"](
         props, t, PARTDEF_KEY_KEYS,
         concert_id, target_song_id, part_name,
@@ -1518,6 +1532,7 @@ def _render_partdef_tab(ctx: dict):
                     help="候補が多いときは上の絞り込みを使ってください。",
                 )
                 need = st.number_input("必要人数", min_value=1, max_value=20, value=1, step=1)
+                pd_score_url = st.text_input("楽譜URL（パート別）", placeholder="例: https://drive.google.com/...")
                 note = st.text_input("備考", placeholder="任意")
                 if st.form_submit_button("💾 追加", type="primary", use_container_width=True):
                     if not p_name.strip():
@@ -1530,6 +1545,7 @@ def _render_partdef_tab(ctx: dict):
                             part_name=p_name.strip(),
                             inst_ids=[inst_opts[n] for n in i_names if inst_opts.get(n)],
                             inst_names=i_names, need_count=int(need), note=note,
+                            score_url=pd_score_url,
                         )
                         if ok:
                             _set_concert_song_partdef_completed(ctx, c_id, s_id, False)
@@ -1583,6 +1599,7 @@ def _render_partdef_tab(ctx: dict):
             cur_inst_ids   = ctx["extract_relation_ids_any"](r, PARTDEF_INST_REL_KEYS)
             cur_inst_names = [k for k, v in inst_opts_all.items() if v in set(cur_inst_ids)]
             cur_note       = ctx["extract_prop_text_any"](r, PARTDEF_NOTE_KEYS) or ""
+            cur_pd_score_url = ctx["extract_prop_text_any"](r, PARTDEF_SCORE_URL_KEYS) or ""
             with st.expander(row_title, expanded=False):
                 with st.form(f"partdef_edit_{rid}", border=True):
                     n_name = st.text_input("パート名 *", value=part_name_disp)
@@ -1590,6 +1607,8 @@ def _render_partdef_tab(ctx: dict):
                         "担当楽器（複数選択可）", list(inst_opts.keys()),
                         default=[x for x in cur_inst_names if x in inst_opts],
                     )
+                    n_score_url = st.text_input("楽譜URL（パート別）", value=cur_pd_score_url,
+                                                placeholder="例: https://drive.google.com/...")
                     n_note = st.text_input("備考", value=cur_note)
                     c1, c2 = st.columns(2)
                     if c1.form_submit_button("💾 更新", use_container_width=True):
@@ -1601,7 +1620,7 @@ def _render_partdef_tab(ctx: dict):
                                 part_name=n_name.strip() or part_name_disp,
                                 inst_ids=[inst_opts[x] for x in n_inst if inst_opts.get(x)],
                                 inst_names=n_inst, need_count=1, note=n_note,
-                                existing_id=rid,
+                                existing_id=rid, score_url=n_score_url,
                             )
                             if ok:
                                 _set_concert_song_partdef_completed(ctx, c_id, s_id, False)
