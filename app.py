@@ -9434,9 +9434,62 @@ if system_mode == "HARMONIA":
                             else:
                                 st.error("変更に失敗しました。")
 
-                # フォームURL + QRコード
-                st.code(_form_url, language=None)
-                st.caption(f"招待コード: **{_invite_code}** をLINEやチャットで別途共有してください。")
+                # ── 招待メッセージ + フォームURL + QRコード ───────
+                # 団体名：ATLASの「キャスト・関係者」フィールドから取得
+                _org_name_raw = concert_ctx["extract_prop_text_any"](
+                    selected_concert_row,
+                    ["キャスト・関係者", "キャスト", "関係者", "cast_members", "organizer"]
+                ) or ""
+
+                # 署名者名・団体名をUI上で編集可能に
+                col_org, col_sig = st.columns(2)
+                _org_name = col_org.text_input(
+                    "団体名",
+                    value=st.session_state.get("invite_org_name", _org_name_raw),
+                    key="invite_org_name",
+                    placeholder="例: ○○打楽器アンサンブル",
+                )
+                _sig_name = col_sig.text_input(
+                    "署名者名",
+                    value=st.session_state.get("invite_sig_name", ""),
+                    key="invite_sig_name",
+                    placeholder="例: 山田太郎",
+                )
+
+                # 署名行を組み立て
+                if _org_name and _sig_name:
+                    _signature = f"{_org_name} 代表 / {_sig_name}"
+                elif _org_name:
+                    _signature = _org_name
+                elif _sig_name:
+                    _signature = _sig_name
+                else:
+                    _signature = "ArtéMis HARMONIA"
+
+                _invite_msg = (
+                    f"🎵 {_c_name} への参加登録をお願いします。\n"
+                    f"\n"
+                    f"以下のURLにアクセスし、招待コードを入力してください。\n"
+                    f"\n"
+                    f"▶ フォームURL\n"
+                    f"{_form_url}\n"
+                    f"\n"
+                    f"▶ 招待コード\n"
+                    f"{_invite_code}\n"
+                    f"\n"
+                    f"初回アクセス時は「招待コードで参加」を選択し、\n"
+                    f"コードを入力してください。\n"
+                    f"2回目以降はメールアドレスとパスワードでログインできます。\n"
+                    f"\n"
+                    f"— {_signature}"
+                )
+                st.text_area(
+                    "📨 招待メッセージ（コピーしてLINE・メール等で共有）",
+                    value=_invite_msg,
+                    height=275,
+                    key="invite_msg_area",
+                    help="このテキストをそのままコピーして奏者に送ってください。",
+                )
                 if st.button("📱 QRコードを表示", key="invite_qr_btn", use_container_width=True):
                     st.session_state["show_invite_qr"] = not st.session_state.get("show_invite_qr", False)
                 if st.session_state.get("show_invite_qr"):
