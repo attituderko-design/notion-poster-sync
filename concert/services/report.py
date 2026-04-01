@@ -15,6 +15,7 @@ from reportlab.platypus import (
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from concert.services.song_utils import get_song_display_name, build_song_name_map
 
 FONT_PATH_REGULAR = "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf"
 FONT_PATH_BOLD    = "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf"  # IPAゴシック（プロポーショナル）をBold代用
@@ -366,7 +367,7 @@ def generate_assign_report(
     story = []
 
     extract = ctx["extract_prop_text_any"]
-    song_name_map  = {s.get("id"): (extract(s, ["曲名","タイトル"]) or s.get("id","")) for s in songs}
+    song_name_map  = build_song_name_map(ctx, songs)
     player_name_map= {p.get("id"): (extract(p, ["氏名","名前","表示名","タイトル"]) or p.get("id","")) for p in players}
     song_order     = [s.get("id") for s in sorted(songs, key=lambda x: song_name_map.get(x.get("id",""),""))]
 

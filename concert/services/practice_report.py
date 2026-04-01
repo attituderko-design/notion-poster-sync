@@ -31,14 +31,14 @@ from concert.services.keys import (
     SCHEDULE_START_KEYS, SCHEDULE_END_KEYS, SCHEDULE_TYPE_KEYS,
     SCHEDULE_CONTENT_KEYS, SCHEDULE_SONG_REL_KEYS, SCHEDULE_ORDER_KEYS,
     ATT_PLAYER_REL_KEYS, ATT_STATUS_KEYS,
-    PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_PART_REL_KEYS,
-    PARTMASTER_NAME_KEYS, PARTMASTER_TYPE_KEYS,
+    PARTICIPANT_PLAYER_REL_KEYS,
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_BRING_ASSIGN_KEYS,
     PI_OWN_COUNT_KEYS, PI_BRING_COUNT_KEYS, PI_CONCERT_REL_KEYS,
     RENTAL_INST_REL_KEYS, RENTAL_ITEM_NAME_KEYS, RENTAL_VENDOR_KEYS,
     RENTAL_QTY_KEYS, RENTAL_UNIT_PRICE_KEYS, RENTAL_CONFIRMED_KEYS, RENTAL_COST_TYPE_KEYS,
     PLAYER_NAME_KEYS, INSTRUMENT_NAME_KEYS, SONG_NAME_KEYS,
 )
+from concert.services.song_utils import get_song_display_name, build_song_name_map
 
 
 def _make_maps_url(address: str) -> str:
@@ -206,14 +206,14 @@ def generate_practice_report(
     # 練習する曲
     practice_song_ids = ext_rel(practice, PRACTICE_SONG_REL_KEYS)
     all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
-    song_name_map = {s.get("id"): ext(s, SONG_NAME_KEYS) or "" for s in all_songs}
+    song_name_map = build_song_name_map(ctx, all_songs)
     if practice_song_ids:
         practice_songs = [song_name_map.get(sid, "") for sid in practice_song_ids if song_name_map.get(sid)]
     else:
         # 未設定の場合は演奏会の全曲
         from concert.services.keys import SONG_CONCERT_REL_KEYS
-        practice_songs = [ext(s, SONG_NAME_KEYS) or "" for s in all_songs
-                          if concert_id in ext_rel(s, SONG_CONCERT_REL_KEYS)]
+        practice_songs = [get_song_display_name(ctx, s) for s in all_songs
+                          if concert_id in ext_rel(s, SONG_CONCERT_REL_KEYS) and get_song_display_name(ctx, s)]
 
     # スケジュール
     sched_t    = ctx["get_prop_types"](ctx["CONCERT_DB_SCHEDULE"])
@@ -257,22 +257,14 @@ def generate_practice_report(
         pid = part_to_player.get(raw_ids[0], raw_ids[0])
         att_map[pid] = ext(r, ATT_STATUS_KEYS) or "—"
 
-    # パート情報取得（PART_MASTERのRelation経由）
-    from concert.services.keys import PARTICIPANT_CONCERT_REL_KEYS
+    # 参加者（演奏会参加者DB経由）
+    from concert.services.keys import PARTICIPANT_CONCERT_REL_KEYS, PARTICIPANT_PART_KEYS
     concert_participants = [r for r in participant_rows
                              if concert_id in ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)]
     participant_player_ids = []
     for r in concert_participants:
         p_ids = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
         if p_ids: participant_player_ids.append(p_ids[0])
-
-    # PART_MASTERマップを構築
-    try:
-        _pm_rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
-        _pm_map  = {r.get("id",""): ctx["extract_prop_text_any"](r, PARTMASTER_NAME_KEYS) or ""
-                    for r in _pm_rows}
-    except Exception:
-        _pm_map = {}
 
     # 持参楽器（演奏会×出席者）
     inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"], None)
@@ -388,13 +380,12 @@ def generate_practice_report(
     # 出欠一覧（パート順ソート・パート列追加）
     _h_att = Paragraph("■ 出欠一覧", st_map["h2"])
 
-    # パート情報取得（PART_MASTERのRelation経由）
+    # パート情報取得
     player_part_map_pr: dict[str, str] = {}
     for r in concert_participants:
         p_ids = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
         if p_ids:
-            pm_ids = ext_rel(r, PARTICIPANT_PART_REL_KEYS)
-            player_part_map_pr[p_ids[0]] = _pm_map.get(pm_ids[0], "") if pm_ids else ""
+            player_part_map_pr[p_ids[0]] = ctx["extract_prop_text_any"](r, PARTICIPANT_PART_KEYS) or ""
     # パート→氏名順でソート
     sorted_pids = sorted(participant_player_ids,
                          key=lambda pid: (player_part_map_pr.get(pid,"zzz"), player_name_map.get(pid,"")))
