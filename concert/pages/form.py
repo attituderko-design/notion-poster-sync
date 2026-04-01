@@ -928,7 +928,7 @@ def render_form(ctx, concert_id: str = ""):
 
     # ── STEP 0: 新規登録 / ログイン 選択 ─────────────────────
     if step == 1 and not st.session_state.get("form_auth_verified") and not st.session_state.get("form_auth_mode"):
-        st.subheader("はじめに")
+        st.subheader("ArtéMis HARMONIA ログイン")
         col_new, col_login = st.columns(2)
         if col_new.button("📝 新規登録", use_container_width=True, type="primary", key="mode_new"):
             st.session_state["form_auth_mode"] = "new"
