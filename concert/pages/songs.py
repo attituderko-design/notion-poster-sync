@@ -387,10 +387,16 @@ def _load_movement_map(ctx: dict) -> dict[str, dict]:
 
 def _song_name(s: dict, ctx: dict) -> str:
     """APOLLOのタイトル + 楽章情報を組み合わせて表示名を返す。
-    楽章リレーションがある場合: 「スペイン狂詩曲 IV. Feria」のように表示。
+    全楽章フラグがTrueの場合は曲名のみ。
+    特定楽章の場合: 「スペイン狂詩曲 / IV. Feria」のように表示。
     """
     title = ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or ctx["extract_title"](s) or s.get("id", "")
     try:
+        # 全楽章フラグがTrueなら楽章名は付けない
+        all_mvmt = ctx["extract_prop_text_any"](s, SONG_ALL_MOVEMENTS_KEYS)
+        if all_mvmt == "True":
+            return title
+        # 楽章リレーションがある場合のみ楽章名を付加
         mv_ids = ctx["extract_relation_ids_any"](s, SONG_MOVEMENT_REL_KEYS)
         if mv_ids:
             mv_map = _load_movement_map(ctx)
@@ -453,7 +459,7 @@ def _create_song(ctx: dict, title: str, concert_ids: list[str],
 
 def _update_song(ctx: dict, page_id: str, title: str, concert_ids: list[str],
                  composer: str, duration_sec: int | None, note: str,
-                 score_url: str = "") -> bool:
+                 score_url: str = "", all_movements: bool = False) -> bool:
     type_map = ctx["get_prop_types"](ctx["CONCERT_DB_SONG"])
     props: dict = {}
     ctx["put_prop_any"](props, type_map, SONG_NAME_KEYS, title)
@@ -465,6 +471,7 @@ def _update_song(ctx: dict, page_id: str, title: str, concert_ids: list[str],
     ctx["put_prop_any"](props, type_map, SONG_NOTE_KEYS, note)
     if score_url.strip():
         ctx["put_prop_any"](props, type_map, SONG_SCORE_URL_KEYS, score_url.strip())
+    ctx["put_prop_any"](props, type_map, SONG_ALL_MOVEMENTS_KEYS, all_movements)
     ctx["put_key_any"](props, type_map, SONG_KEY_KEYS, title, composer, prefix="song")
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}",
                              json={"properties": props})
@@ -1062,9 +1069,12 @@ def _render_song_row(
                 default=existing_concert_names, key=f"se_concerts_{song_id}",
             )
             cur_score_url = ctx["extract_prop_text_any"](s, SONG_SCORE_URL_KEYS) or ""
+            cur_all_mvmt  = ctx["extract_prop_text_any"](s, SONG_ALL_MOVEMENTS_KEYS) == "True"
             score_url_v = st.text_input("楽譜URL（全体）", value=cur_score_url,
                                         placeholder="例: https://imslp.org/...",
                                         key=f"se_score_url_{song_id}")
+            all_mvmt_v = st.checkbox("全楽章演奏（楽章名を曲名に含めない）",
+                                     value=cur_all_mvmt, key=f"se_all_mvmt_{song_id}")
             note = st.text_area("難易度メモ",
                                 value=ctx["extract_prop_text_any"](s, SONG_NOTE_KEYS) or "",
                                 height=60, key=f"se_note_{song_id}")
@@ -1076,7 +1086,8 @@ def _render_song_row(
                     concert_ids  = [all_concert_opts[n] for n in concert_sel if all_concert_opts.get(n)]
                     with st.spinner("更新中..."):
                         ok = _update_song(ctx, song_id, title.strip(), concert_ids,
-                                          composer_v, duration_sec, note, score_url_v)
+                                          composer_v, duration_sec, note, score_url_v,
+                                          all_movements=all_mvmt_v)
                     if ok:
                         st.success("✅ 更新しました。")
                         _clear_song_cache()
