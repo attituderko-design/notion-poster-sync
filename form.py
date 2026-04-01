@@ -4,6 +4,20 @@ artemis-form.streamlit.app のエントリポイント。
 実装は concert/pages/form.py に集約。
 """
 import streamlit as st
+from pathlib import Path
+
+_ASSET_BASE_URL = "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets"
+
+def _get_asset(filename: str) -> str:
+    local = Path(__file__).parent / "assets" / filename
+    return str(local) if local.exists() else f"{_ASSET_BASE_URL}/{filename}"
+
+st.set_page_config(
+    page_title="HARMONIA",
+    page_icon=_get_asset("favicon.png"),
+    layout="centered",
+)
+
 from concert.services.notion_client import build_concert_ctx
 from concert.pages.form import verify_form_token, render_form
 
