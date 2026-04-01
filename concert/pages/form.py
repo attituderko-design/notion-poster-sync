@@ -276,8 +276,11 @@ def _load_form_data(ctx, concert_id: str, progress=None):
         }
         for r in part_master_rows
     }
-    # パート名リスト（表示順はNotionの登録順）
-    part_opts = [v["name"] for v in part_master_map.values() if v["name"]]
+    # パート名リスト（種別でグループ化、各グループ内はアルファベット順）
+    part_opts = sorted(
+        [v["name"] for v in part_master_map.values() if v["name"]],
+        key=lambda x: x.lower()
+    )
 
     st.session_state.update({
         "form_data_loaded":       concert_id,
@@ -1160,7 +1163,21 @@ def render_form(ctx, concert_id: str):
             phone    = st.text_input("電話番号（任意）", placeholder="例：09012345678")
             line_id  = st.text_input("LINE ID（任意）", placeholder="例：yamada_taro")
             st.divider()
-            part_sel = st.selectbox("担当パート *", part_opts)
+            # 種別→パート名の2段階選択
+            pm_map_step1: dict = st.session_state.get("form_part_master_map") or {}
+            # 種別リスト（アルファベット順）
+            type_opts = sorted({v["type"] for v in pm_map_step1.values() if v["type"]}, key=lambda x: x.lower())
+            part_type_sel = st.selectbox("パート種別 *", ["（選択してください）"] + type_opts, key="step1_part_type")
+            # 選択された種別に属するパート名（アルファベット順）
+            if part_type_sel and part_type_sel != "（選択してください）":
+                filtered_opts = sorted(
+                    [v["name"] for v in pm_map_step1.values()
+                     if v["type"] == part_type_sel and v["name"]],
+                    key=lambda x: x.lower()
+                ) + [OTHER_PART]
+            else:
+                filtered_opts = [OTHER_PART]
+            part_sel = st.selectbox("担当パート *", filtered_opts, key="step1_part_name")
             part_other = ""
             if part_sel == OTHER_PART:
                 part_other = st.text_input("パートを入力してください")
