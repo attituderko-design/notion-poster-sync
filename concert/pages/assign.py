@@ -1469,6 +1469,7 @@ def _render_result_tab(ctx: dict):
         disabled=bool(_proposal_on or _assign_on),
     ):
         _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PLAN_KEYS, True, concert_name)
+        st.cache_data.clear()
         _clear_assign_cache()
         st.rerun()
 
@@ -1480,6 +1481,7 @@ def _render_result_tab(ctx: dict):
         disabled=bool(not _proposal_on or _assign_on),
     ):
         _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PLAN_KEYS, False, concert_name)
+        st.cache_data.clear()
         _clear_assign_cache()
         st.rerun()
 
@@ -1494,6 +1496,7 @@ def _render_result_tab(ctx: dict):
         disabled=bool(not _proposal_on or _assign_on),
     ):
         _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, True, concert_name)
+        st.cache_data.clear()
         _clear_assign_cache()
         st.rerun()
 
@@ -1516,6 +1519,7 @@ def _render_result_tab(ctx: dict):
         _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PLAN_KEYS, False, concert_name)
         _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, False, concert_name)
         st.success(f"✅ {_ok}件リセットしました。")
+        st.cache_data.clear()
         _clear_assign_cache()
         st.rerun()
 
