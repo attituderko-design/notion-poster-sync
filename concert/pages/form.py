@@ -41,6 +41,30 @@ def IS_PERC(part_name_or_type: str) -> bool:
     v = (part_name_or_type or "").strip()
     return v == "打楽器" or v.lower() in ("perc", "percussion")
 
+
+# ── ロール定数 ────────────────────────────────────────────────
+ROLE_PLAYER  = 0
+ROLE_LEADER  = 1
+ROLE_MANAGER = 2
+_ROLE_MAP = {"Manager": ROLE_MANAGER, "Leader": ROLE_LEADER, "Player": ROLE_PLAYER}
+
+
+def _resolve_user_role(ctx, player_id: str, concert_id: str) -> int:
+    """CONCERT_CASTのシステムロールフィールドから権限レベルを返す。
+    未設定またはPlayerの場合はROLE_PLAYER(0)を返す。
+    """
+    try:
+        all_cast = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+        for r in all_cast:
+            pids = ctx["extract_relation_ids_any"](r, PARTICIPANT_PLAYER_REL_KEYS)
+            cids = ctx["extract_relation_ids_any"](r, PARTICIPANT_CONCERT_REL_KEYS)
+            if player_id in pids and concert_id in cids:
+                role_str = ctx["extract_prop_text_any"](r, PARTICIPANT_SYSTEM_ROLE_KEYS) or ""
+                return _ROLE_MAP.get(role_str, ROLE_PLAYER)
+    except Exception:
+        pass
+    return ROLE_PLAYER
+
 def _get_part_master_map(ctx) -> dict[str, dict]:
     """PART_MASTERをquery_allしてid→{name, type}のdictを返す。"""
     try:
@@ -611,6 +635,208 @@ attituderko@gmail.com
 *本フォームへの入力・送信をもって上記に同意したものとみなします。*
 """
 
+def _render_attendance_overview(ctx, concert_id: str, participant_rows: list,
+                                 practices: list, my_part_master_id: str,
+                                 role: int):
+    """出欠一覧をロールに応じて表示する。
+    Leader: 自パートのみ、Manager: 全員
+    """
+    ext     = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
+    pm_map  = st.session_state.get("form_part_master_map") or {}
+
+    # 自分のパートに絞るかどうか
+    filter_part = (role == ROLE_LEADER)
+
+    # CONCERT_CASTから対象者を絞り込む
+    target_cast = []
+    for r in participant_rows:
+        cids = ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)
+        if concert_id not in cids:
+            continue
+        if filter_part:
+            pm_ids = ext_rel(r, PARTICIPANT_PART_REL_KEYS)
+            if not pm_ids or pm_ids[0] != my_part_master_id:
+                continue
+        target_cast.append(r)
+
+    if not target_cast:
+        st.info("対象メンバーが見つかりません。")
+        return
+
+    # PERFORMER名マップ
+    all_players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    player_name_map = {p.get("id",""): ext(p, PLAYER_NAME_KEYS) or "" for p in all_players}
+
+    # 出欠データ取得
+    all_att = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], None)
+    # cast_id or player_id → {practice_id: status}
+    att_map: dict[str, dict[str,str]] = {}
+    for r in all_att:
+        pl_ids = ext_rel(r, ATT_PLAYER_REL_KEYS)
+        pr_ids = ext_rel(r, ATT_PRACTICE_REL_KEYS)
+        if not pl_ids or not pr_ids:
+            continue
+        status = ext(r, ATT_STATUS_KEYS) or "—"
+        att_map.setdefault(pl_ids[0], {})[pr_ids[0]] = status
+
+    # ヘッダー行
+    pr_labels = [ext(p, PRACTICE_DATE_KEYS)[:10] if ext(p, PRACTICE_DATE_KEYS) else ext(p, PRACTICE_NAME_KEYS) or "?"
+                 for p in practices]
+    header = ["パート", "氏名"] + pr_labels
+    rows = []
+    for cast_row in sorted(target_cast, key=lambda r: (
+        pm_map.get((ext_rel(r, PARTICIPANT_PART_REL_KEYS) or [""])[0], {}).get("name",""),
+        player_name_map.get((ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0], "")
+    )):
+        pids   = ext_rel(cast_row, PARTICIPANT_PLAYER_REL_KEYS)
+        pm_ids = ext_rel(cast_row, PARTICIPANT_PART_REL_KEYS)
+        pid    = pids[0] if pids else ""
+        pname  = player_name_map.get(pid, "—")
+        part   = pm_map.get(pm_ids[0], {}).get("name","") if pm_ids else ""
+        # cast_idまたはplayer_idで出欠を探す
+        cast_id = cast_row.get("id","")
+        p_att = att_map.get(cast_id) or att_map.get(pid) or {}
+        row = [part, pname] + [p_att.get(p.get("id",""), "—") for p in practices]
+        rows.append(row)
+
+    import pandas as pd
+    df = pd.DataFrame(rows, columns=header)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def _render_member_list(ctx, concert_id: str, participant_rows: list,
+                        my_part_master_id: str, role: int):
+    """メンバー一覧をロールに応じて表示する。
+    Leader: 自パートのみ、Manager: 全員（連絡先含む）
+    """
+    ext     = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
+    pm_map  = st.session_state.get("form_part_master_map") or {}
+
+    filter_part = (role == ROLE_LEADER)
+    target_cast = []
+    for r in participant_rows:
+        cids = ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)
+        if concert_id not in cids:
+            continue
+        if filter_part:
+            pm_ids = ext_rel(r, PARTICIPANT_PART_REL_KEYS)
+            if not pm_ids or pm_ids[0] != my_part_master_id:
+                continue
+        target_cast.append(r)
+
+    if not target_cast:
+        st.info("対象メンバーが見つかりません。")
+        return
+
+    all_players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    player_map  = {p.get("id",""): p for p in all_players}
+
+    rows = []
+    for cast_row in sorted(target_cast, key=lambda r: (
+        pm_map.get((ext_rel(r, PARTICIPANT_PART_REL_KEYS) or [""])[0], {}).get("name",""),
+        (ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0]
+    )):
+        pids   = ext_rel(cast_row, PARTICIPANT_PLAYER_REL_KEYS)
+        pm_ids = ext_rel(cast_row, PARTICIPANT_PART_REL_KEYS)
+        pid    = pids[0] if pids else ""
+        p      = player_map.get(pid, {})
+        part   = pm_map.get(pm_ids[0], {}).get("name","") if pm_ids else ""
+        pname  = ext(p, PLAYER_NAME_KEYS) or "—"
+        hn     = ext(p, PLAYER_HN_KEYS)   or ""
+        row = {"パート": part, "氏名": pname, "H.N.": hn}
+        if role >= ROLE_MANAGER:
+            row["メール"]  = ext(p, PLAYER_EMAIL_KEYS) or ""
+            row["電話"]    = ext(p, PLAYER_PHONE_KEYS) or ""
+            row["LINE ID"] = ext(p, PLAYER_LINE_KEYS)  or ""
+        rows.append(row)
+
+    import pandas as pd
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: int):
+    """アサイン結果をロールに応じて表示する。
+    Leader: アサイン確定後のみ・自パートのみ、Manager: 常時・全員
+    """
+    from concert.services.keys import (
+        ASSIGNMENT_CONCERT_REL_KEYS, ASSIGNMENT_PLAYER_REL_KEYS,
+        ASSIGNMENT_PARTDEF_REL_KEYS, ASSIGNMENT_SONG_REL_KEYS,
+        ASSIGNMENT_FLAG_KEYS,
+    )
+    ext     = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
+    pm_map  = st.session_state.get("form_part_master_map") or {}
+
+    # LeaderはアサインConfirmフラグ確認
+    if role == ROLE_LEADER:
+        assign_confirmed = False
+        try:
+            hc_rows = ctx["query_all"](ctx["CONCERT_DB_HARMONIA_CONCERT"], None)
+            for r in hc_rows:
+                if concert_id in ext_rel(r, ["演奏会","FK演奏会","concert"]):
+                    assign_confirmed = ext(r, ["アサイン確定","assign_confirmed"]) == "True"
+                    break
+        except Exception:
+            pass
+        if not assign_confirmed:
+            st.info("アサインが確定されていません。確定後に閲覧できます。")
+            return
+
+    # アサイン結果取得
+    try:
+        all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+    except Exception:
+        st.error("アサイン結果の取得に失敗しました。")
+        return
+
+    concert_assigns = [r for r in all_assign
+                       if concert_id in ext_rel(r, ASSIGNMENT_CONCERT_REL_KEYS)
+                       and ext(r, ASSIGNMENT_FLAG_KEYS) == "True"]
+
+    if not concert_assigns:
+        st.info("アサイン結果がまだ登録されていません。")
+        return
+
+    # 曲・パート定義・奏者名マップ
+    all_players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    player_name_map = {p.get("id",""): ext(p, PLAYER_NAME_KEYS) or "" for p in all_players}
+    all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
+    song_name_map = {s.get("id",""): ext(s, SONG_NAME_KEYS) or "" for s in all_songs}
+    all_pd = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
+    pd_name_map = {p.get("id",""): ext(p, PARTDEF_NAME_KEYS) or "" for p in all_pd}
+    # パート定義→PART_MASTERのIDマップ
+    pd_part_map = {p.get("id",""): (ext_rel(p, PARTDEF_PART_REL_KEYS) or [""])[0]
+                   for p in all_pd}
+
+    rows = []
+    for r in concert_assigns:
+        player_ids = ext_rel(r, ASSIGNMENT_PLAYER_REL_KEYS)
+        pd_ids     = ext_rel(r, ASSIGNMENT_PARTDEF_REL_KEYS)
+        song_ids   = ext_rel(r, ASSIGNMENT_SONG_REL_KEYS)
+        if not player_ids or not pd_ids:
+            continue
+        pd_id  = pd_ids[0]
+        pm_id  = pd_part_map.get(pd_id, "")
+        # LeaderはPART_MASTER IDで自パートのみ絞る
+        if role == ROLE_LEADER and pm_id != my_part_master_id:
+            continue
+        pname  = player_name_map.get(player_ids[0], "—")
+        part   = pd_name_map.get(pd_id, "—")
+        song   = song_name_map.get(song_ids[0], "—") if song_ids else "—"
+        rows.append({"曲": song, "パート": part, "奏者": pname})
+
+    if not rows:
+        st.info("表示できるアサイン結果がありません。")
+        return
+
+    import pandas as pd
+    df = pd.DataFrame(rows).sort_values(["曲","パート"])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+
 def _render_concert_selector(ctx):
     """concert_id未確定時のエントリ画面。
     ログイン済み → 参加演奏会選択 or 招待コードで別演奏会追加
@@ -621,7 +847,7 @@ def _render_concert_selector(ctx):
 
     # ── モード未選択 ─────────────────────────────────────────
     if not selector_mode:
-        st.subheader("ArtéMis HARMONIA ログイン")
+        st.subheader("はじめに")
         col_l, col_i = st.columns(2)
         if col_l.button("🔑 ログイン", use_container_width=True, type="primary", key="sel_login"):
             st.session_state["selector_mode"] = "login"
@@ -928,7 +1154,7 @@ def render_form(ctx, concert_id: str = ""):
 
     # ── STEP 0: 新規登録 / ログイン 選択 ─────────────────────
     if step == 1 and not st.session_state.get("form_auth_verified") and not st.session_state.get("form_auth_mode"):
-        st.subheader("ArtéMis HARMONIA ログイン")
+        st.subheader("はじめに")
         col_new, col_login = st.columns(2)
         if col_new.button("📝 新規登録", use_container_width=True, type="primary", key="mode_new"):
             st.session_state["form_auth_mode"] = "new"
@@ -1184,10 +1410,11 @@ def render_form(ctx, concert_id: str = ""):
             pid   = st.session_state.get("form_player_id", "")
             st.subheader(f"こんにちは、{pname} さん")
 
-            # パートをセット（CONCERT_CASTのパートRelationから取得）
+            # パート・ロールをCONCERT_CASTから取得
             participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
             my_part = ""
             my_part_master_id = ""
+            my_cast_row = None
             for row in participant_rows:
                 p_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
                 c_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_CONCERT_REL_KEYS)
@@ -1197,35 +1424,47 @@ def render_form(ctx, concert_id: str = ""):
                         my_part_master_id = part_ids[0]
                         pm_map_local: dict = st.session_state.get("form_part_master_map") or {}
                         my_part = pm_map_local.get(my_part_master_id, {}).get("name", "")
+                    my_cast_row = row
                     break
             st.session_state["form_player_part"]    = my_part
             st.session_state["form_player_part_id"] = my_part_master_id
 
+            # ロール解決
+            user_role = _resolve_user_role(ctx, pid, concert_id)
+            st.session_state["form_user_role"] = user_role
+
+            # デバッグ：URLに?debug=1がある場合のみロール情報を表示
+            if st.query_params.get("debug") == "1":
+                st.caption(f"🔧 DEBUG: user_role={user_role} (0=Player,1=Leader,2=Manager), pid={pid[:8]}, concert_id={concert_id[:8]}")
+
             # 案提示フラグ確認
             proposal_done = _get_proposal_flag(ctx, concert_id)
 
-            # ── 出欠サマリ ──────────────────────────────────
+            # ── サマリカード ─────────────────────────────────
             _, p_to_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
             att_answered = sum(1 for pr in practices
                                if (p_to_att_map.get(pr.get("id",""), {}) or {}).get("status","") not in ("", "未回答"))
             att_total    = len(practices)
-
-            # ── 希望サマリ ──────────────────────────────────
             existing_pref = _load_existing_prefs(ctx, concert_id, pid, partdefs)
             pref_answered = sum(1 for v in existing_pref.values() if v not in ("未回答", ""))
             pref_total    = len(partdefs)
 
-            # ── サマリカード ─────────────────────────────────
+            _role_label = {ROLE_PLAYER: "", ROLE_LEADER: "　🎖 パートリーダー", ROLE_MANAGER: "　👑 Manager"}.get(user_role, "")
+            if _role_label:
+                st.caption(f"パート：{my_part}{_role_label}" if my_part else _role_label.strip())
+            elif my_part:
+                st.caption(f"パート：{my_part}")
+
             with st.container(border=True):
                 c1, c2 = st.columns(2)
-                att_status = "✅ 完了" if att_answered == att_total and att_total > 0 else f"⚠️ {att_answered}/{att_total}回 回答済"
+                att_status  = "✅ 完了" if att_answered == att_total and att_total > 0 else f"⚠️ {att_answered}/{att_total}回 回答済"
                 pref_status = "✅ 完了" if pref_answered == pref_total and pref_total > 0 else (f"⚠️ {pref_answered}/{pref_total}パート 回答済" if pref_total > 0 else "—")
                 c1.metric("出欠", att_status)
                 c2.metric("パート希望", pref_status)
 
             st.divider()
 
-            # ── メニューボタン ──────────────────────────────
+            # ── 基本メニュー（全ロール共通） ─────────────────
             if st.button("📅 出欠を入力・変更する", use_container_width=True, key="menu_att"):
                 _, existing_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
                 preload_att: dict[str, str] = {}
@@ -1237,7 +1476,7 @@ def render_form(ctx, concert_id: str = ""):
                     "form_att": preload_att,
                     "form_att_comment": preload_comment,
                     "form_step": 2,
-                    "form_menu_mode": True,  # メニューから来たフラグ
+                    "form_menu_mode": True,
                 })
                 st.rerun()
 
@@ -1249,7 +1488,7 @@ def render_form(ctx, concert_id: str = ""):
                 else:
                     if st.button("🎵 パート希望を入力・変更する", use_container_width=True, key="menu_pref"):
                         st.session_state.update({
-                            "form_pref": existing_pref,  # 既存データをプリロード
+                            "form_pref": existing_pref,
                             "form_step": 3,
                             "form_menu_mode": True,
                         })
@@ -1264,7 +1503,66 @@ def render_form(ctx, concert_id: str = ""):
                     })
                     st.rerun()
 
-            # ── 直近の練習情報 ──────────────────────────────
+            # ── Leader / Manager 専用メニュー ─────────────────
+            if user_role >= ROLE_LEADER:
+                st.divider()
+                _section_label = "パートリーダーメニュー" if user_role == ROLE_LEADER else "Managerメニュー"
+                st.markdown(f"**🎖 {_section_label}**")
+
+                # 出欠一覧
+                _att_label = "自パートの出欠一覧" if user_role == ROLE_LEADER else "全員の出欠一覧"
+                with st.expander(f"📋 {_att_label}", expanded=False):
+                    if practices:
+                        _render_attendance_overview(
+                            ctx, concert_id, participant_rows, practices,
+                            my_part_master_id, user_role
+                        )
+                    else:
+                        st.info("練習日が登録されていません。")
+
+                # メンバー一覧
+                _mem_label = "自パートのメンバー一覧" if user_role == ROLE_LEADER else "全員のメンバー一覧（連絡先含む）"
+                with st.expander(f"👥 {_mem_label}", expanded=False):
+                    _render_member_list(
+                        ctx, concert_id, participant_rows,
+                        my_part_master_id, user_role
+                    )
+
+                # 練習情報PDF（Leader以上）
+                if practices:
+                    st.markdown("**📄 練習情報PDF（全練習回）**")
+                    for _pr in practices:
+                        _pr_id   = _pr.get("id","")
+                        _pr_name = ext(_pr, PRACTICE_NAME_KEYS) or "練習"
+                        _pr_date = (ext(_pr, PRACTICE_DATE_KEYS) or "")[:10]
+                        _pdf_key = f"form_pdf_bytes_{_pr_id}"
+                        _col_a, _col_b = st.columns([3,2])
+                        _col_a.caption(f"{_pr_date}　{_pr_name}")
+                        if _pdf_key not in st.session_state:
+                            if _col_b.button("生成", key=f"leader_gen_{_pr_id}", use_container_width=True):
+                                with st.spinner("生成中..."):
+                                    try:
+                                        from concert.services.practice_report import generate_practice_report
+                                        st.session_state[_pdf_key] = generate_practice_report(ctx, _pr_id)
+                                        st.rerun()
+                                    except Exception as _e:
+                                        st.error(f"失敗: {_e}")
+                        else:
+                            _col_b.download_button(
+                                "⬇️ DL", data=st.session_state[_pdf_key],
+                                file_name=f"練習情報_{_pr_name}.pdf",
+                                mime="application/pdf",
+                                key=f"leader_dl_{_pr_id}",
+                                use_container_width=True,
+                            )
+
+            # Manager専用メニュー
+            if user_role >= ROLE_MANAGER:
+                # アサイン閲覧
+                with st.expander("🎯 アサイン結果閲覧", expanded=False):
+                    _render_assignment_view(ctx, concert_id, my_part_master_id, user_role)
+
+            # ── 直近の練習情報（全ロール共通） ──────────────
             st.divider()
             from datetime import date as _date_cls
             today = _date_cls.today()
