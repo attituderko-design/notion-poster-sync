@@ -63,6 +63,7 @@ SONG_NOTE_KEYS            = ["メモ", "備考"]
 SONG_KEY_KEYS             = ["song_key", "SongKey", "PK曲キー", "曲キー"]
 SONG_CONCERT_REL_KEYS     = ["演奏会", "出演", "FK演奏会"]
 SONG_SCORE_URL_KEYS       = ["楽譜URL", "score_url", "ScoreURL"]
+SONG_ALL_MOVEMENTS_KEYS   = ["全楽章", "all_movements", "full_movements"]
 
 # ── MOVEMENT（楽章）DB ───────────────────────────────────────
 MOVEMENT_KEY_KEYS         = ["movement_key", "タイトル"]
