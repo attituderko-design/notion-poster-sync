@@ -98,9 +98,23 @@ def _load_harmonia_concert_row(ctx: dict, concert_id: str) -> dict:
     return {}
 
 
+def _generate_invite_code() -> str:
+    """8桁のランダム英数字大文字招待コードを生成する。"""
+    import random, string
+    return "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+
+
 def _ensure_harmonia_concert_row(ctx: dict, concert_id: str, concert_name: str = "") -> tuple[dict, bool]:
     row = _load_harmonia_concert_row(ctx, concert_id)
     if row:
+        # 既存レコードに招待コードが未設定なら自動生成して書き込む
+        existing_code = ctx["extract_prop_text_any"](row, HARMONIA_CONCERT_INVITE_CODE_KEYS)
+        if not existing_code:
+            db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
+            t = ctx["get_prop_types"](db_id) or {}
+            code_props: dict = {}
+            ctx["put_prop_any"](code_props, t, HARMONIA_CONCERT_INVITE_CODE_KEYS, _generate_invite_code())
+            ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{row.get('id','')}", json={"properties": code_props})
         return row, False
     db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
     if not db_id:
@@ -110,6 +124,7 @@ def _ensure_harmonia_concert_row(ctx: dict, concert_id: str, concert_name: str =
     ctx["put_key_any"](props, t, HARMONIA_CONCERT_KEY_KEYS, concert_id, concert_name or concert_id, prefix="harmonia")
     ctx["put_prop_any"](props, t, HARMONIA_CONCERT_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, HARMONIA_CONCERT_MANAGED_KEYS, True)
+    ctx["put_prop_any"](props, t, HARMONIA_CONCERT_INVITE_CODE_KEYS, _generate_invite_code())
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
     if res is not None and res.status_code == 200:
         return res.json() or {}, True
