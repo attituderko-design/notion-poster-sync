@@ -9442,19 +9442,24 @@ if system_mode == "HARMONIA":
                 ) or ""
 
                 # 署名者名・団体名をUI上で編集可能に
+                # ※ keyのみ指定（valueはsession_stateで管理）してリアルタイム反映
                 col_org, col_sig = st.columns(2)
-                _org_name = col_org.text_input(
+                # 団体名の初期値をATLASから設定（未セット時のみ）
+                if "invite_org_name" not in st.session_state:
+                    st.session_state["invite_org_name"] = _org_name_raw
+                col_org.text_input(
                     "団体名",
-                    value=st.session_state.get("invite_org_name", _org_name_raw),
                     key="invite_org_name",
                     placeholder="例: ○○打楽器アンサンブル",
                 )
-                _sig_name = col_sig.text_input(
+                col_sig.text_input(
                     "署名者名",
-                    value=st.session_state.get("invite_sig_name", ""),
                     key="invite_sig_name",
                     placeholder="例: 山田太郎",
                 )
+                # session_stateから最新値を読む
+                _org_name = st.session_state.get("invite_org_name", "") or ""
+                _sig_name = st.session_state.get("invite_sig_name", "") or ""
 
                 # 署名行を組み立て
                 if _org_name and _sig_name:
@@ -9483,11 +9488,11 @@ if system_mode == "HARMONIA":
                     f"\n"
                     f"— {_signature}"
                 )
+                # keyなし・valueのみ指定でリアルタイム反映
                 st.text_area(
                     "📨 招待メッセージ（コピーしてLINE・メール等で共有）",
                     value=_invite_msg,
                     height=275,
-                    key="invite_msg_area",
                     help="このテキストをそのままコピーして奏者に送ってください。",
                 )
                 if st.button("📱 QRコードを表示", key="invite_qr_btn", use_container_width=True):
