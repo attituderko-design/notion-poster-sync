@@ -23,46 +23,13 @@ def _first_prop_by_type(type_map: dict, ptype: str) -> str:
     return ""
 
 
-def _load_part_master_map(ctx) -> dict[str, dict]:
-    """PART_MASTERをid→{name, type}のdictで返す。セッション内キャッシュ付き。"""
-    cached = st.session_state.get("_part_master_map_cache")
-    if cached:
-        return cached
-    try:
-        rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
-        ext  = ctx["extract_prop_text_any"]
-        result = {
-            r.get("id", ""): {
-                "name": ext(r, PARTMASTER_NAME_KEYS) or "",
-                "type": ext(r, PARTMASTER_TYPE_KEYS) or "",
-            }
-            for r in rows
-        }
-        st.session_state["_part_master_map_cache"] = result
-        return result
-    except Exception:
-        return {}
+from concert.services.part_master_utils import (
+    load_part_master_map as _load_part_master_map,
+    part_name_from_cast  as _part_name_from_cast,
+    part_id_from_name    as _part_id_from_name,
+    is_perc_from_pm      as _is_perc_from_pm,
+)
 
-
-def _part_name_from_cast(ctx, cast_row: dict, pm_map: dict) -> str:
-    """CONCERT_CASTのパートRelationからパート名を返す。"""
-    pm_ids = ctx["extract_relation_ids_any"](cast_row, PARTICIPANT_PART_REL_KEYS)
-    if not pm_ids:
-        return ""
-    return pm_map.get(pm_ids[0], {}).get("name", "")
-
-
-def _part_id_from_name(pm_map: dict, name: str) -> str:
-    """パート名からPART_MASTERのIDを逆引きする。"""
-    for pid, v in pm_map.items():
-        if v["name"] == name:
-            return pid
-    return ""
-
-
-def _is_perc_from_pm(pm_map: dict, pm_id: str) -> bool:
-    """PART_MASTERのIDからIS_PERC判定する。"""
-    return pm_map.get(pm_id, {}).get("type", "") == "打楽器"
 
 
 def _response_error_message(res) -> str:

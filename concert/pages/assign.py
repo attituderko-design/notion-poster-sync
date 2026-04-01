@@ -214,25 +214,10 @@ def _is_perc_part(part_name_or_type: str) -> bool:
     return name == "打楽器" or name.lower() in ("perc", "percussion")
 
 
-def _load_part_master_map(ctx) -> dict[str, dict]:
-    """PART_MASTERをid→{name, type}のdictで返す。セッション内キャッシュ付き。"""
-    cached = st.session_state.get("_part_master_map_cache")
-    if cached:
-        return cached
-    try:
-        rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
-        ext  = ctx["extract_prop_text_any"]
-        result = {
-            r.get("id", ""): {
-                "name": ext(r, PARTMASTER_NAME_KEYS) or "",
-                "type": ext(r, PARTMASTER_TYPE_KEYS) or "",
-            }
-            for r in rows
-        }
-        st.session_state["_part_master_map_cache"] = result
-        return result
-    except Exception:
-        return {}
+from concert.services.part_master_utils import (
+    load_part_master_map as _load_part_master_map,
+)
+
 
 
 def _load_players(ctx) -> list[dict]:
