@@ -611,9 +611,210 @@ attituderko@gmail.com
 *本フォームへの入力・送信をもって上記に同意したものとみなします。*
 """
 
+def _render_concert_selector(ctx):
+    """concert_id未確定時のエントリ画面。
+    ログイン済み → 参加演奏会選択 or 招待コードで別演奏会追加
+    未ログイン   → ログイン or 招待コードで新規参加
+    """
+    ext = ctx["extract_prop_text_any"]
+    selector_mode = st.session_state.get("selector_mode")  # None / "login" / "invite"
+
+    # ── モード未選択 ─────────────────────────────────────────
+    if not selector_mode:
+        st.subheader("はじめに")
+        col_l, col_i = st.columns(2)
+        if col_l.button("🔑 ログイン", use_container_width=True, type="primary", key="sel_login"):
+            st.session_state["selector_mode"] = "login"
+            st.rerun()
+        if col_i.button("🎟 招待コードで参加", use_container_width=True, key="sel_invite"):
+            st.session_state["selector_mode"] = "invite"
+            st.rerun()
+        return
+
+    # ── 招待コード入力モード ──────────────────────────────────
+    if selector_mode == "invite":
+        st.subheader("招待コードを入力してください")
+        st.caption("管理者から受け取った招待コードを入力してください。")
+        with st.form("invite_code_form"):
+            code_input = st.text_input("招待コード", max_chars=20, placeholder="例: K7X2MN9A")
+            submitted = st.form_submit_button("次へ →", type="primary", use_container_width=True)
+        if submitted:
+            cid = _resolve_concert_id_by_invite_code(ctx, code_input)
+            if cid:
+                st.session_state["form_resolved_concert_id"] = cid
+                st.session_state.pop("selector_mode", None)
+                st.rerun()
+            else:
+                st.error("招待コードが見つかりませんでした。管理者に確認してください。")
+        if st.button("← 戻る", key="invite_back"):
+            st.session_state.pop("selector_mode", None)
+            st.rerun()
+        return
+
+    # ── ログインモード ────────────────────────────────────────
+    if selector_mode == "login":
+        # メールアドレス未入力フェーズ
+        if not st.session_state.get("sel_email_submitted"):
+            st.subheader("ログイン")
+            with st.form("sel_email_form"):
+                sel_email = st.text_input("メールアドレス", placeholder="yamada@example.com")
+                submitted_e = st.form_submit_button("次へ", type="primary", use_container_width=True)
+            if submitted_e:
+                if not sel_email.strip():
+                    st.error("メールアドレスを入力してください。")
+                    return
+                email_lower = sel_email.strip().lower()
+                players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+                matched = next(
+                    (p for p in players
+                     if (ext(p, PLAYER_EMAIL_KEYS) or "").strip().lower() == email_lower),
+                    None
+                )
+                if not matched:
+                    st.error("このメールアドレスは登録されていません。招待コードから新規参加してください。")
+                    return
+                st.session_state.update({
+                    "sel_email":           email_lower,
+                    "sel_player_id":       matched.get("id", ""),
+                    "sel_player_name":     ext(matched, PLAYER_NAME_KEYS) or "",
+                    "sel_has_password":    bool(ext(matched, PLAYER_PASSWORD_HASH_KEYS)),
+                    "sel_email_submitted": True,
+                })
+                st.rerun()
+            if st.button("← 戻る", key="sel_login_back"):
+                st.session_state.pop("selector_mode", None)
+                st.rerun()
+            return
+
+        # パスワード認証フェーズ
+        sel_email       = st.session_state.get("sel_email", "")
+        sel_pid         = st.session_state.get("sel_player_id", "")
+        sel_pname       = st.session_state.get("sel_player_name", "")
+        sel_has_pw      = st.session_state.get("sel_has_password", False)
+        sel_pw_verified = st.session_state.get("sel_pw_verified", False)
+
+        if not sel_pw_verified:
+            if sel_has_pw:
+                st.subheader(f"おかえりなさい、{sel_pname} さん")
+                with st.form("sel_pw_form"):
+                    pw = st.text_input("パスワード", type="password")
+                    submitted_pw = st.form_submit_button("ログイン", type="primary", use_container_width=True)
+                if submitted_pw:
+                    players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+                    matched = next((p for p in players if p.get("id") == sel_pid), None)
+                    stored_hash = ext(matched, PLAYER_PASSWORD_HASH_KEYS) if matched else ""
+                    if _verify_password(pw, stored_hash):
+                        st.session_state["sel_pw_verified"] = True
+                        st.rerun()
+                    else:
+                        st.error("パスワードが違います。")
+            else:
+                # パスワード未設定→マジックコード認証（既存フローへ委譲するため簡略）
+                st.info("パスワードが未設定です。管理者にお問い合わせいただくか、招待コードから再登録してください。")
+            if st.button("← 戻る", key="sel_pw_back"):
+                for k in ["sel_email_submitted","sel_email","sel_player_id",
+                          "sel_player_name","sel_has_password","sel_pw_verified"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+            return
+
+        # 認証済み → 参加演奏会を選択
+        st.subheader(f"こんにちは、{sel_pname} さん")
+        my_concerts = _get_my_concerts(ctx, sel_pid)
+
+        if my_concerts:
+            concert_opts = {
+                ext(c, CONCERT_NAME_KEYS) or c.get("id","")[:8]: c.get("id","")
+                for c in my_concerts
+            }
+            selected_name = st.selectbox(
+                "参加している演奏会を選択してください",
+                list(concert_opts.keys()),
+                key="sel_concert_select",
+            )
+            if st.button("この演奏会に進む →", type="primary",
+                         use_container_width=True, key="sel_concert_go"):
+                selected_cid = concert_opts[selected_name]
+                # 既存ログインフローのsession_stateをセットしてform_stepへ
+                st.session_state.update({
+                    "form_resolved_concert_id": selected_cid,
+                    "form_auth_verified":        True,
+                    "form_auth_email":           sel_email,
+                    "form_player_id":            sel_pid,
+                    "form_player_name":          sel_pname,
+                    "form_is_new":               False,
+                    "form_is_existing_auth":     True,
+                    "form_step":                 1,
+                })
+                for k in ["selector_mode","sel_email_submitted","sel_email",
+                          "sel_player_id","sel_player_name","sel_has_password",
+                          "sel_pw_verified","sel_concert_select"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+        else:
+            st.info("参加登録されている演奏会が見つかりませんでした。")
+
+        st.divider()
+        if st.button("🎟 招待コードで別の演奏会に参加する",
+                     use_container_width=True, key="sel_add_concert"):
+            st.session_state["selector_mode"] = "invite"
+            # 認証情報はそのまま保持
+            st.rerun()
+
+        if st.button("🔓 ログアウト", use_container_width=True, key="sel_logout"):
+            for k in list(st.session_state.keys()):
+                if k.startswith("sel_") or k.startswith("form_"):
+                    st.session_state.pop(k, None)
+            st.session_state.pop("selector_mode", None)
+            st.rerun()
+
+
 # ── フォームメイン ────────────────────────────────────────────
 
-def render_form(ctx, concert_id: str):
+def _resolve_concert_id_by_invite_code(ctx, code: str) -> str:
+    """招待コードからconcert_idを解決する。見つからなければ空文字を返す。"""
+    try:
+        hc_rows = ctx["query_all"](ctx["CONCERT_DB_HARMONIA_CONCERT"], None)
+        ext = ctx["extract_prop_text_any"]
+        for r in hc_rows:
+            stored = (ext(r, ["招待コード", "invite_code"]) or "").strip().upper()
+            if stored and stored == code.strip().upper():
+                rel_ids = ctx["extract_relation_ids_any"](r, ["演奏会", "FK演奏会", "concert"])
+                if rel_ids:
+                    return rel_ids[0]
+    except Exception:
+        pass
+    return ""
+
+
+def _get_my_concerts(ctx, player_id: str) -> list[dict]:
+    """CONCERT_CASTからplayer_idに紐づく演奏会情報のリストを返す。"""
+    try:
+        ext_rel = ctx["extract_relation_ids_any"]
+        ext     = ctx["extract_prop_text_any"]
+        all_cast = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+        concert_ids = [
+            ext_rel(r, ["出演", "演奏会", "FK演奏会"])[0]
+            for r in all_cast
+            if player_id in ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
+            and ext_rel(r, ["出演", "演奏会", "FK演奏会"])
+        ]
+        if not concert_ids:
+            return []
+        all_concerts = ctx["query_all"](ctx["CONCERT_DB_CONCERT"], None)
+        result = []
+        for cid in concert_ids:
+            c = next((r for r in all_concerts if r.get("id") == cid), None)
+            if c:
+                result.append(c)
+        # 本番日の降順でソート
+        result.sort(key=lambda r: ext(r, CONCERT_DATE_KEYS) or "", reverse=True)
+        return result
+    except Exception:
+        return []
+
+
+def render_form(ctx, concert_id: str = ""):
     ext = ctx["extract_prop_text_any"]
 
     # form.py を直接 entrypoint にしていない場合でもロゴを表示
@@ -640,8 +841,16 @@ def render_form(ctx, concert_id: str):
         unsafe_allow_html=True,
     )
 
+    # ── concert_id未確定時：ログイン→演奏会選択 or 招待コード入力 ──
+    if not concert_id:
+        concert_id = st.session_state.get("form_resolved_concert_id", "")
+
+    if not concert_id:
+        _render_concert_selector(ctx)
+        return
+
     # 初回のみデータ一括取得
-    if not st.session_state.get("form_data_loaded"):
+    if st.session_state.get("form_data_loaded") != concert_id:
         _progress_bar = st.progress(0, text="🎵 フォームを読み込み中...")
         def _on_progress(ratio: float, text: str):
             _progress_bar.progress(ratio, text=text)
