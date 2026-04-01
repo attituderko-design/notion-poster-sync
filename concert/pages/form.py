@@ -13,10 +13,11 @@ from concert.services.keys import (
     CONCERT_CONDUCTOR_KEYS, CONCERT_SOLOIST_KEYS,
     PRACTICE_NAME_KEYS, PRACTICE_DATE_KEYS, PRACTICE_VENUE_KEYS,
     PRACTICE_CONCERT_REL_KEYS, PRACTICE_CONCERT_DAY_KEYS,
-    PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_ROLE_OPS_KEYS,
+    PARTICIPANT_PART_REL_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_ROLE_OPS_KEYS,
     PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
     PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_RECORD_KEYS,
-    PARTDEF_NAME_KEYS, PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS,
+    PARTDEF_NAME_KEYS, PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS, PARTDEF_PART_REL_KEYS,
+    PARTMASTER_NAME_KEYS, PARTMASTER_TYPE_KEYS,
     SONG_NAME_KEYS, SONG_CREATOR_KEYS, SONG_CONCERT_REL_KEYS,
     INSTRUMENT_NAME_KEYS,
     PLAYER_NAME_KEYS, PLAYER_HN_KEYS, PLAYER_EMAIL_KEYS, PLAYER_RECEIVE_KEYS,
@@ -32,7 +33,33 @@ _TOKEN_SECRET = "harmonia_form_2024"
 PRIORITY_OPTS = ["未回答", "第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
 ATT_OPTS      = ["○", "△", "×"]
 OTHER_PART    = "一覧にない（管理者に連絡）"
-IS_PERC       = lambda p: (p or "").lower() in ("perc", "percussion", "打楽器")
+
+def IS_PERC(part_name_or_type: str) -> bool:
+    """打楽器かどうかを判定。
+    PART_MASTERの種別（"打楽器"）またはパート名（旧来の"perc"等）どちらでも対応。
+    """
+    v = (part_name_or_type or "").strip()
+    return v == "打楽器" or v.lower() in ("perc", "percussion")
+
+def _get_part_master_map(ctx) -> dict[str, dict]:
+    """PART_MASTERをquery_allしてid→{name, type}のdictを返す。"""
+    try:
+        rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
+        ext  = ctx["extract_prop_text_any"]
+        return {
+            r.get("id", ""): {
+                "name": ext(r, PARTMASTER_NAME_KEYS) or "",
+                "type": ext(r, PARTMASTER_TYPE_KEYS) or "",
+            }
+            for r in rows
+        }
+    except Exception:
+        return {}
+
+def _resolve_part_type(part_master_id: str) -> str:
+    """PART_MASTERのIDから種別文字列（"打楽器" etc.）を返す。session_stateのmapを参照。"""
+    pm_map: dict = st.session_state.get("form_part_master_map") or {}
+    return pm_map.get(part_master_id, {}).get("type", "")
 
 
 def _render_brand_logo() -> None:
@@ -239,18 +266,30 @@ def _load_form_data(ctx, concert_id: str, progress=None):
         req_inst_ids.update(ext_rel(pd, PARTDEF_INST_REL_KEYS))
 
     _prog(0.95, "⚙️ 仕上げ中...")
-    part_opts = _get_select_opts(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_PART_KEYS)
+    # PART_MASTERからパート一覧を取得
+    part_master_rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
+    ext_pm = ctx["extract_prop_text_any"]
+    part_master_map: dict[str, dict] = {
+        r.get("id", ""): {
+            "name": ext_pm(r, PARTMASTER_NAME_KEYS) or "",
+            "type": ext_pm(r, PARTMASTER_TYPE_KEYS) or "",
+        }
+        for r in part_master_rows
+    }
+    # パート名リスト（表示順はNotionの登録順）
+    part_opts = [v["name"] for v in part_master_map.values() if v["name"]]
 
     st.session_state.update({
-        "form_data_loaded": concert_id,
-        "form_concert":     concert,
-        "form_practices":   practices,
-        "form_concert_day": concert_day,
-        "form_songs":       songs,
-        "form_partdefs":    partdefs,
-        "form_inst_map":    inst_map,
-        "form_req_insts":   sorted(req_inst_ids, key=lambda x: inst_map.get(x, x)),
-        "form_part_opts":   part_opts + [OTHER_PART],
+        "form_data_loaded":       concert_id,
+        "form_concert":           concert,
+        "form_practices":         practices,
+        "form_concert_day":       concert_day,
+        "form_songs":             songs,
+        "form_partdefs":          partdefs,
+        "form_inst_map":          inst_map,
+        "form_req_insts":         sorted(req_inst_ids, key=lambda x: inst_map.get(x, x)),
+        "form_part_opts":         part_opts + [OTHER_PART],
+        "form_part_master_map":   part_master_map,
     })
 
 
@@ -366,8 +405,10 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
             ctx["put_prop_any"](props, t_cast, PARTICIPANT_PLAYER_REL_KEYS,  player_id)
             ctx["put_key_any"](props, t_cast, PARTICIPANT_RECORD_KEYS,
                                concert_id, player_id, prefix="participant")
-            ctx["put_prop_any"](props, t_cast, PARTICIPANT_PART_KEYS,
-                                st.session_state.get("form_player_part", ""))
+            # パートはRelation型（PART_MASTERへ）
+            part_master_id = st.session_state.get("form_player_part_id", "")
+            if part_master_id:
+                ctx["put_prop_any"](props, t_cast, PARTICIPANT_PART_REL_KEYS, part_master_id)
             confirmed_fee = st.session_state.get(f"confirmed_fee_{concert_id}")
             if confirmed_fee is not None:
                 ctx["put_prop_any"](props, t_cast, PARTICIPANT_FEE_KEYS, confirmed_fee)
@@ -383,13 +424,14 @@ def _submit_all(ctx, concert_id: str, concert_name: str,
             debug["cast_id"] = cast_id + "（既存）"
             # 既存レコードのパートが空なら書き込む
             existing_row = next((r for r in all_cast if r.get("id","") == cast_id), {})
-            if not ctx["extract_prop_text_any"](existing_row, PARTICIPANT_PART_KEYS):
-                props_p: dict = {}
-                ctx["put_prop_any"](props_p, t_cast, PARTICIPANT_PART_KEYS,
-                                    st.session_state.get("form_player_part", ""))
-                ctx["api_request"]("patch",
-                    f"https://api.notion.com/v1/pages/{cast_id}",
-                    json={"properties": props_p})
+            if not ext_rel(existing_row, PARTICIPANT_PART_REL_KEYS):
+                part_master_id = st.session_state.get("form_player_part_id", "")
+                if part_master_id:
+                    props_p: dict = {}
+                    ctx["put_prop_any"](props_p, t_cast, PARTICIPANT_PART_REL_KEYS, part_master_id)
+                    ctx["api_request"]("patch",
+                        f"https://api.notion.com/v1/pages/{cast_id}",
+                        json={"properties": props_p})
 
     debug["player_id"] = player_id
 
@@ -930,20 +972,22 @@ def render_form(ctx, concert_id: str):
             pid   = st.session_state.get("form_player_id", "")
             st.subheader(f"こんにちは、{pname} さん")
 
-            # パートをセット
-            players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
-            player  = next((p for p in players if p.get("id") == pid), {})
+            # パートをセット（CONCERT_CASTのパートRelationから取得）
             participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
             my_part = ""
+            my_part_master_id = ""
             for row in participant_rows:
                 p_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
                 c_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_CONCERT_REL_KEYS)
                 if pid in p_ids and concert_id in c_ids:
-                    my_part = ext(row, PARTICIPANT_PART_KEYS) or ""
+                    part_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PART_REL_KEYS)
+                    if part_ids:
+                        my_part_master_id = part_ids[0]
+                        pm_map_local: dict = st.session_state.get("form_part_master_map") or {}
+                        my_part = pm_map_local.get(my_part_master_id, {}).get("name", "")
                     break
-            if not my_part:
-                my_part = ext(player, ["パート", "Part"]) or ""
-            st.session_state["form_player_part"] = my_part
+            st.session_state["form_player_part"]    = my_part
+            st.session_state["form_player_part_id"] = my_part_master_id
 
             # 案提示フラグ確認
             proposal_done = _get_proposal_flag(ctx, concert_id)
@@ -1173,10 +1217,18 @@ def render_form(ctx, concert_id: str):
                 st.error("登録に失敗しました。もう一度お試しください。")
                 return
 
+            # パート名→PART_MASTERのIDを逆引き
+            pm_map: dict = st.session_state.get("form_part_master_map") or {}
+            part_master_id = next(
+                (pid for pid, v in pm_map.items() if v["name"] == actual_part),
+                ""
+            )
+
             st.session_state.update({
-                "form_player_id":   player_id,
-                "form_player_name": name,
-                "form_player_part": actual_part,
+                "form_player_id":        player_id,
+                "form_player_name":      name,
+                "form_player_part":      actual_part,
+                "form_player_part_id":   part_master_id,
                 "form_att":  {},
                 "form_att_comment": {},
                 "form_pref": {},
@@ -1261,13 +1313,33 @@ def render_form(ctx, concert_id: str):
 
     # ── STEP 3: パート希望（パート定義が存在する場合） ──────────
     elif step == 3:
+        # partとpart_master_idをここで取得（このスコープでは未定義のため必須）
+        part           = st.session_state.get("form_player_part", "")
+        part_master_id = st.session_state.get("form_player_part_id", "")
+
+        # 奏者のパートの種別をPART_MASTERから取得
+        pm_map: dict = st.session_state.get("form_part_master_map") or {}
+        my_part_type = pm_map.get(part_master_id, {}).get("type", "") if part_master_id else ""
+        my_is_perc   = IS_PERC(my_part_type or part)  # マスタ種別優先、なければパート名でフォールバック
+
+        # PART_DEFINITIONの「パート区分」RelationからPART_MASTERIDを引き、
+        # 奏者のpart_master_idと一致するものだけ表示する。
+        # パート区分が未設定の定義はスキップ（安全側）。
+        def _partdef_matches(pd) -> bool:
+            pd_part_ids = ctx["extract_relation_ids_any"](pd, PARTDEF_PART_REL_KEYS)
+            if not pd_part_ids:
+                return False
+            return part_master_id in pd_part_ids
+
+        visible_partdefs = [pd for pd in partdefs if _partdef_matches(pd)]
+
         st.subheader("Step 3 / パート希望を入力してください")
         st.caption("希望・NGのあるパートだけ入力してください。入力しないパートは「希望なし/降り番でも可」として扱われます。")
 
-        if not partdefs:
+        if not visible_partdefs:
             st.info("パート定義がまだ登録されていません。スキップします。")
             st.session_state["form_pref"] = {}
-            st.session_state["form_step"] = 4 if IS_PERC(part) else 5
+            st.session_state["form_step"] = 4 if my_is_perc else 5
             st.rerun()
             return
 
@@ -1275,7 +1347,7 @@ def render_form(ctx, concert_id: str):
         song_name_map = {s.get("id",""): ext(s, SONG_NAME_KEYS) or "" for s in songs}
         from collections import defaultdict
         pd_by_song: dict[str, list] = defaultdict(list)
-        for pd in partdefs:
+        for pd in visible_partdefs:
             sids = ctx["extract_relation_ids_any"](pd, PARTDEF_SONG_REL_KEYS)
             sid = sids[0] if sids else "__none__"
             pd_by_song[sid].append(pd)
@@ -1308,7 +1380,7 @@ def render_form(ctx, concert_id: str):
         # 入力済みパートのサマリ
         active = {pd_id: v for pd_id, v in pref.items() if v not in ("希望なし/降り番でも可", "")}
         if active:
-            pd_name_map = {pd.get("id",""): ext(pd, PARTDEF_NAME_KEYS) or "" for pd in partdefs}
+            pd_name_map = {pd.get("id",""): ext(pd, PARTDEF_NAME_KEYS) or "" for pd in visible_partdefs}
             with st.expander(f"入力済み: {len(active)}パート", expanded=False):
                 for pd_id, v in active.items():
                     st.caption(f"{pd_name_map.get(pd_id, pd_id)}：{v}")
@@ -1317,7 +1389,7 @@ def render_form(ctx, concert_id: str):
             if st.session_state.get("form_menu_mode"):
                 st.session_state["form_step"] = 6
             else:
-                st.session_state["form_step"] = 4 if IS_PERC(part) else 5
+                st.session_state["form_step"] = 4 if my_is_perc else 5
             st.rerun()
 
     # ── STEP 4: 所有楽器（Percのみ） ─────────────────────────
