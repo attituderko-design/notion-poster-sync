@@ -71,6 +71,7 @@ PARTDEF_RECORD_KEYS       = ["part_key", "タイトル"]
 PARTDEF_CONCERT_REL_KEYS  = ["演奏会", "出演", "FK演奏会"]
 PARTDEF_SONG_REL_KEYS     = ["演奏曲", "楽曲", "FK楽曲", "作品楽章", "作品マスタ"]
 PARTDEF_INST_REL_KEYS     = ["必要楽器", "楽器種別", "楽器", "FK楽器種別", "担当楽器"]
+PARTDEF_PART_REL_KEYS     = ["パート区分", "パートマスタ", "part_type", "part_master"]
 PARTDEF_NAME_KEYS         = ["パート名", "名称", "表示名"]
 PARTDEF_DISPLAY_NAME_KEYS = ["表示パート名", "display_part_name", "パート表示名"]
 PARTDEF_NOTE_KEYS         = ["備考", "メモ", "注記"]
@@ -178,12 +179,17 @@ BILLING_MODE_KEYS         = ["算出モード", "Mode", "連動モード"]
 BILLING_NOTE_KEYS         = ["備考", "メモ", "Note"]
 
 # ── CONCERT_CAST 追加フィールド ───────────────────────────────
-PARTICIPANT_PART_KEYS     = ["パート", "Part"]
+PARTICIPANT_PART_KEYS     = ["パート", "Part"]          # 旧Select型（互換用に残す）
+PARTICIPANT_PART_REL_KEYS = ["パート", "Part"]          # Relation型（PART_MASTERへ）
 PARTICIPANT_ROLE_KEYS     = ["役職_音楽", "役職", "Role"]
 PARTICIPANT_ROLE_OPS_KEYS = ["役職_運営", "RoleOps"]
 PARTICIPANT_FEE_KEYS      = ["参加費", "Fee"]
 PARTICIPANT_PAID_KEYS     = ["入金済", "Paid"]
 PARTICIPANT_OWN_CONFIRM_KEYS = ["所有楽器確定", "ownership_confirmed", "own_confirmed"]
+
+# ── PART_MASTER（パートマスタ）DB ────────────────────────────
+PARTMASTER_NAME_KEYS      = ["パート名", "名称", "タイトル", "Name"]
+PARTMASTER_TYPE_KEYS      = ["種別", "type", "category", "カテゴリ"]
 
 # ── ATLAS（CONCERT DB）追加フィールド ────────────────────────
 CONCERT_CONFIRMED_FEE_KEYS = ["確定参加費", "ConfirmedFee"]
