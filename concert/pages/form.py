@@ -621,7 +621,7 @@ def _render_concert_selector(ctx):
 
     # ── モード未選択 ─────────────────────────────────────────
     if not selector_mode:
-        st.subheader("はじめに")
+        st.subheader("ArtéMis HARMONIA ログイン")
         col_l, col_i = st.columns(2)
         if col_l.button("🔑 ログイン", use_container_width=True, type="primary", key="sel_login"):
             st.session_state["selector_mode"] = "login"
