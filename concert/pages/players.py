@@ -833,7 +833,7 @@ def _render_player_tab(ctx: dict):
             st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
         _set_harmonia_concert_checkbox(ctx, global_concert_id, HARMONIA_CONCERT_PARTICIPANT_KEYS, ok_n > 0 or len(df_reset) > 0, global_concert_name)
         st.session_state[f"cast_editor_version_{global_concert_id}"] = cast_version + 1
-        st.session_state.pop(f"participant_list_{global_concert_id}", None)
+        _clear_player_cache()
         st.rerun()
 
 
@@ -1067,7 +1067,7 @@ def _render_attendance_tab(ctx: dict):
                 answered_pairs.add((pls[0], prs[0]))
         attendance_complete = bool(all_parts and regular_practices) and all(any((pid, pr.get("id","")) in answered_pairs for pid in [part.get("id","")] + ctx["extract_relation_ids_any"](part, PARTICIPANT_PLAYER_REL_KEYS)) for part in all_parts for pr in regular_practices)
         _set_harmonia_concert_checkbox(ctx, c_id, HARMONIA_CONCERT_ATTENDANCE_KEYS, attendance_complete, c_name)
-        st.session_state.pop(f"attendance_list_{p_id}", None)
+        _clear_player_cache()
         st.rerun()
 
 

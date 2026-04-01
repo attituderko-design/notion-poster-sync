@@ -25,6 +25,9 @@ def _clear_rental_cache():
         if k.startswith("rental_list_"):
             st.session_state.pop(k, None)
     st.session_state.pop("rental_concert_list", None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
+    for _k in [k for k in st.session_state if k.startswith("harmonia_preloaded_")]:
+        st.session_state.pop(_k, None)  # 次回ホームで再プリフェッチ
 
 
 def _concert_media_values(c: dict) -> list[str]:
@@ -446,6 +449,7 @@ def _render_calc_tab(ctx: dict):
                         col_qty, col_btn = c4.columns([2, 3])
                         qty_input = col_qty.number_input(
                             "台数", min_value=1, max_value=99,
+                            value=st.session_state[qty_key],
                             step=1, key=qty_key,
                             label_visibility="collapsed",
                         )

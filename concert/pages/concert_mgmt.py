@@ -136,6 +136,9 @@ def _clear_concert_cache(ctx):
         pass
     for k in ["concertmgmt_concert_list", "practice_list"]:
         st.session_state.pop(k, None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
+    for _k in [k for k in st.session_state if k.startswith("harmonia_preloaded_")]:
+        st.session_state.pop(_k, None)  # 次回ホームで再プリフェッチ
 
 
 def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> str:
@@ -681,17 +684,6 @@ def _update_concert(
     ctx["put_key_any"](props, type_map, CONCERT_KEY_KEYS, name, dt_start, prefix="concert")
 
     res = api("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
-    return res is not None and res.status_code == 200
-
-
-def _update_practice_songs(ctx: dict, page_id: str, song_ids: list[str]) -> bool:
-    """練習レコードの演奏曲リレーションのみを更新する軽量版。"""
-    type_map = ctx["get_prop_types"](ctx["CONCERT_DB_PRACTICE"])
-    props: dict = {}
-    ctx["put_prop_any"](props, type_map, PRACTICE_SONG_REL_KEYS, song_ids)
-    if not props:
-        return False
-    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{page_id}", json={"properties": props})
     return res is not None and res.status_code == 200
 
 
@@ -1313,6 +1305,9 @@ def _clear_schedule_cache(practice_id: str = ""):
     for k in list(st.session_state.keys()):
         if k.startswith("schedule_list_") and (not practice_id or practice_id in k):
             st.session_state.pop(k, None)
+    st.cache_data.clear()  # Notionクエリキャッシュを無効化
+    for _k in [k for k in st.session_state if k.startswith("harmonia_preloaded_")]:
+        st.session_state.pop(_k, None)  # 次回ホームで再プリフェッチ
 
 
 def _upsert_schedule(ctx, practice_id: str, practice_name: str,
@@ -1351,15 +1346,34 @@ def _delete_schedule(ctx, page_id: str) -> bool:
     return res is not None and res.status_code == 200
 
 
-def _render_schedule_inline(ctx: dict, p_id: str, p_label: str, concert_id: str):
-    """練習expander内に埋め込むスケジュール入力。保存時にPRACTICE.演奏曲も自動更新。"""
-    if not p_id:
+def _render_schedule_tab(ctx: dict):
+    st.caption("練習日ごとのタイムスケジュールを管理します。行を追加・削除して「保存」を押してください。")
+
+    concert_id = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+    if not concert_id:
+        st.info("サイドバーで演奏会を選択してください。")
         return
 
-    col_r, _ = st.columns([1, 8])
-    if col_r.button("🔄", key=f"sched_refresh_{p_id}", help="再読み込み"):
+    practices = _load_practices(ctx, concert_id)
+    if not practices:
+        st.info("練習が登録されていません。")
+        return
+
+    def _prac_date_sort(p):
+        d = ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS)
+        return d[:10] if d else "9999"
+
+    practice_opts = {_practice_display_name(p, ctx): p.get("id", "")
+                     for p in sorted(practices, key=_prac_date_sort)}
+
+    col_sel, col_r = st.columns([8, 1])
+    p_label = col_sel.selectbox("練習日", list(practice_opts.keys()), key="sched_practice_sel")
+    p_id    = practice_opts.get(p_label, "")
+    if col_r.button("🔄", key="sched_refresh", help="再読み込み"):
         _clear_schedule_cache(p_id)
         st.rerun()
+    if not p_id:
+        return
 
     # 演奏曲の選択肢
     all_songs_rows = _load_songs(ctx, concert_id)
@@ -1466,28 +1480,11 @@ def _render_schedule_inline(ctx: dict, p_id: str, p_label: str, concert_id: str)
                 if rid and rid not in saved_ids:
                     _delete_schedule(ctx, rid)
 
-            # ── PRACTICE.演奏曲を自動更新 ──────────────────
-            # スケジュールに登録された演奏曲（重複排除・順序保持）をPRACTICEに反映
-            _sched_song_ids: list[str] = []
-            _seen: set[str] = set()
-            for idx in range(len(df_reset)):
-                row = df_reset.iloc[idx]
-                start_v = str(row.get("開始") or "").strip()
-                if not start_v:
-                    continue
-                song_n  = str(row.get("演奏曲") or "（なし）").strip()
-                sid     = song_opts.get(song_n, "")
-                if sid and sid not in _seen:
-                    _sched_song_ids.append(sid)
-                    _seen.add(sid)
-            _update_practice_songs(ctx, p_id, _sched_song_ids)
-
         if fail_n == 0:
-            st.success(f"✅ {ok_n}件を保存しました。練習曲も自動更新しました。（スキップ {skip_n}件）")
+            st.success(f"✅ {ok_n}件を保存しました。（スキップ {skip_n}件）")
         else:
             st.warning(f"⚠️ 成功 {ok_n} / 失敗 {fail_n} / スキップ {skip_n}")
         _clear_schedule_cache(p_id)
-        _clear_concert_cache(ctx)
         st.rerun()
 
 def render(ctx: dict):
@@ -1748,8 +1745,40 @@ def render(ctx: dict):
                         else:
                             st.error("❌ 練習日確定の更新に失敗しました。")
                 st.divider()
-                st.caption("📅 タイムスケジュール（保存時に練習曲も自動更新されます）")
-                _render_schedule_inline(ctx, p_id_pdf, label, filter_concert_id)
+                # 演奏曲設定（multiselect必須のためexpander内に残す）
+                song_opts_e: dict = {}
+                if filter_concert_id:
+                    s_rows_e = _load_songs(ctx, filter_concert_id)
+                    song_opts_e = {ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or s.get("id",""): s.get("id","")
+                                   for s in s_rows_e}
+                cur_song_ids_e = ctx["extract_relation_ids_any"](p, PRACTICE_SONG_REL_KEYS)
+                cur_song_names_e = [k for k, v in song_opts_e.items() if v in cur_song_ids_e]
+                selected_songs_e = st.multiselect(
+                    "この日に練習する曲（未選択の場合は全曲対象）",
+                    options=list(song_opts_e.keys()),
+                    default=cur_song_names_e,
+                    key=f"prac_songs_{p_id_pdf}",
+                )
+                if st.button("💾 演奏曲を保存", key=f"prac_songs_save_{p_id_pdf}", use_container_width=True):
+                    new_song_ids_e = [song_opts_e[s] for s in selected_songs_e if s in song_opts_e]
+                    ok = _update_practice(
+                        ctx, p_id_pdf,
+                        ctx["extract_prop_text_any"](p, PRACTICE_NAME_KEYS) or "",
+                        filter_concert_id,
+                        ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS) or "", "",
+                        ctx["extract_prop_text_any"](p, PRACTICE_VENUE_KEYS) or "",
+                        ctx["extract_prop_text_any"](p, PRACTICE_ADDRESS_KEYS) or "",
+                        _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False),
+                        _extract_bool_any(ctx, p, PRACTICE_PERCUSSION_OFF_KEYS, False),
+                        ctx["extract_prop_text_any"](p, PRACTICE_MEMO_KEYS) or "",
+                        song_ids=new_song_ids_e,
+                    )
+                    if ok:
+                        st.success("✅ 演奏曲を保存しました。")
+                        _clear_concert_cache(ctx)
+                        st.rerun()
+                    else:
+                        st.error("❌ 保存に失敗しました。")
                 st.divider()
                 col_pdf, col_mail, _ = st.columns([2, 2, 4])
 
@@ -1851,6 +1880,9 @@ def render(ctx: dict):
                             st.error(f"送信エラー: {e}")
                             st.code(traceback.format_exc())
 
+    st.divider()
+    with st.expander("📅 スケジュール管理", expanded=False):
+        _render_schedule_tab(ctx)
     st.divider()
     with st.expander("📋 データチェック", expanded=False):
         try:
