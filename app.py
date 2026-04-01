@@ -9376,6 +9376,88 @@ if system_mode == "HARMONIA":
                     st.image(_cover2_url, width=360)
                 st.markdown("### 作業の流れ")
                 _render_harmonia_progress_cards(_build_harmonia_progress(selected_concert_row))
+
+                # ── 招待コード・フォームURL ───────────────────────
+                st.divider()
+                st.markdown("### 📋 奏者フォーム招待情報")
+                _hc_row_latest = next(
+                    (r for r in concert_ctx["query_all"](concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT",""), None)
+                     if selected_concert_id in concert_ctx["extract_relation_ids_any"](r, ["演奏会","FK演奏会","concert"])),
+                    None
+                ) if concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT") else None
+
+                _invite_code = ""
+                if _hc_row_latest:
+                    _invite_code = concert_ctx["extract_prop_text_any"](_hc_row_latest, ["招待コード","invite_code"]) or ""
+
+                _form_base = (st.secrets.get("FORM_BASE_URL","https://artemis-form.streamlit.app") or "").strip().rstrip("/")
+                _form_url  = _form_base + "/"
+
+                col_code, col_regen = st.columns([4, 1])
+                col_code.text_input("招待コード", value=_invite_code, disabled=True, key="invite_code_display",
+                                    help="奏者フォームの新規参加・別演奏会参加時に入力してもらうコードです。")
+                if col_regen.button("🔄", key="invite_code_regen", help="招待コードを再生成する",
+                                    use_container_width=True):
+                    if _hc_row_latest:
+                        import random as _r, string as _s
+                        _new_code = "".join(_r.choices(_s.ascii_uppercase + _s.digits, k=8))
+                        _hc_db = concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT","")
+                        _t_hc  = concert_ctx["get_prop_types"](_hc_db) or {}
+                        _cp: dict = {}
+                        concert_ctx["put_prop_any"](_cp, _t_hc, ["招待コード","invite_code"], _new_code)
+                        concert_ctx["api_request"]("patch",
+                            f"https://api.notion.com/v1/pages/{_hc_row_latest.get('id','')}",
+                            json={"properties": _cp})
+                        st.cache_data.clear()
+                        st.rerun()
+
+                # 手動編集
+                with st.expander("招待コードを手動で変更する", expanded=False):
+                    _manual_code = st.text_input("新しい招待コード", max_chars=20, key="invite_code_manual",
+                                                  placeholder="例: SPRING2026")
+                    if st.button("💾 変更を保存", key="invite_code_save", use_container_width=True):
+                        _manual_code = (_manual_code or "").strip()
+                        if not _manual_code:
+                            st.error("招待コードを入力してください。")
+                        elif _hc_row_latest:
+                            _hc_db = concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT","")
+                            _t_hc  = concert_ctx["get_prop_types"](_hc_db) or {}
+                            _cp2: dict = {}
+                            concert_ctx["put_prop_any"](_cp2, _t_hc, ["招待コード","invite_code"], _manual_code)
+                            _res_inv = concert_ctx["api_request"]("patch",
+                                f"https://api.notion.com/v1/pages/{_hc_row_latest.get('id','')}",
+                                json={"properties": _cp2})
+                            if _res_inv and _res_inv.status_code == 200:
+                                st.success(f"✅ 招待コードを「{_manual_code}」に変更しました。")
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error("変更に失敗しました。")
+
+                # フォームURL + QRコード
+                st.code(_form_url, language=None)
+                st.caption(f"招待コード: **{_invite_code}** をLINEやチャットで別途共有してください。")
+                if st.button("📱 QRコードを表示", key="invite_qr_btn", use_container_width=True):
+                    st.session_state["show_invite_qr"] = not st.session_state.get("show_invite_qr", False)
+                if st.session_state.get("show_invite_qr"):
+                    try:
+                        import qrcode as _qc
+                        import io as _io
+                        _qr = _qc.QRCode(version=None,
+                                          error_correction=_qc.constants.ERROR_CORRECT_M,
+                                          box_size=6, border=3)
+                        _qr.add_data(_form_url)
+                        _qr.make(fit=True)
+                        _qr_img = _qr.make_image(fill_color="black", back_color="white")
+                        _qr_buf = _io.BytesIO()
+                        _qr_img.save(_qr_buf, format="PNG")
+                        _qr_buf.seek(0)
+                        st.image(_qr_buf, width=220, caption=f"フォームURL QR（招待コード: {_invite_code}）")
+                        st.download_button("⬇️ QR画像をダウンロード", data=_qr_buf.getvalue(),
+                                           file_name=f"harmonia_form_qr_{_invite_code}.png",
+                                           mime="image/png", key="invite_qr_dl")
+                    except Exception as _qe:
+                        st.warning(f"QRコード生成に失敗しました（qrcodeライブラリを確認してください）: {_qe}")
         else:
             st.info("サイドバーの『演奏会フィルタ』で演奏会を選択してください。")
         st.stop()
