@@ -32,13 +32,15 @@ from concert.services.keys import (
     PRACTICE_ADDRESS_KEYS, PRACTICE_CONCERT_DAY_KEYS, PRACTICE_CONCERT_REL_KEYS,
     ATT_PLAYER_REL_KEYS, ATT_STATUS_KEYS, ATT_PRACTICE_REL_KEYS,
     PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
+    PARTICIPANT_PART_REL_KEYS,
+    PARTMASTER_NAME_KEYS, PARTMASTER_TYPE_KEYS,
     RENTAL_PRACTICE_REL_KEYS, RENTAL_QTY_KEYS, RENTAL_UNIT_PRICE_KEYS,
     RENTAL_CONFIRMED_KEYS, RENTAL_VENDOR_KEYS, RENTAL_ITEM_NAME_KEYS,
     RENTAL_INST_REL_KEYS, RENTAL_COST_TYPE_KEYS,
     PLAYER_NAME_KEYS, INSTRUMENT_NAME_KEYS,
     SONG_NAME_KEYS, SONG_CONCERT_REL_KEYS, SONG_COMPOSER_KEYS,
     PARTICIPANT_CONCERT_REL_KEYS, PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS,
-    PARTICIPANT_PART_KEYS, CONCERT_CONFIRMED_FEE_KEYS,
+    CONCERT_CONFIRMED_FEE_KEYS,
     EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS, EXPENSE_AMOUNT_KEYS,
     EXPENSE_CONFIRMED_KEYS,
 )
@@ -204,14 +206,21 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     player_name_map = {r.get("id",""): ext(r, PLAYER_NAME_KEYS) or "" for r in player_rows}
     part_to_player = {r.get("id",""): (ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0]
                       for r in participant_rows}
-    # player_id → パート名のマップ
+    # PART_MASTERマップを構築
+    try:
+        _pm_rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
+        _pm_map  = {r.get("id",""): ext(r, PARTMASTER_NAME_KEYS) or "" for r in _pm_rows}
+    except Exception:
+        _pm_map = {}
+    # player_id → パート名のマップ（PART_MASTERのRelation経由）
     player_part_map: dict[str, str] = {}
     participant_player_ids = []
     for r in concert_parts:
         p_ids = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
         if p_ids and p_ids[0] not in participant_player_ids:
             participant_player_ids.append(p_ids[0])
-            player_part_map[p_ids[0]] = ext(r, PARTICIPANT_PART_KEYS) or ""
+            pm_ids = ext_rel(r, PARTICIPANT_PART_REL_KEYS)
+            player_part_map[p_ids[0]] = _pm_map.get(pm_ids[0], "") if pm_ids else ""
     # パート→氏名順でソート
     participant_player_ids.sort(key=lambda pid: (
         player_part_map.get(pid, "zzz"),
