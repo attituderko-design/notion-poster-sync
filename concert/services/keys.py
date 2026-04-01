@@ -60,6 +60,7 @@ SONG_DURATION_KEYS        = ["演奏時間", "Duration"]
 SONG_NOTE_KEYS            = ["メモ", "備考"]
 SONG_KEY_KEYS             = ["song_key", "SongKey", "PK曲キー", "曲キー"]
 SONG_CONCERT_REL_KEYS     = ["演奏会", "出演", "FK演奏会"]
+SONG_SCORE_URL_KEYS       = ["楽譜URL", "score_url", "ScoreURL"]
 
 # ── INSTRUMENT（楽器種別）DB ─────────────────────────────────
 INSTRUMENT_NAME_KEYS      = ["楽器名", "タイトル", "PK楽器名"]
@@ -77,6 +78,7 @@ PARTDEF_NAME_KEYS         = ["パート名", "名称", "表示名"]
 PARTDEF_DISPLAY_NAME_KEYS = ["表示パート名", "display_part_name", "パート表示名"]
 PARTDEF_NOTE_KEYS         = ["備考", "メモ", "注記"]
 PARTDEF_KEY_KEYS          = ["part_key", "PartKey", "PKパートキー", "パートキー"]
+PARTDEF_SCORE_URL_KEYS    = ["楽譜URL", "score_url", "ScoreURL"]
 
 # ── PREFERENCE（希望入力）DB ─────────────────────────────────
 PREF_PLAYER_REL_KEYS      = ["演奏会参加者", "奏者", "出演者", "FK奏者"]
