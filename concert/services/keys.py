@@ -53,15 +53,8 @@ ATT_STATUS_KEYS           = ["参加可否", "出欠", "ステータス", "Statu
 ATT_NOTE_KEYS             = ["コメント", "備考", "メモ"]
 ATTENDANCE_KEY_KEYS       = ["attendance_key", "AttendanceKey", "出欠キー", "PK出欠キー"]
 
-# ── MOVEMENT（楽章）DB ───────────────────────────────────────
-MOVEMENT_KEY_KEYS         = ["movement_key", "タイトル"]
-MOVEMENT_NAME_KEYS        = ["楽章名", "movement_name", "name"]
-MOVEMENT_NO_KEYS          = ["楽章番号", "movement_no", "number"]
-MOVEMENT_ORDER_KEYS       = ["表示順", "movement_order", "order"]
-MOVEMENT_ROMAN_KEYS       = ["ローマ数字表示", "roman", "roman_numeral"]
-MOVEMENT_WORK_REL_KEYS    = ["作品マスタ", "作品", "Work"]
-
-# ── APOLLO（演奏曲）DBの楽章リレーション ─────────────────────
+# ── APOLLO（演奏曲）DB ───────────────────────────────────────
+SONG_NAME_KEYS            = ["曲名", "タイトル", "PK曲名", "作品名"]
 SONG_MOVEMENT_REL_KEYS    = ["作品楽章マスタ", "作品楽章", "楽章マスタ", "Movement"]
 SONG_WORK_REL_KEYS        = ["作品マスタ", "作品", "Work"]
 SONG_COMPOSER_KEYS        = ["作曲者", "Composer"]
@@ -70,6 +63,14 @@ SONG_NOTE_KEYS            = ["メモ", "備考"]
 SONG_KEY_KEYS             = ["song_key", "SongKey", "PK曲キー", "曲キー"]
 SONG_CONCERT_REL_KEYS     = ["演奏会", "出演", "FK演奏会"]
 SONG_SCORE_URL_KEYS       = ["楽譜URL", "score_url", "ScoreURL"]
+
+# ── MOVEMENT（楽章）DB ───────────────────────────────────────
+MOVEMENT_KEY_KEYS         = ["movement_key", "タイトル"]
+MOVEMENT_NAME_KEYS        = ["楽章名", "movement_name", "name"]
+MOVEMENT_NO_KEYS          = ["楽章番号", "movement_no", "number"]
+MOVEMENT_ORDER_KEYS       = ["表示順", "movement_order", "order"]
+MOVEMENT_ROMAN_KEYS       = ["ローマ数字表示", "roman", "roman_numeral"]
+MOVEMENT_WORK_REL_KEYS    = ["作品マスタ", "作品", "Work"]
 
 # ── INSTRUMENT（楽器種別）DB ─────────────────────────────────
 INSTRUMENT_NAME_KEYS      = ["楽器名", "タイトル", "PK楽器名"]
