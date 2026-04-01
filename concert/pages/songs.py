@@ -5,6 +5,10 @@ concert.pages.songs
 import pandas as pd
 import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
+from concert.services.song_utils import (
+    get_song_display_name, build_song_name_map,
+    load_movement_map, clear_song_display_cache,
+)
 
 
 APOLLO_ATLAS_SONG_REL_KEYS = ["演奏曲", "曲", "作品楽章", "作品", "ATLAS曲"]
@@ -360,56 +364,9 @@ def _concert_name(c: dict, ctx: dict) -> str:
     return f"{n}（{dt[:10] if dt else '日時未設定'}）"
 
 
-def _load_movement_map(ctx: dict) -> dict[str, dict]:
-    """MOVEMENT DBをid→{name, no, roman}のdictで返す。セッション内キャッシュ付き。"""
-    cache_key = "_movement_map_cache"
-    if cache_key in st.session_state:
-        return st.session_state[cache_key]
-    try:
-        db_id = ctx.get("CONCERT_DB_MOVEMENT", "")
-        if not db_id:
-            return {}
-        rows = ctx["query_all"](db_id, None)
-        ext  = ctx["extract_prop_text_any"]
-        result = {
-            r.get("id", ""): {
-                "name":  ext(r, MOVEMENT_NAME_KEYS)  or "",
-                "no":    ext(r, MOVEMENT_NO_KEYS)    or "",
-                "roman": ext(r, MOVEMENT_ROMAN_KEYS) or "",
-            }
-            for r in rows
-        }
-        st.session_state[cache_key] = result
-        return result
-    except Exception:
-        return {}
-
-
 def _song_name(s: dict, ctx: dict) -> str:
-    """APOLLOのタイトル + 楽章情報を組み合わせて表示名を返す。
-    全楽章フラグがTrueの場合は曲名のみ。
-    特定楽章の場合: 「スペイン狂詩曲 / IV. Feria」のように表示。
-    """
-    title = ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or ctx["extract_title"](s) or s.get("id", "")
-    try:
-        # 全楽章フラグがTrueなら楽章名は付けない
-        all_mvmt = ctx["extract_prop_text_any"](s, SONG_ALL_MOVEMENTS_KEYS)
-        if all_mvmt == "True":
-            return title
-        # 楽章リレーションがある場合のみ楽章名を付加
-        mv_ids = ctx["extract_relation_ids_any"](s, SONG_MOVEMENT_REL_KEYS)
-        if mv_ids:
-            mv_map = _load_movement_map(ctx)
-            mv = mv_map.get(mv_ids[0], {})
-            mv_name  = mv.get("name", "")
-            mv_roman = mv.get("roman", "")
-            mv_no    = mv.get("no", "")
-            if mv_name:
-                mv_label = f"{mv_roman}. {mv_name}" if mv_roman else (f"{mv_no}. {mv_name}" if mv_no else mv_name)
-                return f"{title} / {mv_label}"
-    except Exception:
-        pass
-    return title
+    """song_utils.get_song_display_nameのラッパー。後方互換用。"""
+    return get_song_display_name(ctx, s)
 
 
 def _instrument_name(i: dict, ctx: dict) -> str:

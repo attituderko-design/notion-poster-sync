@@ -7,6 +7,7 @@ concert.pages.assign
 """
 import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
+from concert.services.song_utils import get_song_display_name, build_song_name_map, get_songs_for_concert
 from collections import defaultdict
 import re
 
@@ -206,18 +207,12 @@ def _normalize_page_id(v: str) -> str:
     return (v or "").replace("-", "").strip().lower()
 
 
-def _is_perc_part(part_name_or_type: str) -> bool:
-    """パート名/種別が打楽器（Perc）かどうかを判定する。未設定の場合は対象外とする。"""
-    name = (part_name_or_type or "").strip()
+def _is_perc_part(part_name: str) -> bool:
+    """パート名が打楽器（Perc）かどうかを判定する。未設定の場合は対象外とする。"""
+    name = (part_name or "").strip().lower()
     if not name:
-        return False
-    return name == "打楽器" or name.lower() in ("perc", "percussion")
-
-
-from concert.services.part_master_utils import (
-    load_part_master_map as _load_part_master_map,
-)
-
+        return False  # パート未設定はPercでないとみなす
+    return name in ("perc", "percussion", "打楽器")
 
 
 def _load_players(ctx) -> list[dict]:
@@ -326,7 +321,7 @@ def _bump_pref_editor_version(concert_id: str, player_id: str) -> None:
 
 
 def _song_name(s, ctx) -> str:
-    return ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or ctx["extract_title"](s) or s.get("id", "")
+    return get_song_display_name(ctx, s)
 
 
 def _instrument_name(i, ctx) -> str:
@@ -538,14 +533,12 @@ def _render_pref_tab(ctx: dict):
         st.info("この演奏会に紐づく奏者が見つかりませんでした。参加者DBのリレーションを確認してください。")
         return
 
-    # パートフィルタ：PART_MASTERからパート名を取得して選択
-    pm_map_as = _load_part_master_map(ctx)
+    # パートフィルタ：CONCERT_CASTからパート一覧を取得して選択
     part_by_player: dict[str, str] = {}
     for row in participant_rows:
         pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
         if pids:
-            pm_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PART_REL_KEYS)
-            part_by_player[pids[0]] = pm_map_as.get(pm_ids[0], {}).get("name", "") if pm_ids else ""
+            part_by_player[pids[0]] = ctx["extract_prop_text_any"](row, PARTICIPANT_PART_KEYS) or ""
     all_parts = sorted({p for p in part_by_player.values() if p})
     if all_parts:
         selected_part = st.selectbox(
@@ -847,16 +840,14 @@ def _render_solver_tab(ctx: dict):
                 # 参加者DB全員リスト（希望未提出も含む）をfallback候補に
                 # ※ all_pidsより先に定義する必要がある
                 _all_cast = _load_participants(ctx, concert_id)
-                _pm_map_as = _load_part_master_map(ctx)
                 _part_to_pl = {}
                 for _r in _all_cast:
                     _pids = ctx["extract_relation_ids_any"](_r, PARTICIPANT_PLAYER_REL_KEYS)
                     if _pids:
                         _pid = _pids[0]
-                        # 打楽器パートのみを対象にする（PART_MASTERの種別で判定）
-                        _pm_ids = ctx["extract_relation_ids_any"](_r, PARTICIPANT_PART_REL_KEYS)
-                        _ptype = _pm_map_as.get(_pm_ids[0], {}).get("type", "") if _pm_ids else ""
-                        if not _is_perc_part(_ptype):
+                        # 打楽器パート（Perc系）のみを対象にする
+                        _ppart = (ctx["extract_prop_text_any"](_r, PARTICIPANT_PART_KEYS) or "").strip()
+                        if not _is_perc_part(_ppart):
                             continue
                         _pobj = next((p for p in players if p.get("id","") == _pid), None)
                         _pname = _player_name(_pobj, ctx) if _pobj else ""
