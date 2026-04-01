@@ -106,12 +106,19 @@ def _save_password_hash(ctx: dict, player_id: str, password: str) -> bool:
     return res is not None and res.status_code == 200
 
 def _get_proposal_flag(ctx: dict, concert_id: str) -> bool:
-    """HARMONIA_CONCERTの「案提示」フラグを取得する。"""
+    """HARMONIA_CONCERTの「案提示」フラグを取得する。
+    formアプリは別プロセスのためキャッシュを使わずAPIを直接叩く。
+    """
     try:
         hc_db = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
         if not hc_db:
             return False
-        hc_rows = ctx["query_all"](hc_db, None)
+        # キャッシュを使わず直接APIで取得
+        url = f"https://api.notion.com/v1/databases/{hc_db}/query"
+        res = ctx["api_request"]("post", url, json={"page_size": 100})
+        if not res or res.status_code != 200:
+            return False
+        hc_rows = res.json().get("results", [])
         hc_row = next(
             (r for r in hc_rows
              if concert_id in ctx["extract_relation_ids_any"](r, ["演奏会", "FK演奏会", "concert"])),
