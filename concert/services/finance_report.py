@@ -24,9 +24,10 @@ from concert.services.keys import (
     PRACTICE_NAME_KEYS, PRACTICE_DATE_KEYS, PRACTICE_CONCERT_DAY_KEYS,
     PRACTICE_CONCERT_REL_KEYS,
     PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
-    PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS,
+    PARTICIPANT_PART_REL_KEYS, PARTICIPANT_ROLE_KEYS,
     PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS,
     PLAYER_NAME_KEYS,
+    PARTMASTER_NAME_KEYS, PARTMASTER_TYPE_KEYS,
     EXPENSE_TYPE_KEYS, EXPENSE_CONTENT_KEYS, EXPENSE_AMOUNT_KEYS,
     EXPENSE_CONFIRMED_KEYS, EXPENSE_NOTE_KEYS, EXPENSE_CONCERT_REL_KEYS,
     RENTAL_PRACTICE_REL_KEYS, RENTAL_QTY_KEYS, RENTAL_UNIT_PRICE_KEYS,
@@ -383,10 +384,19 @@ def generate_finance_report(ctx: dict, concert_id: str) -> bytes:
     story.append(Spacer(1, 2*mm))
 
     cast_data = [["氏名", "パート", "役職", "参加費", "入金済"]]
-    for r in sorted(cast, key=lambda x: (ext(x, PARTICIPANT_PART_KEYS) or "", ext(x, PARTICIPANT_ROLE_KEYS) or "")):
+    # PART_MASTERマップを構築
+    try:
+        _pm_rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
+        _pm_map  = {r.get("id",""): ext(r, PARTMASTER_NAME_KEYS) or "" for r in _pm_rows}
+    except Exception:
+        _pm_map = {}
+    def _part_name(r):
+        pm_ids = ext_rel(r, PARTICIPANT_PART_REL_KEYS)
+        return _pm_map.get(pm_ids[0], "") if pm_ids else ""
+    for r in sorted(cast, key=lambda x: (_part_name(x), ext(x, PARTICIPANT_ROLE_KEYS) or "")):
         pids  = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
         pname = player_name_map.get(pids[0], "—") if pids else "—"
-        part  = ext(r, PARTICIPANT_PART_KEYS)  or "—"
+        part  = _part_name(r) or "—"
         role  = ext(r, PARTICIPANT_ROLE_KEYS)  or "—"
         fee_s = ext(r, PARTICIPANT_FEE_KEYS)   or "0"
         paid  = ext(r, PARTICIPANT_PAID_KEYS)  == "True"
