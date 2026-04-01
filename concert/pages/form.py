@@ -28,6 +28,7 @@ from concert.services.keys import (
     CONCERT_CONFIRMED_FEE_KEYS,
 )
 from concert.services.relation_utils import find_relation_prop
+from concert.services.song_utils import get_song_display_name, build_song_name_map
 
 _TOKEN_SECRET = "harmonia_form_2024"
 PRIORITY_OPTS = ["未回答", "第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
@@ -271,9 +272,13 @@ def _load_form_data(ctx, concert_id: str, progress=None):
     )
 
     _prog(0.5, "🎶 演奏曲目を取得中...")
-    all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
-    songs = [s for s in all_songs
-             if concert_id in ext_rel(s, SONG_CONCERT_REL_KEYS)]
+    from concert.services.song_utils import get_songs_for_concert as _get_songs
+    songs = _get_songs(ctx, concert_id)
+    # フォールバック：get_songs_for_concertが空の場合は旧ロジックで取得
+    if not songs:
+        all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
+        songs = [s for s in all_songs
+                 if concert_id in ext_rel(s, SONG_CONCERT_REL_KEYS)]
     song_ids = {s.get("id","") for s in songs}
 
     _prog(0.65, "🧩 パート定義を取得中...")
@@ -804,7 +809,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
     all_players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
     player_name_map = {p.get("id",""): ext(p, PLAYER_NAME_KEYS) or "" for p in all_players}
     all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
-    song_name_map = {s.get("id",""): ext(s, SONG_NAME_KEYS) or "" for s in all_songs}
+    song_name_map = build_song_name_map(ctx, all_songs)
     all_pd = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
     pd_name_map = {p.get("id",""): ext(p, PARTDEF_NAME_KEYS) or "" for p in all_pd}
     # パート定義→PART_MASTERのIDマップ
@@ -1134,8 +1139,8 @@ def render_form(ctx, concert_id: str = ""):
     if c_soloist:   st.caption(f"🌟 ソリスト：{c_soloist}")
     if songs:
         st.caption("🎶 演奏曲目：" + "　/　".join(
-            f"{ext(s, SONG_NAME_KEYS) or ''}（{ext(s, SONG_CREATOR_KEYS)}）" if ext(s, SONG_CREATOR_KEYS)
-            else (ext(s, SONG_NAME_KEYS) or "")
+            f"{get_song_display_name(ctx, s)}（{ext(s, SONG_CREATOR_KEYS)}）" if ext(s, SONG_CREATOR_KEYS)
+            else get_song_display_name(ctx, s)
             for s in songs
         ))
     if st.query_params.get("debug") == "1" and st.session_state.get("form_att_debug"):
@@ -1607,7 +1612,7 @@ def render_form(ctx, concert_id: str = ""):
                                 _song = next((s for s in songs if s.get("id") == _pd_song_ids[0]), None)
                                 if _song:
                                     _song_url = ctx["extract_prop_text_any"](_song, ["楽譜URL","score_url","ScoreURL"]) or ""
-                                    _song_name_lbl = ctx["extract_prop_text_any"](_song, SONG_NAME_KEYS) or "楽譜"
+                                    _song_name_lbl = get_song_display_name(ctx, _song) or "楽譜"
                                     if _song_url:
                                         _score_links.append((f"{_song_name_lbl}（全体）", _song_url))
 
@@ -1698,25 +1703,39 @@ def render_form(ctx, concert_id: str = ""):
             # ── 楽譜リンク（全ロール共通：自パートのもの） ──────
             _player_score_links: list[tuple[str,str]] = []
             for _pd in partdefs:
+                # パート区分リレーションで自パートと照合（設定済みの場合）
                 _pd_pm_ids = ctx["extract_relation_ids_any"](_pd, PARTDEF_PART_REL_KEYS)
-                if _pd_pm_ids and _pd_pm_ids[0] == my_part_master_id:
-                    _pd_url = ctx["extract_prop_text_any"](_pd, ["楽譜URL","score_url","ScoreURL"]) or ""
-                    _pd_lbl = ctx["extract_prop_text_any"](_pd, PARTDEF_NAME_KEYS) or "楽譜"
-                    if _pd_url:
-                        _player_score_links.append((_pd_lbl, _pd_url))
-                    else:
-                        _pd_song_ids = ctx["extract_relation_ids_any"](_pd, PARTDEF_SONG_REL_KEYS)
-                        if _pd_song_ids:
-                            _s = next((s for s in songs if s.get("id") == _pd_song_ids[0]), None)
-                            if _s:
-                                _s_url = ctx["extract_prop_text_any"](_s, ["楽譜URL","score_url","ScoreURL"]) or ""
-                                _s_lbl = ctx["extract_prop_text_any"](_s, SONG_NAME_KEYS) or "楽譜"
-                                if _s_url:
-                                    _player_score_links.append((f"{_s_lbl}（全体）", _s_url))
-            if _player_score_links:
+                _is_my_part = _pd_pm_ids and _pd_pm_ids[0] == my_part_master_id
+                # フォールバック：パート区分未設定の場合は全パート定義を対象に
+                if not _pd_pm_ids:
+                    _is_my_part = True
+                if not _is_my_part:
+                    continue
+                _pd_url = ctx["extract_prop_text_any"](_pd, ["楽譜URL","score_url","ScoreURL"]) or ""
+                _pd_lbl = ctx["extract_prop_text_any"](_pd, PARTDEF_NAME_KEYS) or "楽譜"
+                if _pd_url:
+                    _player_score_links.append((_pd_lbl, _pd_url))
+                else:
+                    # パート別URLがなければ曲全体のURLを探す
+                    _pd_song_ids = ctx["extract_relation_ids_any"](_pd, PARTDEF_SONG_REL_KEYS)
+                    if _pd_song_ids:
+                        _s = next((s for s in songs if s.get("id") == _pd_song_ids[0]), None)
+                        if _s:
+                            _s_url = ctx["extract_prop_text_any"](_s, ["楽譜URL","score_url","ScoreURL"]) or ""
+                            _s_lbl = get_song_display_name(ctx, _s) or "楽譜"
+                            if _s_url:
+                                _player_score_links.append((f"{_s_lbl}（全体）", _s_url))
+            # 重複除去（同じURLが複数のパート定義から来る場合）
+            _seen_urls: set[str] = set()
+            _deduped_links = []
+            for _lbl, _url in _player_score_links:
+                if _url not in _seen_urls:
+                    _seen_urls.add(_url)
+                    _deduped_links.append((_lbl, _url))
+            if _deduped_links:
                 st.divider()
                 st.markdown("**🎼 楽譜リンク**")
-                for _lbl, _url in _player_score_links:
+                for _lbl, _url in _deduped_links:
                     st.markdown(f"[📄 {_lbl}]({_url})")
 
             st.divider()
@@ -1958,7 +1977,7 @@ def render_form(ctx, concert_id: str = ""):
             return
 
         # 曲ごとにグループ化
-        song_name_map = {s.get("id",""): ext(s, SONG_NAME_KEYS) or "" for s in songs}
+        song_name_map = build_song_name_map(ctx, songs)
         from collections import defaultdict
         pd_by_song: dict[str, list] = defaultdict(list)
         for pd in visible_partdefs:
