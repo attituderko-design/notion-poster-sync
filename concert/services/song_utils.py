@@ -89,40 +89,50 @@ def get_song_display_name(ctx, apollo_row: dict) -> str:
 
 
 def get_songs_for_concert(ctx, concert_id: str) -> list[dict]:
-    """CONCERT_SONG経由でこの演奏会のAPOLLOレコード一覧を曲順ソートで返す。"""
+    """この演奏会のAPOLLOレコード一覧を曲順ソートで返す。
+    CONCERT_SONG → ATLASのID → APOLLO.演奏曲リレーション のチェーンで解決。
+    """
     try:
-        ext     = ctx["extract_prop_text_any"]
         ext_rel = ctx["extract_relation_ids_any"]
+        ext     = ctx["extract_prop_text_any"]
 
-        # CONCERT_SONGから演奏会に紐づく行を取得
+        # CONCERT_SONGから演奏会に紐づくATLAS song IDと曲順を取得
         cs_rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT_SONG"], None)
-        cs_for_concert = [
-            r for r in cs_rows
-            if concert_id in ext_rel(r, CONCERT_SONG_CONCERT_REL_KEYS)
-        ]
-        # 曲順ソート
-        def _order(r):
-            v = ext(r, CONCERT_SONG_ORDER_KEYS) or ""
-            try:
-                return float(v)
-            except Exception:
-                return 9999.0
-        cs_for_concert.sort(key=_order)
+        atlas_id_order: dict[str, float] = {}  # atlas_song_id → 曲順
+        for r in cs_rows:
+            if concert_id not in ext_rel(r, CONCERT_SONG_CONCERT_REL_KEYS):
+                continue
+            for aid in ext_rel(r, CONCERT_SONG_SONG_REL_KEYS):
+                try:
+                    order_val = float(ext(r, CONCERT_SONG_ORDER_KEYS) or "9999")
+                except Exception:
+                    order_val = 9999.0
+                atlas_id_order[aid] = order_val
 
-        # APOLLOのIDを収集
-        apollo_ids = []
-        for r in cs_for_concert:
-            ids = ext_rel(r, CONCERT_SONG_SONG_REL_KEYS)
-            if ids and ids[0] not in apollo_ids:
-                apollo_ids.append(ids[0])
-
-        if not apollo_ids:
+        if not atlas_id_order:
             return []
 
-        # APOLLOを取得してID順に並べ直す
+        atlas_id_set = set(atlas_id_order.keys())
+
+        # APOLLOを取得してATLAS IDで照合
         all_apollo = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
-        apollo_map = {r.get("id", ""): r for r in all_apollo}
-        return [apollo_map[aid] for aid in apollo_ids if aid in apollo_map]
+        result = []
+        for row in all_apollo:
+            # APOLLO.演奏曲リレーション（→ATLAS）と照合
+            apollo_atlas_ids = set(ext_rel(row, ["演奏曲", "FK演奏曲", "出演"]))
+            if not apollo_atlas_ids.intersection(atlas_id_set):
+                continue
+            result.append(row)
+
+        # 曲順でソート（APOLLOのリレーション先ATLASのIDから曲順を引く）
+        def _sort_key(s):
+            for aid in ext_rel(s, ["演奏曲", "FK演奏曲", "出演"]):
+                if aid in atlas_id_order:
+                    return atlas_id_order[aid]
+            return 9999.0
+
+        result.sort(key=_sort_key)
+        return result
 
     except Exception:
         return []
