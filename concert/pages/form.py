@@ -1008,6 +1008,78 @@ def render_form(ctx, concert_id: str):
                     })
                     st.rerun()
 
+            # ── 直近の練習情報 ──────────────────────────────
+            st.divider()
+            from datetime import date as _date_cls
+            today = _date_cls.today()
+            next_practice = None
+            for pr in practices:
+                pr_date_str = ext(pr, PRACTICE_DATE_KEYS) or ""
+                if pr_date_str and len(pr_date_str) >= 10:
+                    try:
+                        pr_d = _date_cls.fromisoformat(pr_date_str[:10])
+                        if pr_d >= today:
+                            if next_practice is None or pr_d < _date_cls.fromisoformat(ext(next_practice, PRACTICE_DATE_KEYS)[:10]):
+                                next_practice = pr
+                    except Exception:
+                        pass
+
+            if next_practice:
+                pr_id_next   = next_practice.get("id", "")
+                pr_name_next = ext(next_practice, PRACTICE_NAME_KEYS) or "練習"
+                pr_date_next = ext(next_practice, PRACTICE_DATE_KEYS) or ""
+                pr_venue_next = ext(next_practice, PRACTICE_VENUE_KEYS) or ""
+                pr_addr_next  = ext(next_practice, ["会場住所", "住所", "Address"]) or ""
+                pr_date_disp  = pr_date_next[:10] if pr_date_next else ""
+                pr_time_disp  = pr_date_next[11:16] if len(pr_date_next) > 10 else ""
+                try:
+                    _wd = _date_cls.fromisoformat(pr_date_disp)
+                    pr_weekday = ["月","火","水","木","金","土","日"][_wd.weekday()]
+                except Exception:
+                    pr_weekday = ""
+
+                with st.container(border=True):
+                    st.caption("📅 直近の練習")
+                    st.markdown(f"**{pr_name_next}**")
+                    if pr_date_disp:
+                        _label = f"{pr_date_disp}（{pr_weekday}）" if pr_weekday else pr_date_disp
+                        if pr_time_disp:
+                            _label += f" {pr_time_disp}"
+                        st.caption(f"🗓 {_label}")
+                    if pr_venue_next:
+                        st.caption(f"📍 {pr_venue_next}")
+                    if pr_addr_next:
+                        # Google Maps URLを生成
+                        import urllib.parse
+                        _maps_url = "https://www.google.com/maps/search/?api=1&query=" + urllib.parse.quote(pr_addr_next)
+                        st.markdown(f"[🗺 Google Mapsで開く]({_maps_url})")
+
+                    # 練習情報PDFダウンロード
+                    _pdf_key = f"form_pdf_bytes_{pr_id_next}"
+                    if _pdf_key not in st.session_state:
+                        if st.button("📄 練習情報PDFを生成する", key=f"gen_pdf_{pr_id_next}", use_container_width=True):
+                            with st.spinner("PDF生成中..."):
+                                try:
+                                    from concert.services.practice_report import generate_practice_report
+                                    _pdf_bytes = generate_practice_report(ctx, pr_id_next)
+                                    st.session_state[_pdf_key] = _pdf_bytes
+                                    st.rerun()
+                                except Exception as _e:
+                                    st.error(f"PDF生成に失敗しました: {_e}")
+                    else:
+                        _fname = f"練習情報PDF_{pr_name_next.replace('/', '-')}.pdf"
+                        st.download_button(
+                            label="⬇️ 練習情報PDFをダウンロード",
+                            data=st.session_state[_pdf_key],
+                            file_name=_fname,
+                            mime="application/pdf",
+                            key=f"dl_pdf_{pr_id_next}",
+                            use_container_width=True,
+                        )
+                        if st.button("🔄 PDFを再生成", key=f"regen_pdf_{pr_id_next}", use_container_width=True):
+                            st.session_state.pop(_pdf_key, None)
+                            st.rerun()
+
             st.divider()
             if st.button("🔓 ログアウト", use_container_width=True, key="menu_logout"):
                 for k in list(st.session_state.keys()):
@@ -1027,14 +1099,14 @@ def render_form(ctx, concert_id: str):
                                       disabled=True,
                                       help="認証済みのメールアドレスが自動入力されています。")
 
-            # 前日共有PDF受信設定
+            # 練習情報PDF受信設定
             _sample_url = ctx.get("FORM_PRACTICE_SAMPLE_PDF_URL", "")
-            _caption_parts = ["練習前日（または本番前日）に資料PDFをメールでお送りします。"]
+            _caption_parts = ["練習情報PDFをメールでお送りします。"]
             if _sample_url:
                 _caption_parts.append(f"[サンプルPDFを見る]({_sample_url})")
             st.caption(" / ".join(_caption_parts))
             receive_pdf = st.checkbox(
-                "前日共有PDFをメールで受け取る",
+                "練習情報PDFをメールで受け取る",
                 value=True,
                 help="チェックを入れると、練習・本番の前日に資料PDFがメールで届きます。メールアドレスの登録が必要です。",
             )

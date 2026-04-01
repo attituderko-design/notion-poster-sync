@@ -136,9 +136,6 @@ def _clear_concert_cache(ctx):
         pass
     for k in ["concertmgmt_concert_list", "practice_list"]:
         st.session_state.pop(k, None)
-    st.cache_data.clear()  # Notionクエリキャッシュを無効化
-    for _k in [k for k in st.session_state if k.startswith("harmonia_preloaded_")]:
-        st.session_state.pop(_k, None)  # 次回ホームで再プリフェッチ
 
 
 def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> str:
@@ -1305,9 +1302,6 @@ def _clear_schedule_cache(practice_id: str = ""):
     for k in list(st.session_state.keys()):
         if k.startswith("schedule_list_") and (not practice_id or practice_id in k):
             st.session_state.pop(k, None)
-    st.cache_data.clear()  # Notionクエリキャッシュを無効化
-    for _k in [k for k in st.session_state if k.startswith("harmonia_preloaded_")]:
-        st.session_state.pop(_k, None)  # 次回ホームで再プリフェッチ
 
 
 def _upsert_schedule(ctx, practice_id: str, practice_name: str,
@@ -1707,7 +1701,7 @@ def render(ctx: dict):
             st.rerun()
 
         st.divider()
-        st.caption("演奏曲設定・前日共有PDFは各練習を展開してください。")
+        st.caption("演奏曲設定・練習情報PDFは各練習を展開してください。")
         for p in filtered_practices:
             label = _practice_display_name(p, ctx)
             is_concert_day = _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)
@@ -1783,14 +1777,14 @@ def render(ctx: dict):
                 col_pdf, col_mail, _ = st.columns([2, 2, 4])
 
                 # ── PDF出力 ────────────────────────────────────
-                if col_pdf.button("📄 前日共有PDF",
+                if col_pdf.button("📄 練習情報PDF",
                                   key=f"practice_pdf_{p_id_pdf}",
                                   use_container_width=True):
                     with st.spinner("PDF生成中..."):
                         try:
                             from concert.services.practice_report import generate_practice_report
                             pdf_bytes = generate_practice_report(ctx, p_id_pdf)
-                            fname_pdf = f"練習前日共有_{label.replace('/', '-').replace(' ', '_')}.pdf"
+                            fname_pdf = f"練習情報PDF_{label.replace('/', '-').replace(' ', '_')}.pdf"
                             st.session_state[f"practice_pdf_bytes_{p_id_pdf}"] = pdf_bytes
                             st.session_state[f"practice_pdf_fname_{p_id_pdf}"] = fname_pdf
                         except Exception as e:
@@ -1815,7 +1809,7 @@ def render(ctx: dict):
                             from concert.services.practice_report import generate_practice_report
                             from concert.services.mailer import get_recipients_from_players, send_pdf_to_all
                             _pdf = generate_practice_report(ctx, p_id_pdf)
-                            _fname = f"練習前日共有_{label.replace('/', '-').replace(' ', '_')}.pdf"
+                            _fname = f"練習情報PDF_{label.replace('/', '-').replace(' ', '_')}.pdf"
                             _concert_id = (filter_concert_id or "").strip()
                             if not _concert_id:
                                 st.error("演奏会が選択されていないため、送信対象を確定できません。")
@@ -1857,10 +1851,10 @@ def render(ctx: dict):
                                         _concert_name = "演奏会"
                                 except Exception:
                                     _concert_name = "演奏会"
-                            _subject = f"【ArtéMis HARMONIA】{label} 前日共有資料"
+                            _subject = f"【ArtéMis HARMONIA】{label} 練習情報PDF"
                             _body = (
                                 "{name} さん" + "\n\n"
-                                + f"{_concert_name} の{label}前日共有資料をお送りします。\n"
+                                + f"{_concert_name} の{label}練習情報PDFをお送りします。\n"
                                 + "添付PDFをご確認ください。\n\nArtéMis HARMONIA"
                             )
                             result = send_pdf_to_all(
