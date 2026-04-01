@@ -165,6 +165,11 @@ def get_concert_secrets() -> dict:
         st.secrets.get("CONCERT_DB_PART_MASTER", "")
         or _DEFAULT_CONCERT_DB_IDS.get("part_master", "")
     )
+    db_movement = (
+        st.secrets.get("NOTION_MOVEMENT_DB_ID", "")
+        or st.secrets.get("CONCERT_DB_MOVEMENT", "")
+        or "3284532d7d5680e9bc10fc96fe7bfb99"
+    )
     required_db = {
         "演奏会DB": db_concert,
         "練習DB": db_practice,
@@ -214,6 +219,7 @@ def get_concert_secrets() -> dict:
         "db_concert_instrument":    normalized_required_db["演奏会必要楽器DB"],
         "db_concert_assignment":    normalized_required_db["アサイン結果DB"],
         "db_part_master":           normalized_required_db["パートマスタDB"],
+        "db_movement":              _normalize_notion_id(db_movement),
     }
 
 
@@ -824,6 +830,7 @@ def build_concert_ctx() -> dict:
         "CONCERT_DB_CONCERT_ASSIGNMENT":      secrets["db_concert_assignment"],
         "CONCERT_DB_PI_MASTER":               secrets["db_pi_master"],
         "CONCERT_DB_PART_MASTER":             secrets["db_part_master"],
+        "CONCERT_DB_MOVEMENT":                secrets.get("db_movement", ""),
         "query_all":                   _query_all,
         "get_prop_types":              _get_prop_types,
         "get_db_schema":               _get_db_schema,
