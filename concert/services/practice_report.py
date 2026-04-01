@@ -1,6 +1,6 @@
 """
 concert/services/practice_report.py
-練習前日共有PDF生成スクリプト
+練習情報PDF生成スクリプト
 
 含まれる情報:
   - 練習基本情報（日時・会場・住所）
@@ -169,7 +169,7 @@ def generate_practice_report(
     practice_id: str,
 ) -> bytes:
     """
-    1つの練習日について前日共有PDFを生成してbytesで返す。
+    1つの練習日について練習情報PDFを生成してbytesで返す。
     """
     font, font_b = _register_fonts()
     st_map = _styles(font, font_b)
@@ -295,7 +295,7 @@ def generate_practice_report(
     story = []
 
     # タイトル
-    prefix = "本番当日" if is_concert_day else "練習前日共有"
+    prefix = "本番当日" if is_concert_day else "練習情報PDF"
     story.append(Paragraph(f"ArtéMis HARMONIA　{prefix}", st_map["subtitle"]))
     story.append(Spacer(1, 2*mm))
     title_str = ("【本番当日】" if is_concert_day else "") + prac_name
