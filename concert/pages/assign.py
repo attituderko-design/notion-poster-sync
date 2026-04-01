@@ -1433,6 +1433,94 @@ def _render_result_tab(ctx: dict):
         return
     st.caption(f"対象演奏会: {concert_name or concert_id}")
 
+    # ── HARMONIA_CONCERTのフラグ状態を取得 ──────────────────────
+    _hc_rows = ctx["query_all"](ctx.get("CONCERT_DB_HARMONIA_CONCERT", ""), None) if ctx.get("CONCERT_DB_HARMONIA_CONCERT") else []
+    _hc_row = next(
+        (r for r in _hc_rows if concert_id in ctx["extract_relation_ids_any"](r, HARMONIA_CONCERT_CONCERT_REL_KEYS)),
+        None
+    )
+    _proposal_on = _hc_row and ctx["extract_prop_text_any"](_hc_row, HARMONIA_CONCERT_PLAN_KEYS) == "True"
+    _assign_on   = _hc_row and ctx["extract_prop_text_any"](_hc_row, HARMONIA_CONCERT_ASSIGN_KEYS) == "True"
+
+    # ── 現在の状態表示 ──────────────────────────────────────────
+    if _assign_on:
+        _status_label = "✅ アサイン確定済"
+        _status_color = "#4caf50"
+    elif _proposal_on:
+        _status_label = "🟡 案提示中"
+        _status_color = "#ffa726"
+    else:
+        _status_label = "⚪ 案未提示"
+        _status_color = "#888"
+
+    st.markdown(
+        f"<div style='border:2px solid {_status_color};border-radius:8px;padding:8px 14px;margin-bottom:8px'>"        f"<b>現在の状態：</b> {_status_label}</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── フラグ操作ボタン ────────────────────────────────────────
+    _col1, _col2 = st.columns(2)
+
+    # 案を提示する
+    if _col1.button(
+        "📢 案を提示する",
+        key="btn_propose",
+        use_container_width=True,
+        disabled=bool(_proposal_on or _assign_on),
+    ):
+        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PLAN_KEYS, True, concert_name)
+        _clear_assign_cache()
+        st.rerun()
+
+    # 案の提示を取り消す
+    if _col2.button(
+        "↩ 案の提示を取り消す",
+        key="btn_unpropose",
+        use_container_width=True,
+        disabled=bool(not _proposal_on or _assign_on),
+    ):
+        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PLAN_KEYS, False, concert_name)
+        _clear_assign_cache()
+        st.rerun()
+
+    _col3, _col4 = st.columns(2)
+
+    # アサインを確定する
+    if _col3.button(
+        "✅ アサインを確定する",
+        key="btn_assign_confirm",
+        type="primary",
+        use_container_width=True,
+        disabled=bool(not _proposal_on or _assign_on),
+    ):
+        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, True, concert_name)
+        _clear_assign_cache()
+        st.rerun()
+
+    # アサインをやり直す
+    if _col4.button(
+        "↩ アサインをやり直す",
+        key="btn_assign_reset",
+        use_container_width=True,
+        type="secondary",
+    ):
+        with st.spinner("リセット中..."):
+            _reset_rows = [r for r in ctx["query_all"](ctx.get("CONCERT_DB_CONCERT_ASSIGNMENT",""), None)
+                           if concert_id in ctx["extract_relation_ids_any"](r, ASSIGNMENT_CONCERT_REL_KEYS)]
+            _ok = _fail = 0
+            for r in _reset_rows:
+                res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{r.get('id','')}",
+                                          json={"archived": True})
+                if res and res.status_code == 200: _ok += 1
+                else: _fail += 1
+        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PLAN_KEYS, False, concert_name)
+        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, False, concert_name)
+        st.success(f"✅ {_ok}件リセットしました。")
+        _clear_assign_cache()
+        st.rerun()
+
+    st.divider()
+
     col_h, col_r = st.columns([8, 1])
     col_h.subheader("担当パート一覧")
     if col_r.button("🔄", key="refresh_result", help="再読み込み"):
@@ -1474,28 +1562,6 @@ def _render_result_tab(ctx: dict):
 
     if not assigned_rows:
         st.info("まだ担当が確定していません。「アルゴリズム実行」タブから割当を実行してください。")
-
-        # リセットボタン
-        if st.button("🗑️ 全担当フラグをリセット", key="reset_assign", type="secondary"):
-            with st.spinner("リセット中..."):
-                # 必ずこの演奏会のレコードのみに絞る
-                all_rows = [
-                    r for r in pi_rows
-                    if ext_any(r, PI_ASSIGN_KEYS) == "True"
-                    and (not concert_id or concert_id in ext_rel(r, PI_CONCERT_REL_KEYS))
-                ]
-                ok = fail = 0
-                for r in all_rows:
-                    rid = r.get("id","")
-                    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{rid}",
-                                             json={"archived": True})
-                    if res and res.status_code == 200: ok += 1
-                    else: fail += 1
-            _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PROPOSAL_KEYS, False, concert_name)
-            _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, False, concert_name)
-            st.success(f"✅ {ok}件リセットしました。")
-            _clear_assign_cache()
-            st.rerun()
         return
 
     # パート定義を先読みしてpart_id → song_idのマップを作る
@@ -1597,30 +1663,7 @@ def _render_result_tab(ctx: dict):
                         else:
                             st.error("❌ 更新に失敗しました。")
 
-    if st.button("✅ この演奏会のアサインを確定", key=f"assign_confirm_{concert_id}", type="primary", use_container_width=True):
-        if _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PROPOSAL_KEYS, True, concert_name) and _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, True, concert_name):
-            st.success("✅ アサイン確定を反映しました。")
-            _clear_assign_cache()
-            st.rerun()
-        else:
-            st.warning("HARMONIA_CONCERT の『案提示』または『アサイン確定』列が見つからないか、更新に失敗しました。")
 
-    st.divider()
-    if st.button("🗑️ 全担当フラグをリセット", key="reset_assign_bottom", type="secondary"):
-        with st.spinner("リセット中..."):
-            ok = fail = 0
-            for r in assigned_rows:
-                rid = r.get("id","")
-                props: dict = {}
-                res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{rid}",
-                                         json={"archived": True})
-                if res and res.status_code == 200: ok += 1
-                else: fail += 1
-        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PROPOSAL_KEYS, False, concert_name)
-        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, False, concert_name)
-        st.success(f"✅ {ok}件リセットしました。")
-        _clear_assign_cache()
-        st.rerun()
 
 
 # ============================================================
