@@ -15,8 +15,9 @@ from concert.services.keys import (
     PARTDEF_KEY_KEYS, PARTDEF_RECORD_KEYS, PARTDEF_CONCERT_REL_KEYS,
     PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS, PARTDEF_NAME_KEYS,
     PARTICIPANT_RECORD_KEYS, PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
-    PARTICIPANT_PART_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_FEE_KEYS,
+    PARTICIPANT_PART_KEYS, PARTICIPANT_PART_REL_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_FEE_KEYS,
     PLAYER_NAME_KEYS,
+    PARTMASTER_NAME_KEYS, PARTMASTER_TYPE_KEYS,
     ATTENDANCE_KEY_KEYS, ATT_PLAYER_REL_KEYS, ATT_PRACTICE_REL_KEYS, ATT_STATUS_KEYS,
     ASSIGN_KEY_KEYS,
     PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
@@ -296,13 +297,26 @@ def _seed_all(ctx) -> dict:
     parts = ["Perc"]*8 + ["Vn1", "Vn2", "Va"]
     fees  = [5000]*8 + [5000, 5000, 0]
     roles_ops = ["", "", "", "会計", "広報", "", "", "", "", "", ""]
+    # PART_MASTERからパート名→IDマップを構築
+    try:
+        _pm_rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
+        _pm_name_to_id = {
+            ctx["extract_prop_text_any"](r, PARTMASTER_NAME_KEYS): r.get("id","")
+            for r in _pm_rows
+        }
+    except Exception:
+        _pm_name_to_id = {}
     for i, pid in enumerate(player_ids):
         props = {}
         ctx["put_key_any"](props, tcast, PARTICIPANT_RECORD_KEYS,
                            concert_id, pid, prefix="participant")
         _put(ctx, props, tcast, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
         _put(ctx, props, tcast, PARTICIPANT_PLAYER_REL_KEYS,  pid)
-        _put(ctx, props, tcast, PARTICIPANT_PART_KEYS,        parts[i])
+        # パートはRelation型（PART_MASTERへ）
+        _part_name = parts[i]
+        _part_id = _pm_name_to_id.get(_part_name, "")
+        if _part_id:
+            _put(ctx, props, tcast, PARTICIPANT_PART_REL_KEYS, _part_id)
         _put(ctx, props, tcast, PARTICIPANT_ROLE_KEYS,        "プレイヤー")
         _put(ctx, props, tcast, PARTICIPANT_ROLE_OPS_KEYS,    roles_ops[i] if i < len(roles_ops) else "")
         _put(ctx, props, tcast, PARTICIPANT_FEE_KEYS,         fees[i])

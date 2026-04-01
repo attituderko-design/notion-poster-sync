@@ -23,6 +23,48 @@ def _first_prop_by_type(type_map: dict, ptype: str) -> str:
     return ""
 
 
+def _load_part_master_map(ctx) -> dict[str, dict]:
+    """PART_MASTERをid→{name, type}のdictで返す。セッション内キャッシュ付き。"""
+    cached = st.session_state.get("_part_master_map_cache")
+    if cached:
+        return cached
+    try:
+        rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
+        ext  = ctx["extract_prop_text_any"]
+        result = {
+            r.get("id", ""): {
+                "name": ext(r, PARTMASTER_NAME_KEYS) or "",
+                "type": ext(r, PARTMASTER_TYPE_KEYS) or "",
+            }
+            for r in rows
+        }
+        st.session_state["_part_master_map_cache"] = result
+        return result
+    except Exception:
+        return {}
+
+
+def _part_name_from_cast(ctx, cast_row: dict, pm_map: dict) -> str:
+    """CONCERT_CASTのパートRelationからパート名を返す。"""
+    pm_ids = ctx["extract_relation_ids_any"](cast_row, PARTICIPANT_PART_REL_KEYS)
+    if not pm_ids:
+        return ""
+    return pm_map.get(pm_ids[0], {}).get("name", "")
+
+
+def _part_id_from_name(pm_map: dict, name: str) -> str:
+    """パート名からPART_MASTERのIDを逆引きする。"""
+    for pid, v in pm_map.items():
+        if v["name"] == name:
+            return pid
+    return ""
+
+
+def _is_perc_from_pm(pm_map: dict, pm_id: str) -> bool:
+    """PART_MASTERのIDからIS_PERC判定する。"""
+    return pm_map.get(pm_id, {}).get("type", "") == "打楽器"
+
+
 def _response_error_message(res) -> str:
     if res is None:
         return "API応答なし（None）"
@@ -490,7 +532,11 @@ def _upsert_participant(
     ctx["put_prop_any"](props, t, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PARTICIPANT_PLAYER_REL_KEYS, player_id)
     ctx["put_key_any"](props, t, PARTICIPANT_RECORD_KEYS, concert_id, player_id, prefix="participant")
-    ctx["put_prop_any"](props, t, PARTICIPANT_PART_KEYS,     part)
+    # パートはRelation型（PART_MASTERへ）
+    pm_map = _load_part_master_map(ctx)
+    part_master_id = _part_id_from_name(pm_map, part)
+    if part_master_id:
+        ctx["put_prop_any"](props, t, PARTICIPANT_PART_REL_KEYS, part_master_id)
     ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_KEYS,     role_music)
     ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_OPS_KEYS, role_ops)
     # 新規登録時のみ：session_stateの確定参加費をセット
@@ -710,8 +756,9 @@ def _render_player_tab(ctx: dict):
             part_row_by_pid[pids[0]] = row
     current_pids = set(part_row_by_pid.keys())
 
-    # Notionのselect選択肢を動的取得
-    part_opts     = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_PART_KEYS)
+    # PART_MASTERからパート一覧を取得（アルファベット順）
+    pm_map_pl = _load_part_master_map(ctx)
+    part_opts = sorted([v["name"] for v in pm_map_pl.values() if v["name"]], key=lambda x: x.lower())
     role_m_opts   = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_ROLE_KEYS)
     role_ops_opts = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_ROLE_OPS_KEYS)
 
@@ -723,7 +770,7 @@ def _render_player_tab(ctx: dict):
         row   = part_row_by_pid.get(pid, {})
         rid   = row.get("id", "") if row else ""
         in_cast = pid in current_pids
-        cur_part    = ctx["extract_prop_text_any"](row, PARTICIPANT_PART_KEYS)  if row else ""
+        cur_part    = _part_name_from_cast(ctx, row, pm_map_pl) if row else ""
         cur_role_m  = ctx["extract_prop_text_any"](row, PARTICIPANT_ROLE_KEYS)  if row else ""
         cur_role_o  = ctx["extract_prop_text_any"](row, PARTICIPANT_ROLE_OPS_KEYS) if row else ""
         fee_s       = ctx["extract_prop_text_any"](row, PARTICIPANT_FEE_KEYS)   if row else ""
@@ -1870,17 +1917,18 @@ def _render_practice_bring_tab(ctx: dict):
 
 
 def _filter_perc_players(ctx, player_ids: list[str], participants: list[dict]) -> list[str]:
-    """CONCERT_CASTのパートがPercの奏者のみに絞り込む。未設定の場合は全員対象。"""
-    ext = ctx["extract_prop_text_any"]
-    part_set = {}
+    """CONCERT_CASTのパートが打楽器の奏者のみに絞り込む。未設定の場合は全員対象。"""
+    pm_map = _load_part_master_map(ctx)
+    part_set: dict[str, bool] = {}  # pid → is_perc
     for row in participants:
         pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
         if pids:
-            part_set[pids[0]] = (ext(row, PARTICIPANT_PART_KEYS) or "").strip()
+            pm_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PART_REL_KEYS)
+            is_perc = _is_perc_from_pm(pm_map, pm_ids[0]) if pm_ids else False
+            part_set[pids[0]] = is_perc
     # パートが設定されている奏者がいる場合のみフィルタ
     if any(v for v in part_set.values()):
-        return [pid for pid in player_ids
-                if part_set.get(pid, "").lower() in ("perc", "percussion", "打楽器", "")]
+        return [pid for pid in player_ids if part_set.get(pid, False) or pid not in part_set]
     return player_ids  # 全員未設定なら全員対象
 
 

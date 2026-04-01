@@ -1928,7 +1928,7 @@ def _render_data_check_tab(ctx: dict, concert_id: str):
 
     # パート・役職未入力
     no_part = [player_name_map.get((ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0], "?")
-               for r in cast if not ext(r, PARTICIPANT_PART_KEYS)]
+               for r in cast if not ext_rel(r, PARTICIPANT_PART_REL_KEYS)]
     if no_part:
         warn("パート・役職", f"パート未入力: {', '.join(no_part)}")
     else:
@@ -1986,11 +1986,19 @@ def _render_data_check_tab(ctx: dict, concert_id: str):
             ok("出欠", "全練習日・全参加者の出欠入力済み")
 
     # ── 3. 希望入力（Percパートのみ） ────────────────────────
-    perc_pids = [
-        (ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0]
-        for r in cast
-        if (ext(r, PARTICIPANT_PART_KEYS) or "").lower() in ("perc", "percussion", "打楽器")
-    ]
+    try:
+        _pm_rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
+        _pm_map  = {r.get("id",""): ctx["extract_prop_text_any"](r, PARTMASTER_TYPE_KEYS) or ""
+                    for r in _pm_rows}
+    except Exception:
+        _pm_map = {}
+    perc_pids = []
+    for r in cast:
+        _pm_ids = ext_rel(r, PARTICIPANT_PART_REL_KEYS)
+        if _pm_ids and _pm_map.get(_pm_ids[0], "") == "打楽器":
+            _pid = (ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0]
+            if _pid:
+                perc_pids.append(_pid)
     if not perc_pids:
         warn("希望入力", "Percパートの参加者がいません（パート未入力の可能性あり）")
     else:
