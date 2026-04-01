@@ -7,6 +7,12 @@ import streamlit as st
 from concert.services.notion_client import build_concert_ctx
 from concert.pages.form import verify_form_token, render_form
 
+st.set_page_config(
+    page_title="HARMONIA",
+    page_icon="https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/favicon.png",
+    layout="centered",
+)
+
 _qp    = st.query_params
 _token = _qp.get("concert", "")
 _cid   = _qp.get("cid", "")
