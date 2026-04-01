@@ -1137,6 +1137,24 @@ def render_form(ctx, concert_id: str):
         # 新規奏者の場合: 名前・パート入力
         st.subheader("Step 1 / 基本情報を入力してください")
         _auth_email = st.session_state.get("form_auth_email", "")
+
+        # ── 種別選択はフォーム外（変更即時反映のため） ──────────
+        pm_map_step1: dict = st.session_state.get("form_part_master_map") or {}
+        type_opts = sorted({v["type"] for v in pm_map_step1.values() if v["type"]}, key=lambda x: x.lower())
+        part_type_sel = st.selectbox(
+            "パート種別 *", ["（選択してください）"] + type_opts,
+            key="step1_part_type",
+        )
+        # 種別に応じたパート名リストを事前計算（フォーム内で参照）
+        if part_type_sel and part_type_sel != "（選択してください）":
+            _filtered_part_opts = sorted(
+                [v["name"] for v in pm_map_step1.values()
+                 if v["type"] == part_type_sel and v["name"]],
+                key=lambda x: x.lower()
+            ) + [OTHER_PART]
+        else:
+            _filtered_part_opts = [OTHER_PART]
+
         with st.form("step1"):
             col_last, col_first = st.columns(2)
             last_name  = col_last.text_input("姓 *",  placeholder="例：山田")
@@ -1163,21 +1181,8 @@ def render_form(ctx, concert_id: str):
             phone    = st.text_input("電話番号（任意）", placeholder="例：09012345678")
             line_id  = st.text_input("LINE ID（任意）", placeholder="例：yamada_taro")
             st.divider()
-            # 種別→パート名の2段階選択
-            pm_map_step1: dict = st.session_state.get("form_part_master_map") or {}
-            # 種別リスト（アルファベット順）
-            type_opts = sorted({v["type"] for v in pm_map_step1.values() if v["type"]}, key=lambda x: x.lower())
-            part_type_sel = st.selectbox("パート種別 *", ["（選択してください）"] + type_opts, key="step1_part_type")
-            # 選択された種別に属するパート名（アルファベット順）
-            if part_type_sel and part_type_sel != "（選択してください）":
-                filtered_opts = sorted(
-                    [v["name"] for v in pm_map_step1.values()
-                     if v["type"] == part_type_sel and v["name"]],
-                    key=lambda x: x.lower()
-                ) + [OTHER_PART]
-            else:
-                filtered_opts = [OTHER_PART]
-            part_sel = st.selectbox("担当パート *", filtered_opts, key="step1_part_name")
+            # パート名選択（種別選択の結果を反映）
+            part_sel = st.selectbox("担当パート *", _filtered_part_opts)
             part_other = ""
             if part_sel == OTHER_PART:
                 part_other = st.text_input("パートを入力してください")
