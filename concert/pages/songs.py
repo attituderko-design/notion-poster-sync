@@ -1516,6 +1516,7 @@ def _render_partdef_tab(ctx: dict):
                 if ok: st.rerun()
     else:
         st.warning("CONCERT_SONG に対応する行がありません。完了フラグの更新はできません。")
+        current_done = False
 
 
 
