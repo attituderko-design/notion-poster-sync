@@ -135,8 +135,13 @@ def _clear_concert_cache(ctx):
         get_concert_db_property_types.clear()
     except Exception:
         pass
-    for k in ["concertmgmt_concert_list", "practice_list"]:
-        st.session_state.pop(k, None)
+    st.cache_data.clear()
+    for k in list(st.session_state.keys()):
+        if any(k.startswith(p) for p in [
+            "concertmgmt_concert_list", "practice_list", "schedule_list_",
+            "harmonia_preloaded_",
+        ]):
+            st.session_state.pop(k, None)
 
 
 def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> str:

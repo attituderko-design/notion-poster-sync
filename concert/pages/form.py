@@ -948,8 +948,41 @@ def _render_concert_selector(ctx):
                     else:
                         st.error("パスワードが違います。")
             else:
-                # パスワード未設定→マジックコード認証（既存フローへ委譲するため簡略）
-                st.info("パスワードが未設定です。管理者にお問い合わせいただくか、招待コードから再登録してください。")
+                # パスワード未設定 → マジックコードでパスワード設定を促す
+                st.subheader(f"おかえりなさい、{sel_pname} さん")
+                st.warning("パスワードが設定されていません。メールアドレスに確認コードを送信して、パスワードを設定してください。")
+                if st.button("📧 確認コードを送信してパスワードを設定する",
+                             type="primary", use_container_width=True,
+                             key="sel_send_magic_for_pw"):
+                    import random as _random
+                    code = str(_random.randint(100000, 999999))
+                    hc   = _hash_code(code)
+                    import time as _time
+                    exp  = _time.time() + 600
+                    # 演奏会名は仮置き（コード送信のみ目的）
+                    ok = _send_magic_code(ctx, sel_email, code, "HARMONIA")
+                    if ok:
+                        st.session_state.update({
+                            "auth_code_hash":    hc,
+                            "auth_code_expires": exp,
+                            "auth_attempts":     0,
+                            "auth_code_sent":    True,
+                            "auth_player_id":    sel_pid,
+                            "auth_is_existing":  True,
+                            "auth_email_submitted": True,
+                            "form_auth_email":   sel_email,
+                            # 認証後にパスワード設定フラグを立てる
+                            "form_auth_mode":    "login",
+                        })
+                        # selector stateをクリアしてSTEP0bの認証フローへ
+                        for k in ["sel_email_submitted","sel_email","sel_player_id",
+                                  "sel_player_name","sel_has_password","sel_pw_verified",
+                                  "selector_mode"]:
+                            st.session_state.pop(k, None)
+                        st.success("✅ 確認コードを送信しました。メールを確認してください。")
+                        st.rerun()
+                    else:
+                        st.error("送信に失敗しました。しばらく待ってから再試行してください。")
             if st.button("← 戻る", key="sel_pw_back"):
                 for k in ["sel_email_submitted","sel_email","sel_player_id",
                           "sel_player_name","sel_has_password","sel_pw_verified"]:
@@ -1495,13 +1528,19 @@ def render_form(ctx, concert_id: str = ""):
                     ok = _save_password_hash(ctx, pid, pw1)
                     if ok:
                         st.session_state.pop("form_need_set_password", None)
-                        st.cache_data.clear()  # パスワード保存後キャッシュ更新
+                        st.cache_data.clear()
                         st.success("✅ パスワードを設定しました。")
+                        # 新規登録の場合はSTEP2へ
+                        if st.session_state.get("form_is_new"):
+                            st.session_state["form_step"] = 2
                         st.rerun()
                     else:
                         st.error("パスワードの設定に失敗しました。スキップして進んでください。")
             if submitted_skip:
                 st.session_state.pop("form_need_set_password", None)
+                # 新規登録の場合はSTEP2へ
+                if st.session_state.get("form_is_new"):
+                    st.session_state["form_step"] = 2
                 st.rerun()
             return
 
@@ -1965,6 +2004,11 @@ def render_form(ctx, concert_id: str = ""):
                 "form_own":  {},
                 "form_step": 2,
             })
+            # 新規登録かつメールアドレス入力済みの場合はパスワード設定を促す
+            if st.session_state.get("form_is_new") and email.strip():
+                st.session_state["form_need_set_password"] = True
+                st.session_state["form_is_existing_auth"]  = True
+                st.session_state["form_step"] = 1  # パスワード設定画面を先に表示
             st.rerun()
 
     # ── STEP 2: 出欠 ──────────────────────────────────────────
