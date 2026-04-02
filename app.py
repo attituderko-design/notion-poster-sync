@@ -8317,14 +8317,14 @@ _ADMIN_COOKIE_MAX_AGE = 60 * 60 * 24 * 7  # 7日間
 
 
 def _get_cookie_manager():
-    """extra-streamlit-componentsのCookieManagerを返す。"""
+    """streamlit-cookies-controllerのCookieControllerを返す。"""
     try:
-        import extra_streamlit_components as stx
-        return stx.CookieManager(key="harmonia_cookie_mgr")
+        from streamlit_cookies_controller import CookieController
+        return CookieController()
     except Exception:
         return None
 
-# モジュールレベルで一度だけインスタンス化（再レンダリングでも同一インスタンスを使用）
+# モジュールレベルで一度だけインスタンス化
 _ADMIN_COOKIE_MGR = _get_cookie_manager() if ADMIN_AUTH_ENABLED else None
 
 
