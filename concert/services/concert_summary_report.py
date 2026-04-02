@@ -42,7 +42,6 @@ from concert.services.keys import (
     EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS, EXPENSE_AMOUNT_KEYS,
     EXPENSE_CONFIRMED_KEYS,
 )
-from concert.services.song_utils import get_song_display_name, build_song_name_map
 
 
 def _make_maps_url(address: str) -> str:
@@ -180,7 +179,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
     concert_songs = [s for s in all_songs
                      if concert_id in ext_rel(s, SONG_CONCERT_REL_KEYS)]
-    concert_songs.sort(key=lambda s: get_song_display_name(ctx, s))
+    concert_songs.sort(key=lambda s: ext(s, SONG_NAME_KEYS) or "")
 
     # 練習一覧（この演奏会に紐づく）- 会場取得のため先に取得
     all_practices = ctx["query_all"](ctx["CONCERT_DB_PRACTICE"], None)
@@ -205,14 +204,15 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
     player_name_map = {r.get("id",""): ext(r, PLAYER_NAME_KEYS) or "" for r in player_rows}
     part_to_player = {r.get("id",""): (ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0]
                       for r in participant_rows}
-    # player_id → パート名のマップ
-    player_part_map: dict[str, str] = {}
-    participant_player_ids = []
-    for r in concert_parts:
-        p_ids = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
-        if p_ids and p_ids[0] not in participant_player_ids:
-            participant_player_ids.append(p_ids[0])
-            player_part_map[p_ids[0]] = ext(r, PARTICIPANT_PART_KEYS) or ""
+    # player_id → パート名のマップ（PART_MASTERリレーション経由）
+    from concert.services.part_master_utils import load_part_master_map, build_player_part_map
+    pm_map = load_part_master_map(ctx)
+    player_part_map = build_player_part_map(ctx, concert_parts, pm_map)
+    participant_player_ids = list(dict.fromkeys(
+        (ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0]
+        for r in concert_parts
+        if (ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0]
+    ))
     # パート→氏名順でソート
     participant_player_ids.sort(key=lambda pid: (
         player_part_map.get(pid, "zzz"),
@@ -278,7 +278,7 @@ def generate_concert_summary(ctx: dict, concert_id: str) -> bytes:
         info_data.append(["ソリスト", c_soloist])
     if concert_songs:
         songs_str = "　/　".join(
-            f"{get_song_display_name(ctx, s)}（{ext(s, SONG_COMPOSER_KEYS) or ''}）".strip("（）")
+            f"{ext(s, SONG_NAME_KEYS) or ''}（{ext(s, SONG_COMPOSER_KEYS) or ''}）".strip("（）")
             for s in concert_songs
         )
         info_data.append(["演奏曲目", songs_str])

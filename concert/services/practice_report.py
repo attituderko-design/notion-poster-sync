@@ -38,7 +38,6 @@ from concert.services.keys import (
     RENTAL_QTY_KEYS, RENTAL_UNIT_PRICE_KEYS, RENTAL_CONFIRMED_KEYS, RENTAL_COST_TYPE_KEYS,
     PLAYER_NAME_KEYS, INSTRUMENT_NAME_KEYS, SONG_NAME_KEYS,
 )
-from concert.services.song_utils import get_song_display_name, build_song_name_map
 
 
 def _make_maps_url(address: str) -> str:
@@ -206,14 +205,14 @@ def generate_practice_report(
     # 練習する曲
     practice_song_ids = ext_rel(practice, PRACTICE_SONG_REL_KEYS)
     all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
-    song_name_map = build_song_name_map(ctx, all_songs)
+    song_name_map = {s.get("id"): ext(s, SONG_NAME_KEYS) or "" for s in all_songs}
     if practice_song_ids:
         practice_songs = [song_name_map.get(sid, "") for sid in practice_song_ids if song_name_map.get(sid)]
     else:
         # 未設定の場合は演奏会の全曲
         from concert.services.keys import SONG_CONCERT_REL_KEYS
-        practice_songs = [get_song_display_name(ctx, s) for s in all_songs
-                          if concert_id in ext_rel(s, SONG_CONCERT_REL_KEYS) and get_song_display_name(ctx, s)]
+        practice_songs = [ext(s, SONG_NAME_KEYS) or "" for s in all_songs
+                          if concert_id in ext_rel(s, SONG_CONCERT_REL_KEYS)]
 
     # スケジュール
     sched_t    = ctx["get_prop_types"](ctx["CONCERT_DB_SCHEDULE"])
@@ -380,12 +379,10 @@ def generate_practice_report(
     # 出欠一覧（パート順ソート・パート列追加）
     _h_att = Paragraph("■ 出欠一覧", st_map["h2"])
 
-    # パート情報取得
-    player_part_map_pr: dict[str, str] = {}
-    for r in concert_participants:
-        p_ids = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
-        if p_ids:
-            player_part_map_pr[p_ids[0]] = ctx["extract_prop_text_any"](r, PARTICIPANT_PART_KEYS) or ""
+    # パート情報取得（PART_MASTERリレーション経由）
+    from concert.services.part_master_utils import load_part_master_map, build_player_part_map
+    pm_map_pr = load_part_master_map(ctx)
+    player_part_map_pr = build_player_part_map(ctx, concert_participants, pm_map_pr)
     # パート→氏名順でソート
     sorted_pids = sorted(participant_player_ids,
                          key=lambda pid: (player_part_map_pr.get(pid,"zzz"), player_name_map.get(pid,"")))
