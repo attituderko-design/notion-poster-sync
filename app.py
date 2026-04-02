@@ -8320,7 +8320,10 @@ def _get_cookie_manager():
     """extra-streamlit-componentsのCookieManagerを返す。"""
     try:
         import extra_streamlit_components as stx
-        return stx.CookieManager(key="harmonia_cookie_mgr")
+        @st.cache_resource
+        def _create_cookie_manager():
+            return stx.CookieManager(key="harmonia_cookie_mgr")
+        return _create_cookie_manager()
     except Exception:
         return None
 
