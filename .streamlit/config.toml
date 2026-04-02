@@ -1,0 +1,11 @@
+[server]
+maxUploadSize = 200
+enableWebsocketCompression = false
+maxMessageSize = 200
+
+[browser]
+gatherUsageStats = false
+
+[runner]
+magicEnabled = false
+fastReruns = true
