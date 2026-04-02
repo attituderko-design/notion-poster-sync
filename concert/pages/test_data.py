@@ -176,10 +176,9 @@ def _seed_all(ctx, pfx: str, is_demo: bool) -> dict:
     for part_name, _, _, pm_name, sys_role, n_test, n_demo in PART_ROSTER:
         n = n_demo if is_demo else n_test
         for seat in range(n):
-            label = f"{pfx} 奏者{player_no:02d}（{part_name}）"
             props = {}
-            _put(ctx, props, tp, PLAYER_NAME_KEYS,  label)
-            _put(ctx, props, tp, PLAYER_HN_KEYS,    f"{part_name}-{seat+1}")
+            _put(ctx, props, tp, PLAYER_NAME_KEYS,  f"{pfx} 奏者{player_no:02d}")
+            _put(ctx, props, tp, PLAYER_HN_KEYS,    f"Player{player_no:02d}")
             _put(ctx, props, tp, PLAYER_EMAIL_KEYS,
                  f"test.player{player_no:02d}@harmonia.example.com")
             pid = track(_create(ctx, player_db, props))
