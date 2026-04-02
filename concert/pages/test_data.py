@@ -654,9 +654,11 @@ def _delete_all(ctx, pfx: str) -> dict:
 # ============================================================
 
 def render(ctx: dict):
-    st.header("🧪 テストデータ管理")
+    st.caption("演奏会未選択でも利用できます。")
     st.warning("⚠️ この画面はテスト・開発用です。本番運用時は使用しないでください。")
 
+    st.divider()
+    st.subheader("📦 HARMONIAテストデータ")
     tab_test, tab_demo = st.tabs(["🔬 [TEST] 軽量版", "🎭 [DEMO] フル版（2管編成）"])
 
     for tab, pfx, is_demo, desc in [
