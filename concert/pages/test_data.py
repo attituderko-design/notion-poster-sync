@@ -170,9 +170,9 @@ def _seed_all(ctx, pfx: str, is_demo: bool) -> dict:
     }
     # 不足分は新規作成
     ti = _p(ctx, inst_db)
-    needed = list(dict.fromkeys(
-        row[2] for row in PART_ROSTER
-    ) | {item[0] for item in CONCERT_INST_ITEMS + [(r[0],) for r in RENTAL_ITEMS]})
+    needed = set(row[2] for row in PART_ROSTER) | \
+             set(item[0] for item in CONCERT_INST_ITEMS) | \
+             set(r[0] for r in RENTAL_ITEMS)
     new_inst_count = 0
     for iname in needed:
         if iname not in inst_name_to_id:
@@ -707,6 +707,24 @@ def _delete_all(ctx, pfx: str) -> dict:
                    for cid in test_cast_ids):
                 if _archive(ctx, r.get("id", "")): pref_cnt += 1
         if pref_cnt: summary["PREFERENCE"] = pref_cnt
+
+        # PART_DEFINITION（演奏会リレーション経由）
+        pd_cnt = 0
+        for r in ctx["query_all"](ctx.get("CONCERT_DB_PART_DEFINITION", ""), None):
+            if any(cid in ctx["extract_relation_ids_any"](r, ["演奏会", "FK演奏会"])
+                   for cid in test_concert_ids):
+                if _archive(ctx, r.get("id", "")): pd_cnt += 1
+        if pd_cnt: summary["PART_DEFINITION"] = pd_cnt
+
+        # MOVEMENT（KeyフィールドにPFXが含まれるもの）
+        mv_cnt = 0
+        mv_db = ctx.get("CONCERT_DB_MOVEMENT", "")
+        if mv_db:
+            for r in ctx["query_all"](mv_db, None):
+                k = ctx["extract_prop_text_any"](r, MOVEMENT_KEY_KEYS) or \
+                    ctx["extract_title"](r) or ""
+                if pfx in k and _archive(ctx, r.get("id", "")): mv_cnt += 1
+        if mv_cnt: summary["MOVEMENT"] = mv_cnt
 
     # プレフィックスで直接検索できるDB
     for db_key, keys in [
