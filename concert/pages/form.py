@@ -1706,12 +1706,12 @@ def render_form(ctx, concert_id: str = ""):
                                     except Exception as _e:
                                         st.error(f"失敗: {_e}")
                         else:
-                            _col_b.download_button(
-                                "⬇️ DL", data=st.session_state[_pdf_key],
-                                file_name=f"練習情報_{_pr_name}.pdf",
-                                mime="application/pdf",
-                                key=f"leader_dl_{_pr_id}",
-                                use_container_width=True,
+                            from concert.services.convert_utils import render_report_output
+                            render_report_output(
+                                st.session_state[_pdf_key],
+                                filename=f"練習情報_{_pr_name}",
+                                label=f"{_pr_name}",
+                                key_prefix=f"leader_{_pr_id}",
                             )
 
                 # ── 楽譜URLリンク ──────────────────────────────
@@ -1807,14 +1807,12 @@ def render_form(ctx, concert_id: str = ""):
                                 except Exception as _e:
                                     st.error(f"PDF生成に失敗しました: {_e}")
                     else:
-                        _fname = f"練習情報PDF_{pr_name_next.replace('/', '-')}.pdf"
-                        st.download_button(
-                            label="⬇️ 練習情報PDFをダウンロード",
-                            data=st.session_state[_pdf_key],
-                            file_name=_fname,
-                            mime="application/pdf",
-                            key=f"dl_pdf_{pr_id_next}",
-                            use_container_width=True,
+                        from concert.services.convert_utils import render_report_output
+                        render_report_output(
+                            st.session_state[_pdf_key],
+                            filename=f"練習情報PDF_{pr_name_next.replace('/', '-')}",
+                            label="練習情報PDF",
+                            key_prefix=f"player_{pr_id_next}",
                         )
                         if st.button("🔄 PDFを再生成", key=f"regen_pdf_{pr_id_next}", use_container_width=True):
                             st.session_state.pop(_pdf_key, None)
