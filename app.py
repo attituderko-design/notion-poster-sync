@@ -8312,6 +8312,40 @@ if "concert" in _qp and "cid" in _qp:
 ADMIN_AUTH_ENABLED = bool(st.secrets.get("ADMIN_AUTH_ENABLED", False))
 ADMIN_USERNAME = str(st.secrets.get("ADMIN_USERNAME", ""))
 ADMIN_PASSWORD = str(st.secrets.get("ADMIN_PASSWORD", ""))
+_ADMIN_COOKIE_NAME = "harmonia_admin_auth"
+_ADMIN_COOKIE_MAX_AGE = 60 * 60 * 24 * 7  # 7日間
+
+
+def _get_cookie_manager():
+    """extra-streamlit-componentsのCookieManagerを返す。"""
+    try:
+        import extra_streamlit_components as stx
+        return stx.CookieManager(key="harmonia_cookie_mgr")
+    except Exception:
+        return None
+
+
+def _make_auth_token(username: str, password: str) -> str:
+    """認証トークンを生成（HMAC-SHA256）。"""
+    import hashlib, hmac, time
+    secret = st.secrets.get("ADMIN_COOKIE_SECRET", "harmonia-secret-key")
+    payload = f"{username}:{int(time.time() // 3600)}"  # 時間単位でローリング
+    return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+
+def _verify_auth_token(token: str) -> bool:
+    """トークンの有効性を確認（±1時間の誤差を許容）。"""
+    import hashlib, hmac, time
+    if not token or not ADMIN_USERNAME:
+        return False
+    secret = st.secrets.get("ADMIN_COOKIE_SECRET", "harmonia-secret-key")
+    current_hour = int(time.time() // 3600)
+    for delta in (0, -1, 1):
+        payload = f"{ADMIN_USERNAME}:{current_hour + delta}"
+        expected = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        if hmac.compare_digest(token, expected):
+            return True
+    return False
 
 
 def _clear_admin_auth_session():
@@ -8324,7 +8358,7 @@ def _clear_admin_auth_session():
         st.session_state.pop(_k, None)
 
 
-def _render_admin_login_gate() -> None:
+def _render_admin_login_gate(cookie_manager) -> None:
     st.markdown("## 管理者ログイン")
     st.info("管理者のみアクセスできます。ID とパスワードを入力してください。")
     with st.form("global_admin_login_form", clear_on_submit=False):
@@ -8336,6 +8370,16 @@ def _render_admin_login_gate() -> None:
             st.session_state["admin_authenticated"] = True
             st.session_state.pop("admin_auth_error", None)
             st.session_state.pop("admin_login_password", None)
+            # クッキーにトークンを保存
+            if cookie_manager is not None:
+                try:
+                    token = _make_auth_token(_uid, _pwd)
+                    cookie_manager.set(
+                        _ADMIN_COOKIE_NAME, token,
+                        max_age=_ADMIN_COOKIE_MAX_AGE,
+                    )
+                except Exception:
+                    pass
             st.rerun()
         else:
             st.session_state["admin_authenticated"] = False
@@ -8344,8 +8388,19 @@ def _render_admin_login_gate() -> None:
         st.error(st.session_state["admin_auth_error"])
 
 
+# クッキーから認証状態を復元
+_cookie_mgr = _get_cookie_manager() if ADMIN_AUTH_ENABLED else None
 if ADMIN_AUTH_ENABLED and not st.session_state.get("admin_authenticated", False):
-    _render_admin_login_gate()
+    if _cookie_mgr is not None:
+        try:
+            _saved_token = _cookie_mgr.get(_ADMIN_COOKIE_NAME)
+            if _saved_token and _verify_auth_token(_saved_token):
+                st.session_state["admin_authenticated"] = True
+        except Exception:
+            pass
+
+if ADMIN_AUTH_ENABLED and not st.session_state.get("admin_authenticated", False):
+    _render_admin_login_gate(_cookie_mgr)
     st.stop()
 
 # ============================================================
@@ -9676,6 +9731,12 @@ with st.sidebar:
         st.caption("管理者ログイン中")
         if st.button("ログアウト", key="global_admin_logout", use_container_width=True):
             _clear_admin_auth_session()
+            # クッキーも削除
+            if _cookie_mgr is not None:
+                try:
+                    _cookie_mgr.delete(_ADMIN_COOKIE_NAME)
+                except Exception:
+                    pass
             st.rerun()
         st.divider()
     with st.expander("📘 操作ガイド", expanded=False):
