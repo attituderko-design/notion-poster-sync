@@ -443,11 +443,16 @@ def _seed_all(ctx, pfx: str, is_demo: bool) -> dict:
         _put(ctx, props, tcast, PARTICIPANT_PLAYER_REL_KEYS,  player_id)
         if pm_id:
             _put(ctx, props, tcast, PARTICIPANT_PART_REL_KEYS, pm_id)
-        _put(ctx, props, tcast, PARTICIPANT_ROLE_KEYS,        "団員")
-        # 役職_運営は先頭奏者のみ設定
+        # 役職_音楽：ロールに応じて設定
+        role_music = {
+            "Manager": "コンサートマスター",
+            "Leader":  "パートリーダー",
+            "Player":  "プレイヤー",
+        }.get(sys_role, "プレイヤー")
+        _put(ctx, props, tcast, PARTICIPANT_ROLE_KEYS,        role_music)
+        # 役職_運営：役職持ちは個別設定、それ以外は「団員」
         role_ops = ROLE_OPS_BY_PART.get(part_def, "") if sys_role != "Player" else ""
-        if role_ops:
-            _put(ctx, props, tcast, PARTICIPANT_ROLE_OPS_KEYS, role_ops)
+        _put(ctx, props, tcast, PARTICIPANT_ROLE_OPS_KEYS,    role_ops if role_ops else "団員")
         _put(ctx, props, tcast, PARTICIPANT_SYSTEM_ROLE_KEYS, sys_role)
         _put(ctx, props, tcast, PARTICIPANT_FEE_KEYS,         5000)
         cast_id = track(_create(ctx, cast_db, props))
