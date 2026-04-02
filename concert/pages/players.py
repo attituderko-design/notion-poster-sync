@@ -631,12 +631,22 @@ def _render_player_tab(ctx: dict):
         st.rerun()
 
     sorted_players = sorted(players, key=lambda x: _player_name(x, ctx))
+    # 演奏会が選択されている場合、CONCERT_CASTに登録済みの奏者は除外
+    # （既に演奏会参加者設定で管理されているため）
+    if global_concert_id:
+        cast_player_ids = set()
+        for row in _load_participants(ctx, global_concert_id):
+            pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+            if pids: cast_player_ids.add(pids[0])
+        sorted_players = [p for p in sorted_players if p.get("id", "") not in cast_player_ids]
     if search:
         sorted_players = [p for p in sorted_players
                           if search in _player_name(p, ctx).lower()
                           or search in (ctx["extract_prop_text_any"](p, PLAYER_MEMO_KEYS) or "").lower()]
 
-    st.caption(f"表示 {len(sorted_players)} / {len(players)} 件")
+    cast_count = len(cast_player_ids) if global_concert_id else 0
+    st.caption(f"表示 {len(sorted_players)} / {len(players)} 件" +
+               (f"（{cast_count}名は演奏会参加者として登録済み）" if cast_count else ""))
 
     # data_editor形式で全奏者を表示・編集
     master_rows = []
@@ -724,10 +734,13 @@ def _render_player_tab(ctx: dict):
     role_m_opts   = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_ROLE_KEYS)
     role_ops_opts = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_ROLE_OPS_KEYS)
 
+    # 演奏会参加者設定：CONCERT_CASTに登録済みの奏者のみ表示
     cast_rows = []
     cast_meta = []
     for p in sorted(players, key=lambda x: _player_name(x, ctx)):
-        pid   = p.get("id", "")
+        pid = p.get("id", "")
+        if pid not in current_pids:
+            continue  # 未登録の奏者はスキップ
         pname = _player_name(p, ctx)
         row   = part_row_by_pid.get(pid, {})
         rid   = row.get("id", "") if row else ""
@@ -744,7 +757,6 @@ def _render_player_tab(ctx: dict):
         is_extra = (fee == 0) if fee is not None else False
 
         cast_rows.append({
-            "参加":     in_cast,
             "エキストラ": is_extra,
             "氏名":     pname,
             "パート":   cur_part or "",
@@ -758,11 +770,112 @@ def _render_player_tab(ctx: dict):
             "cur_role_o": cur_role_o, "fee": fee, "paid": paid,
         })
 
+    # ── 演奏会参加者設定：左右2カラムUI ──────────────────────
+    unregistered = sorted(
+        [p for p in players if p.get("id", "") not in current_pids],
+        key=lambda x: _player_name(x, ctx)
+    )
+
+    col_l, col_arrow, col_r = st.columns([5, 1, 5])
+
+    # ── 左：奏者マスタ（未登録） ─────────────────────────────
+    with col_l:
+        st.markdown("**👤 奏者マスタ**")
+        st.caption(f"未登録 {len(unregistered)}名")
+        if unregistered:
+            sel_key = f"transfer_sel_{global_concert_id}"
+            sel_names = st.multiselect(
+                "選択して → で追加",
+                [_player_name(p, ctx) for p in unregistered],
+                key=sel_key,
+                label_visibility="collapsed",
+            )
+            # パート・役職設定（追加時の初期値）
+            if sel_names:
+                add_part   = st.selectbox("パート（初期値）",   [""] + part_opts,          key=f"tr_part_{global_concert_id}")
+                add_role_m = st.selectbox("役職(音楽)（初期値）", [""] + (role_m_opts or []), key=f"tr_role_m_{global_concert_id}")
+                add_role_o = st.selectbox("役職(運営)（初期値）", [""] + (role_ops_opts or []), key=f"tr_role_o_{global_concert_id}")
+            else:
+                add_part = add_role_m = add_role_o = ""
+        else:
+            st.caption("✅ 全奏者が参加者として登録済みです。")
+            sel_names = []
+            add_part = add_role_m = add_role_o = ""
+
+    # ── 中央：矢印ボタン ────────────────────────────────────
+    with col_arrow:
+        st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
+        unreg_name_to_pid = {_player_name(p, ctx): p.get("id", "") for p in unregistered}
+
+        # 追加ボタン（左→右）
+        if st.button("→", key=f"btn_add_{global_concert_id}",
+                     use_container_width=True, type="primary",
+                     disabled=not sel_names,
+                     help="選択した奏者を演奏会参加者に追加"):
+            _t_add = ctx["get_prop_types"](ctx["CONCERT_DB_PARTICIPANT"])
+            ok_n = ng_n = 0
+            for sname in sel_names:
+                pid_add = unreg_name_to_pid.get(sname, "")
+                if not pid_add: continue
+                ok = _upsert_participant(
+                    ctx, global_concert_id, global_concert_name,
+                    pid_add, sname, "",
+                    part=add_part, role_music=add_role_m, role_ops=add_role_o,
+                    _prop_types=_t_add,
+                )
+                ok_n += 1 if ok else 0
+                ng_n += 0 if ok else 1
+            st.success(f"✅ {ok_n}名追加") if ng_n == 0 else st.warning(f"{ok_n}名成功/{ng_n}名失敗")
+            _clear_player_cache()
+            st.rerun()
+
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+        # 除外ボタン（右→左）
+        remove_sel = st.session_state.get(f"remove_sel_{global_concert_id}", [])
+        if st.button("←", key=f"btn_remove_{global_concert_id}",
+                     use_container_width=True,
+                     disabled=not remove_sel,
+                     help="選択した参加者を除外"):
+            ok_n = ng_n = 0
+            for pname_r in remove_sel:
+                rid_r = next((m["rid"] for m in cast_meta if m["pname"] == pname_r), "")
+                if rid_r and _archive_participant(ctx, rid_r):
+                    ok_n += 1
+                else:
+                    ng_n += 1
+            st.success(f"✅ {ok_n}名除外") if ng_n == 0 else st.warning(f"{ok_n}名成功/{ng_n}名失敗")
+            st.session_state.pop(f"remove_sel_{global_concert_id}", None)
+            _clear_player_cache()
+            st.rerun()
+
+    # ── 右：演奏会参加者（登録済み） ─────────────────────────
+    with col_r:
+        st.markdown("**🎻 演奏会参加者**")
+        st.caption(f"登録済み {len(cast_rows)}名")
+
+        if not cast_rows:
+            st.info("左から奏者を選んで → で追加してください。")
+        else:
+            # 除外用のmultiselect
+            st.multiselect(
+                "選択して ← で除外",
+                [m["pname"] for m in cast_meta],
+                key=f"remove_sel_{global_concert_id}",
+                label_visibility="collapsed",
+            )
+
+    st.divider()
+
+    # ── パート・役職の一括編集テーブル ─────────────────────
+    if not cast_rows:
+        return
+
+    st.markdown("**パート・役職の編集**")
     cast_version = st.session_state.get(f"cast_editor_version_{global_concert_id}", 0)
     df_cast = pd.DataFrame(cast_rows)
 
     col_cfg = {
-        "参加":       st.column_config.CheckboxColumn("参加", default=False),
         "エキストラ": st.column_config.CheckboxColumn("エキストラ", default=False,
                        help="チェックすると参加費0円で登録"),
         "氏名":       st.column_config.TextColumn("氏名", disabled=True),
@@ -797,31 +910,18 @@ def _render_player_tab(ctx: dict):
             pass
 
         with st.spinner("保存中..."):
-            # prop_typesを事前取得（ループ内でのAPI呼び出しを削減）
             _t_cast = ctx["get_prop_types"](ctx["CONCERT_DB_PARTICIPANT"])
             df_reset = edited_cast.reset_index(drop=True)
             for idx, meta in enumerate(cast_meta):
                 if idx >= len(df_reset): break
                 row        = df_reset.iloc[idx]
-                new_in     = bool(row.get("参加") or False)
                 new_extra  = bool(row.get("エキストラ") or False)
                 new_part   = str(row.get("パート")     or "").strip()
                 new_role_m = str(row.get("役職(音楽)") or "").strip()
                 new_role_o = str(row.get("役職(運営)") or "").strip()
 
-                if not new_in and not meta["in_cast"]:
-                    skip_n += 1; continue
-
-                # 参加→非参加：アーカイブ
-                if not new_in and meta["in_cast"] and meta["rid"]:
-                    ok = _archive_participant(ctx, meta["rid"])
-                    ok_n += 1 if ok else 0
-                    ng_n += 0 if ok else 1
-                    continue
-
-                # 新規参加 or 既存更新
-                no_change = (meta["in_cast"] and new_in and
-                             new_extra == meta["is_extra"] and
+                # 変更なしはスキップ
+                no_change = (new_extra == meta["is_extra"] and
                              new_part   == (meta["cur_part"]   or "") and
                              new_role_m == (meta["cur_role_m"] or "") and
                              new_role_o == (meta["cur_role_o"] or ""))
