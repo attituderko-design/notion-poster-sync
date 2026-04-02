@@ -37,8 +37,8 @@ ATT_OPTS      = ["○", "△", "×"]
 # フォーム用クッキーマネージャー（モジュールレベルで一度だけインスタンス化）
 _FORM_COOKIE_MGR = None
 try:
-    import extra_streamlit_components as _stx
-    _FORM_COOKIE_MGR = _stx.CookieManager(key="harmonia_form_cookie_mgr")
+    from streamlit_cookies_controller import CookieController
+    _FORM_COOKIE_MGR = CookieController()
 except Exception:
     pass
 OTHER_PART    = "一覧にない（管理者に連絡）"
