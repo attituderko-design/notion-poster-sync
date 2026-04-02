@@ -60,42 +60,57 @@ ATLAS_CREATOR_KEYS           = ["クリエイター"]
 # (part_def_name, inst_category, inst_name, part_master_name, system_role, n_test, n_demo)
 # part_master_name は PART_MASTER DBの実際の値に合わせる
 # part_def_name はPART_DEFINITIONの表示パート名（席番・番号付き）
+# ── パート構成定義 ───────────────────────────────────────────
+# (part_def_name, inst_category, inst_name, part_master_name, system_role, n_test, n_demo)
+# PART_ROSTERはPART_DEFINITIONを作成するパートのみ
 PART_ROSTER = [
-    ("Fl.1",   "管楽器", "Flute",       "Flute",       "Player",  1, 2),
-    ("Fl.2",   "管楽器", "Flute",       "Flute",       "Player",  1, 2),
-    ("Ob.1",   "管楽器", "Oboe",        "Oboe",        "Player",  1, 2),
-    ("Ob.2",   "管楽器", "Oboe",        "Oboe",        "Player",  1, 2),
-    ("Cl.1",   "管楽器", "Clarinet",    "Clarinet",    "Player",  1, 2),
-    ("Cl.2",   "管楽器", "Clarinet",    "Clarinet",    "Player",  1, 2),
-    ("Fg.1",   "管楽器", "Fagotto",     "Faggot",      "Player",  1, 2),
-    ("Fg.2",   "管楽器", "Fagotto",     "Faggot",      "Player",  1, 2),
-    ("Hr.1",   "管楽器", "Horn",        "Horn",        "Player",  1, 4),
-    ("Hr.2",   "管楽器", "Horn",        "Horn",        "Player",  1, 4),
-    ("Hr.3",   "管楽器", "Horn",        "Horn",        "Player",  0, 4),
-    ("Hr.4",   "管楽器", "Horn",        "Horn",        "Player",  0, 4),
-    ("Tp.1",   "管楽器", "Trumpet",     "Trumpet",     "Player",  1, 2),
-    ("Tp.2",   "管楽器", "Trumpet",     "Trumpet",     "Player",  1, 2),
-    ("Tb.1",   "管楽器", "Trombone",    "Trombone",    "Player",  1, 3),
-    ("Tb.2",   "管楽器", "Trombone",    "Trombone",    "Player",  1, 3),
-    ("Tb.3",   "管楽器", "Trombone",    "Trombone",    "Player",  0, 3),
-    ("Tuba",   "管楽器", "Tuba",        "Tuba",        "Player",  1, 1),
-    ("Timp.",  "打楽器", "Timpani",     "Percussion",  "Leader",  1, 1),
-    ("Perc.1", "打楽器", "Percussion",  "Percussion",  "Player",  1, 1),
-    ("Perc.2", "打楽器", "Percussion",  "Percussion",  "Player",  0, 1),
-    ("Perc.3", "打楽器", "Percussion",  "Percussion",  "Player",  0, 1),
-    ("Vn1",    "弦楽器", "Violin",      "Violin",      "Manager", 1,12),
-    ("Vn2",    "弦楽器", "Violin",      "Violin",      "Leader",  1,10),
-    ("Va",     "弦楽器", "Viola",       "Viola",       "Player",  1, 8),
-    ("Vc",     "弦楽器", "Violoncello", "Violoncello", "Player",  1, 8),
-    ("Cb",     "弦楽器", "Contrabass",  "Contrabass",  "Player",  1, 4),
+    # 管楽器
+    ("Fl. Picc & 1st", "管楽器", "Flute",     "Flute",    "Player",  1, 1),
+    ("Fl. 2nd",        "管楽器", "Flute",     "Flute",    "Player",  1, 1),
+    ("Ob. 1st",        "管楽器", "Oboe",      "Oboe",     "Player",  1, 1),
+    ("Ob. 2nd & E.H.", "管楽器", "Oboe",      "Oboe",     "Player",  1, 1),
+    ("Cl. 1st",        "管楽器", "Clarinet",  "Clarinet", "Player",  1, 1),
+    ("Cl. 2nd",        "管楽器", "Clarinet",  "Clarinet", "Player",  1, 1),
+    ("Fg. 1st",        "管楽器", "Fagotto",   "Faggot",   "Player",  1, 1),
+    ("Fg. 2nd",        "管楽器", "Fagotto",   "Faggot",   "Player",  1, 1),
+    ("Hr. 1st",        "管楽器", "Horn",      "Horn",     "Player",  1, 1),
+    ("Hr. 2nd",        "管楽器", "Horn",      "Horn",     "Player",  1, 1),
+    ("Hr. 3rd",        "管楽器", "Horn",      "Horn",     "Player",  0, 1),
+    ("Hr. 4th",        "管楽器", "Horn",      "Horn",     "Player",  0, 1),
+    ("Tp. 1st",        "管楽器", "Trumpet",   "Trumpet",  "Player",  1, 1),
+    ("Tp. 2nd",        "管楽器", "Trumpet",   "Trumpet",  "Player",  1, 1),
+    ("Tb. 1st",        "管楽器", "Trombone",  "Trombone", "Player",  1, 1),
+    ("Tb. 2nd",        "管楽器", "Trombone",  "Trombone", "Player",  1, 1),
+    ("Tb. Bass",       "管楽器", "Trombone",  "Trombone", "Player",  0, 1),
+    ("Tuba 1st",       "管楽器", "Tuba",      "Tuba",     "Player",  1, 1),
+    ("Tuba 2nd",       "管楽器", "Tuba",      "Tuba",     "Player",  0, 1),
+    # 打楽器
+    ("Timp.",  "打楽器", "Timpani",    "Percussion", "Leader",  1, 1),
+    ("Perc.1", "打楽器", "Percussion", "Percussion", "Player",  1, 1),
+    ("Perc.2", "打楽器", "Percussion", "Percussion", "Player",  0, 1),
+    ("Perc.3", "打楽器", "Percussion", "Percussion", "Player",  0, 1),
+    # 弦楽器（Vn1/Vn2は1st/2ndで譜面が異なるのでパート定義あり）
+    ("Vn1 1st", "弦楽器", "Violin", "Violin", "Manager", 1, 1),
+    ("Vn1 2nd", "弦楽器", "Violin", "Violin", "Player",  1, 1),
+    ("Vn2 1st", "弦楽器", "Violin", "Violin", "Leader",  1, 1),
+    ("Vn2 2nd", "弦楽器", "Violin", "Violin", "Player",  1, 1),
+]
+
+# CONCERT_CASTには登録するがPART_DEFINITIONは不要なパート
+# Va/Vc/CbはPART_MASTERへの紐づけのみ
+# (part_master_name, system_role, n_test, n_demo)
+CAST_ONLY_PARTS = [
+    ("Viola",       "Player", 1, 8),
+    ("Violoncello", "Player", 1, 8),
+    ("Contrabass",  "Player", 1, 4),
 ]
 
 # 役職_運営のサンプル割り当て（パート別先頭奏者向け）
 ROLE_OPS_BY_PART = {
-    "Vn1":  "代表",
-    "Vn2":  "副代表",
-    "Timp.":"会計",
-    "Fl.1": "広報",
+    "Vn1 1st":        "代表",
+    "Vn2 1st":        "副代表",
+    "Timp.":          "会計",
+    "Fl. Picc & 1st": "広報",
 }
 
 # CONCERT_INSTRUMENTに登録するテスト用楽器（演奏曲ごとに必要な楽器）
@@ -191,9 +206,12 @@ def _seed_all(ctx, pfx: str, is_demo: bool) -> dict:
     # ── 2. PERFORMER ─────────────────────────────────────────
     player_db = ctx["CONCERT_DB_PLAYER"]
     tp = _p(ctx, player_db)
-    cast_plan: list[tuple[str, str, str]] = []  # (part_def_name, player_id, system_role)
+    # cast_plan: (part_def_name_or_pm_name, player_id, system_role, pm_name, is_cast_only)
+    cast_plan: list[tuple[str, str, str, str, bool]] = []
     player_count = 0
     player_no = 1
+
+    # PART_ROSTER（PART_DEFINITIONあり）
     for part_def, _, _, pm_name, sys_role, n_test, n_demo in PART_ROSTER:
         n = n_demo if is_demo else n_test
         for seat in range(n):
@@ -204,7 +222,24 @@ def _seed_all(ctx, pfx: str, is_demo: bool) -> dict:
                  f"test.player{player_no:02d}@harmonia.example.com")
             pid = track(_create(ctx, player_db, props))
             if pid:
-                cast_plan.append((part_def, pid, sys_role if seat == 0 else "Player"))
+                cast_plan.append((part_def, pid, sys_role if seat == 0 else "Player",
+                                  pm_name, False))
+                player_count += 1
+            player_no += 1
+
+    # CAST_ONLY_PARTS（PART_DEFINITIONなし：Va/Vc/Cb）
+    for pm_name, sys_role, n_test, n_demo in CAST_ONLY_PARTS:
+        n = n_demo if is_demo else n_test
+        for seat in range(n):
+            props = {}
+            _put(ctx, props, tp, PLAYER_NAME_KEYS,  f"{pfx} 奏者{player_no:02d}")
+            _put(ctx, props, tp, PLAYER_HN_KEYS,    f"Player{player_no:02d}")
+            _put(ctx, props, tp, PLAYER_EMAIL_KEYS,
+                 f"test.player{player_no:02d}@harmonia.example.com")
+            pid = track(_create(ctx, player_db, props))
+            if pid:
+                cast_plan.append((pm_name, pid, sys_role if seat == 0 else "Player",
+                                  pm_name, True))
                 player_count += 1
             player_no += 1
     summary["PERFORMER"] = player_count
@@ -433,9 +468,8 @@ def _seed_all(ctx, pfx: str, is_demo: bool) -> dict:
     tcast = _p(ctx, cast_db)
     cast_ids: list[str] = []
     player_to_cast: dict[str, str] = {}
-    for part_def, player_id, sys_role in cast_plan:
-        pm_name = next((row[3] for row in PART_ROSTER if row[0] == part_def), "")
-        pm_id   = pm_name_to_id.get(pm_name, "")
+    for part_def, player_id, sys_role, pm_name_c, is_cast_only in cast_plan:
+        pm_id = pm_name_to_id.get(pm_name_c, "")
         props = {}
         ctx["put_key_any"](props, tcast, PARTICIPANT_RECORD_KEYS,
                            concert_id, player_id, prefix="participant")
@@ -471,7 +505,7 @@ def _seed_all(ctx, pfx: str, is_demo: bool) -> dict:
     status_pattern = ["○","○","○","△","×","○","○","△","○","○"]
     for pr_idx, pr_id in enumerate(practice_ids):
         is_concert_day = (pr_id == concert_day_id)
-        for i, (_, player_id, _) in enumerate(cast_plan):
+        for i, (_, player_id, _sys, _pm, _co) in enumerate(cast_plan):
             cast_id = player_to_cast.get(player_id, "")
             if not cast_id: continue
             if is_concert_day:
@@ -497,7 +531,7 @@ def _seed_all(ctx, pfx: str, is_demo: bool) -> dict:
         row[2] for row in PART_ROSTER if row[1] == "打楽器"
     ))
     pi_count = 0
-    for part_def, player_id, _ in cast_plan:
+    for part_def, player_id, _, _pm2, _co2 in cast_plan:
         if part_def not in perc_parts: continue
         cast_id = player_to_cast.get(player_id, "")
         for iname in perc_inst_names:
@@ -527,7 +561,7 @@ def _seed_all(ctx, pfx: str, is_demo: bool) -> dict:
         if part_def in perc_parts:
             perc_pd_ids.append(pd_id)
 
-    for part_def, player_id, _ in cast_plan:
+    for part_def, player_id, _, _pm2, _co2 in cast_plan:
         if part_def not in perc_parts: continue
         cast_id = player_to_cast.get(player_id, "")
         if not cast_id: continue
