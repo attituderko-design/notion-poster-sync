@@ -1018,13 +1018,22 @@ def _render_song_row(
                         db_id = ctx.get("CONCERT_DB_CONCERT_SONG","")
                         type_map = ctx["get_prop_types"](db_id) or {}
                         rel_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_CONCERT_REL_KEYS)
+                        # CONCERT_SONGの演奏会IDサンプルを取得
+                        cs_concert_ids = []
+                        for r in cs_rows_all[:3]:
+                            ids = ctx["extract_relation_ids_any"](r, [rel_key] if rel_key else CONCERT_SONG_CONCERT_REL_KEYS)
+                            cs_concert_ids.append([x[:8] for x in ids])
+                        # APOLLOの「演奏曲」リレーションを直接確認
+                        apollo_row = next((r for r in ctx["query_all"](ctx["CONCERT_DB_SONG"], None) if r.get("id","") == song_id), None)
+                        apollo_atlas_ids = ctx["extract_relation_ids_any"](apollo_row, APOLLO_ATLAS_SONG_REL_KEYS) if apollo_row else []
                         st.error(
-                            f"CONCERT_SONG 行が見つかりません。"
-                            f"APOLLO ID: {song_id[:8]}、"
-                            f"解決したATLAS ID: {[x[:8] for x in atlas_ids]}、"
-                            f"total: {total}、"
-                            f"CONCERT_SONG全件: {len(cs_rows_all)}件、"
-                            f"rel_key: '{rel_key}'"
+                            f"CONCERT_SONG 行が見つかりません。\n"
+                            f"APOLLO ID: {song_id[:8]}\n"
+                            f"APOLLO.演奏曲リレーション: {[x[:8] for x in apollo_atlas_ids]}\n"
+                            f"解決したATLAS ID: {[x[:8] for x in atlas_ids]}\n"
+                            f"CONCERT_SONG全件: {len(cs_rows_all)}件 / rel_key: '{rel_key}'\n"
+                            f"CONCERT_SONGの演奏会IDサンプル: {cs_concert_ids}\n"
+                            f"検索中のconcert_id: {concert_id[:8]}"
                         )
             else:
                 if c_conf2.button("↩ 確定を解除", key=f"song_unconfirm_{concert_id}_{song_id}",
