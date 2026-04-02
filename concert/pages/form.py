@@ -1059,7 +1059,10 @@ _FORM_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30日間
 def _get_form_cookie_manager():
     try:
         import extra_streamlit_components as stx
-        return stx.CookieManager(key="harmonia_form_cookie_mgr")
+        @st.cache_resource
+        def _create_form_cookie_manager():
+            return stx.CookieManager(key="harmonia_form_cookie_mgr")
+        return _create_form_cookie_manager()
     except Exception:
         return None
 
