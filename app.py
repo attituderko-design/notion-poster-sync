@@ -8320,12 +8320,12 @@ def _get_cookie_manager():
     """extra-streamlit-componentsのCookieManagerを返す。"""
     try:
         import extra_streamlit_components as stx
-        @st.cache_resource
-        def _create_cookie_manager():
-            return stx.CookieManager(key="harmonia_cookie_mgr")
-        return _create_cookie_manager()
+        return stx.CookieManager(key="harmonia_cookie_mgr")
     except Exception:
         return None
+
+# モジュールレベルで一度だけインスタンス化（再レンダリングでも同一インスタンスを使用）
+_ADMIN_COOKIE_MGR = _get_cookie_manager() if ADMIN_AUTH_ENABLED else None
 
 
 def _make_auth_token(username: str, password: str) -> str:
@@ -8392,18 +8392,17 @@ def _render_admin_login_gate(cookie_manager) -> None:
 
 
 # クッキーから認証状態を復元
-_cookie_mgr = _get_cookie_manager() if ADMIN_AUTH_ENABLED else None
 if ADMIN_AUTH_ENABLED and not st.session_state.get("admin_authenticated", False):
-    if _cookie_mgr is not None:
+    if _ADMIN_COOKIE_MGR is not None:
         try:
-            _saved_token = _cookie_mgr.get(_ADMIN_COOKIE_NAME)
+            _saved_token = _ADMIN_COOKIE_MGR.get(_ADMIN_COOKIE_NAME)
             if _saved_token and _verify_auth_token(_saved_token):
                 st.session_state["admin_authenticated"] = True
         except Exception:
             pass
 
 if ADMIN_AUTH_ENABLED and not st.session_state.get("admin_authenticated", False):
-    _render_admin_login_gate(_cookie_mgr)
+    _render_admin_login_gate(_ADMIN_COOKIE_MGR)
     st.stop()
 
 # ============================================================
@@ -9735,9 +9734,9 @@ with st.sidebar:
         if st.button("ログアウト", key="global_admin_logout", use_container_width=True):
             _clear_admin_auth_session()
             # クッキーも削除
-            if _cookie_mgr is not None:
+            if _ADMIN_COOKIE_MGR is not None:
                 try:
-                    _cookie_mgr.delete(_ADMIN_COOKIE_NAME)
+                    _ADMIN_COOKIE_MGR.delete(_ADMIN_COOKIE_NAME)
                 except Exception:
                     pass
             st.rerun()
