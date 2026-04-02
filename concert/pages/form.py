@@ -977,6 +977,9 @@ def _render_concert_selector(ctx):
                     "form_is_existing_auth":     True,
                     "form_step":                 1,
                 })
+                # クッキーに保存
+                _save_form_session_to_cookie(
+                    _form_cookie_mgr, selected_cid, sel_pid, sel_pname)
                 for k in ["selector_mode","sel_email_submitted","sel_email",
                           "sel_player_id","sel_player_name","sel_has_password",
                           "sel_pw_verified","sel_concert_select"]:
@@ -993,6 +996,10 @@ def _render_concert_selector(ctx):
             st.rerun()
 
         if st.button("🔓 ログアウト", use_container_width=True, key="sel_logout"):
+            try:
+                _clear_form_cookie(_get_form_cookie_manager())
+            except Exception:
+                pass
             for k in list(st.session_state.keys()):
                 if k.startswith("sel_") or k.startswith("form_"):
                     st.session_state.pop(k, None)
@@ -1045,8 +1052,69 @@ def _get_my_concerts(ctx, player_id: str) -> list[dict]:
         return []
 
 
+_FORM_COOKIE_PREFIX = "harmonia_form_"
+_FORM_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30日間
+
+
+def _get_form_cookie_manager():
+    try:
+        import extra_streamlit_components as stx
+        return stx.CookieManager(key="harmonia_form_cookie_mgr")
+    except Exception:
+        return None
+
+
+def _save_form_session_to_cookie(cookie_mgr, concert_id: str, player_id: str,
+                                  player_name: str) -> None:
+    """ログイン状態をクッキーに保存する。"""
+    if cookie_mgr is None: return
+    try:
+        cookie_mgr.set(f"{_FORM_COOKIE_PREFIX}concert_id",  concert_id,
+                       max_age=_FORM_COOKIE_MAX_AGE)
+        cookie_mgr.set(f"{_FORM_COOKIE_PREFIX}player_id",   player_id,
+                       max_age=_FORM_COOKIE_MAX_AGE)
+        cookie_mgr.set(f"{_FORM_COOKIE_PREFIX}player_name", player_name,
+                       max_age=_FORM_COOKIE_MAX_AGE)
+    except Exception:
+        pass
+
+
+def _clear_form_cookie(cookie_mgr) -> None:
+    """ログアウト時にクッキーを削除する。"""
+    if cookie_mgr is None: return
+    for key in ("concert_id", "player_id", "player_name"):
+        try:
+            cookie_mgr.delete(f"{_FORM_COOKIE_PREFIX}{key}")
+        except Exception:
+            pass
+
+
+def _restore_form_session_from_cookie(cookie_mgr) -> bool:
+    """クッキーからログイン状態を復元する。復元できたらTrueを返す。"""
+    if cookie_mgr is None: return False
+    if st.session_state.get("form_is_existing_auth"): return False  # 既にログイン済み
+    try:
+        concert_id  = cookie_mgr.get(f"{_FORM_COOKIE_PREFIX}concert_id")
+        player_id   = cookie_mgr.get(f"{_FORM_COOKIE_PREFIX}player_id")
+        player_name = cookie_mgr.get(f"{_FORM_COOKIE_PREFIX}player_name")
+        if concert_id and player_id:
+            st.session_state["form_resolved_concert_id"] = concert_id
+            st.session_state["form_player_id"]           = player_id
+            st.session_state["form_player_name"]         = player_name or ""
+            st.session_state["form_is_existing_auth"]    = True
+            st.session_state["form_auth_verified"]       = True
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def render_form(ctx, concert_id: str = ""):
     ext = ctx["extract_prop_text_any"]
+
+    # クッキーマネージャー初期化・セッション復元
+    _form_cookie_mgr = _get_form_cookie_manager()
+    _restore_form_session_from_cookie(_form_cookie_mgr)
 
     # form.py を直接 entrypoint にしていない場合でもロゴを表示
     _render_brand_logo()
@@ -1348,14 +1416,17 @@ def render_form(ctx, concert_id: str = ""):
                 if is_existing and existing_pid:
                     players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
                     matched_player = next((p for p in players if p.get("id") == existing_pid), None)
+                    _pname_cookie = ext(matched_player, PLAYER_NAME_KEYS) if matched_player else ""
                     st.session_state["form_player_id"]   = existing_pid
-                    st.session_state["form_player_name"] = (
-                        ext(matched_player, PLAYER_NAME_KEYS) if matched_player else ""
-                    )
+                    st.session_state["form_player_name"] = _pname_cookie
                     st.session_state["form_is_new"]           = False
                     st.session_state["form_is_existing_auth"] = True
                     # パスワード未設定 or リセット → パスワード設定フラグ
                     st.session_state["form_need_set_password"] = True
+                    # クッキーに保存（concert_idはresolved済みのものを使用）
+                    _cid_for_cookie = st.session_state.get("form_resolved_concert_id", concert_id)
+                    _save_form_session_to_cookie(
+                        _form_cookie_mgr, _cid_for_cookie, existing_pid, _pname_cookie)
                 else:
                     st.session_state["form_is_new"]           = True
                     st.session_state["form_is_existing_auth"] = False
@@ -1740,6 +1811,7 @@ def render_form(ctx, concert_id: str = ""):
 
             st.divider()
             if st.button("🔓 ログアウト", use_container_width=True, key="menu_logout"):
+                _clear_form_cookie(_form_cookie_mgr)
                 for k in list(st.session_state.keys()):
                     if k.startswith("form_") or k.startswith("auth_"):
                         st.session_state.pop(k, None)
