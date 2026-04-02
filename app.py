@@ -9516,7 +9516,6 @@ if system_mode == "HARMONIA":
 
     if concert_page == "🧪 テストデータ管理":
         st.header("🧪 テストデータ管理")
-        st.caption("演奏会未選択でも利用できます。")
         with st.expander("🧪 出演登録E2Eテスト", expanded=False):
             st.caption("既存の『出演』登録フローを最小構成で1ボタン実行し、ATLASの出演演奏会/演奏曲と APOLLO 演奏曲DBの同時登録を確認します。")
             col_run, col_run_rich, col_cleanup = st.columns(3)
