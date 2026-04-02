@@ -8373,7 +8373,7 @@ def _render_admin_login_gate(cookie_manager) -> None:
             st.session_state["admin_authenticated"] = True
             st.session_state.pop("admin_auth_error", None)
             st.session_state.pop("admin_login_password", None)
-            # クッキーにトークンを保存
+            # クッキーにトークンを保存（rerun前に書き込む）
             if cookie_manager is not None:
                 try:
                     token = _make_auth_token(_uid, _pwd)
@@ -8383,7 +8383,8 @@ def _render_admin_login_gate(cookie_manager) -> None:
                     )
                 except Exception:
                     pass
-            st.rerun()
+            # rerunせずst.session_stateで認証済みにして自然に次のレンダリングへ
+            # （st.rerun()するとクッキー書き込みが完了する前に画面遷移してしまう）
         else:
             st.session_state["admin_authenticated"] = False
             st.session_state["admin_auth_error"] = "ID またはパスワードが違います。"
