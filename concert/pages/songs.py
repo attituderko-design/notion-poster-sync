@@ -1011,11 +1011,11 @@ def _render_song_row(
                     total, updated = _set_concert_song_song_confirmed(ctx, concert_id, True, song_id=song_id)
                     if updated:
                         st.success(f"✅ {updated}件を更新しました。")
+                        st.rerun()
                     else:
                         # デバッグ: ATLAS IDが取れているか確認
                         atlas_ids = _resolve_atlas_song_ids(ctx, concert_id, song_id)
-                        st.error(f"CONCERT_SONG 行が見つかりません。APOLLO ID: {song_id[:8]}、解決したATLAS ID: {[x[:8] for x in atlas_ids]}")
-                    st.rerun()
+                        st.error(f"CONCERT_SONG 行が見つかりません。APOLLO ID: {song_id[:8]}、解決したATLAS ID: {[x[:8] for x in atlas_ids]}、total: {total}")
             else:
                 if c_conf2.button("↩ 確定を解除", key=f"song_unconfirm_{concert_id}_{song_id}",
                                    use_container_width=True):

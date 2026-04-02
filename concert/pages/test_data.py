@@ -54,7 +54,10 @@ ATLAS_CREATOR_KEYS           = ["クリエイター"]
 
 # ── パート構成定義 ───────────────────────────────────────────
 # (part_name, inst_category, inst_name, part_master_name, system_role, n_test, n_demo)
+# part_master_nameはPART_MASTERの粒度（席番・楽器具体名は含めない）
+# part_nameはPART_DEFINITIONの表示パート名（Fl.1/Hr.3等の具体名）
 PART_ROSTER = [
+    # 管楽器 - part_master_nameは楽器種別のみ
     ("Fl.1",   "管楽器", "Flute",       "Fl",   "Player", 1, 2),
     ("Fl.2",   "管楽器", "Flute",       "Fl",   "Player", 1, 2),
     ("Ob.1",   "管楽器", "Oboe",        "Ob",   "Player", 1, 2),
@@ -73,10 +76,12 @@ PART_ROSTER = [
     ("Tb.2",   "管楽器", "Trombone",    "Tb",   "Player", 1, 3),
     ("Tb.3",   "管楽器", "Trombone",    "Tb",   "Player", 0, 3),
     ("Tuba",   "管楽器", "Tuba",        "Tuba", "Player", 1, 1),
+    # 打楽器 - Timp.もPerc.もPART_MASTERは"Perc"
     ("Timp.",  "打楽器", "Timpani",     "Perc", "Leader", 1, 1),
     ("Perc.1", "打楽器", "Percussion",  "Perc", "Player", 1, 1),
     ("Perc.2", "打楽器", "Percussion",  "Perc", "Player", 0, 1),
     ("Perc.3", "打楽器", "Percussion",  "Perc", "Player", 0, 1),
+    # 弦楽器 - Vn1/Vn2は1st/2ndで別パートなのでそのまま
     ("Vn1",    "弦楽器", "Violin",      "Vn1",  "Manager",1,12),
     ("Vn2",    "弦楽器", "Violin",      "Vn2",  "Leader", 1,10),
     ("Va",     "弦楽器", "Viola",       "Va",   "Player", 1, 8),
@@ -244,6 +249,7 @@ def _seed_all(ctx, pfx: str, is_demo: bool) -> dict:
         ("テスト交響曲",      "Test, Composer B.", False, mv_ids[3] if len(mv_ids)>=4 else None),
     ]
     song_ids: list[str] = []
+    atlas_song_id_list: list[tuple[str,str]] = []  # (atlas_sid, apollo_sid)
     apollo_db = ctx["CONCERT_DB_SONG"]
     ta = _p(ctx, apollo_db)
     for sname, composer, all_mvmt, mv_id in song_defs:
@@ -259,19 +265,21 @@ def _seed_all(ctx, pfx: str, is_demo: bool) -> dict:
         atlas_sid = track(_create(ctx, concert_db, props))
 
         # APOLLOにも作成してATLASとリレーション
+        apollo_sid = ""
         if atlas_sid and ta:
             apollo_props = {}
-            _put(ctx, apollo_props, ta, SONG_NAME_KEYS,         f"{pfx} {sname}")
-            _put(ctx, apollo_props, ta, SONG_COMPOSER_KEYS,     composer)
-            _put(ctx, apollo_props, ta, SONG_CONCERT_REL_KEYS,  concert_id)
+            _put(ctx, apollo_props, ta, SONG_NAME_KEYS,          f"{pfx} {sname}")
+            _put(ctx, apollo_props, ta, SONG_COMPOSER_KEYS,      composer)
+            _put(ctx, apollo_props, ta, SONG_CONCERT_REL_KEYS,   concert_id)
             _put(ctx, apollo_props, ta, SONG_ALL_MOVEMENTS_KEYS, all_mvmt)
-            # ATLASへのリレーション（演奏曲フィールド）
             ctx["put_prop_any"](apollo_props, ta, ["演奏曲","FK演奏曲"], atlas_sid)
             if mv_id and not all_mvmt:
                 ctx["put_prop_any"](apollo_props, ta, SONG_MOVEMENT_REL_KEYS, mv_id)
             apollo_sid = track(_create(ctx, apollo_db, apollo_props))
             if apollo_sid:
                 song_ids.append(apollo_sid)
+        if atlas_sid and apollo_sid:
+            atlas_song_id_list.append((atlas_sid, apollo_sid))
 
     # 親演奏会側に演奏曲リレーションをセット
     if song_ids:
@@ -285,22 +293,15 @@ def _seed_all(ctx, pfx: str, is_demo: bool) -> dict:
     # ── 6. CONCERT_SONG ──────────────────────────────────────
     cs_db = ctx.get("CONCERT_DB_CONCERT_SONG","")
     cs_count = 0
-    cs_ids_for_atlas: list[str] = []  # ATLAS songのIDをCONCERT_SONGに入れる
-    # ATLAS側のsong IDを取得（APOLLOのatlas_sidリスト）
-    atlas_song_ids_for_cs = []
-    for sname, _, _, _ in song_defs:
-        # ATLASから作ったIDを探す（直前のループで作成した順と対応）
-        # track済みのcreated_idsから逆引き（少し簡略化してsong_idsと同数と仮定）
-        pass
-    # 実際はATLASのIDをtrack順から取得するより、CONCERT_SONGにはAPOLLO IDを直接入れる方針に
-    if cs_db and song_ids:
+    # atlas_song_idsはSTEP5のループで収集（atlas_sid→apollo_sid の対応を保持）
+    if cs_db and atlas_song_id_list:
         tcs = _p(ctx, cs_db)
-        for idx, sid in enumerate(song_ids, start=1):
+        for idx, (atlas_sid, apollo_sid) in enumerate(atlas_song_id_list, start=1):
             props = {}
             ctx["put_key_any"](props, tcs, CONCERT_SONG_KEY_KEYS,
-                               concert_id, sid, prefix="concert_song")
+                               concert_id, atlas_sid, prefix="concert_song")
             _put(ctx, props, tcs, CONCERT_SONG_CONCERT_REL_KEYS, concert_id)
-            _put(ctx, props, tcs, CONCERT_SONG_SONG_REL_KEYS,    sid)
+            _put(ctx, props, tcs, CONCERT_SONG_SONG_REL_KEYS,    atlas_sid)
             _put(ctx, props, tcs, CONCERT_SONG_ORDER_KEYS,       idx)
             _put(ctx, props, tcs, CONCERT_SONG_DONE_KEYS,        True)
             if track(_create(ctx, cs_db, props)): cs_count += 1
