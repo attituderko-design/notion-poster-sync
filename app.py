@@ -9268,12 +9268,6 @@ if system_mode == "HARMONIA":
     selected_concert_row = next((r for r in concert_rows if r.get("id", "") == selected_concert_id), None)
 
     concert_mgmt.render_sidebar_summary_pdf(concert_ctx)
-    try:
-        from concert.pages.form import render_url_generator
-        with st.sidebar.expander("📋 奏者フォームURL", expanded=False):
-            render_url_generator(concert_ctx, concert_ctx.get("SELECTED_CONCERT_ID",""), concert_ctx.get("SELECTED_CONCERT_NAME",""))
-    except Exception:
-        pass
 
     if concert_page == "🏠 ホーム":
         st.header("🏠 HARMONIAホーム")
