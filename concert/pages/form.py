@@ -33,6 +33,14 @@ from concert.services.song_utils import get_song_display_name, build_song_name_m
 _TOKEN_SECRET = "harmonia_form_2024"
 PRIORITY_OPTS = ["未回答", "第1希望", "第2希望", "第3希望", "希望なし/降り番でも可", "NG"]
 ATT_OPTS      = ["○", "△", "×"]
+
+# フォーム用クッキーマネージャー（モジュールレベルで一度だけインスタンス化）
+_FORM_COOKIE_MGR = None
+try:
+    import extra_streamlit_components as _stx
+    _FORM_COOKIE_MGR = _stx.CookieManager(key="harmonia_form_cookie_mgr")
+except Exception:
+    pass
 OTHER_PART    = "一覧にない（管理者に連絡）"
 
 def IS_PERC(part_name_or_type: str) -> bool:
@@ -1057,14 +1065,7 @@ _FORM_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30日間
 
 
 def _get_form_cookie_manager():
-    try:
-        import extra_streamlit_components as stx
-        @st.cache_resource
-        def _create_form_cookie_manager():
-            return stx.CookieManager(key="harmonia_form_cookie_mgr")
-        return _create_form_cookie_manager()
-    except Exception:
-        return None
+    return _FORM_COOKIE_MGR
 
 
 def _save_form_session_to_cookie(cookie_mgr, concert_id: str, player_id: str,
@@ -1115,8 +1116,8 @@ def _restore_form_session_from_cookie(cookie_mgr) -> bool:
 def render_form(ctx, concert_id: str = ""):
     ext = ctx["extract_prop_text_any"]
 
-    # クッキーマネージャー初期化・セッション復元
-    _form_cookie_mgr = _get_form_cookie_manager()
+    # クッキーからセッション復元（サーバー再起動後のログイン維持）
+    _form_cookie_mgr = _FORM_COOKIE_MGR
     _restore_form_session_from_cookie(_form_cookie_mgr)
 
     # form.py を直接 entrypoint にしていない場合でもロゴを表示
