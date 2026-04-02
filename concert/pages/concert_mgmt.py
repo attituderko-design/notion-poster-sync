@@ -1790,7 +1790,7 @@ def render(ctx: dict):
                         try:
                             from concert.services.practice_report import generate_practice_report
                             pdf_bytes = generate_practice_report(ctx, p_id_pdf)
-                            fname_pdf = f"練習情報PDF_{label.replace('/', '-').replace(' ', '_')}.pdf"
+                            fname_pdf = f"練習情報PDF_{label.replace('/', '-').replace(' ', '_')}"
                             st.session_state[f"practice_pdf_bytes_{p_id_pdf}"] = pdf_bytes
                             st.session_state[f"practice_pdf_fname_{p_id_pdf}"] = fname_pdf
                         except Exception as e:
@@ -1798,12 +1798,12 @@ def render(ctx: dict):
 
                 _pdf_ready = st.session_state.get(f"practice_pdf_bytes_{p_id_pdf}")
                 if _pdf_ready:
-                    st.download_button(
-                        label="⬇️ ダウンロード",
-                        data=_pdf_ready,
-                        file_name=st.session_state.get(f"practice_pdf_fname_{p_id_pdf}", "practice.pdf"),
-                        mime="application/pdf",
-                        key=f"practice_pdf_dl_{p_id_pdf}",
+                    from concert.services.convert_utils import render_report_output
+                    render_report_output(
+                        _pdf_ready,
+                        filename=st.session_state.get(f"practice_pdf_fname_{p_id_pdf}", "practice"),
+                        label="練習情報PDF",
+                        key_prefix=f"practice_pdf_{p_id_pdf}",
                     )
 
                 # ── メール一括送信 ──────────────────────────────
@@ -2108,13 +2108,17 @@ def render_sidebar_summary_pdf(ctx: dict):
             try:
                 from concert.services.concert_summary_report import generate_concert_summary
                 pdf_bytes = generate_concert_summary(ctx, concert_id)
-                fname = f"演奏会サマリ_{concert_name or concert_id}.pdf"
-                st.sidebar.download_button(
-                    label="⬇️ ダウンロード",
-                    data=pdf_bytes,
-                    file_name=fname,
-                    mime="application/pdf",
-                    key="sidebar_summary_pdf_dl",
-                )
+                st.session_state["summary_pdf_bytes"] = pdf_bytes
+                st.session_state["summary_pdf_fname"] = f"演奏会サマリ_{concert_name or concert_id}"
             except Exception as e:
                 st.sidebar.error(f"PDF生成に失敗しました: {e}")
+
+    _summary_pdf = st.session_state.get("summary_pdf_bytes")
+    if _summary_pdf:
+        from concert.services.convert_utils import render_report_output
+        render_report_output(
+            _summary_pdf,
+            filename=st.session_state.get("summary_pdf_fname", "演奏会サマリ"),
+            label="演奏会サマリ",
+            key_prefix="summary_pdf",
+        )

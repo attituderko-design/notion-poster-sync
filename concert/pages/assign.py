@@ -1040,54 +1040,54 @@ def _render_solver_tab(ctx: dict):
             st.warning(f"検証エラー: {_ve}")
 
     # PDFダウンロードボタン（3種類）
-    col_title, col_pdf1, col_pdf2, col_pdf3 = st.columns([4, 1, 1, 2])
+    col_title, col_sel = st.columns([4, 3])
     col_title.subheader("候補案比較")
     try:
         from concert.services.report import generate_assign_report
+        from concert.services.convert_utils import render_report_output
         concert_name = ctx.get("SELECTED_CONCERT_NAME", "演奏会")
         _h_res = st.session_state.get(f"assign_result_heuristic_{concert_id}", [])
         _e_res = st.session_state.get(f"assign_result_exact_{concert_id}", [])
 
-        # (1) ヒューリスティックPDF
-        if _h_res:
-            pdf_h = generate_assign_report(concert_name, _h_res, songs, players, ctx)
-            col_pdf1.download_button(
-                "⚡ H解",
-                data=pdf_h,
-                file_name=f"アサイン_ヒューリスティック_{concert_name}.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                help="ヒューリスティック解（高速）の候補案PDF",
-            )
+        # どのPDFを出力するか選択
+        pdf_opts = []
+        if _h_res:          pdf_opts.append("⚡ ヒューリスティック解")
+        if _e_res:          pdf_opts.append("🎯 厳密解")
+        if _h_res and _e_res: pdf_opts.append("📊 比較（両解を並べて表示）")
 
-        # (2) 厳密解PDF
-        if _e_res:
-            pdf_e = generate_assign_report(concert_name, _e_res, songs, players, ctx)
-            col_pdf2.download_button(
-                "🎯 厳密解",
-                data=pdf_e,
-                file_name=f"アサイン_厳密解_{concert_name}.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                help="厳密解（整数計画法）の候補案PDF",
+        if pdf_opts:
+            sel_pdf = col_sel.radio(
+                "出力する候補案", pdf_opts, horizontal=True,
+                key=f"assign_pdf_sel_{concert_id}",
             )
+            if st.button("📄 候補案を出力", key=f"assign_pdf_gen_{concert_id}",
+                         use_container_width=True, type="primary"):
+                with st.spinner("PDF生成中..."):
+                    if "ヒューリスティック" in sel_pdf:
+                        _pdf = generate_assign_report(concert_name, _h_res, songs, players, ctx)
+                        _fname = f"アサイン_ヒューリスティック_{concert_name}"
+                    elif "厳密解" in sel_pdf:
+                        _pdf = generate_assign_report(concert_name, _e_res, songs, players, ctx)
+                        _fname = f"アサイン_厳密解_{concert_name}"
+                    else:
+                        _pdf = generate_assign_report(
+                            concert_name, _h_res, songs, players, ctx,
+                            compare_results=_e_res, compare_label="厳密解",
+                        )
+                        _fname = f"アサイン比較_{concert_name}"
+                    st.session_state[f"assign_pdf_bytes_{concert_id}"] = _pdf
+                    st.session_state[f"assign_pdf_fname_{concert_id}"] = _fname
 
-        # (3) 比較PDF（両方ある場合のみ）
-        if _h_res and _e_res:
-            pdf_cmp = generate_assign_report(
-                concert_name, _h_res, songs, players, ctx,
-                compare_results=_e_res, compare_label="厳密解",
-            )
-            col_pdf3.download_button(
-                "📊 比較PDF",
-                data=pdf_cmp,
-                file_name=f"アサイン比較_{concert_name}.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                help="ヒューリスティック解と厳密解を横並び比較したPDF",
+        _assign_pdf = st.session_state.get(f"assign_pdf_bytes_{concert_id}")
+        if _assign_pdf:
+            render_report_output(
+                _assign_pdf,
+                filename=st.session_state.get(f"assign_pdf_fname_{concert_id}", "アサイン候補案"),
+                label="アサイン候補案",
+                key_prefix=f"assign_pdf_{concert_id}",
             )
     except Exception as e:
-        col_pdf1.caption(f"PDF生成エラー: {e}")
+        st.caption(f"PDF生成エラー: {e}")
 
     # サマリーカード（verify()ベース）
     from concert.services.verify_results import verify as _verify_ui
