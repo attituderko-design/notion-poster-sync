@@ -6,3 +6,4 @@ reportlab
 qrcode[pil]
 scipy
 matplotlib
+extra-streamlit-components
