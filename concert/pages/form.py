@@ -948,41 +948,26 @@ def _render_concert_selector(ctx):
                     else:
                         st.error("パスワードが違います。")
             else:
-                # パスワード未設定 → マジックコードでパスワード設定を促す
+                # パスワード未設定 → STEP0bの通常フローに戻して処理させる
                 st.subheader(f"おかえりなさい、{sel_pname} さん")
-                st.warning("パスワードが設定されていません。メールアドレスに確認コードを送信して、パスワードを設定してください。")
-                if st.button("📧 確認コードを送信してパスワードを設定する",
+                st.warning("パスワードが設定されていません。確認コードでログインしてパスワードを設定してください。")
+                st.caption(f"登録メールアドレス: {sel_email}")
+                if st.button("📧 確認コードでログインする",
                              type="primary", use_container_width=True,
-                             key="sel_send_magic_for_pw"):
-                    import random as _random
-                    code = str(_random.randint(100000, 999999))
-                    hc   = _hash_code(code)
-                    import time as _time
-                    exp  = _time.time() + 600
-                    # 演奏会名は仮置き（コード送信のみ目的）
-                    ok = _send_magic_code(ctx, sel_email, code, "HARMONIA")
-                    if ok:
-                        st.session_state.update({
-                            "auth_code_hash":    hc,
-                            "auth_code_expires": exp,
-                            "auth_attempts":     0,
-                            "auth_code_sent":    True,
-                            "auth_player_id":    sel_pid,
-                            "auth_is_existing":  True,
-                            "auth_email_submitted": True,
-                            "form_auth_email":   sel_email,
-                            # 認証後にパスワード設定フラグを立てる
-                            "form_auth_mode":    "login",
-                        })
-                        # selector stateをクリアしてSTEP0bの認証フローへ
-                        for k in ["sel_email_submitted","sel_email","sel_player_id",
-                                  "sel_player_name","sel_has_password","sel_pw_verified",
-                                  "selector_mode"]:
-                            st.session_state.pop(k, None)
-                        st.success("✅ 確認コードを送信しました。メールを確認してください。")
-                        st.rerun()
-                    else:
-                        st.error("送信に失敗しました。しばらく待ってから再試行してください。")
+                             key="sel_goto_magic"):
+                    # selector stateをクリアしてSTEP0bへ
+                    # auth_email_submittedをTrueにすることでメール入力をスキップして
+                    # そのままマジックコード送信フローへ進む
+                    for k in ["sel_email_submitted", "sel_email", "sel_player_id",
+                              "sel_player_name", "sel_has_password", "sel_pw_verified",
+                              "selector_mode"]:
+                        st.session_state.pop(k, None)
+                    st.session_state.update({
+                        "form_auth_mode":        "login",
+                        "auth_email_submitted":  True,
+                        "form_auth_email":       sel_email,
+                    })
+                    st.rerun()
             if st.button("← 戻る", key="sel_pw_back"):
                 for k in ["sel_email_submitted","sel_email","sel_player_id",
                           "sel_player_name","sel_has_password","sel_pw_verified"]:
