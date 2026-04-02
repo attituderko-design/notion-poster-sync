@@ -820,7 +820,14 @@ def _get_concert_song_confirmation_stats(ctx: dict, concert_id: str) -> dict:
             if matched:
                 song_names.append(_song_name(matched, ctx))
         if not song_names:
-            song_names = atlas_song_ids or [row.get("id", "")]
+            # APOLLOが見つからない場合はCONCERT_SONGのタイトルかATLAS IDの先頭8文字を表示
+            cs_title = ctx["extract_prop_text_any"](row, ["タイトル","名称","title"]) or ""
+            if cs_title:
+                song_names = [cs_title]
+            elif atlas_song_ids:
+                song_names = [f"曲ID:{aid[:8]}" for aid in atlas_song_ids]
+            else:
+                song_names = [f"CONCERT_SONG:{row.get('id','')[:8]}"]
         is_done = _extract_checkbox_value(row, flag_key) if flag_key else False
         confirmed += 1 if is_done else 0
         detail_rows.append({"row": row, "name": " / ".join(song_names), "confirmed": is_done})
@@ -1002,7 +1009,12 @@ def _render_song_row(
                 if c_conf1.button("✅ 楽曲情報を確定", key=f"song_confirm_{concert_id}_{song_id}",
                                    use_container_width=True, type="primary"):
                     total, updated = _set_concert_song_song_confirmed(ctx, concert_id, True, song_id=song_id)
-                    st.success(f"✅ {updated}件を更新しました。") if updated else st.error("CONCERT_SONG 行が見つかりません。")
+                    if updated:
+                        st.success(f"✅ {updated}件を更新しました。")
+                    else:
+                        # デバッグ: ATLAS IDが取れているか確認
+                        atlas_ids = _resolve_atlas_song_ids(ctx, concert_id, song_id)
+                        st.error(f"CONCERT_SONG 行が見つかりません。APOLLO ID: {song_id[:8]}、解決したATLAS ID: {[x[:8] for x in atlas_ids]}")
                     st.rerun()
             else:
                 if c_conf2.button("↩ 確定を解除", key=f"song_unconfirm_{concert_id}_{song_id}",
