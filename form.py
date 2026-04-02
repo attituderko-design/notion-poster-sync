@@ -31,4 +31,9 @@ if _token and _cid:
     except Exception as _e:
         st.error(f"フォームの初期化に失敗しました: {_e}")
 else:
-    st.error("URLが正しくありません。管理者から送られたURLを使用してください。")
+    # クエリパラメータなし → 招待コード入力画面として通常起動
+    try:
+        _ctx = build_concert_ctx()
+        render_form(_ctx)
+    except Exception as _e:
+        st.error(f"フォームの読み込みに失敗しました: {_e}")
