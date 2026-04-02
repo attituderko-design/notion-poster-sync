@@ -6,4 +6,4 @@ reportlab
 qrcode[pil]
 scipy
 matplotlib
-extra-streamlit-components
+streamlit-cookies-controller
