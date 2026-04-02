@@ -987,7 +987,7 @@ def _render_concert_selector(ctx):
                 })
                 # クッキーに保存
                 _save_form_session_to_cookie(
-                    _form_cookie_mgr, selected_cid, sel_pid, sel_pname)
+                    _FORM_COOKIE_MGR, selected_cid, sel_pid, sel_pname)
                 for k in ["selector_mode","sel_email_submitted","sel_email",
                           "sel_player_id","sel_player_name","sel_has_password",
                           "sel_pw_verified","sel_concert_select"]:
@@ -1005,7 +1005,7 @@ def _render_concert_selector(ctx):
 
         if st.button("🔓 ログアウト", use_container_width=True, key="sel_logout"):
             try:
-                _clear_form_cookie(_get_form_cookie_manager())
+                _clear_form_cookie(_FORM_COOKIE_MGR)
             except Exception:
                 pass
             for k in list(st.session_state.keys()):
@@ -1070,8 +1070,9 @@ def _get_form_cookie_manager():
 
 def _save_form_session_to_cookie(cookie_mgr, concert_id: str, player_id: str,
                                   player_name: str) -> None:
-    """ログイン状態をクッキーに保存する。"""
-    if cookie_mgr is None: return
+    """ログイン状態をクッキーに保存する。session_stateにも pending として記録。"""
+    if cookie_mgr is None:
+        return
     try:
         cookie_mgr.set(f"{_FORM_COOKIE_PREFIX}concert_id",  concert_id,
                        max_age=_FORM_COOKIE_MAX_AGE)
@@ -1081,6 +1082,12 @@ def _save_form_session_to_cookie(cookie_mgr, concert_id: str, player_id: str,
                        max_age=_FORM_COOKIE_MAX_AGE)
     except Exception:
         pass
+    # rerun後にも再保存できるようにsession_stateにも記録
+    st.session_state["_form_cookie_pending"] = {
+        "concert_id": concert_id,
+        "player_id": player_id,
+        "player_name": player_name,
+    }
 
 
 def _clear_form_cookie(cookie_mgr) -> None:
@@ -1095,8 +1102,22 @@ def _clear_form_cookie(cookie_mgr) -> None:
 
 def _restore_form_session_from_cookie(cookie_mgr) -> bool:
     """クッキーからログイン状態を復元する。復元できたらTrueを返す。"""
-    if cookie_mgr is None: return False
     if st.session_state.get("form_is_existing_auth"): return False  # 既にログイン済み
+
+    # pendingデータがあればクッキーに再保存（rerun後の保存）
+    pending = st.session_state.pop("_form_cookie_pending", None)
+    if pending and cookie_mgr is not None:
+        try:
+            cookie_mgr.set(f"{_FORM_COOKIE_PREFIX}concert_id",  pending["concert_id"],
+                           max_age=_FORM_COOKIE_MAX_AGE)
+            cookie_mgr.set(f"{_FORM_COOKIE_PREFIX}player_id",   pending["player_id"],
+                           max_age=_FORM_COOKIE_MAX_AGE)
+            cookie_mgr.set(f"{_FORM_COOKIE_PREFIX}player_name", pending["player_name"],
+                           max_age=_FORM_COOKIE_MAX_AGE)
+        except Exception:
+            pass
+
+    if cookie_mgr is None: return False
     try:
         concert_id  = cookie_mgr.get(f"{_FORM_COOKIE_PREFIX}concert_id")
         player_id   = cookie_mgr.get(f"{_FORM_COOKIE_PREFIX}player_id")
