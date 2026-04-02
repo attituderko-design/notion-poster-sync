@@ -14,7 +14,6 @@ from concert.services.keys import (
     PARTICIPANT_PART_KEYS, PARTICIPANT_PART_REL_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_ROLE_OPS_KEYS,
     PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS,
     PLAYER_NAME_KEYS,
-    PARTMASTER_NAME_KEYS, PARTMASTER_TYPE_KEYS,
     EXPENSE_KEY_KEYS, EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS,
     EXPENSE_CONTENT_KEYS, EXPENSE_AMOUNT_KEYS, EXPENSE_CONFIRMED_KEYS,
     EXPENSE_NOTE_KEYS, EXPENSE_TYPE_OPTIONS,
@@ -24,6 +23,7 @@ from concert.services.keys import (
     BILLING_TAX_RATE_KEYS, BILLING_SUBTOTAL_KEYS, BILLING_TAX_KEYS,
     BILLING_TOTAL_KEYS, BILLING_MODE_KEYS, BILLING_NOTE_KEYS,
 )
+from concert.services.part_master_utils import load_part_master_map, build_player_part_map, part_id_from_name
 
 
 def _normalize_page_id(v: str) -> str:
@@ -401,21 +401,18 @@ def _upsert_expense(ctx, concert_id: str, concert_name: str,
     return res is not None and res.status_code == 200
 
 
-from concert.services.part_master_utils import (
-    load_part_master_map as _load_part_master_map,
-)
-
-
-def _update_cast_finance(ctx, page_id: str, part_master_id: str, role: str,
+def _update_cast_finance(ctx, page_id: str, part: str, role: str,
                          fee: int, paid: bool, role_ops: str = "") -> bool:
     db_id = ctx["CONCERT_DB_PARTICIPANT"]
     t = ctx["get_prop_types"](db_id)
     if not t:
         return False
     props: dict = {}
-    # パートはRelation型（PART_MASTERへ）。IDがある場合のみ書き込む
-    if part_master_id:
-        ctx["put_prop_any"](props, t, PARTICIPANT_PART_REL_KEYS, part_master_id)
+    if part:
+        pm_map_f = load_part_master_map(ctx)
+        pm_id_f  = part_id_from_name(pm_map_f, part)
+        if pm_id_f:
+            ctx["put_prop_any"](props, t, PARTICIPANT_PART_REL_KEYS, pm_id_f)
     ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_KEYS,     role)
     ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_OPS_KEYS, role_ops)
     ctx["put_prop_any"](props, t, PARTICIPANT_FEE_KEYS,      fee)
@@ -623,16 +620,16 @@ def _render_budget_tab(ctx, concert_id: str):
         use_container_width=True,
     ):
         ok_n = ng_n = 0
+        _pm_map_fb = load_part_master_map(ctx)
         with st.spinner("設定中..."):
-            _pm_map_fin = _load_part_master_map(ctx)
             for r in cast_rows:
                 rid  = r.get("id", "")
-                pm_ids = ctx["extract_relation_ids_any"](r, PARTICIPANT_PART_REL_KEYS)
-                part_master_id = pm_ids[0] if pm_ids else ""
+                _pm_ids_f = ctx["extract_relation_ids_any"](r, PARTICIPANT_PART_REL_KEYS)
+                part = _pm_map_fb.get(_pm_ids_f[0], {}).get("name", "") if _pm_ids_f else ""
                 role = ext(r, PARTICIPANT_ROLE_KEYS) or ""
                 paid = ext(r, PARTICIPANT_PAID_KEYS) == "True"
                 role_ops = ext(r, PARTICIPANT_ROLE_OPS_KEYS) or ""
-                ok   = _update_cast_finance(ctx, rid, part_master_id, role, int(assumed_fee), paid, role_ops=role_ops)
+                ok   = _update_cast_finance(ctx, rid, part, role, int(assumed_fee), paid, role_ops=role_ops)
                 ok_n += 1 if ok else 0
                 ng_n += 0 if ok else 1
         if ng_n == 0:
@@ -929,19 +926,18 @@ def _render_payment_tab(ctx, concert_id: str):
         _clear_finance_cache(concert_id)
         st.rerun()
 
-    _pm_map_fin = _load_part_master_map(ctx)
     df_rows: list[dict] = []
     df_meta: list[dict] = []
+    _pm_map_fin = load_part_master_map(ctx)
     for r in sorted(cast_rows, key=lambda x: (
-        _pm_map_fin.get((ctx["extract_relation_ids_any"](x, PARTICIPANT_PART_REL_KEYS) or [""])[0], {}).get("name", ""),
+        _pm_map_fin.get((ctx["extract_relation_ids_any"](x, PARTICIPANT_PART_REL_KEYS) or [""])[0], {}).get("name", "") or "",
         ext(x, PARTICIPANT_ROLE_KEYS) or "",
     )):
         rid      = r.get("id", "")
         pids     = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
         pname    = player_name_map.get(pids[0], "") if pids else ""
-        pm_ids   = ctx["extract_relation_ids_any"](r, PARTICIPANT_PART_REL_KEYS)
-        part_master_id = pm_ids[0] if pm_ids else ""
-        part     = _pm_map_fin.get(part_master_id, {}).get("name", "")
+        _pm_ids_fin = ctx["extract_relation_ids_any"](r, PARTICIPANT_PART_REL_KEYS)
+        part     = _pm_map_fin.get(_pm_ids_fin[0], {}).get("name", "") if _pm_ids_fin else ""
         role     = ext(r, PARTICIPANT_ROLE_KEYS)     or ""
         role_ops = ext(r, PARTICIPANT_ROLE_OPS_KEYS) or ""
         fee_s    = ext(r, PARTICIPANT_FEE_KEYS) or "0"
@@ -952,7 +948,7 @@ def _render_payment_tab(ctx, concert_id: str):
         df_rows.append({"氏名": pname, "パート": part, "役職(音楽)": role,
                         "役職(運営)": role_ops, "参加費": fee, "入金済": paid})
         df_meta.append({"rid": rid, "pname": pname,
-                        "cur_part_id": part_master_id, "cur_role": role, "cur_role_ops": role_ops,
+                        "cur_part": part, "cur_role": role, "cur_role_ops": role_ops,
                         "cur_fee": fee, "cur_paid": paid})
 
     # 入金サマリ
@@ -996,7 +992,7 @@ def _render_payment_tab(ctx, concert_id: str):
                     skip_n += 1
                     continue
                 ok = _update_cast_finance(ctx, meta["rid"],
-                                          meta["cur_part_id"], meta["cur_role"],
+                                          meta["cur_part"], meta["cur_role"],
                                           new_fee, new_paid,
                                           role_ops=meta["cur_role_ops"])
                 ok_n += 1 if ok else 0

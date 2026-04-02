@@ -4,7 +4,7 @@ concert.pages.concert_mgmt
 """
 import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
-from concert.services.song_utils import get_song_display_name, build_song_name_map
+from concert.services.part_master_utils import load_part_master_map, is_perc_from_pm
 from datetime import date, datetime, timezone, timedelta
 import re
 import requests
@@ -1087,7 +1087,7 @@ def _render_practice_form(ctx: dict, concerts: list[dict], existing: dict | None
         song_opts: dict = {}
         if selected_concert_id:
             s_rows = _load_songs(ctx, selected_concert_id)
-            song_opts = {get_song_display_name(ctx, s) or s.get("id",""): s.get("id","")
+            song_opts = {ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or s.get("id",""): s.get("id","")
                          for s in s_rows}
         cur_song_ids: list[str] = []
         if is_edit:
@@ -1373,8 +1373,8 @@ def _render_schedule_tab(ctx: dict):
     # 演奏曲の選択肢
     all_songs_rows = _load_songs(ctx, concert_id)
     song_opts = {"（なし）": ""}
-    for s in sorted(all_songs_rows, key=lambda x: get_song_display_name(ctx, x)):
-        name = get_song_display_name(ctx, s) or s.get("id", "")
+    for s in sorted(all_songs_rows, key=lambda x: ctx["extract_prop_text_any"](x, SONG_NAME_KEYS) or ""):
+        name = ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or s.get("id", "")
         song_opts[name] = s.get("id", "")
     song_names = list(song_opts.keys())
 
@@ -1744,7 +1744,7 @@ def render(ctx: dict):
                 song_opts_e: dict = {}
                 if filter_concert_id:
                     s_rows_e = _load_songs(ctx, filter_concert_id)
-                    song_opts_e = {get_song_display_name(ctx, s) or s.get("id",""): s.get("id","")
+                    song_opts_e = {ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or s.get("id",""): s.get("id","")
                                    for s in s_rows_e}
                 cur_song_ids_e = ctx["extract_relation_ids_any"](p, PRACTICE_SONG_REL_KEYS)
                 cur_song_names_e = [k for k, v in song_opts_e.items() if v in cur_song_ids_e]
@@ -1929,7 +1929,7 @@ def _render_data_check_tab(ctx: dict, concert_id: str):
 
     # パート・役職未入力
     no_part = [player_name_map.get((ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0], "?")
-               for r in cast if not ext(r, PARTICIPANT_PART_KEYS)]
+               for r in cast if not ctx["extract_relation_ids_any"](r, PARTICIPANT_PART_REL_KEYS)]
     if no_part:
         warn("パート・役職", f"パート未入力: {', '.join(no_part)}")
     else:
@@ -1987,10 +1987,12 @@ def _render_data_check_tab(ctx: dict, concert_id: str):
             ok("出欠", "全練習日・全参加者の出欠入力済み")
 
     # ── 3. 希望入力（Percパートのみ） ────────────────────────
+    _pm_map_cm = load_part_master_map(ctx)
     perc_pids = [
         (ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0]
         for r in cast
-        if (ext(r, PARTICIPANT_PART_KEYS) or "").lower() in ("perc", "percussion", "打楽器")
+        if is_perc_from_pm(_pm_map_cm,
+            (ctx["extract_relation_ids_any"](r, PARTICIPANT_PART_REL_KEYS) or [""])[0])
     ]
     if not perc_pids:
         warn("希望入力", "Percパートの参加者がいません（パート未入力の可能性あり）")

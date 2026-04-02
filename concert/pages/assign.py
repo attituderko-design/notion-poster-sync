@@ -7,7 +7,7 @@ concert.pages.assign
 """
 import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
-from concert.services.song_utils import get_song_display_name, build_song_name_map, get_songs_for_concert
+from concert.services.part_master_utils import load_part_master_map, build_player_part_map, is_perc_from_pm
 from collections import defaultdict
 import re
 
@@ -321,7 +321,7 @@ def _bump_pref_editor_version(concert_id: str, player_id: str) -> None:
 
 
 def _song_name(s, ctx) -> str:
-    return get_song_display_name(ctx, s)
+    return ctx["extract_prop_text_any"](s, SONG_NAME_KEYS) or ctx["extract_title"](s) or s.get("id", "")
 
 
 def _instrument_name(i, ctx) -> str:
@@ -533,12 +533,9 @@ def _render_pref_tab(ctx: dict):
         st.info("この演奏会に紐づく奏者が見つかりませんでした。参加者DBのリレーションを確認してください。")
         return
 
-    # パートフィルタ：CONCERT_CASTからパート一覧を取得して選択
-    part_by_player: dict[str, str] = {}
-    for row in participant_rows:
-        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
-        if pids:
-            part_by_player[pids[0]] = ctx["extract_prop_text_any"](row, PARTICIPANT_PART_KEYS) or ""
+    # パートフィルタ：PART_MASTERリレーション経由でパート一覧を取得
+    pm_map_as = load_part_master_map(ctx)
+    part_by_player = build_player_part_map(ctx, participant_rows, pm_map_as)
     all_parts = sorted({p for p in part_by_player.values() if p})
     if all_parts:
         selected_part = st.selectbox(
@@ -846,8 +843,9 @@ def _render_solver_tab(ctx: dict):
                     if _pids:
                         _pid = _pids[0]
                         # 打楽器パート（Perc系）のみを対象にする
-                        _ppart = (ctx["extract_prop_text_any"](_r, PARTICIPANT_PART_KEYS) or "").strip()
-                        if not _is_perc_part(_ppart):
+                        _pm_ids = ctx["extract_relation_ids_any"](_r, PARTICIPANT_PART_REL_KEYS)
+                        _pm_map = load_part_master_map(ctx)
+                        if not (_pm_ids and is_perc_from_pm(_pm_map, _pm_ids[0])):
                             continue
                         _pobj = next((p for p in players if p.get("id","") == _pid), None)
                         _pname = _player_name(_pobj, ctx) if _pobj else ""

@@ -6,6 +6,9 @@ concert.pages.players
 import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
 from concert.services.relation_utils import find_relation_prop
+from concert.services.part_master_utils import (
+    load_part_master_map, build_player_part_map, part_id_from_name, is_perc_from_pm
+)
 
 
 
@@ -21,15 +24,6 @@ def _first_prop_by_type(type_map: dict, ptype: str) -> str:
         if t == ptype:
             return k
     return ""
-
-
-from concert.services.part_master_utils import (
-    load_part_master_map as _load_part_master_map,
-    part_name_from_cast  as _part_name_from_cast,
-    part_id_from_name    as _part_id_from_name,
-    is_perc_from_pm      as _is_perc_from_pm,
-)
-
 
 
 def _response_error_message(res) -> str:
@@ -98,23 +92,9 @@ def _load_harmonia_concert_row(ctx: dict, concert_id: str) -> dict:
     return {}
 
 
-def _generate_invite_code() -> str:
-    """8桁のランダム英数字大文字招待コードを生成する。"""
-    import random, string
-    return "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
-
-
 def _ensure_harmonia_concert_row(ctx: dict, concert_id: str, concert_name: str = "") -> tuple[dict, bool]:
     row = _load_harmonia_concert_row(ctx, concert_id)
     if row:
-        # 既存レコードに招待コードが未設定なら自動生成して書き込む
-        existing_code = ctx["extract_prop_text_any"](row, HARMONIA_CONCERT_INVITE_CODE_KEYS)
-        if not existing_code:
-            db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
-            t = ctx["get_prop_types"](db_id) or {}
-            code_props: dict = {}
-            ctx["put_prop_any"](code_props, t, HARMONIA_CONCERT_INVITE_CODE_KEYS, _generate_invite_code())
-            ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{row.get('id','')}", json={"properties": code_props})
         return row, False
     db_id = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
     if not db_id:
@@ -124,7 +104,6 @@ def _ensure_harmonia_concert_row(ctx: dict, concert_id: str, concert_name: str =
     ctx["put_key_any"](props, t, HARMONIA_CONCERT_KEY_KEYS, concert_id, concert_name or concert_id, prefix="harmonia")
     ctx["put_prop_any"](props, t, HARMONIA_CONCERT_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, HARMONIA_CONCERT_MANAGED_KEYS, True)
-    ctx["put_prop_any"](props, t, HARMONIA_CONCERT_INVITE_CODE_KEYS, _generate_invite_code())
     res = ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
     if res is not None and res.status_code == 200:
         return res.json() or {}, True
@@ -514,11 +493,12 @@ def _upsert_participant(
     ctx["put_prop_any"](props, t, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
     ctx["put_prop_any"](props, t, PARTICIPANT_PLAYER_REL_KEYS, player_id)
     ctx["put_key_any"](props, t, PARTICIPANT_RECORD_KEYS, concert_id, player_id, prefix="participant")
-    # パートはRelation型（PART_MASTERへ）
-    pm_map = _load_part_master_map(ctx)
-    part_master_id = _part_id_from_name(pm_map, part)
-    if part_master_id:
-        ctx["put_prop_any"](props, t, PARTICIPANT_PART_REL_KEYS, part_master_id)
+    # partはPART_MASTERの名前 → IDに変換してRelationで書き込む
+    if part:
+        pm_map = load_part_master_map(ctx)
+        pm_id  = part_id_from_name(pm_map, part)
+        if pm_id:
+            ctx["put_prop_any"](props, t, PARTICIPANT_PART_REL_KEYS, pm_id)
     ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_KEYS,     role_music)
     ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_OPS_KEYS, role_ops)
     # 新規登録時のみ：session_stateの確定参加費をセット
@@ -738,9 +718,9 @@ def _render_player_tab(ctx: dict):
             part_row_by_pid[pids[0]] = row
     current_pids = set(part_row_by_pid.keys())
 
-    # PART_MASTERからパート一覧を取得（アルファベット順）
-    pm_map_pl = _load_part_master_map(ctx)
-    part_opts = sorted([v["name"] for v in pm_map_pl.values() if v["name"]], key=lambda x: x.lower())
+    # PART_MASTERからパート選択肢を取得
+    pm_map_pl     = load_part_master_map(ctx)
+    part_opts     = sorted(v["name"] for v in pm_map_pl.values() if v["name"])
     role_m_opts   = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_ROLE_KEYS)
     role_ops_opts = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_ROLE_OPS_KEYS)
 
@@ -752,7 +732,9 @@ def _render_player_tab(ctx: dict):
         row   = part_row_by_pid.get(pid, {})
         rid   = row.get("id", "") if row else ""
         in_cast = pid in current_pids
-        cur_part    = _part_name_from_cast(ctx, row, pm_map_pl) if row else ""
+        # パート名はPART_MASTERリレーション経由で取得
+        cur_part_pm_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PART_REL_KEYS) if row else []
+        cur_part    = pm_map_pl.get(cur_part_pm_ids[0], {}).get("name", "") if cur_part_pm_ids else ""
         cur_role_m  = ctx["extract_prop_text_any"](row, PARTICIPANT_ROLE_KEYS)  if row else ""
         cur_role_o  = ctx["extract_prop_text_any"](row, PARTICIPANT_ROLE_OPS_KEYS) if row else ""
         fee_s       = ctx["extract_prop_text_any"](row, PARTICIPANT_FEE_KEYS)   if row else ""
@@ -1899,18 +1881,18 @@ def _render_practice_bring_tab(ctx: dict):
 
 
 def _filter_perc_players(ctx, player_ids: list[str], participants: list[dict]) -> list[str]:
-    """CONCERT_CASTのパートが打楽器の奏者のみに絞り込む。未設定の場合は全員対象。"""
-    pm_map = _load_part_master_map(ctx)
-    part_set: dict[str, bool] = {}  # pid → is_perc
+    """CONCERT_CASTのパートがPercの奏者のみに絞り込む。未設定の場合は全員対象。"""
+    pm_map_perc = load_part_master_map(ctx)
+    part_set = {}
     for row in participants:
-        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        pids   = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        pm_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PART_REL_KEYS)
         if pids:
-            pm_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PART_REL_KEYS)
-            is_perc = _is_perc_from_pm(pm_map, pm_ids[0]) if pm_ids else False
-            part_set[pids[0]] = is_perc
+            pm_type = pm_map_perc.get(pm_ids[0], {}).get("type", "") if pm_ids else ""
+            part_set[pids[0]] = pm_type
     # パートが設定されている奏者がいる場合のみフィルタ
     if any(v for v in part_set.values()):
-        return [pid for pid in player_ids if part_set.get(pid, False) or pid not in part_set]
+        return [pid for pid in player_ids if part_set.get(pid, "") in ("打楽器", "")]
     return player_ids  # 全員未設定なら全員対象
 
 
