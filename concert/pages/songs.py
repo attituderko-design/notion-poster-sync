@@ -689,7 +689,7 @@ def _load_concert_song_rows(ctx: dict, concert_id: str) -> list[dict]:
         if rel_key:
             rows = ctx["query_all"](db_id, {"filter": {"property": rel_key, "relation": {"contains": concert_id}}})
         if not rows:
-            rows = ctx["query_all"](db_id)
+            rows = ctx["query_all"](db_id, None)
         target = _norm_notion_id(concert_id)
         filtered = []
         for row in rows:
@@ -1013,9 +1013,19 @@ def _render_song_row(
                         st.success(f"✅ {updated}件を更新しました。")
                         st.rerun()
                     else:
-                        # デバッグ: ATLAS IDが取れているか確認
                         atlas_ids = _resolve_atlas_song_ids(ctx, concert_id, song_id)
-                        st.error(f"CONCERT_SONG 行が見つかりません。APOLLO ID: {song_id[:8]}、解決したATLAS ID: {[x[:8] for x in atlas_ids]}、total: {total}")
+                        cs_rows_all = ctx["query_all"](ctx.get("CONCERT_DB_CONCERT_SONG",""), None)
+                        db_id = ctx.get("CONCERT_DB_CONCERT_SONG","")
+                        type_map = ctx["get_prop_types"](db_id) or {}
+                        rel_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_CONCERT_REL_KEYS)
+                        st.error(
+                            f"CONCERT_SONG 行が見つかりません。"
+                            f"APOLLO ID: {song_id[:8]}、"
+                            f"解決したATLAS ID: {[x[:8] for x in atlas_ids]}、"
+                            f"total: {total}、"
+                            f"CONCERT_SONG全件: {len(cs_rows_all)}件、"
+                            f"rel_key: '{rel_key}'"
+                        )
             else:
                 if c_conf2.button("↩ 確定を解除", key=f"song_unconfirm_{concert_id}_{song_id}",
                                    use_container_width=True):
