@@ -6667,7 +6667,7 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                     else:
                         st.error(f"❌ テスト送信に失敗しました。{msg_send}")
 
-    with st.expander("📄 練習情報PDFを送信", expanded=False):
+with st.expander("📄 練習情報PDFを送信", expanded=False):
     if not linked_rows:
         st.caption("先にLINEグループを紐づけてください。")
     else:
