@@ -6668,25 +6668,32 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                         st.error(f"❌ テスト送信に失敗しました。{msg_send}")
 
     with st.expander("📄 練習情報PDFを送信", expanded=False):
-        if not linked_rows:
-            st.caption("先にLINEグループを紐づけてください。")
+    if not linked_rows:
+        st.caption("先にLINEグループを紐づけてください。")
+    else:
+        try:
+            practices = concert_mgmt._load_practices(concert_ctx, selected_concert_id) if selected_concert_id else []
+        except Exception as e:
+            practices = []
+            st.error(f"練習一覧の取得に失敗しました: {e}")
+
+        if not practices:
+            st.caption("この演奏会に紐づく練習がありません。")
         else:
-            try:
-                practices = concert_mgmt._load_practices(concert_ctx, selected_concert_id) if selected_concert_id else []
-            except Exception as e:
-                practices = []
-                st.error(f"練習一覧の取得に失敗しました: {e}")
+            practice_options = {}
+            for p in practices:
+                p_name = concert_ctx["extract_prop_text_any"](p, ["名称", "練習名", "タイトル", "PK名称"]) or concert_ctx["extract_title"](p) or "練習"
+                p_date = concert_ctx["extract_prop_text_any"](p, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""
+                p_label = f"{p_name}（{p_date[:10] if p_date else '日時未設定'}）"
+                practice_options[p_label] = p
 
-            if not practices:
-                st.caption("この演奏会に紐づく練習がありません。")
-            else:
-                practice_options = {}
-                for p in practices:
-                    p_name = concert_ctx["extract_prop_text_any"](p, ["名称", "練習名", "タイトル", "PK名称"]) or concert_ctx["extract_title"](p) or "練習"
-                    p_date = concert_ctx["extract_prop_text_any"](p, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""
-                    p_label = f"{p_name}（{p_date[:10] if p_date else '日時未設定'}）"
-                    practice_options[p_label] = p
+            bulk_send = st.checkbox(
+                "この演奏会に紐づく全LINEグループへ一斉送信する",
+                value=False,
+                key=f"practice_pdf_bulk_send_{selected_concert_id}",
+            )
 
+            if not bulk_send:
                 pdf_send_options = {_build_line_group_option_label(r): r for r in linked_rows}
                 pdf_send_label = st.selectbox(
                     "送信先グループ",
@@ -6694,48 +6701,77 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                     key=f"practice_pdf_group_select_{selected_concert_id}",
                 )
                 pdf_send_row = pdf_send_options.get(pdf_send_label)
+            else:
+                pdf_send_row = None
+                st.caption(f"送信対象: {len(linked_rows)} グループ")
 
-                practice_label = st.selectbox(
-                    "送信する練習",
-                    options=list(practice_options.keys()),
-                    key=f"practice_pdf_select_{selected_concert_id}",
-                )
-                practice_row = practice_options.get(practice_label)
+            practice_label = st.selectbox(
+                "送信する練習",
+                options=list(practice_options.keys()),
+                key=f"practice_pdf_select_{selected_concert_id}",
+            )
+            practice_row = practice_options.get(practice_label)
 
-                pdf_message_prefix = st.text_area(
-                    "送信メッセージ（任意）",
-                    value="練習情報PDFはこちらです",
-                    height=80,
-                    key=f"practice_pdf_message_{selected_concert_id}",
-                )
+            pdf_message_prefix = st.text_area(
+                "送信メッセージ（任意）",
+                value="練習情報PDFはこちらです",
+                height=80,
+                key=f"practice_pdf_message_{selected_concert_id}",
+            )
 
-                if st.button("📤 練習情報PDFリンクを送信", key=f"practice_pdf_send_btn_{selected_concert_id}", use_container_width=True):
-                    if not pdf_send_row:
-                        st.warning("送信先グループを選択してください。")
-                    elif not practice_row:
-                        st.warning("送信する練習を選択してください。")
-                    else:
-                        target_group_id = _extract_line_group_text(pdf_send_row, ["groupId", "GroupId", "LINE Group ID"])
-                        practice_id = practice_row.get("id", "")
-                        practice_name = concert_ctx["extract_prop_text_any"](practice_row, ["名称", "練習名", "タイトル", "PK名称"]) or concert_ctx["extract_title"](practice_row) or "練習"
-                        concert_name = (
-                            concert_ctx.get("SELECTED_CONCERT_NAME", "")
-                            or concert_ctx["extract_prop_text_any"](hc_row_latest, ["concert_key"])
-                            or "演奏会"
+            send_button_label = "📤 練習情報PDFリンクを一斉送信" if bulk_send else "📤 練習情報PDFリンクを送信"
+
+            if st.button(send_button_label, key=f"practice_pdf_send_btn_{selected_concert_id}", use_container_width=True):
+                if not bulk_send and not pdf_send_row:
+                    st.warning("送信先グループを選択してください。")
+                elif not practice_row:
+                    st.warning("送信する練習を選択してください。")
+                else:
+                    practice_id = practice_row.get("id", "")
+                    practice_name = concert_ctx["extract_prop_text_any"](practice_row, ["名称", "練習名", "タイトル", "PK名称"]) or concert_ctx["extract_title"](practice_row) or "練習"
+                    concert_name = (
+                        concert_ctx.get("SELECTED_CONCERT_NAME", "")
+                        or concert_ctx["extract_prop_text_any"](hc_row_latest, ["concert_key"])
+                        or "演奏会"
+                    )
+
+                    with st.spinner("練習情報PDFを生成してDriveへ保存中..."):
+                        pdf_url, pdf_err = save_practice_pdf_to_drive_and_get_url(
+                            concert_ctx,
+                            practice_id=practice_id,
+                            concert_name=concert_name,
+                            practice_name=practice_name,
                         )
 
-                        with st.spinner("練習情報PDFを生成してDriveへ保存中..."):
-                            pdf_url, pdf_err = save_practice_pdf_to_drive_and_get_url(
-                                concert_ctx,
-                                practice_id=practice_id,
-                                concert_name=concert_name,
-                                practice_name=practice_name,
-                            )
+                    if not pdf_url:
+                        st.error(f"❌ PDFの保存に失敗しました。{pdf_err}")
+                    else:
+                        final_message = f"{pdf_message_prefix.strip()}\n{pdf_url}" if pdf_message_prefix.strip() else pdf_url
 
-                        if not pdf_url:
-                            st.error(f"❌ PDFの保存に失敗しました。{pdf_err}")
+                        if bulk_send:
+                            success_count = 0
+                            failed = []
+
+                            for row in linked_rows:
+                                target_group_id = _extract_line_group_text(row, ["groupId", "GroupId", "LINE Group ID"])
+                                target_group_name = _extract_line_group_title(row) or "（名称未設定）"
+
+                                ok_send, msg_send = _post_line_push(target_group_id, final_message)
+                                if ok_send:
+                                    success_count += 1
+                                else:
+                                    failed.append(f"{target_group_name}: {msg_send}")
+
+                            if success_count == len(linked_rows):
+                                st.success(f"✅ {success_count}グループへ一斉送信しました。")
+                                st.caption(pdf_url)
+                            else:
+                                st.warning(f"⚠️ 一斉送信結果: 成功 {success_count} / 失敗 {len(failed)}")
+                                st.caption(pdf_url)
+                                for msg in failed:
+                                    st.error(msg)
                         else:
-                            final_message = f"{pdf_message_prefix.strip()}\n{pdf_url}" if pdf_message_prefix.strip() else pdf_url
+                            target_group_id = _extract_line_group_text(pdf_send_row, ["groupId", "GroupId", "LINE Group ID"])
                             ok_send, msg_send = _post_line_push(target_group_id, final_message)
                             if ok_send:
                                 st.success("✅ 練習情報PDFリンクを送信しました。")
