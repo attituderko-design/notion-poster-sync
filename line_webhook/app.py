@@ -13,6 +13,7 @@ LINE_CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
 LINE_CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 NOTION_API_KEY = os.environ["NOTION_API_KEY"]
 NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
+HARMONIA_PUSH_API_KEY = os.environ["HARMONIA_PUSH_API_KEY"]
 
 NOTION_VERSION = "2022-06-28"
 
@@ -50,6 +51,43 @@ def notion_headers() -> dict:
         "Notion-Version": NOTION_VERSION,
         "Content-Type": "application/json",
     }
+
+
+def validate_push_api_key(request_obj) -> bool:
+    provided = request_obj.headers.get("X-HARMONIA-API-KEY", "")
+    return hmac.compare_digest(provided, HARMONIA_PUSH_API_KEY)
+
+
+def push_text_message(group_id: str, message: str) -> dict:
+    url = "https://api.line.me/v2/bot/message/push"
+    headers = {
+        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "to": group_id,
+        "messages": [
+            {
+                "type": "text",
+                "text": message[:5000],
+            }
+        ],
+    }
+
+    res = requests.post(url, headers=headers, json=payload, timeout=30)
+
+    print(
+        f"line_push_status={res.status_code} line_push_body={res.text} payload={payload}",
+        flush=True
+    )
+
+    res.raise_for_status()
+    if res.text:
+        try:
+            return res.json()
+        except Exception:
+            return {"raw": res.text}
+    return {"ok": True}
 
 
 def find_existing_group_page(group_id: str) -> dict | None:
@@ -207,3 +245,48 @@ def webhook():
             create_notion_page(event)
 
     return jsonify({"ok": True}), 200
+
+
+@app.post("/push")
+def push():
+    if not validate_push_api_key(request):
+        print("invalid_push_api_key", flush=True)
+        return jsonify({"ok": False, "error": "invalid api key"}), 401
+
+    data = request.get_json(silent=True) or {}
+    group_id = str(data.get("groupId", "")).strip()
+    message = str(data.get("message", "")).strip()
+
+    if not group_id:
+        return jsonify({"ok": False, "error": "groupId is required"}), 400
+
+    if not message:
+        return jsonify({"ok": False, "error": "message is required"}), 400
+
+    try:
+        result = push_text_message(group_id, message)
+        return jsonify({
+            "ok": True,
+            "groupId": group_id,
+            "result": result,
+        }), 200
+    except requests.HTTPError as e:
+        status_code = getattr(getattr(e, "response", None), "status_code", 500)
+        response_text = getattr(getattr(e, "response", None), "text", str(e))
+        print(
+            f"push_http_error status={status_code} body={response_text}",
+            flush=True
+        )
+        return jsonify({
+            "ok": False,
+            "error": "line push failed",
+            "status_code": status_code,
+            "detail": response_text,
+        }), status_code
+    except Exception as e:
+        print(f"push_unexpected_error error={e}", flush=True)
+        return jsonify({
+            "ok": False,
+            "error": "unexpected error",
+            "detail": str(e),
+        }), 500
