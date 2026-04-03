@@ -6367,6 +6367,30 @@ def _patch_harmonia_concert_line_groups(hc_row_id: str, relation_ids: list[str])
     return False, f"HTTP {res.status_code}"
 
 
+def _patch_line_group_concert_relation(line_group_row_id: str, concert_ids: list[str]) -> tuple[bool, str]:
+    """LINE_GROUP_ID.concert を丸ごと更新する。逆リレーション未反映対策として明示更新。"""
+    if not line_group_row_id:
+        return False, "LINE_GROUP_ID の行IDが取得できませんでした。"
+
+    res = api_request(
+        "patch",
+        f"https://api.notion.com/v1/pages/{line_group_row_id}",
+        headers=NOTION_HEADERS,
+        json={
+            "properties": {
+                "concert": {
+                    "relation": [{"id": rid} for rid in concert_ids if rid]
+                }
+            }
+        },
+    )
+    if res is not None and res.status_code == 200:
+        return True, ""
+    if res is None:
+        return False, "Notion API の応答がありませんでした。"
+    return False, f"HTTP {res.status_code}"
+
+
 def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest: dict | None):
     """🏠ホーム画面下部のLINEグループ紐付けUI。既存画面には追加のみ。"""
     st.divider()
@@ -6424,13 +6448,20 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                 else:
                     target_id = selected_row.get("id", "")
                     new_ids = list(dict.fromkeys([*(linked_ids or []), target_id]))
-                    ok, msg = _patch_harmonia_concert_line_groups(hc_row_latest.get("id", ""), new_ids)
-                    if ok:
-                        st.success("✅ LINEグループを演奏会に紐づけました。")
-                        st.cache_data.clear()
-                        st.rerun()
+
+                    ok_h, msg_h = _patch_harmonia_concert_line_groups(hc_row_latest.get("id", ""), new_ids)
+                    if not ok_h:
+                        st.error(f"❌ HARMONIA_CONCERT 側の紐づけに失敗しました。{msg_h}")
                     else:
-                        st.error(f"❌ 紐づけに失敗しました。{msg}")
+                        current_concert_ids = _extract_line_group_relation_ids(selected_row, "concert")
+                        new_concert_ids = list(dict.fromkeys([*(current_concert_ids or []), selected_concert_id]))
+                        ok_l, msg_l = _patch_line_group_concert_relation(target_id, new_concert_ids)
+                        if ok_l:
+                            st.success("✅ LINEグループを演奏会に紐づけました。")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(f"❌ LINE_GROUP_ID 側の concert 更新に失敗しました。{msg_l}")
 
     with st.expander("紐づけ済みグループを解除", expanded=False):
         if not linked_rows:
@@ -6450,13 +6481,20 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                 else:
                     remove_id = remove_row.get("id", "")
                     new_ids = [rid for rid in linked_ids if rid != remove_id]
-                    ok, msg = _patch_harmonia_concert_line_groups(hc_row_latest.get("id", ""), new_ids)
-                    if ok:
-                        st.success("✅ LINEグループの紐づけを解除しました。")
-                        st.cache_data.clear()
-                        st.rerun()
+
+                    ok_h, msg_h = _patch_harmonia_concert_line_groups(hc_row_latest.get("id", ""), new_ids)
+                    if not ok_h:
+                        st.error(f"❌ HARMONIA_CONCERT 側の解除に失敗しました。{msg_h}")
                     else:
-                        st.error(f"❌ 解除に失敗しました。{msg}")
+                        current_concert_ids = _extract_line_group_relation_ids(remove_row, "concert")
+                        new_concert_ids = [rid for rid in current_concert_ids if rid != selected_concert_id]
+                        ok_l, msg_l = _patch_line_group_concert_relation(remove_id, new_concert_ids)
+                        if ok_l:
+                            st.success("✅ LINEグループの紐づけを解除しました。")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(f"❌ LINE_GROUP_ID 側の concert 解除に失敗しました。{msg_l}")
 
 def _split_instruments(part: str) -> list[str]:
     return [x.strip() for x in re.split(r'[/／,、・\s]+', part or "") if x.strip()]
