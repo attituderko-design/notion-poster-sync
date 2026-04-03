@@ -6404,19 +6404,40 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
         st.info("HARMONIA_CONCERT 行が見つからないため、LINEグループ連携を表示できません。")
         return
 
+    def _patch_line_group_concert_relation(line_group_row_id: str, concert_relation_ids: list[str]) -> tuple[bool, str]:
+        """LINE_GROUP_ID.concert を丸ごと更新する。"""
+        if not line_group_row_id:
+            return False, "LINE_GROUP_ID の行IDが取得できませんでした。"
+
+        res = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{line_group_row_id}",
+            headers=NOTION_HEADERS,
+            json={
+                "properties": {
+                    "concert": {
+                        "relation": [{"id": rid} for rid in concert_relation_ids if rid]
+                    }
+                }
+            },
+        )
+        if res is not None and res.status_code == 200:
+            return True, ""
+        if res is None:
+            return False, "Notion API の応答がありませんでした。"
+        return False, f"HTTP {res.status_code}"
+
     line_rows = _get_line_group_rows()
     if not line_rows:
         st.caption("LINE_GROUP_ID DB にグループがまだありません。")
         return
 
+    hc_row_id = hc_row_latest.get("id", "")
     linked_ids = _extract_line_group_relation_ids(hc_row_latest, "LINE_GROUP_ID")
     linked_set = set(linked_ids)
 
     linked_rows = [r for r in line_rows if r.get("id") in linked_set]
-    unlinked_rows = [
-        r for r in line_rows
-        if not _extract_line_group_relation_ids(r, "concert")
-    ]
+    unlinked_rows = [r for r in line_rows if r.get("id") not in linked_set]
 
     with st.expander("現在この演奏会に紐づいているLINEグループ", expanded=True):
         if linked_rows:
@@ -6447,17 +6468,23 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                     st.warning("LINEグループを選択してください。")
                 else:
                     target_id = selected_row.get("id", "")
-                    new_ids = list(dict.fromkeys([*(linked_ids or []), target_id]))
 
-                    ok_h, msg_h = _patch_harmonia_concert_line_groups(hc_row_latest.get("id", ""), new_ids)
+                    # 1) HARMONIA_CONCERT 側更新
+                    new_ids_h = list(dict.fromkeys([*(linked_ids or []), target_id]))
+                    ok_h, msg_h = _patch_harmonia_concert_line_groups(hc_row_id, new_ids_h)
                     if not ok_h:
                         st.error(f"❌ HARMONIA_CONCERT 側の紐づけに失敗しました。{msg_h}")
                     else:
-                        current_concert_ids = _extract_line_group_relation_ids(selected_row, "concert")
-                        new_concert_ids = list(dict.fromkeys([*(current_concert_ids or []), selected_concert_id]))
-                        ok_l, msg_l = _patch_line_group_concert_relation(target_id, new_concert_ids)
+                        # 2) LINE_GROUP_ID 側更新
+                        line_group_concert_ids = _extract_line_group_relation_ids(selected_row, "concert")
+                        new_ids_l = list(dict.fromkeys([*(line_group_concert_ids or []), hc_row_id]))
+                        ok_l, msg_l = _patch_line_group_concert_relation(target_id, new_ids_l)
                         if ok_l:
                             st.success("✅ LINEグループを演奏会に紐づけました。")
+                            try:
+                                _get_line_group_rows_cached.clear()
+                            except Exception:
+                                pass
                             st.cache_data.clear()
                             st.rerun()
                         else:
@@ -6480,17 +6507,23 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                     st.warning("解除するLINEグループを選択してください。")
                 else:
                     remove_id = remove_row.get("id", "")
-                    new_ids = [rid for rid in linked_ids if rid != remove_id]
 
-                    ok_h, msg_h = _patch_harmonia_concert_line_groups(hc_row_latest.get("id", ""), new_ids)
+                    # 1) HARMONIA_CONCERT 側解除
+                    new_ids_h = [rid for rid in linked_ids if rid != remove_id]
+                    ok_h, msg_h = _patch_harmonia_concert_line_groups(hc_row_id, new_ids_h)
                     if not ok_h:
                         st.error(f"❌ HARMONIA_CONCERT 側の解除に失敗しました。{msg_h}")
                     else:
-                        current_concert_ids = _extract_line_group_relation_ids(remove_row, "concert")
-                        new_concert_ids = [rid for rid in current_concert_ids if rid != selected_concert_id]
-                        ok_l, msg_l = _patch_line_group_concert_relation(remove_id, new_concert_ids)
+                        # 2) LINE_GROUP_ID 側解除
+                        line_group_concert_ids = _extract_line_group_relation_ids(remove_row, "concert")
+                        new_ids_l = [rid for rid in line_group_concert_ids if rid != hc_row_id]
+                        ok_l, msg_l = _patch_line_group_concert_relation(remove_id, new_ids_l)
                         if ok_l:
                             st.success("✅ LINEグループの紐づけを解除しました。")
+                            try:
+                                _get_line_group_rows_cached.clear()
+                            except Exception:
+                                pass
                             st.cache_data.clear()
                             st.rerun()
                         else:
