@@ -858,6 +858,63 @@ def save_cover_to_drive_noid(cover_url: str, title: str, page_id: str) -> str | 
     filename = make_noid_filename(title, page_id)
     return save_bytes_to_drive(filename, image_bytes, mimetype, make_public=True)
 
+def make_practice_pdf_filename(concert_name: str, practice_name: str, practice_id: str) -> str:
+    concert_part = sanitize_filename((concert_name or "").strip()) or "concert"
+    practice_part = sanitize_filename((practice_name or "").strip()) or "practice"
+    pid_part = (practice_id or "").replace("-", "").strip()[:8] or "unknown"
+    return f"{concert_part}_{practice_part}_{pid_part}.pdf"
+
+
+def get_drive_file_view_url(file_id: str) -> str:
+    """Drive ファイルの閲覧用URLを返す。PDF向け。"""
+    return f"https://drive.google.com/file/d/{file_id}/view"
+
+
+def save_pdf_bytes_to_drive(filename: str, pdf_bytes: bytes, make_public: bool = True) -> str | None:
+    """PDF bytes を Drive に保存して file_id を返す。"""
+    if not pdf_bytes:
+        return None
+    return save_bytes_to_drive(
+        filename=filename,
+        image_bytes=pdf_bytes,
+        mimetype="application/pdf",
+        make_public=make_public,
+    )
+
+
+def save_practice_pdf_to_drive_and_get_url(
+    ctx: dict,
+    practice_id: str,
+    concert_name: str = "",
+    practice_name: str = "",
+) -> tuple[str | None, str]:
+    """
+    練習情報PDFを生成→Drive保存→共有URL返却
+    return: (url_or_none, error_message)
+    """
+    if not practice_id:
+        return None, "practice_id が空です。"
+
+    try:
+        from concert.services.practice_report import generate_practice_report
+    except Exception as e:
+        return None, f"practice_report の import に失敗しました: {e}"
+
+    try:
+        pdf_bytes = generate_practice_report(ctx, practice_id)
+    except Exception as e:
+        return None, f"PDF生成に失敗しました: {e}"
+
+    if not pdf_bytes:
+        return None, "PDF生成結果が空でした。"
+
+    filename = make_practice_pdf_filename(concert_name, practice_name, practice_id)
+    file_id = save_pdf_bytes_to_drive(filename, pdf_bytes, make_public=True)
+    if not file_id:
+        return None, "Drive保存に失敗しました。"
+
+    return get_drive_file_view_url(file_id), ""
+
 def clearable_text_input(
     label: str,
     key: str,
