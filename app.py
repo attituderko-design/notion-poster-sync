@@ -6756,6 +6756,24 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
             if not practices:
                 st.caption("この演奏会に紐づく練習がありません。")
             else:
+                
+def _practice_sort_key_for_line(row: dict):
+    p_name = concert_ctx["extract_prop_text_any"](row, ["名称", "練習名", "タイトル", "PK名称"]) or concert_ctx["extract_title"](row) or ""
+    p_name = p_name.strip()
+
+    if p_name == "本番当日":
+        return (999999, p_name)
+
+    m = re.search(r"第\s*(\d+)\s*回", p_name)
+    if m:
+        return (int(m.group(1)), p_name)
+
+    p_date_raw = concert_ctx["extract_prop_text_any"](row, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""
+    p_date = p_date_raw[:10] if p_date_raw else "9999-99-99"
+    return (999998, p_date + "_" + p_name)
+
+practices = sorted(practices, key=_practice_sort_key_for_line)
+
                 practice_options = {}
                 for p in practices:
                     p_name = concert_ctx["extract_prop_text_any"](p, ["名称", "練習名", "タイトル", "PK名称"]) or concert_ctx["extract_title"](p) or "練習"
