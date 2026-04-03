@@ -448,20 +448,27 @@ def process_user_message(event: dict) -> None:
     if existing and is_pending_name_user(existing):
         finalize_user_destination_name(existing, text)
         if reply_token:
-            reply_text_message(reply_token, "登録が完了しました。
-以後、この演奏会に関する案内をお送りします。")
+            reply_text_message(
+                reply_token,
+                "登録が完了しました。\n以後、この演奏会に関する案内をお送りします。"
+            )
         return
 
     concert = find_active_concert_by_auth_code(text)
     if not concert:
         if reply_token:
-            reply_text_message(reply_token, "認証コードを確認してください。")
+            reply_text_message(
+                reply_token,
+                "認証コードを確認してください。"
+            )
         return
 
     upsert_user_destination_pending_name(user_id, text, concert)
     if reply_token:
-        reply_text_message(reply_token, "認証コードを確認しました。
-続けて、お名前をフルネームで送信してください。")
+        reply_text_message(
+            reply_token,
+            "認証コードを確認しました。\n続けて、お名前をフルネームで送信してください。"
+        )
 
 
 @app.get("/")
