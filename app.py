@@ -6461,8 +6461,7 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                 title = _extract_line_group_title(row) or "（名称未設定）"
                 gid = _extract_line_group_text(row, ["groupId", "GroupId", "LINE Group ID"])
                 if gid:
-                    st.markdown(f"{idx}. **{title}**  
-`{gid}`")
+                    st.markdown(f"{idx}. **{title}**  \n`{gid}`")
                 else:
                     st.markdown(f"{idx}. **{title}**")
         else:
