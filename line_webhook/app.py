@@ -99,7 +99,14 @@ def create_notion_page(event: dict) -> None:
         },
     }
 
+    app.logger.warning(f"creating notion page payload={payload}")
+
     res = requests.post(url, headers=headers, json=payload, timeout=30)
+
+    app.logger.warning(
+        f"notion_response_status={res.status_code} notion_response_body={res.text}"
+    )
+
     res.raise_for_status()
 
 
@@ -114,12 +121,18 @@ def webhook():
     body = request.get_data()
 
     if not validate_line_signature(body, signature):
+        app.logger.warning("invalid signature")
         return jsonify({"ok": False, "error": "invalid signature"}), 401
 
     data = request.get_json(silent=True) or {}
     events = data.get("events", [])
 
+    app.logger.warning(f"events_count={len(events)} payload={data}")
+
     for event in events:
+        app.logger.warning(
+            f"event_type={event.get('type')} source_type={event.get('source', {}).get('type')} source={event.get('source')}"
+        )
         source = event.get("source", {})
         if source.get("type") == "group":
             create_notion_page(event)
