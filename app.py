@@ -6335,18 +6335,12 @@ def _get_line_group_rows() -> list[dict]:
 
 
 def _build_line_group_option_label(row: dict) -> str:
+    """選択肢ラベルはグループ名とgroupIdのみ表示する。"""
     title = _extract_line_group_title(row) or "（名称未設定）"
     group_id = _extract_line_group_text(row, ["groupId", "GroupId", "LINE Group ID"])
-    source_type = _extract_line_group_text(row, ["sourceType", "source_type"])
-    event_type = _extract_line_group_text(row, ["eventType", "event_type"])
-    parts = [title]
     if group_id:
-        parts.append(group_id)
-    if source_type:
-        parts.append(source_type)
-    if event_type:
-        parts.append(event_type)
-    return " / ".join(parts)
+        return f"{title} / {group_id}"
+    return title
 
 
 def _patch_harmonia_concert_line_groups(hc_row_id: str, relation_ids: list[str]) -> tuple[bool, str]:
