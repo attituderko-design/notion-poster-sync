@@ -782,19 +782,27 @@ def _rank_portrait_candidate_url(url: str) -> int:
         score += 1
     return score
 
-def save_bytes_to_drive(filename: str, image_bytes: bytes, mimetype: str, make_public: bool = False) -> str | None:
+def save_bytes_to_drive(
+    filename: str,
+    image_bytes: bytes,
+    mimetype: str,
+    make_public: bool = False,
+    folder_id: str | None = None,
+) -> str | None:
     service = get_drive_service_safe()
     if service is None:
         return None
+
+    target_folder_id = folder_id or DRIVE_FOLDER_ID
     files = get_drive_files()
     media = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype=mimetype, resumable=False)
     file_id = None
     cached_id = files.get(filename)
     escaped_name = filename.replace("'", "\\'")
+
     try:
-        # 同名重複がある場合は最新を優先し、古い重複は削除して今後の取り違えを防ぐ
         listed = service.files().list(
-            q=f"'{DRIVE_FOLDER_ID}' in parents and name='{escaped_name}' and trashed=false",
+            q=f"'{target_folder_id}' in parents and name='{escaped_name}' and trashed=false",
             fields="files(id,name,modifiedTime)",
             orderBy="modifiedTime desc",
             pageSize=20,
@@ -824,14 +832,14 @@ def save_bytes_to_drive(filename: str, image_bytes: bytes, mimetype: str, make_p
                     cache.pop(filename, None)
                 file_id = None
             else:
-                # 一時通信エラー時に新規作成へフォールバックすると重複が増えるため中断
                 return None
         except Exception:
             return None
+
     if file_id is None:
         try:
             result = service.files().create(
-                body={"name": filename, "parents": [DRIVE_FOLDER_ID]},
+                body={"name": filename, "parents": [target_folder_id]},
                 media_body=media,
                 fields="id",
             ).execute()
@@ -843,11 +851,13 @@ def save_bytes_to_drive(filename: str, image_bytes: bytes, mimetype: str, make_p
             cache[filename] = file_id
         except Exception:
             return None
+
     if make_public:
         try:
             service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
         except Exception:
             pass
+
     return file_id
 
 def save_cover_to_drive_noid(cover_url: str, title: str, page_id: str) -> str | None:
