@@ -6450,7 +6450,7 @@ def _patch_line_group_concert_relation(line_group_row_id: str, concert_ids: list
 
 
 def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest: dict | None):
-    """🏠ホーム画面下部のLINEグループ紐付けUI。既存画面には追加のみ。"""
+    """🏠ホーム画面下部のLINEグループ紐付け + テスト送信 + 練習情報PDF送信UI。"""
     st.divider()
     st.markdown("### 💬 LINEグループ連携")
 
@@ -6462,43 +6462,67 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
         st.info("HARMONIA_CONCERT 行が見つからないため、LINEグループ連携を表示できません。")
         return
 
-    def _send_line_push_text(group_id: str, message: str) -> tuple[bool, str]:
-        push_url = str(
-            st.secrets.get("LINE_PUSH_API_URL", st.secrets.get("LINE_PUSH_ENDPOINT", ""))
-        ).strip()
-        push_api_key = str(st.secrets.get("HARMONIA_PUSH_API_KEY", "")).strip()
+    line_push_api_url = (st.secrets.get("LINE_PUSH_API_URL", "") or "").strip()
+    harmonia_push_api_key = (st.secrets.get("HARMONIA_PUSH_API_KEY", "") or "").strip()
 
-        if not push_url:
+    def _patch_line_group_concert_relation(line_group_row_id: str, concert_relation_ids: list[str]) -> tuple[bool, str]:
+        """LINE_GROUP_ID.concert を丸ごと更新する。"""
+        if not line_group_row_id:
+            return False, "LINE_GROUP_ID の行IDが取得できませんでした。"
+
+        res = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{line_group_row_id}",
+            headers=NOTION_HEADERS,
+            json={
+                "properties": {
+                    "concert": {
+                        "relation": [{"id": rid} for rid in concert_relation_ids if rid]
+                    }
+                }
+            },
+        )
+        if res is not None and res.status_code == 200:
+            return True, ""
+        if res is None:
+            return False, "Notion API の応答がありませんでした。"
+        return False, f"HTTP {res.status_code}"
+
+    def _post_line_push(group_id: str, message: str) -> tuple[bool, str]:
+        """Cloud Run /push にテキスト送信を依頼する。"""
+        if not line_push_api_url:
             return False, "LINE_PUSH_API_URL が未設定です。"
-        if not push_api_key:
+        if not harmonia_push_api_key:
             return False, "HARMONIA_PUSH_API_KEY が未設定です。"
         if not group_id:
-            return False, "groupId が取得できませんでした。"
+            return False, "groupId が空です。"
         if not message.strip():
-            return False, "送信メッセージが空です。"
+            return False, "message が空です。"
 
-        headers = {
-            "Content-Type": "application/json; charset=utf-8",
-            "X-HARMONIA-API-KEY": push_api_key,
-        }
         payload = {
             "groupId": group_id,
             "message": message,
         }
 
+        try:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        except Exception as e:
+            return False, f"JSON変換に失敗しました: {e}"
+
         res = api_request(
             "post",
-            push_url,
-            headers=headers,
-            json=payload,
-            timeout=30,
+            line_push_api_url,
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "X-HARMONIA-API-KEY": harmonia_push_api_key,
+            },
+            data=body,
         )
+        if res is not None and res.status_code == 200:
+            return True, ""
         if res is None:
-            return False, "Cloud Run /push の応答がありませんでした。"
-        if res.status_code != 200:
-            detail = _truncate_text(res.text or "", 300)
-            return False, f"HTTP {res.status_code} / {detail or '(no body)'}"
-        return True, ""
+            return False, "Cloud Run /push から応答がありませんでした。"
+        return False, f"HTTP {res.status_code} / {((res.text or '')[:500])}"
 
     line_rows = _get_line_group_rows()
     if not line_rows:
@@ -6523,56 +6547,6 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                     st.markdown(f"{idx}. **{title}**")
         else:
             st.caption("まだ紐づいているグループはありません。")
-
-    with st.expander("テスト送信", expanded=True):
-        push_url = str(
-            st.secrets.get("LINE_PUSH_API_URL", st.secrets.get("LINE_PUSH_ENDPOINT", ""))
-        ).strip()
-        push_api_key = str(st.secrets.get("HARMONIA_PUSH_API_KEY", "")).strip()
-
-        if not push_url:
-            st.caption("LINE_PUSH_API_URL が未設定のため、テスト送信はできません。")
-        elif not push_api_key:
-            st.caption("HARMONIA_PUSH_API_KEY が未設定のため、テスト送信はできません。")
-        elif not linked_rows:
-            st.caption("この演奏会に紐づいているLINEグループがないため、テスト送信はできません。")
-        else:
-            send_options = {_build_line_group_option_label(r): r for r in linked_rows}
-            send_label = st.selectbox(
-                "送信先LINEグループ",
-                options=list(send_options.keys()),
-                key=f"line_group_send_select_{selected_concert_id}",
-            )
-            send_row = send_options.get(send_label)
-
-            default_message = st.session_state.get(
-                f"line_group_test_message_{selected_concert_id}",
-                "HARMONIAからのテスト送信です",
-            )
-            message = st.text_area(
-                "送信メッセージ",
-                value=default_message,
-                height=120,
-                key=f"line_group_test_message_{selected_concert_id}",
-            )
-
-            send_gid = _extract_line_group_text(
-                send_row or {},
-                ["groupId", "GroupId", "LINE Group ID"],
-            ).strip()
-            if send_gid:
-                st.caption(f"送信先 groupId: `{send_gid}`")
-
-            if st.button(
-                "📨 このグループへテスト送信",
-                key=f"line_group_send_btn_{selected_concert_id}",
-                use_container_width=True,
-            ):
-                ok, msg = _send_line_push_text(send_gid, message)
-                if ok:
-                    st.success("✅ テスト送信しました。")
-                else:
-                    st.error(f"❌ テスト送信に失敗しました。{msg}")
 
     with st.expander("未連携のLINEグループを追加", expanded=True):
         if not unlinked_rows:
@@ -6651,6 +6625,113 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                             st.rerun()
                         else:
                             st.error(f"❌ LINE_GROUP_ID 側の concert 解除に失敗しました。{msg_l}")
+
+    with st.expander("✉️ テキストをテスト送信", expanded=False):
+        if not linked_rows:
+            st.caption("先にLINEグループを紐づけてください。")
+        else:
+            send_options = {_build_line_group_option_label(r): r for r in linked_rows}
+            send_label = st.selectbox(
+                "送信先グループ",
+                options=list(send_options.keys()),
+                key=f"line_group_send_select_{selected_concert_id}",
+            )
+            send_row = send_options.get(send_label)
+            default_message = "HARMONIAからのテスト送信です"
+            send_message = st.text_area(
+                "送信メッセージ",
+                value=default_message,
+                height=100,
+                key=f"line_group_send_message_{selected_concert_id}",
+            )
+
+            if st.button("📨 テキスト送信", key=f"line_group_send_btn_{selected_concert_id}", use_container_width=True):
+                if not send_row:
+                    st.warning("送信先グループを選択してください。")
+                else:
+                    target_group_id = _extract_line_group_text(send_row, ["groupId", "GroupId", "LINE Group ID"])
+                    ok_send, msg_send = _post_line_push(target_group_id, send_message)
+                    if ok_send:
+                        st.success("✅ テキスト送信が完了しました。")
+                    else:
+                        st.error(f"❌ テスト送信に失敗しました。{msg_send}")
+
+    with st.expander("📄 練習情報PDFを送信", expanded=False):
+        if not linked_rows:
+            st.caption("先にLINEグループを紐づけてください。")
+        else:
+            try:
+                practices = concert_mgmt._load_practices(concert_ctx, selected_concert_id) if selected_concert_id else []
+            except Exception as e:
+                practices = []
+                st.error(f"練習一覧の取得に失敗しました: {e}")
+
+            if not practices:
+                st.caption("この演奏会に紐づく練習がありません。")
+            else:
+                practice_options = {}
+                for p in practices:
+                    p_name = concert_ctx["extract_prop_text_any"](p, ["名称", "練習名", "タイトル", "PK名称"]) or concert_ctx["extract_title"](p) or "練習"
+                    p_date = concert_ctx["extract_prop_text_any"](p, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""
+                    p_label = f"{p_name}（{p_date[:10] if p_date else '日時未設定'}）"
+                    practice_options[p_label] = p
+
+                pdf_send_options = {_build_line_group_option_label(r): r for r in linked_rows}
+                pdf_send_label = st.selectbox(
+                    "送信先グループ",
+                    options=list(pdf_send_options.keys()),
+                    key=f"practice_pdf_group_select_{selected_concert_id}",
+                )
+                pdf_send_row = pdf_send_options.get(pdf_send_label)
+
+                practice_label = st.selectbox(
+                    "送信する練習",
+                    options=list(practice_options.keys()),
+                    key=f"practice_pdf_select_{selected_concert_id}",
+                )
+                practice_row = practice_options.get(practice_label)
+
+                pdf_message_prefix = st.text_area(
+                    "送信メッセージ（任意）",
+                    value="練習情報PDFはこちらです",
+                    height=80,
+                    key=f"practice_pdf_message_{selected_concert_id}",
+                )
+
+                if st.button("📤 練習情報PDFリンクを送信", key=f"practice_pdf_send_btn_{selected_concert_id}", use_container_width=True):
+                    if not pdf_send_row:
+                        st.warning("送信先グループを選択してください。")
+                    elif not practice_row:
+                        st.warning("送信する練習を選択してください。")
+                    else:
+                        target_group_id = _extract_line_group_text(pdf_send_row, ["groupId", "GroupId", "LINE Group ID"])
+                        practice_id = practice_row.get("id", "")
+                        practice_name = concert_ctx["extract_prop_text_any"](practice_row, ["名称", "練習名", "タイトル", "PK名称"]) or concert_ctx["extract_title"](practice_row) or "練習"
+                        concert_name = (
+                            concert_ctx.get("SELECTED_CONCERT_NAME", "")
+                            or concert_ctx["extract_prop_text_any"](hc_row_latest, ["concert_key"])
+                            or "演奏会"
+                        )
+
+                        with st.spinner("練習情報PDFを生成してDriveへ保存中..."):
+                            pdf_url, pdf_err = save_practice_pdf_to_drive_and_get_url(
+                                concert_ctx,
+                                practice_id=practice_id,
+                                concert_name=concert_name,
+                                practice_name=practice_name,
+                            )
+
+                        if not pdf_url:
+                            st.error(f"❌ PDFの保存に失敗しました。{pdf_err}")
+                        else:
+                            final_message = f"{pdf_message_prefix.strip()}\n{pdf_url}" if pdf_message_prefix.strip() else pdf_url
+                            ok_send, msg_send = _post_line_push(target_group_id, final_message)
+                            if ok_send:
+                                st.success("✅ 練習情報PDFリンクを送信しました。")
+                                st.caption(pdf_url)
+                            else:
+                                st.error(f"❌ PDFリンク送信に失敗しました。{msg_send}")
+                                st.caption(pdf_url)
 
 def _split_instruments(part: str) -> list[str]:
     return [x.strip() for x in re.split(r'[/／,、・\s]+', part or "") if x.strip()]
