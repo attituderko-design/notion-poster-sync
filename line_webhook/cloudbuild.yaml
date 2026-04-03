@@ -1,0 +1,16 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'asia-northeast2-docker.pkg.dev/line-webhook-492123/cloud-run-source-deploy/line-webhook:latest'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+    dir: 'line_webhook'
+
+images:
+  - 'asia-northeast2-docker.pkg.dev/line-webhook-492123/cloud-run-source-deploy/line-webhook:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
