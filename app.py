@@ -64,6 +64,7 @@ DEFAULT_PERFORMER_NAME = st.secrets.get("DEFAULT_PERFORMER_NAME", "")
 TMDB_API_KEY         = st.secrets["TMDB_API_KEY"]
 RAKUTEN_APP_ID = st.secrets.get("RAKUTEN_APP_ID", "")
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"]
+REPORT_PDF_DRIVE_FOLDER_ID = st.secrets.get("REPORT_PDF_DRIVE_FOLDER_ID")
 IGDB_CLIENT_ID     = st.secrets.get("IGDB_CLIENT_ID", "")
 IGDB_CLIENT_SECRET = st.secrets.get("IGDB_CLIENT_SECRET", "")
 LINE_GROUP_DB_ID = st.secrets.get("LINE_GROUP_DB_ID", "")
@@ -879,8 +880,8 @@ def save_pdf_bytes_to_drive(filename: str, pdf_bytes: bytes, make_public: bool =
         image_bytes=pdf_bytes,
         mimetype="application/pdf",
         make_public=make_public,
+        folder_id=REPORT_PDF_DRIVE_FOLDER_ID,
     )
-
 
 def save_practice_pdf_to_drive_and_get_url(
     ctx: dict,
