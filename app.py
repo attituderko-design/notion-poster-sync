@@ -6511,6 +6511,12 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
         practice_name = _line_extract_practice_name(ctx, practice_row)
         selected_practice_date = _line_extract_practice_date(ctx, practice_row)
 
+        concert_name_local = (
+            ctx.get("SELECTED_CONCERT_NAME", "")
+            or ctx["extract_prop_text_any"](hc_row_latest, ["concert_key"])
+            or "演奏会"
+        )
+
         try:
             practices = concert_mgmt._load_practices(ctx, concert_id) if concert_id else []
         except Exception:
@@ -6553,7 +6559,7 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
             remaining_count = 1
 
         return (
-            f"{practice_name}の事前共有PDFをお送りします。\n"
+            f"{concert_name_local}の{practice_name} 事前共有PDFをお送りします。\n"
             f"本番まであと{days_text}、練習回数は残{remaining_count}回です。\n"
             f"頑張っていきましょう！\n\n"
             f"- ArtéMis HARMONIA"
@@ -6809,12 +6815,19 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                 if practice_row:
                     auto_pdf_message = _build_practice_pdf_message(concert_ctx, selected_concert_id, practice_row)
 
-                st.text_area(
-                    "送信メッセージ（自動生成）",
-                    value=auto_pdf_message,
-                    height=120,
-                    key=f"practice_pdf_message_preview_{selected_concert_id}",
-                    disabled=True,
+                message_edit_key = f"practice_pdf_message_edit_{selected_concert_id}"
+                previous_basis_key = f"practice_pdf_message_basis_{selected_concert_id}"
+                current_basis = f"{practice_row.get('id', '') if practice_row else ''}|{bulk_send}"
+
+                if st.session_state.get(previous_basis_key) != current_basis:
+                    st.session_state[message_edit_key] = auto_pdf_message
+                    st.session_state[previous_basis_key] = current_basis
+
+                edited_pdf_message = st.text_area(
+                    "送信メッセージ（編集可）",
+                    value=st.session_state.get(message_edit_key, auto_pdf_message),
+                    height=140,
+                    key=message_edit_key,
                 )
 
                 send_button_label = "📤 練習情報PDFリンクを一斉送信" if bulk_send else "📤 練習情報PDFリンクを送信"
@@ -6844,7 +6857,7 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                         if not pdf_url:
                             st.error(f"❌ PDFの保存に失敗しました。{pdf_err}")
                         else:
-                            final_message = f"{auto_pdf_message}\n{pdf_url}" if auto_pdf_message else pdf_url
+                            final_message = f"{edited_pdf_message.strip()}\n{pdf_url}" if edited_pdf_message.strip() else pdf_url
 
                             if bulk_send:
                                 success_count = 0
