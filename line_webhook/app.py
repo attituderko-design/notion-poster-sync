@@ -46,13 +46,11 @@ def get_group_summary(group_id: str) -> dict:
 
 def create_notion_page(event: dict) -> None:
     source = event.get("source", {})
-    message = event.get("message", {})
 
     group_id = source.get("groupId", "")
     source_type = source.get("type", "")
     event_type = event.get("type", "")
     user_id = source.get("userId", "")
-    message_text = message.get("text", "") if message.get("type") == "text" else ""
     group_name = ""
 
     if group_id:
@@ -112,13 +110,7 @@ def create_notion_page(event: dict) -> None:
                 ]
             },
             "messageText": {
-                "rich_text": [
-                    {
-                        "text": {
-                            "content": message_text[:2000]
-                        }
-                    }
-                ]
+                "rich_text": []
             },
             "receivedAt": {
                 "date": {
@@ -167,12 +159,15 @@ def webhook():
     print(f"events_count={len(events)} payload={data}", flush=True)
 
     for event in events:
+        source = event.get("source", {})
+        event_type = event.get("type")
+
         print(
-            f"event_type={event.get('type')} source_type={event.get('source', {}).get('type')} source={event.get('source')}",
+            f"event_type={event_type} source_type={source.get('type')} source={source}",
             flush=True
         )
-        source = event.get("source", {})
-        if source.get("type") == "group":
+
+        if source.get("type") == "group" and event_type == "join":
             create_notion_page(event)
 
     return jsonify({"ok": True}), 200
