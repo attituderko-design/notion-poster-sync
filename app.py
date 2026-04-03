@@ -66,6 +66,7 @@ RAKUTEN_APP_ID = st.secrets.get("RAKUTEN_APP_ID", "")
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"]
 IGDB_CLIENT_ID     = st.secrets.get("IGDB_CLIENT_ID", "")
 IGDB_CLIENT_SECRET = st.secrets.get("IGDB_CLIENT_SECRET", "")
+LINE_GROUP_DB_ID = st.secrets.get("LINE_GROUP_DB_ID", "")
 
 NOTION_HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -6258,6 +6259,211 @@ def _put_notion_prop(properties: dict, type_map: dict, name: str, value):
         else:
             properties[name] = {"relation": [{"id": value}] if value else []}
 
+def _extract_line_group_title(row: dict) -> str:
+    """LINE_GROUP_ID行から表示名を安全に取り出す。"""
+    props = (row or {}).get("properties", {}) or {}
+
+    for _prop_name, meta in props.items():
+        if isinstance(meta, dict) and meta.get("type") == "title":
+            txt = plain_text_join(meta.get("title", []))
+            if txt.strip():
+                return txt.strip()
+
+    for name in ["groupName", "group_name", "名前", "name", "Title"]:
+        meta = props.get(name) or {}
+        ptype = meta.get("type")
+        if ptype == "rich_text":
+            txt = plain_text_join(meta.get("rich_text", []))
+            if txt.strip():
+                return txt.strip()
+        elif ptype == "title":
+            txt = plain_text_join(meta.get("title", []))
+            if txt.strip():
+                return txt.strip()
+    return ""
+
+
+def _extract_line_group_text(row: dict, prop_names: list[str]) -> str:
+    """LINE_GROUP_ID行から文字列系プロパティを安全に取り出す。"""
+    props = (row or {}).get("properties", {}) or {}
+    for name in prop_names:
+        meta = props.get(name) or {}
+        ptype = meta.get("type")
+        if ptype == "rich_text":
+            txt = plain_text_join(meta.get("rich_text", []))
+            if txt.strip():
+                return txt.strip()
+        elif ptype == "title":
+            txt = plain_text_join(meta.get("title", []))
+            if txt.strip():
+                return txt.strip()
+        elif ptype == "url":
+            txt = str(meta.get("url") or "").strip()
+            if txt:
+                return txt
+        elif ptype == "select":
+            txt = str((meta.get("select") or {}).get("name") or "").strip()
+            if txt:
+                return txt
+        elif ptype == "status":
+            txt = str((meta.get("status") or {}).get("name") or "").strip()
+            if txt:
+                return txt
+    return ""
+
+
+def _extract_line_group_relation_ids(row: dict, prop_name: str) -> list[str]:
+    props = (row or {}).get("properties", {}) or {}
+    rels = ((props.get(prop_name) or {}).get("relation") or [])
+    return [r.get("id") for r in rels if r.get("id")]
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _get_line_group_rows_cached(_db_id: str) -> list[dict]:
+    if not _db_id:
+        return []
+    return query_notion_database_all(_db_id) or []
+
+
+def _get_line_group_rows() -> list[dict]:
+    if not LINE_GROUP_DB_ID:
+        return []
+    try:
+        return _get_line_group_rows_cached(LINE_GROUP_DB_ID)
+    except Exception:
+        return []
+
+
+def _build_line_group_option_label(row: dict) -> str:
+    title = _extract_line_group_title(row) or "（名称未設定）"
+    group_id = _extract_line_group_text(row, ["groupId", "GroupId", "LINE Group ID"])
+    source_type = _extract_line_group_text(row, ["sourceType", "source_type"])
+    event_type = _extract_line_group_text(row, ["eventType", "event_type"])
+    parts = [title]
+    if group_id:
+        parts.append(group_id)
+    if source_type:
+        parts.append(source_type)
+    if event_type:
+        parts.append(event_type)
+    return " / ".join(parts)
+
+
+def _patch_harmonia_concert_line_groups(hc_row_id: str, relation_ids: list[str]) -> tuple[bool, str]:
+    """HARMONIA_CONCERT.LINE_GROUP_ID を丸ごと更新する。"""
+    if not hc_row_id:
+        return False, "HARMONIA_CONCERT の行IDが取得できませんでした。"
+
+    res = api_request(
+        "patch",
+        f"https://api.notion.com/v1/pages/{hc_row_id}",
+        headers=NOTION_HEADERS,
+        json={
+            "properties": {
+                "LINE_GROUP_ID": {
+                    "relation": [{"id": rid} for rid in relation_ids if rid]
+                }
+            }
+        },
+    )
+    if res is not None and res.status_code == 200:
+        return True, ""
+    if res is None:
+        return False, "Notion API の応答がありませんでした。"
+    return False, f"HTTP {res.status_code}"
+
+
+def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest: dict | None):
+    """🏠ホーム画面下部のLINEグループ紐付けUI。既存画面には追加のみ。"""
+    st.divider()
+    st.markdown("### 💬 LINEグループ連携")
+
+    if not LINE_GROUP_DB_ID:
+        st.info("LINE_GROUP_DB_ID が未設定のため、LINEグループ一覧を表示できません。")
+        return
+
+    if not hc_row_latest:
+        st.info("HARMONIA_CONCERT 行が見つからないため、LINEグループ連携を表示できません。")
+        return
+
+    line_rows = _get_line_group_rows()
+    if not line_rows:
+        st.caption("LINE_GROUP_ID DB にグループがまだありません。")
+        return
+
+    linked_ids = _extract_line_group_relation_ids(hc_row_latest, "LINE_GROUP_ID")
+    linked_set = set(linked_ids)
+
+    linked_rows = [r for r in line_rows if r.get("id") in linked_set]
+    unlinked_rows = [
+        r for r in line_rows
+        if not _extract_line_group_relation_ids(r, "concert")
+    ]
+
+    with st.expander("現在この演奏会に紐づいているLINEグループ", expanded=True):
+        if linked_rows:
+            for idx, row in enumerate(linked_rows, start=1):
+                title = _extract_line_group_title(row) or "（名称未設定）"
+                gid = _extract_line_group_text(row, ["groupId", "GroupId", "LINE Group ID"])
+                if gid:
+                    st.markdown(f"{idx}. **{title}**  \n`{gid}`")
+                else:
+                    st.markdown(f"{idx}. **{title}**")
+        else:
+            st.caption("まだ紐づいているグループはありません。")
+
+    with st.expander("未連携のLINEグループを追加", expanded=True):
+        if not unlinked_rows:
+            st.caption("未連携のLINEグループはありません。")
+        else:
+            options = {_build_line_group_option_label(r): r for r in unlinked_rows}
+            selected_label = st.selectbox(
+                "追加するLINEグループ",
+                options=list(options.keys()),
+                key=f"line_group_select_{selected_concert_id}",
+            )
+            selected_row = options.get(selected_label)
+
+            if st.button("➕ この演奏会に紐づける", key=f"line_group_add_btn_{selected_concert_id}", use_container_width=True):
+                if not selected_row:
+                    st.warning("LINEグループを選択してください。")
+                else:
+                    target_id = selected_row.get("id", "")
+                    new_ids = list(dict.fromkeys([*(linked_ids or []), target_id]))
+                    ok, msg = _patch_harmonia_concert_line_groups(hc_row_latest.get("id", ""), new_ids)
+                    if ok:
+                        st.success("✅ LINEグループを演奏会に紐づけました。")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(f"❌ 紐づけに失敗しました。{msg}")
+
+    with st.expander("紐づけ済みグループを解除", expanded=False):
+        if not linked_rows:
+            st.caption("解除対象のグループはありません。")
+        else:
+            linked_options = {_build_line_group_option_label(r): r for r in linked_rows}
+            remove_label = st.selectbox(
+                "解除するLINEグループ",
+                options=list(linked_options.keys()),
+                key=f"line_group_remove_select_{selected_concert_id}",
+            )
+            remove_row = linked_options.get(remove_label)
+
+            if st.button("🗑 この演奏会から解除", key=f"line_group_remove_btn_{selected_concert_id}", use_container_width=True):
+                if not remove_row:
+                    st.warning("解除するLINEグループを選択してください。")
+                else:
+                    remove_id = remove_row.get("id", "")
+                    new_ids = [rid for rid in linked_ids if rid != remove_id]
+                    ok, msg = _patch_harmonia_concert_line_groups(hc_row_latest.get("id", ""), new_ids)
+                    if ok:
+                        st.success("✅ LINEグループの紐づけを解除しました。")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(f"❌ 解除に失敗しました。{msg}")
+
 def _split_instruments(part: str) -> list[str]:
     return [x.strip() for x in re.split(r'[/／,、・\s]+', part or "") if x.strip()]
 
@@ -9568,6 +9774,8 @@ if system_mode == "HARMONIA":
                                            mime="image/png", key="invite_qr_dl")
                     except Exception as _qe:
                         st.warning(f"QRコード生成に失敗しました（qrcodeライブラリを確認してください）: {_qe}")
+
+                _render_home_line_group_link_section(selected_concert_id, _hc_row_latest)
         else:
             st.info("サイドバーの『演奏会フィルタ』で演奏会を選択してください。")
         st.stop()
