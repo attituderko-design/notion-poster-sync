@@ -49,7 +49,7 @@ def create_notion_page(event: dict) -> None:
             "database_id": NOTION_DATABASE_ID
         },
         "properties": {
-            "Name": {
+            "Title": {
                 "title": [
                     {
                         "text": {
