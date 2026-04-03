@@ -6391,6 +6391,7 @@ def _patch_line_group_concert_relation(line_group_row_id: str, concert_ids: list
     return False, f"HTTP {res.status_code}"
 
 
+
 def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest: dict | None):
     """🏠ホーム画面下部のLINEグループ紐付けUI。既存画面には追加のみ。"""
     st.divider()
@@ -6404,28 +6405,43 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
         st.info("HARMONIA_CONCERT 行が見つからないため、LINEグループ連携を表示できません。")
         return
 
-    def _patch_line_group_concert_relation(line_group_row_id: str, concert_relation_ids: list[str]) -> tuple[bool, str]:
-        """LINE_GROUP_ID.concert を丸ごと更新する。"""
-        if not line_group_row_id:
-            return False, "LINE_GROUP_ID の行IDが取得できませんでした。"
+    def _send_line_push_text(group_id: str, message: str) -> tuple[bool, str]:
+        push_url = str(
+            st.secrets.get("LINE_PUSH_API_URL", st.secrets.get("LINE_PUSH_ENDPOINT", ""))
+        ).strip()
+        push_api_key = str(st.secrets.get("HARMONIA_PUSH_API_KEY", "")).strip()
+
+        if not push_url:
+            return False, "LINE_PUSH_API_URL が未設定です。"
+        if not push_api_key:
+            return False, "HARMONIA_PUSH_API_KEY が未設定です。"
+        if not group_id:
+            return False, "groupId が取得できませんでした。"
+        if not message.strip():
+            return False, "送信メッセージが空です。"
+
+        headers = {
+            "Content-Type": "application/json; charset=utf-8",
+            "X-HARMONIA-API-KEY": push_api_key,
+        }
+        payload = {
+            "groupId": group_id,
+            "message": message,
+        }
 
         res = api_request(
-            "patch",
-            f"https://api.notion.com/v1/pages/{line_group_row_id}",
-            headers=NOTION_HEADERS,
-            json={
-                "properties": {
-                    "concert": {
-                        "relation": [{"id": rid} for rid in concert_relation_ids if rid]
-                    }
-                }
-            },
+            "post",
+            push_url,
+            headers=headers,
+            json=payload,
+            timeout=30,
         )
-        if res is not None and res.status_code == 200:
-            return True, ""
         if res is None:
-            return False, "Notion API の応答がありませんでした。"
-        return False, f"HTTP {res.status_code}"
+            return False, "Cloud Run /push の応答がありませんでした。"
+        if res.status_code != 200:
+            detail = _truncate_text(res.text or "", 300)
+            return False, f"HTTP {res.status_code} / {detail or '(no body)'}"
+        return True, ""
 
     line_rows = _get_line_group_rows()
     if not line_rows:
@@ -6445,11 +6461,62 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                 title = _extract_line_group_title(row) or "（名称未設定）"
                 gid = _extract_line_group_text(row, ["groupId", "GroupId", "LINE Group ID"])
                 if gid:
-                    st.markdown(f"{idx}. **{title}**  \n`{gid}`")
+                    st.markdown(f"{idx}. **{title}**  
+`{gid}`")
                 else:
                     st.markdown(f"{idx}. **{title}**")
         else:
             st.caption("まだ紐づいているグループはありません。")
+
+    with st.expander("テスト送信", expanded=True):
+        push_url = str(
+            st.secrets.get("LINE_PUSH_API_URL", st.secrets.get("LINE_PUSH_ENDPOINT", ""))
+        ).strip()
+        push_api_key = str(st.secrets.get("HARMONIA_PUSH_API_KEY", "")).strip()
+
+        if not push_url:
+            st.caption("LINE_PUSH_API_URL が未設定のため、テスト送信はできません。")
+        elif not push_api_key:
+            st.caption("HARMONIA_PUSH_API_KEY が未設定のため、テスト送信はできません。")
+        elif not linked_rows:
+            st.caption("この演奏会に紐づいているLINEグループがないため、テスト送信はできません。")
+        else:
+            send_options = {_build_line_group_option_label(r): r for r in linked_rows}
+            send_label = st.selectbox(
+                "送信先LINEグループ",
+                options=list(send_options.keys()),
+                key=f"line_group_send_select_{selected_concert_id}",
+            )
+            send_row = send_options.get(send_label)
+
+            default_message = st.session_state.get(
+                f"line_group_test_message_{selected_concert_id}",
+                "HARMONIAからのテスト送信です",
+            )
+            message = st.text_area(
+                "送信メッセージ",
+                value=default_message,
+                height=120,
+                key=f"line_group_test_message_{selected_concert_id}",
+            )
+
+            send_gid = _extract_line_group_text(
+                send_row or {},
+                ["groupId", "GroupId", "LINE Group ID"],
+            ).strip()
+            if send_gid:
+                st.caption(f"送信先 groupId: `{send_gid}`")
+
+            if st.button(
+                "📨 このグループへテスト送信",
+                key=f"line_group_send_btn_{selected_concert_id}",
+                use_container_width=True,
+            ):
+                ok, msg = _send_line_push_text(send_gid, message)
+                if ok:
+                    st.success("✅ テスト送信しました。")
+                else:
+                    st.error(f"❌ テスト送信に失敗しました。{msg}")
 
     with st.expander("未連携のLINEグループを追加", expanded=True):
         if not unlinked_rows:
