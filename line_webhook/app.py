@@ -10,6 +10,7 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 LINE_CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
+LINE_CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 NOTION_API_KEY = os.environ["NOTION_API_KEY"]
 NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
 
@@ -26,6 +27,23 @@ def validate_line_signature(body: bytes, signature: str) -> bool:
     return hmac.compare_digest(expected_signature, signature)
 
 
+def get_group_summary(group_id: str) -> dict:
+    url = f"https://api.line.me/v2/bot/group/{group_id}/summary"
+    headers = {
+        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+    }
+
+    res = requests.get(url, headers=headers, timeout=30)
+
+    print(
+        f"group_summary_status={res.status_code} group_summary_body={res.text}",
+        flush=True
+    )
+
+    res.raise_for_status()
+    return res.json()
+
+
 def create_notion_page(event: dict) -> None:
     source = event.get("source", {})
     message = event.get("message", {})
@@ -35,15 +53,17 @@ def create_notion_page(event: dict) -> None:
     event_type = event.get("type", "")
     user_id = source.get("userId", "")
     message_text = message.get("text", "") if message.get("type") == "text" else ""
+    group_name = ""
 
-    title_text = group_id if group_id else f"{source_type}:{event_type}"
+    if group_id:
+        try:
+            summary = get_group_summary(group_id)
+            group_name = summary.get("groupName", "")
+        except Exception as e:
+            print(f"failed_to_get_group_summary error={e}", flush=True)
 
-    url = "https://api.notion.com/v1/pages"
-    headers = {
-        "Authorization": f"Bearer {NOTION_API_KEY}",
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
+    title_text = group_name if group_name else (group_id if group_id else f"{source_type}:{event_type}")
+
     payload = {
         "parent": {
             "database_id": NOTION_DATABASE_ID
@@ -63,6 +83,15 @@ def create_notion_page(event: dict) -> None:
                     {
                         "text": {
                             "content": group_id[:2000]
+                        }
+                    }
+                ]
+            },
+            "groupName": {
+                "rich_text": [
+                    {
+                        "text": {
+                            "content": group_name[:2000]
                         }
                     }
                 ]
@@ -100,6 +129,13 @@ def create_notion_page(event: dict) -> None:
     }
 
     print(f"creating_notion_page payload={payload}", flush=True)
+
+    url = "https://api.notion.com/v1/pages"
+    headers = {
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
 
     res = requests.post(url, headers=headers, json=payload, timeout=30)
 
