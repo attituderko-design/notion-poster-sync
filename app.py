@@ -6476,6 +6476,89 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
     line_push_api_url = (st.secrets.get("LINE_PUSH_API_URL", "") or "").strip()
     harmonia_push_api_key = (st.secrets.get("HARMONIA_PUSH_API_KEY", "") or "").strip()
 
+    def _line_safe_parse_date(value: str) -> date | None:
+        s = (value or "").strip()
+        if not s:
+            return None
+        try:
+            return date.fromisoformat(s[:10])
+        except Exception:
+            return None
+
+    def _line_extract_practice_name(ctx: dict, practice_row: dict) -> str:
+        return (
+            ctx["extract_prop_text_any"](practice_row, ["名称", "練習名", "タイトル", "PK名称"])
+            or ctx["extract_title"](practice_row)
+            or "練習"
+        )
+
+    def _line_extract_practice_date(ctx: dict, practice_row: dict) -> date | None:
+        raw = ctx["extract_prop_text_any"](practice_row, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""
+        return _line_safe_parse_date(raw)
+
+    def _line_is_concert_day_practice(ctx: dict, practice_row: dict) -> bool:
+        name = _line_extract_practice_name(ctx, practice_row).strip()
+        if name == "本番当日":
+            return True
+
+        raw = (
+            ctx["extract_prop_text_any"](practice_row, ["演奏会当日", "本番当日", "本番日", "concert_day"])
+            or ""
+        ).strip().lower()
+        return raw in ("true", "1", "yes", "on", "チェック済み")
+
+    def _build_practice_pdf_message(ctx: dict, concert_id: str, practice_row: dict) -> str:
+        practice_name = _line_extract_practice_name(ctx, practice_row)
+        selected_practice_date = _line_extract_practice_date(ctx, practice_row)
+
+        try:
+            practices = concert_mgmt._load_practices(ctx, concert_id) if concert_id else []
+        except Exception:
+            practices = []
+
+        concert_day_date = None
+        for row in practices:
+            if _line_is_concert_day_practice(ctx, row):
+                d = _line_extract_practice_date(ctx, row)
+                if d:
+                    concert_day_date = d
+                    break
+
+        if concert_day_date is None:
+            try:
+                concerts = concert_mgmt._load_concerts(ctx)
+            except Exception:
+                concerts = []
+            concert_row = next((c for c in concerts if c.get("id") == concert_id), None)
+            if concert_row:
+                raw_concert_date = ctx["extract_prop_text_any"](concert_row, ["開催日", "日時", "日付", "出演日", "体験日", "リリース日"]) or ""
+                concert_day_date = _line_safe_parse_date(raw_concert_date)
+
+        today_jst = date.today()
+        if concert_day_date is not None:
+            days_left = max((concert_day_date - today_jst).days, 0)
+            days_text = f"{days_left}日"
+        else:
+            days_text = "—日"
+
+        remaining_count = 0
+        if selected_practice_date is not None:
+            for row in practices:
+                if _line_is_concert_day_practice(ctx, row):
+                    continue
+                d = _line_extract_practice_date(ctx, row)
+                if d is not None and d >= selected_practice_date:
+                    remaining_count += 1
+        else:
+            remaining_count = 1
+
+        return (
+            f"{practice_name}の事前共有PDFをお送りします。\n"
+            f"本番まであと{days_text}、練習回数は残{remaining_count}回です。\n"
+            f"頑張っていきましょう！\n\n"
+            f"- ArtéMis HARMONIA"
+        )
+
     def _patch_line_group_concert_relation(line_group_row_id: str, concert_relation_ids: list[str]) -> tuple[bool, str]:
         if not line_group_row_id:
             return False, "LINE_GROUP_ID の行IDが取得できませんでした。"
@@ -6705,11 +6788,16 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                 )
                 practice_row = practice_options.get(practice_label)
 
-                pdf_message_prefix = st.text_area(
-                    "送信メッセージ（任意）",
-                    value="練習情報PDFはこちらです",
-                    height=80,
-                    key=f"practice_pdf_message_{selected_concert_id}",
+                auto_pdf_message = ""
+                if practice_row:
+                    auto_pdf_message = _build_practice_pdf_message(concert_ctx, selected_concert_id, practice_row)
+
+                st.text_area(
+                    "送信メッセージ（自動生成）",
+                    value=auto_pdf_message,
+                    height=120,
+                    key=f"practice_pdf_message_preview_{selected_concert_id}",
+                    disabled=True,
                 )
 
                 send_button_label = "📤 練習情報PDFリンクを一斉送信" if bulk_send else "📤 練習情報PDFリンクを送信"
@@ -6739,7 +6827,7 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                         if not pdf_url:
                             st.error(f"❌ PDFの保存に失敗しました。{pdf_err}")
                         else:
-                            final_message = f"{pdf_message_prefix.strip()}\n{pdf_url}" if pdf_message_prefix.strip() else pdf_url
+                            final_message = f"{auto_pdf_message}\n{pdf_url}" if auto_pdf_message else pdf_url
 
                             if bulk_send:
                                 success_count = 0
