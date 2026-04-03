@@ -44,6 +44,40 @@ def get_group_summary(group_id: str) -> dict:
     return res.json()
 
 
+def notion_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
+
+
+def find_existing_group_page(group_id: str) -> dict | None:
+    url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
+    payload = {
+        "filter": {
+            "property": "groupId",
+            "rich_text": {
+                "equals": group_id
+            }
+        },
+        "page_size": 1
+    }
+
+    res = requests.post(url, headers=notion_headers(), json=payload, timeout=30)
+
+    print(
+        f"notion_query_status={res.status_code} notion_query_body={res.text}",
+        flush=True
+    )
+
+    res.raise_for_status()
+
+    data = res.json()
+    results = data.get("results", [])
+    return results[0] if results else None
+
+
 def create_notion_page(event: dict) -> None:
     source = event.get("source", {})
 
@@ -53,14 +87,22 @@ def create_notion_page(event: dict) -> None:
     user_id = source.get("userId", "")
     group_name = ""
 
-    if group_id:
-        try:
-            summary = get_group_summary(group_id)
-            group_name = summary.get("groupName", "")
-        except Exception as e:
-            print(f"failed_to_get_group_summary error={e}", flush=True)
+    if not group_id:
+        print("skip_create_notion_page: no group_id", flush=True)
+        return
 
-    title_text = group_name if group_name else (group_id if group_id else f"{source_type}:{event_type}")
+    existing = find_existing_group_page(group_id)
+    if existing:
+        print(f"skip_create_notion_page: group already exists group_id={group_id}", flush=True)
+        return
+
+    try:
+        summary = get_group_summary(group_id)
+        group_name = summary.get("groupName", "")
+    except Exception as e:
+        print(f"failed_to_get_group_summary error={e}", flush=True)
+
+    title_text = group_name if group_name else group_id
 
     payload = {
         "parent": {
@@ -123,16 +165,10 @@ def create_notion_page(event: dict) -> None:
     print(f"creating_notion_page payload={payload}", flush=True)
 
     url = "https://api.notion.com/v1/pages"
-    headers = {
-        "Authorization": f"Bearer {NOTION_API_KEY}",
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
-
-    res = requests.post(url, headers=headers, json=payload, timeout=30)
+    res = requests.post(url, headers=notion_headers(), json=payload, timeout=30)
 
     print(
-        f"notion_response_status={res.status_code} notion_response_body={res.text}",
+        f"notion_create_status={res.status_code} notion_create_body={res.text}",
         flush=True
     )
 
