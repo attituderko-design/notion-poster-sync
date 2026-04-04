@@ -6847,62 +6847,7 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                         pass
                     st.cache_data.clear()
                     st.rerun()
-
-    with st.expander("この演奏会に未紐づけのLINE送信先を追加", expanded=False):
-        if not unassigned_rows:
-            st.caption("この演奏会に未紐づけの送信先はありません。")
-        else:
-            unassigned_options = {
-                f"{_extract_display_name(r)} / {_extract_source_type(r) or 'unknown'} / {_extract_destination_id(r)}": r
-                for r in unassigned_rows
-            }
-            picked_label = st.selectbox(
-                "追加する送信先",
-                options=list(unassigned_options.keys()),
-                key=f"line_unassigned_select_{selected_concert_id}",
-            )
-            picked_row = unassigned_options.get(picked_label)
-
-            c1, c2 = st.columns(2)
-            enable_on_add = c1.checkbox(
-                "追加と同時に送信対象にする",
-                value=True,
-                key=f"line_enable_on_add_{selected_concert_id}",
-            )
-
-            if c2.button("➕ この演奏会に追加", key=f"line_assign_to_concert_{selected_concert_id}", use_container_width=True):
-                if not picked_row:
-                    st.warning("追加する送信先を選択してください。")
-                else:
-                    current_concert_ids = _extract_relation_ids_exact(picked_row, "concert")
-                    new_concert_ids = list(dict.fromkeys([*current_concert_ids, hc_row_id]))
-
-                    ok_rel, msg_rel = _patch_line_destination_concert_relation(picked_row, new_concert_ids)
-                    if not ok_rel:
-                        st.error(f"❌ 演奏会への紐づけに失敗しました。{msg_rel}")
-                    else:
-                        if enable_on_add:
-                            ok_en, msg_en = _patch_line_enabled(picked_row.get("id", ""), True)
-                            if not ok_en:
-                                st.error(f"❌ line_enabled 更新に失敗しました。{msg_en}")
-                                return
-
-                        refreshed_rows = _get_line_group_rows()
-                        refreshed_concert_rows = [r for r in refreshed_rows if hc_row_id in _extract_relation_ids_exact(r, "concert")]
-                        refreshed_enabled_rows = [r for r in refreshed_concert_rows if _extract_checkbox_prop(r, "line_enabled", False)]
-                        ok_sync, msg_sync = _sync_hc_line_relation_from_enabled_rows(refreshed_enabled_rows)
-
-                        if not ok_sync:
-                            st.error(f"❌ HARMONIA_CONCERT 側の同期に失敗しました。{msg_sync}")
-                        else:
-                            st.success("✅ 送信先をこの演奏会へ追加しました。")
-                            try:
-                                _get_line_group_rows_cached.clear()
-                            except Exception:
-                                pass
-                            st.cache_data.clear()
-                            st.rerun()
-
+    
     with st.expander("LINEユーザとPERFORMERの紐づけ", expanded=False):
         user_rows = [r for r in concert_related_rows if _extract_source_type(r) == "user"]
         unresolved_user_rows = [r for r in user_rows if not _extract_performer_relation_id(r)]
@@ -6954,38 +6899,6 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                             st.error(f"❌ PERFORMER 紐づけに失敗しました。{msg_perf}")
 
     send_target_rows = [r for r in concert_related_rows if _extract_checkbox_prop(r, "line_enabled", False)]
-
-    with st.expander("✉️ テキストをテスト送信", expanded=False):
-        if not send_target_rows:
-            st.caption("この演奏会の送信対象がありません。")
-        else:
-            send_options = {
-                f"{_extract_display_name(r)} / {_extract_source_type(r) or 'unknown'} / {_extract_destination_id(r)}": r
-                for r in send_target_rows
-            }
-            send_label = st.selectbox(
-                "送信先",
-                options=list(send_options.keys()),
-                key=f"line_group_send_select_{selected_concert_id}",
-            )
-            send_row = send_options.get(send_label)
-            send_message = st.text_area(
-                "送信メッセージ",
-                value="HARMONIAからのテスト送信です",
-                height=100,
-                key=f"line_group_send_message_{selected_concert_id}",
-            )
-
-            if st.button("📨 テキスト送信", key=f"line_group_send_btn_{selected_concert_id}", use_container_width=True):
-                if not send_row:
-                    st.warning("送信先を選択してください。")
-                else:
-                    target_destination_id = _extract_destination_id(send_row)
-                    ok_send, msg_send = _post_line_push(target_destination_id, send_message)
-                    if ok_send:
-                        st.success("✅ テキスト送信が完了しました。")
-                    else:
-                        st.error(f"❌ テスト送信に失敗しました。{msg_send}")
 
     with st.expander("📄 練習情報PDFを送信", expanded=False):
         if not send_target_rows:
