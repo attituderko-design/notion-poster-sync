@@ -6734,7 +6734,7 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
             })
         return pd.DataFrame(table_rows)
 
-    performer_rows = query_notion_database_all(NOTION_PERFORMER_MASTER_DB_ID) if NOTION_PERFORMER_MASTER_DB_ID else []
+    performer_rows = query_notion_database_all(NOTION_PERFORMER_DB_ID) if NOTION_PERFORMER_DB_ID else []
     performer_map = {r.get("id", ""): _performer_row_title(r) for r in performer_rows if r.get("id")}
 
     left_col, center_col, right_col = st.columns([1.0, 0.22, 1.0])
