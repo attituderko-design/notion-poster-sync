@@ -932,7 +932,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
           .pivot(index="担当", columns="奏者", values="size")
           .fillna("")
     )
-    matrix_df = matrix_df.applymap(lambda v: "●" if v != "" else "")
+    matrix_df = matrix_df.map(lambda v: "●" if v != "" else "")
 
     st.caption("※ 表示のみです。フォーム上では変更できません。")
     st.dataframe(matrix_df, use_container_width=True)
