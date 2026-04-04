@@ -835,9 +835,13 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
 
     all_pd = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
 
-    # PART_DEFINITION → PART_MASTER
+    # PART_DEFINITION → PART_MASTER / 表示パート名
     pd_part_map = {
         p.get("id", ""): (ext_rel(p, PARTDEF_PART_REL_KEYS) or [""])[0]
+        for p in all_pd
+    }
+    pd_display_part_map = {
+        p.get("id", ""): (ext(p, PARTDEF_NAME_KEYS) or "")
         for p in all_pd
     }
 
@@ -877,7 +881,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         part_id_by_name = {name: pid for pid, name in part_options}
         default_part_name = part_labels[0]
         selected_part_name = st.selectbox(
-            "表示パート",
+            "担当パートで絞り込み",
             part_labels,
             index=part_labels.index(default_part_name),
             key=f"assign_part_select_{concert_id}",
@@ -886,9 +890,14 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
     else:
         st.caption(f"表示パート: {selected_part_name}")
 
-    # アサイン情報を part_id x song_id x player_id で保持
+    # アサイン情報
+    # 1) part_master x song x player の存在判定
     assign_lookup: dict[tuple[str, str], set[str]] = {}
+    # 2) part_master x song x player ごとの表示パート名（PART_DEFINITION）
+    assign_display_lookup: dict[tuple[str, str, str], set[str]] = {}
+    # 3) part_master欠損時のフォールバック
     assign_lookup_by_song: dict[str, set[str]] = {}
+    assign_display_lookup_by_song: dict[tuple[str, str], set[str]] = {}
     for r in concert_assigns:
         player_ids = ext_rel(r, ASSIGNMENT_PLAYER_REL_KEYS)
         pd_ids     = ext_rel(r, ASSIGNMENT_PARTDEF_REL_KEYS)
@@ -907,10 +916,15 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
             continue
         pd_id = pd_ids[0]
         pm_id = pd_part_map.get(pd_id, "")
+        display_part = (pd_display_part_map.get(pd_id, "") or "").strip()
         if not pm_id:
+            if display_part:
+                assign_display_lookup_by_song.setdefault((song_id, pid), set()).add(display_part)
             continue
         key = (pm_id, song_id)
         assign_lookup.setdefault(key, set()).add(pid)
+        if display_part:
+            assign_display_lookup.setdefault((pm_id, song_id, pid), set()).add(display_part)
 
     # 対象パートのメンバー
     target_cast = []
@@ -965,16 +979,21 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         pids = ext_rel(cast_row, PARTICIPANT_PLAYER_REL_KEYS)
         pid = pids[0] if pids else ""
         pname = player_name_map.get(pid, "—")
-        row = {"担当パート": selected_part_name, "奏者": pname}
+        row = {"担当パート": "", "奏者": pname}
+        player_display_parts: set[str] = set()
         assigned_count = 0
         for sid in selected_song_ids:
             is_assigned = (
                 pid in assign_lookup.get((selected_part_id, sid), set())
                 or pid in assign_lookup_by_song.get(sid, set())
             )
+            if is_assigned:
+                player_display_parts.update(assign_display_lookup.get((selected_part_id, sid, pid), set()))
+                player_display_parts.update(assign_display_lookup_by_song.get((sid, pid), set()))
             row[song_name_map.get(sid, "—")] = "○" if is_assigned else "—"
             if is_assigned:
                 assigned_count += 1
+        row["担当パート"] = " / ".join(sorted(player_display_parts)) if player_display_parts else selected_part_name
         row["担当曲数"] = assigned_count
         matrix_rows.append(row)
 
