@@ -910,18 +910,35 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         return
 
     df = pd.DataFrame(rows).sort_values(["曲", "担当", "奏者"]).reset_index(drop=True)
+
+    song_options = sorted(df["曲"].dropna().astype(str).unique().tolist())
+    if not song_options:
+        st.info("表示できるアサイン結果がありません。")
+        return
+
+    selected_song = st.selectbox(
+        "表示する曲",
+        song_options,
+        key=f"assign_view_song_{concert_id}_{role}",
+    )
+    song_df = df[df["曲"] == selected_song].copy()
+    if song_df.empty:
+        st.info("表示できるアサイン結果がありません。")
+        return
+
     matrix_df = (
-        df.groupby(["曲", "担当"], as_index=False)["奏者"]
-          .agg(lambda xs: "\n".join(dict.fromkeys([str(x) for x in xs if str(x).strip()])))
-          .pivot(index="曲", columns="担当", values="奏者")
+        song_df.groupby(["担当", "奏者"], as_index=False)
+          .size()
+          .pivot(index="担当", columns="奏者", values="size")
           .fillna("")
     )
+    matrix_df = matrix_df.applymap(lambda v: "●" if v != "" else "")
 
     st.caption("※ 表示のみです。フォーム上では変更できません。")
     st.dataframe(matrix_df, use_container_width=True)
 
     with st.expander("詳細一覧", expanded=False):
-        st.dataframe(df[["パート", "曲", "担当", "奏者"]], use_container_width=True, hide_index=True)
+        st.dataframe(song_df[["パート", "曲", "担当", "奏者"]], use_container_width=True, hide_index=True)
 
 def _render_concert_selector(ctx):
     """concert_id未確定時のエントリ画面。
