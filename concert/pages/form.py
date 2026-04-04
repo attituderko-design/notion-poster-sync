@@ -191,6 +191,23 @@ def _get_proposal_flag(ctx: dict, concert_id: str) -> bool:
     except Exception:
         return False
 
+def _has_published_assignments(ctx: dict, concert_id: str) -> bool:
+    """CONCERT_ASSIGNMENTに公開済み（担当フラグ=True）が1件でもあるか。"""
+    try:
+        from concert.services.keys import (
+            ASSIGNMENT_CONCERT_REL_KEYS, ASSIGNMENT_FLAG_KEYS,
+        )
+        ext = ctx["extract_prop_text_any"]
+        ext_rel = ctx["extract_relation_ids_any"]
+        all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+        return any(
+            concert_id in ext_rel(r, ASSIGNMENT_CONCERT_REL_KEYS)
+            and (ext(r, ASSIGNMENT_FLAG_KEYS) or "").strip().lower() == "true"
+            for r in all_assign
+        )
+    except Exception:
+        return False
+
 def _load_existing_prefs(ctx: dict, concert_id: str, player_id: str, partdefs: list) -> dict[str, str]:
     """既存のPREFERENCEデータを取得してpd_id→priorityのdictを返す。"""
     try:
@@ -784,8 +801,8 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
     ext     = ctx["extract_prop_text_any"]
     ext_rel = ctx["extract_relation_ids_any"]
 
-    # 案提示後のみ表示
-    if not _get_proposal_flag(ctx, concert_id):
+    # 案提示または公開済みアサインがある場合に表示
+    if not (_get_proposal_flag(ctx, concert_id) or _has_published_assignments(ctx, concert_id)):
         st.info("アサイン案がまだ提示されていません。提示後に閲覧できます。")
         return
 
@@ -1833,8 +1850,9 @@ def render_form(ctx, concert_id: str = ""):
                     for _lbl, _url in _score_links:
                         st.markdown(f"[📄 {_lbl}]({_url})")
 
-            # 全ロール向けアサイン閲覧（案提示後）
-            if proposal_done:
+            # アサイン閲覧
+            _can_show_assign_menu = (user_role >= ROLE_LEADER) or proposal_done or _has_published_assignments(ctx, concert_id)
+            if _can_show_assign_menu:
                 if user_role == ROLE_MANAGER:
                     _assign_label = "アサイン状況（パート/曲で絞り込み）"
                 elif user_role == ROLE_LEADER:
