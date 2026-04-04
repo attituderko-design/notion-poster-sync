@@ -885,21 +885,29 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
 
     # アサイン情報を part_id x song_id x player_id で保持
     assign_lookup: dict[tuple[str, str], set[str]] = {}
+    assign_lookup_by_song: dict[str, set[str]] = {}
     for r in concert_assigns:
         player_ids = ext_rel(r, ASSIGNMENT_PLAYER_REL_KEYS)
         pd_ids     = ext_rel(r, ASSIGNMENT_PARTDEF_REL_KEYS)
         song_ids   = ext_rel(r, ASSIGNMENT_SONG_REL_KEYS)
 
-        if not player_ids or not pd_ids:
+        if not player_ids:
             continue
 
-        pd_id = pd_ids[0]
-        pm_id = pd_part_map.get(pd_id, "")
-        if not pm_id or not song_ids:
+        if not song_ids:
             continue
         song_id = song_ids[0]
+        pid = player_ids[0]
+        assign_lookup_by_song.setdefault(song_id, set()).add(pid)
+
+        if not pd_ids:
+            continue
+        pd_id = pd_ids[0]
+        pm_id = pd_part_map.get(pd_id, "")
+        if not pm_id:
+            continue
         key = (pm_id, song_id)
-        assign_lookup.setdefault(key, set()).add(player_ids[0])
+        assign_lookup.setdefault(key, set()).add(pid)
 
     # 対象パートのメンバー
     target_cast = []
@@ -913,10 +921,21 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         return
 
     # 対象曲（Leader/Managerはプルダウン）
+    target_player_ids = {
+        (ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])[0]
+        for r in target_cast
+        if (ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS) or [""])
+    }
     song_ids_for_part = sorted({
         sid for (pmid, sid), pset in assign_lookup.items()
         if pmid == selected_part_id and pset
     }, key=lambda sid: song_name_map.get(sid, ""))
+    # フォールバック: アサイン行にパート定義が無い場合は、奏者所属パートから逆引き
+    if not song_ids_for_part and target_player_ids:
+        song_ids_for_part = sorted([
+            sid for sid, pset in assign_lookup_by_song.items()
+            if pset.intersection(target_player_ids)
+        ], key=lambda sid: song_name_map.get(sid, ""))
     if not song_ids_for_part:
         st.info("このパートのアサイン結果がまだ登録されていません。")
         return
@@ -946,7 +965,10 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         row = {"奏者": pname}
         assigned_count = 0
         for sid in selected_song_ids:
-            is_assigned = pid in assign_lookup.get((selected_part_id, sid), set())
+            is_assigned = (
+                pid in assign_lookup.get((selected_part_id, sid), set())
+                or pid in assign_lookup_by_song.get(sid, set())
+            )
             row[song_name_map.get(sid, "—")] = "○" if is_assigned else "—"
             if is_assigned:
                 assigned_count += 1
