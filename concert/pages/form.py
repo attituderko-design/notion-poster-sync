@@ -868,6 +868,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
     part_options = sorted(list({p[0]: p for p in part_options}.values()), key=lambda x: x[1])
 
     selected_part_id = my_part_master_id
+    selected_part_name = pm_name_map.get(selected_part_id, "—")
     if role >= ROLE_MANAGER:
         if not part_options:
             st.info("表示対象パートが見つかりません。")
@@ -882,6 +883,8 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
             key=f"assign_part_select_{concert_id}",
         )
         selected_part_id = part_id_by_name.get(selected_part_name, "")
+    else:
+        st.caption(f"表示パート: {selected_part_name}")
 
     # アサイン情報を part_id x song_id x player_id で保持
     assign_lookup: dict[tuple[str, str], set[str]] = {}
@@ -962,7 +965,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         pids = ext_rel(cast_row, PARTICIPANT_PLAYER_REL_KEYS)
         pid = pids[0] if pids else ""
         pname = player_name_map.get(pid, "—")
-        row = {"奏者": pname}
+        row = {"担当パート": selected_part_name, "奏者": pname}
         assigned_count = 0
         for sid in selected_song_ids:
             is_assigned = (
@@ -1881,7 +1884,7 @@ def render_form(ctx, concert_id: str = ""):
                     _assign_label = "自パートのアサイン状況（曲で絞り込み）"
                 else:
                     _assign_label = "自パートのアサイン状況"
-                with st.expander(f"🎯 {_assign_label}", expanded=False):
+                with st.expander(f"🎯 {_assign_label}", expanded=True):
                     _render_assignment_view(ctx, concert_id, my_part_master_id, user_role)
 
             # ── 直近の練習情報（全ロール共通） ──────────────
