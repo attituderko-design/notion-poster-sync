@@ -15,7 +15,6 @@ NOTION_API_KEY = os.environ["NOTION_API_KEY"]
 NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]  # LINE送信先DB
 HARMONIA_CONCERT_DB_ID = os.environ["HARMONIA_CONCERT_DB_ID"]
 HARMONIA_PUSH_API_KEY = os.environ["HARMONIA_PUSH_API_KEY"]
-NOTION_DB_ID = os.environ["NOTION_DB_ID"]  # ATLAS DB
 
 NOTION_VERSION = "2022-06-28"
 
@@ -145,6 +144,16 @@ def notion_get_db_properties(database_id: str) -> dict:
     print(f"notion_db_status={res.status_code} notion_db_body={res.text[:500]}", flush=True)
     res.raise_for_status()
     return (res.json() or {}).get("properties", {}) or {}
+
+
+def notion_get_page(page_id: str) -> dict | None:
+    if not page_id:
+        return None
+    url = f"https://api.notion.com/v1/pages/{page_id}"
+    res = requests.get(url, headers=notion_headers(), timeout=30)
+    print(f"notion_page_status={res.status_code} notion_page_body={res.text[:500]}", flush=True)
+    res.raise_for_status()
+    return res.json() or {}
 
 
 def normalize_key(value: str) -> str:
@@ -349,29 +358,42 @@ def find_concert_name_from_harmonia_concert_row(harmonia_concert_row: dict) -> s
     hc_props = notion_get_db_properties(HARMONIA_CONCERT_DB_ID)
     concert_rel_key = find_prop_name(hc_props, HARMONIA_CONCERT_REL_KEYS, ["relation"])
     if not concert_rel_key:
+        print("concert_rel_key_not_found", flush=True)
         return ""
 
     atlas_ids = extract_relation_ids(
         ((harmonia_concert_row.get("properties", {}) or {}).get(concert_rel_key) or {})
     )
     if not atlas_ids:
+        print("atlas_relation_id_not_found", flush=True)
         return ""
 
     atlas_concert_id = atlas_ids[0]
-
-    atlas_rows = notion_query_all(NOTION_DB_ID)
-    atlas_row = next((r for r in atlas_rows if r.get("id") == atlas_concert_id), None)
+    atlas_row = notion_get_page(atlas_concert_id)
     if not atlas_row:
+        print(f"atlas_row_not_found atlas_concert_id={atlas_concert_id}", flush=True)
         return ""
 
-    atlas_props = notion_get_db_properties(NOTION_DB_ID)
-    concert_name_key = find_prop_name(atlas_props, ATLAS_CONCERT_NAME_KEYS)
-    if not concert_name_key:
-        return ""
+    atlas_row_props = atlas_row.get("properties", {}) or {}
 
-    return extract_plain_text(
-        ((atlas_row.get("properties", {}) or {}).get(concert_name_key) or {})
-    ).strip()
+    # まず title 型のプロパティを優先
+    for prop_name, prop_value in atlas_row_props.items():
+        if isinstance(prop_value, dict) and prop_value.get("type") == "title":
+            concert_name = extract_plain_text(prop_value).strip()
+            if concert_name:
+                print(f"concert_name_found_by_title prop={prop_name} concert_name={concert_name}", flush=True)
+                return concert_name
+
+    # 保険で候補名も見る
+    for prop_name in ATLAS_CONCERT_NAME_KEYS:
+        prop_value = atlas_row_props.get(prop_name) or {}
+        concert_name = extract_plain_text(prop_value).strip()
+        if concert_name:
+            print(f"concert_name_found_by_candidate prop={prop_name} concert_name={concert_name}", flush=True)
+            return concert_name
+
+    print(f"concert_name_not_found atlas_concert_id={atlas_concert_id}", flush=True)
+    return ""
 
 
 def find_user_destination_page(user_id: str) -> dict | None:
