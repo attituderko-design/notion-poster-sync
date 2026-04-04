@@ -942,6 +942,8 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
           .fillna("")
     )
     matrix_df = matrix_df.map(lambda v: "●" if v != "" else "")
+    matrix_df.index.name = ""
+    matrix_df.columns.name = ""
 
     st.caption("※ 表示のみです。フォーム上では変更できません。")
     _matrix_html = matrix_df.to_html(classes="assign-matrix", escape=False)
@@ -975,7 +977,8 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
     st.markdown(_matrix_html, unsafe_allow_html=True)
 
     with st.expander("詳細一覧", expanded=False):
-        st.dataframe(song_df[["パート", "曲", "担当", "奏者"]], use_container_width=True, hide_index=True)
+        detail_df = song_df[["パート", "担当", "奏者"]].sort_values(["パート", "担当", "奏者"]).reset_index(drop=True)
+        st.dataframe(detail_df, use_container_width=True, hide_index=True)
 
 def _render_concert_selector(ctx):
     """concert_id未確定時のエントリ画面。
