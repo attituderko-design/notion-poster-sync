@@ -14,6 +14,7 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 NOTION_API_KEY = os.environ["NOTION_API_KEY"]
 NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]  # LINE送信先DB
 HARMONIA_CONCERT_DB_ID = os.environ["HARMONIA_CONCERT_DB_ID"]
+HARMONIA_PUSH_API_KEY = os.environ["HARMONIA_PUSH_API_KEY"]
 
 NOTION_VERSION = "2022-06-28"
 
@@ -57,7 +58,6 @@ def get_group_summary(group_id: str) -> dict:
     res.raise_for_status()
     return res.json()
 
-
 def reply_text_message(reply_token: str, message: str) -> dict:
     url = "https://api.line.me/v2/bot/message/reply"
     payload = {
@@ -69,6 +69,38 @@ def reply_text_message(reply_token: str, message: str) -> dict:
     res.raise_for_status()
     return res.json() if res.text else {"ok": True}
 
+def validate_push_api_key(request_obj) -> bool:
+    provided = request_obj.headers.get("X-HARMONIA-API-KEY", "")
+    return hmac.compare_digest(provided, HARMONIA_PUSH_API_KEY)
+
+def push_text_message(destination_id: str, message: str) -> dict:
+    url = "https://api.line.me/v2/bot/message/push"
+    headers = {
+        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "to": destination_id,
+        "messages": [
+            {
+                "type": "text",
+                "text": message[:5000],
+            }
+        ],
+    }
+
+    res = requests.post(url, headers=headers, json=payload, timeout=30)
+    print(
+        f"line_push_status={res.status_code} line_push_body={res.text} payload={payload}",
+        flush=True
+    )
+    res.raise_for_status()
+    if res.text:
+        try:
+            return res.json()
+        except Exception:
+            return {"raw": res.text}
+    return {"ok": True}
 
 def notion_headers() -> dict:
     return {
@@ -76,7 +108,6 @@ def notion_headers() -> dict:
         "Notion-Version": NOTION_VERSION,
         "Content-Type": "application/json",
     }
-
 
 def notion_query_all(database_id: str, payload: dict | None = None) -> list[dict]:
     url = f"https://api.notion.com/v1/databases/{database_id}/query"
@@ -475,6 +506,46 @@ def process_user_message(event: dict) -> None:
 def index():
     return "alive", 200
 
+@app.post("/push")
+def push():
+    if not validate_push_api_key(request):
+        print("invalid_push_api_key", flush=True)
+        return jsonify({"ok": False, "error": "invalid api key"}), 401
+
+    data = request.get_json(silent=True) or {}
+    destination_id = str(data.get("groupId", "")).strip()
+    message = str(data.get("message", "")).strip()
+
+    if not destination_id:
+        return jsonify({"ok": False, "error": "groupId is required"}), 400
+
+    if not message:
+        return jsonify({"ok": False, "error": "message is required"}), 400
+
+    try:
+        result = push_text_message(destination_id, message)
+        return jsonify({
+            "ok": True,
+            "groupId": destination_id,
+            "result": result,
+        }), 200
+    except requests.HTTPError as e:
+        status_code = getattr(getattr(e, "response", None), "status_code", 500)
+        response_text = getattr(getattr(e, "response", None), "text", str(e))
+        print(f"push_http_error status={status_code} body={response_text}", flush=True)
+        return jsonify({
+            "ok": False,
+            "error": "line push failed",
+            "status_code": status_code,
+            "detail": response_text,
+        }), status_code
+    except Exception as e:
+        print(f"push_unexpected_error error={e}", flush=True)
+        return jsonify({
+            "ok": False,
+            "error": "unexpected error",
+            "detail": str(e),
+        }), 500
 
 @app.post("/webhook")
 def webhook():
