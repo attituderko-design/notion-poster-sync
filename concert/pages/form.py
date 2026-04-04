@@ -798,7 +798,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
     from concert.services.keys import (
         ASSIGNMENT_CONCERT_REL_KEYS, ASSIGNMENT_PLAYER_REL_KEYS,
         ASSIGNMENT_PARTDEF_REL_KEYS, ASSIGNMENT_SONG_REL_KEYS,
-        ASSIGNMENT_INST_REL_KEYS, ASSIGNMENT_FLAG_KEYS,
+        ASSIGNMENT_FLAG_KEYS,
     )
     import pandas as pd
 
@@ -831,7 +831,6 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
     all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
     song_name_map = build_song_name_map(ctx, all_songs)
     all_pd = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
-    pd_name_map = {p.get("id", ""): ext(p, PARTDEF_NAME_KEYS) or "" for p in all_pd}
     pd_display_name_map = {
         p.get("id", ""): (
             ext(p, ["表示パート名", "表示用パート名", "display_part_name"])
@@ -840,11 +839,13 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         )
         for p in all_pd
     }
-    pd_part_map = {p.get("id", ""): (ext_rel(p, PARTDEF_PART_REL_KEYS) or [""])[0] for p in all_pd}
-    inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"], None)
-    inst_name_map = {i.get("id", ""): ext(i, INSTRUMENT_NAME_KEYS) or "" for i in inst_rows}
+    pd_part_map = {}
+    for p in all_pd:
+        pd_id = p.get("id", "")
+        pm_ids = ext_rel(p, PARTDEF_PART_REL_KEYS) or ext_rel(p, ["パート区分", "パート", "part", "part_master"])
+        pd_part_map[pd_id] = pm_ids[0] if pm_ids else ""
 
-    # player / leader の自パートは session_state ではなく DB（CONCERT_CAST）から再解決を優先する
+    # player / leader の自パートは DB（CONCERT_CAST）から再解決
     resolved_my_part_master_id = ""
     if role < ROLE_MANAGER:
         player_id = (st.session_state.get("form_player_id") or "").strip()
@@ -855,7 +856,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
                     p_ids = ext_rel(row, PARTICIPANT_PLAYER_REL_KEYS)
                     c_ids = ext_rel(row, PARTICIPANT_CONCERT_REL_KEYS)
                     if player_id in p_ids and concert_id in c_ids:
-                        part_ids = ext_rel(row, PARTICIPANT_PART_REL_KEYS)
+                        part_ids = ext_rel(row, PARTICIPANT_PART_REL_KEYS) or ext_rel(row, ["パート", "part"])
                         if part_ids:
                             resolved_my_part_master_id = part_ids[0]
                         break
@@ -889,7 +890,6 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         player_ids = ext_rel(r, ASSIGNMENT_PLAYER_REL_KEYS)
         pd_ids = ext_rel(r, ASSIGNMENT_PARTDEF_REL_KEYS)
         song_ids = ext_rel(r, ASSIGNMENT_SONG_REL_KEYS)
-        inst_ids = ext_rel(r, ASSIGNMENT_INST_REL_KEYS)
         if not player_ids or not pd_ids:
             continue
         pd_id = pd_ids[0]
@@ -899,9 +899,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
 
         pname = player_name_map.get(player_ids[0], "—") or "—"
         song = song_name_map.get(song_ids[0], "—") if song_ids else "—"
-        partdef_name = pd_name_map.get(pd_id, "—") or "—"
-        display_part_name = pd_display_name_map.get(pd_id, "") or partdef_name
-        duty_label = display_part_name
+        duty_label = pd_display_name_map.get(pd_id, "") or "—"
         part_name = pm_map.get(pm_id, {}).get("name", "") if pm_id else ""
         rows.append({
             "パート": part_name or "—",
@@ -915,7 +913,6 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         return
 
     df = pd.DataFrame(rows).sort_values(["曲", "担当", "奏者"]).reset_index(drop=True)
-
     song_options = sorted(df["曲"].dropna().astype(str).unique().tolist())
     if not song_options:
         st.info("表示できるアサイン結果がありません。")
@@ -938,41 +935,25 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
           .fillna("")
     )
     matrix_df = matrix_df.map(lambda v: "●" if v != "" else "")
-    matrix_df.index.name = ""
-    matrix_df.columns.name = ""
 
     st.caption("※ 表示のみです。フォーム上では変更できません。")
-    _matrix_html = matrix_df.to_html(classes="assign-matrix", escape=False)
-    _matrix_html = _matrix_html.replace('<th></th>', '<th style="width:1%;"></th>', 1)
-    _matrix_html = _matrix_html.replace('<tr style="text-align: right;">\n      <th style="width:1%;"></th>\n    </tr>', '')
-    st.markdown(
-        """
-        <style>
-        table.assign-matrix {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.95rem;
-        }
-        table.assign-matrix th,
-        table.assign-matrix td {
-            border: 1px solid rgba(250,250,250,0.12);
-            padding: 6px 10px;
-            text-align: center;
-            vertical-align: middle;
-        }
-        table.assign-matrix thead th {
-            background: rgba(255,255,255,0.06);
-        }
-        table.assign-matrix tbody th {
-            text-align: left;
-            background: rgba(255,255,255,0.03);
-            white-space: nowrap;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown(_matrix_html, unsafe_allow_html=True)
+    columns = list(matrix_df.columns)
+    html = ['<style>',
+            'table.assign-matrix{width:100%;border-collapse:collapse;font-size:0.95rem;}',
+            'table.assign-matrix th,table.assign-matrix td{border:1px solid rgba(250,250,250,0.12);padding:6px 10px;text-align:center;vertical-align:middle;}',
+            'table.assign-matrix thead th{background:rgba(255,255,255,0.06);}',
+            'table.assign-matrix tbody th{text-align:left;background:rgba(255,255,255,0.03);white-space:nowrap;}',
+            '</style>',
+            '<table class="assign-matrix">', '<thead><tr><th></th>']
+    html.extend(f'<th>{str(col)}</th>' for col in columns)
+    html.append('</tr></thead><tbody>')
+    for idx, row in matrix_df.iterrows():
+        html.append(f'<tr><th>{str(idx)}</th>')
+        for col in columns:
+            html.append(f'<td>{row[col]}</td>')
+        html.append('</tr>')
+    html.append('</tbody></table>')
+    st.markdown(''.join(html), unsafe_allow_html=True)
 
     with st.expander("詳細一覧", expanded=False):
         detail_df = song_df[["パート", "担当", "奏者"]].sort_values(["パート", "担当", "奏者"]).reset_index(drop=True)
