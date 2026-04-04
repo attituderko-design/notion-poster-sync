@@ -6565,6 +6565,24 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
             return False, "Notion API の応答がありませんでした。"
         return False, f"HTTP {res.status_code}"
 
+    def _patch_line_destination_properties_for_any_db(db_id: str, row_id: str, patch_properties: dict) -> tuple[bool, str]:
+        if not db_id:
+            return False, "DB ID が未設定です。"
+        if not row_id:
+            return False, "行IDが取得できませんでした。"
+
+        res = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{row_id}",
+            headers=NOTION_HEADERS,
+            json={"properties": patch_properties},
+        )
+        if res is not None and res.status_code == 200:
+            return True, ""
+        if res is None:
+            return False, "Notion API の応答がありませんでした。"
+        return False, f"HTTP {res.status_code}"
+
     def _patch_line_enabled(row_id: str, enabled: bool) -> tuple[bool, str]:
         return _patch_line_destination_properties(row_id, {"line_enabled": {"checkbox": bool(enabled)}})
 
@@ -6579,6 +6597,14 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
         return _patch_line_destination_properties(
             line_row_id,
             {"PERFORMER": {"relation": relation_payload}}
+        )
+
+    def _patch_performer_user_relation(performer_row_id: str, line_destination_row_id: str) -> tuple[bool, str]:
+        relation_payload = [{"id": line_destination_row_id}] if line_destination_row_id else []
+        return _patch_line_destination_properties_for_any_db(
+            NOTION_PERFORMER_DB_ID,
+            performer_row_id,
+            {"userId": {"relation": relation_payload}}
         )
 
     def _sync_hc_line_relation_from_enabled_rows(enabled_concert_rows: list[dict]) -> tuple[bool, str]:
@@ -6886,17 +6912,23 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                     if not performer_id:
                         st.warning("紐づける PERFORMER を選択してください。")
                     else:
-                        ok_perf, msg_perf = _patch_line_destination_performer(row.get("id", ""), performer_id)
-                        if ok_perf:
-                            st.success(f"✅ {row_name} を PERFORMER に紐づけました。")
-                            try:
-                                _get_line_group_rows_cached.clear()
-                            except Exception:
-                                pass
-                            st.cache_data.clear()
-                            st.rerun()
+                        line_row_id = row.get("id", "")
+
+                        ok_line, msg_line = _patch_line_destination_performer(line_row_id, performer_id)
+                        if not ok_line:
+                            st.error(f"❌ LINE_Destination_ID 側の PERFORMER 紐づけに失敗しました。{msg_line}")
                         else:
-                            st.error(f"❌ PERFORMER 紐づけに失敗しました。{msg_perf}")
+                            ok_perf, msg_perf = _patch_performer_user_relation(performer_id, line_row_id)
+                            if ok_perf:
+                                st.success(f"✅ {row_name} を PERFORMER に紐づけました。")
+                                try:
+                                    _get_line_group_rows_cached.clear()
+                                except Exception:
+                                    pass
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error(f"❌ PERFORMER 側の userId リレーション更新に失敗しました。{msg_perf}")
 
     send_target_rows = [r for r in concert_related_rows if _extract_checkbox_prop(r, "line_enabled", False)]
 
