@@ -836,9 +836,29 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
     inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"], None)
     inst_name_map = {i.get("id", ""): ext(i, INSTRUMENT_NAME_KEYS) or "" for i in inst_rows}
 
+    # player / leader の自パートは session_state ではなく DB（CONCERT_CAST）から再解決を優先する
+    resolved_my_part_master_id = ""
+    if role < ROLE_MANAGER:
+        player_id = (st.session_state.get("form_player_id") or "").strip()
+        if player_id:
+            try:
+                participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+                for row in participant_rows:
+                    p_ids = ext_rel(row, PARTICIPANT_PLAYER_REL_KEYS)
+                    c_ids = ext_rel(row, PARTICIPANT_CONCERT_REL_KEYS)
+                    if player_id in p_ids and concert_id in c_ids:
+                        part_ids = ext_rel(row, PARTICIPANT_PART_REL_KEYS)
+                        if part_ids:
+                            resolved_my_part_master_id = part_ids[0]
+                        break
+            except Exception:
+                resolved_my_part_master_id = ""
+        if not resolved_my_part_master_id:
+            resolved_my_part_master_id = (my_part_master_id or "").strip()
+
     available_part_ids = sorted(
         {pid for pid in pd_part_map.values() if pid},
-        key=lambda pid: pm_map.get(pid, {}).get("name", "")
+        key=lambda pid: pm_map.get(pid, {}).get("name", "") or pid
     )
 
     target_part_master_id = ""
@@ -854,7 +874,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         )
         target_part_master_id = manager_part_opts.get(selected_label, "")
     else:
-        target_part_master_id = my_part_master_id or ""
+        target_part_master_id = resolved_my_part_master_id
 
     rows = []
     for r in concert_assigns:
@@ -867,8 +887,6 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         pd_id = pd_ids[0]
         pm_id = pd_part_map.get(pd_id, "")
         if target_part_master_id and pm_id and pm_id != target_part_master_id:
-            continue
-        if role < ROLE_MANAGER and target_part_master_id and not pm_id:
             continue
 
         pname = player_name_map.get(player_ids[0], "—") or "—"
