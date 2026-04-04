@@ -461,7 +461,6 @@ def finalize_user_destination_name(user_row: dict, full_name: str) -> dict:
     res.raise_for_status()
     return res.json() or user_row
 
-
 def process_user_message(event: dict) -> None:
     source = event.get("source", {}) or {}
     message = event.get("message", {}) or {}
@@ -494,11 +493,24 @@ def process_user_message(event: dict) -> None:
             )
         return
 
+    concert_props = notion_get_db_properties(HARMONIA_CONCERT_DB_ID)
+    concert_name_key = find_prop_name(
+        concert_props,
+        ["concert_key", "演奏会名", "名称", "Title", "title"]
+    )
+    concert_name = ""
+    if concert_name_key:
+        concert_name = extract_plain_text(
+            ((concert.get("properties", {}) or {}).get(concert_name_key) or {})
+        ).strip()
+    if not concert_name:
+        concert_name = "演奏会"
+
     upsert_user_destination_pending_name(user_id, text, concert)
     if reply_token:
         reply_text_message(
             reply_token,
-            "認証コードを確認しました。\n続けて、お名前をフルネームで送信してください。"
+            f"{concert_name}の認証コードを確認しました。\n続けて、お名前をフルネームで送信してください。"
         )
 
 
