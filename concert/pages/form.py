@@ -832,6 +832,14 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
     song_name_map = build_song_name_map(ctx, all_songs)
     all_pd = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
     pd_name_map = {p.get("id", ""): ext(p, PARTDEF_NAME_KEYS) or "" for p in all_pd}
+    pd_display_name_map = {
+        p.get("id", ""): (
+            ext(p, ["表示パート名", "表示用パート名", "display_part_name"])
+            or ext(p, PARTDEF_NAME_KEYS)
+            or ""
+        )
+        for p in all_pd
+    }
     pd_part_map = {p.get("id", ""): (ext_rel(p, PARTDEF_PART_REL_KEYS) or [""])[0] for p in all_pd}
     inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"], None)
     inst_name_map = {i.get("id", ""): ext(i, INSTRUMENT_NAME_KEYS) or "" for i in inst_rows}
@@ -892,11 +900,12 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         pname = player_name_map.get(player_ids[0], "—") or "—"
         song = song_name_map.get(song_ids[0], "—") if song_ids else "—"
         partdef_name = pd_name_map.get(pd_id, "—") or "—"
+        display_part_name = pd_display_name_map.get(pd_id, "") or partdef_name
         inst_name = inst_name_map.get(inst_ids[0], "") if inst_ids else ""
-        if inst_name and inst_name != partdef_name:
-            duty_label = f"{partdef_name} / {inst_name}"
+        if inst_name and inst_name not in (display_part_name, partdef_name):
+            duty_label = f"{display_part_name} / {inst_name}"
         else:
-            duty_label = partdef_name
+            duty_label = display_part_name
         part_name = pm_map.get(pm_id, {}).get("name", "") if pm_id else ""
         rows.append({
             "パート": part_name or "—",
@@ -935,7 +944,35 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
     matrix_df = matrix_df.map(lambda v: "●" if v != "" else "")
 
     st.caption("※ 表示のみです。フォーム上では変更できません。")
-    st.dataframe(matrix_df, use_container_width=True)
+    _matrix_html = matrix_df.to_html(classes="assign-matrix", escape=False)
+    st.markdown(
+        """
+        <style>
+        table.assign-matrix {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95rem;
+        }
+        table.assign-matrix th,
+        table.assign-matrix td {
+            border: 1px solid rgba(250,250,250,0.12);
+            padding: 6px 10px;
+            text-align: center;
+            vertical-align: middle;
+        }
+        table.assign-matrix thead th {
+            background: rgba(255,255,255,0.06);
+        }
+        table.assign-matrix tbody th {
+            text-align: left;
+            background: rgba(255,255,255,0.03);
+            white-space: nowrap;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(_matrix_html, unsafe_allow_html=True)
 
     with st.expander("詳細一覧", expanded=False):
         st.dataframe(song_df[["パート", "曲", "担当", "奏者"]], use_container_width=True, hide_index=True)
