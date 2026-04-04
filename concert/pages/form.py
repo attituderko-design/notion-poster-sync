@@ -982,7 +982,6 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         pname = player_name_map.get(pid, "—")
         row = {"担当パート": "", "奏者": pname}
         player_display_parts: set[str] = set()
-        assigned_count = 0
         for sid in selected_song_ids:
             is_assigned = (
                 pid in assign_lookup.get((selected_part_id, sid), set())
@@ -992,10 +991,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
                 player_display_parts.update(assign_display_lookup.get((selected_part_id, sid, pid), set()))
                 player_display_parts.update(assign_display_lookup_by_song.get((sid, pid), set()))
             row[song_name_map.get(sid, "—")] = "○" if is_assigned else "—"
-            if is_assigned:
-                assigned_count += 1
         row["担当パート"] = " / ".join(sorted(player_display_parts)) if player_display_parts else selected_part_name
-        row["担当曲数"] = assigned_count
         matrix_rows.append(row)
 
     import pandas as pd
