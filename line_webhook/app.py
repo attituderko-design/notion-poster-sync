@@ -15,6 +15,7 @@ NOTION_API_KEY = os.environ["NOTION_API_KEY"]
 NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]  # LINE送信先DB
 HARMONIA_CONCERT_DB_ID = os.environ["HARMONIA_CONCERT_DB_ID"]
 HARMONIA_PUSH_API_KEY = os.environ["HARMONIA_PUSH_API_KEY"]
+NOTION_DB_ID = os.environ["NOTION_DB_ID"]  # ATLAS DB
 
 NOTION_VERSION = "2022-06-28"
 
@@ -28,6 +29,8 @@ LINE_CONCERT_REL_KEYS = ["concert", "Concert"]
 
 CONCERT_AUTH_CODE_KEYS = ["認証コード", "招待コード", "authCode", "inviteCode", "auth_code", "invite_code"]
 CONCERT_ENDED_KEYS = ["演奏会終了", "終了", "ended", "isEnded", "concertEnded"]
+HARMONIA_CONCERT_REL_KEYS = ["演奏会", "FK演奏会", "concert"]
+ATLAS_CONCERT_NAME_KEYS = ["演奏会名", "名称", "Title", "title"]
 
 EVENT_TYPE_GROUP_JOIN = "join"
 EVENT_TYPE_USER_PENDING_NAME = "pending_name"
@@ -58,6 +61,7 @@ def get_group_summary(group_id: str) -> dict:
     res.raise_for_status()
     return res.json()
 
+
 def reply_text_message(reply_token: str, message: str) -> dict:
     url = "https://api.line.me/v2/bot/message/reply"
     payload = {
@@ -69,9 +73,11 @@ def reply_text_message(reply_token: str, message: str) -> dict:
     res.raise_for_status()
     return res.json() if res.text else {"ok": True}
 
+
 def validate_push_api_key(request_obj) -> bool:
     provided = request_obj.headers.get("X-HARMONIA-API-KEY", "")
     return hmac.compare_digest(provided, HARMONIA_PUSH_API_KEY)
+
 
 def push_text_message(destination_id: str, message: str) -> dict:
     url = "https://api.line.me/v2/bot/message/push"
@@ -90,10 +96,7 @@ def push_text_message(destination_id: str, message: str) -> dict:
     }
 
     res = requests.post(url, headers=headers, json=payload, timeout=30)
-    print(
-        f"line_push_status={res.status_code} line_push_body={res.text} payload={payload}",
-        flush=True
-    )
+    print(f"line_push_status={res.status_code} line_push_body={res.text} payload={payload}", flush=True)
     res.raise_for_status()
     if res.text:
         try:
@@ -102,12 +105,14 @@ def push_text_message(destination_id: str, message: str) -> dict:
             return {"raw": res.text}
     return {"ok": True}
 
+
 def notion_headers() -> dict:
     return {
         "Authorization": f"Bearer {NOTION_API_KEY}",
         "Notion-Version": NOTION_VERSION,
         "Content-Type": "application/json",
     }
+
 
 def notion_query_all(database_id: str, payload: dict | None = None) -> list[dict]:
     url = f"https://api.notion.com/v1/databases/{database_id}/query"
@@ -337,6 +342,38 @@ def find_active_concert_by_auth_code(auth_code: str) -> dict | None:
     return None
 
 
+def find_concert_name_from_harmonia_concert_row(harmonia_concert_row: dict) -> str:
+    if not harmonia_concert_row:
+        return ""
+
+    hc_props = notion_get_db_properties(HARMONIA_CONCERT_DB_ID)
+    concert_rel_key = find_prop_name(hc_props, HARMONIA_CONCERT_REL_KEYS, ["relation"])
+    if not concert_rel_key:
+        return ""
+
+    atlas_ids = extract_relation_ids(
+        ((harmonia_concert_row.get("properties", {}) or {}).get(concert_rel_key) or {})
+    )
+    if not atlas_ids:
+        return ""
+
+    atlas_concert_id = atlas_ids[0]
+
+    atlas_rows = notion_query_all(NOTION_DB_ID)
+    atlas_row = next((r for r in atlas_rows if r.get("id") == atlas_concert_id), None)
+    if not atlas_row:
+        return ""
+
+    atlas_props = notion_get_db_properties(NOTION_DB_ID)
+    concert_name_key = find_prop_name(atlas_props, ATLAS_CONCERT_NAME_KEYS)
+    if not concert_name_key:
+        return ""
+
+    return extract_plain_text(
+        ((atlas_row.get("properties", {}) or {}).get(concert_name_key) or {})
+    ).strip()
+
+
 def find_user_destination_page(user_id: str) -> dict | None:
     if not user_id:
         return None
@@ -461,6 +498,7 @@ def finalize_user_destination_name(user_row: dict, full_name: str) -> dict:
     res.raise_for_status()
     return res.json() or user_row
 
+
 def process_user_message(event: dict) -> None:
     source = event.get("source", {}) or {}
     message = event.get("message", {}) or {}
@@ -493,16 +531,7 @@ def process_user_message(event: dict) -> None:
             )
         return
 
-    concert_props = notion_get_db_properties(HARMONIA_CONCERT_DB_ID)
-    concert_name_key = find_prop_name(
-        concert_props,
-        ["concert_key", "演奏会名", "名称", "Title", "title"]
-    )
-    concert_name = ""
-    if concert_name_key:
-        concert_name = extract_plain_text(
-            ((concert.get("properties", {}) or {}).get(concert_name_key) or {})
-        ).strip()
+    concert_name = find_concert_name_from_harmonia_concert_row(concert)
     if not concert_name:
         concert_name = "演奏会"
 
@@ -517,6 +546,7 @@ def process_user_message(event: dict) -> None:
 @app.get("/")
 def index():
     return "alive", 200
+
 
 @app.post("/push")
 def push():
@@ -558,6 +588,7 @@ def push():
             "error": "unexpected error",
             "detail": str(e),
         }), 500
+
 
 @app.post("/webhook")
 def webhook():
