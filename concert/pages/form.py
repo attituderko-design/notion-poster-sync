@@ -772,7 +772,9 @@ def _render_member_list(ctx, concert_id: str, participant_rows: list,
 
 def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: int):
     """アサイン結果をロールに応じて表示する。
-    Leader: アサイン確定後のみ・自パートのみ、Manager: 常時・全員
+    Player/Leader: 自パートのみ表示
+    Manager: パート選択式で表示
+    表示条件は「案提示中」以降（案提示 or アサイン確定）。
     """
     from concert.services.keys import (
         ASSIGNMENT_CONCERT_REL_KEYS, ASSIGNMENT_PLAYER_REL_KEYS,
@@ -783,46 +785,75 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
     ext_rel = ctx["extract_relation_ids_any"]
     pm_map  = st.session_state.get("form_part_master_map") or {}
 
-    # LeaderはアサインConfirmフラグ確認
-    if role == ROLE_LEADER:
-        assign_confirmed = False
-        try:
-            hc_rows = ctx["query_all"](ctx["CONCERT_DB_HARMONIA_CONCERT"], None)
-            for r in hc_rows:
-                if concert_id in ext_rel(r, ["演奏会","FK演奏会","concert"]):
-                    assign_confirmed = ext(r, ["アサイン確定","assign_confirmed"]) == "True"
-                    break
-        except Exception:
-            pass
-        if not assign_confirmed:
-            st.info("アサインが確定されていません。確定後に閲覧できます。")
-            return
+    proposal_done = _get_proposal_flag(ctx, concert_id)
+    assign_confirmed = False
+    try:
+        hc_rows = ctx["query_all"](ctx["CONCERT_DB_HARMONIA_CONCERT"], None)
+        for r in hc_rows:
+            if concert_id in ext_rel(r, ["演奏会", "FK演奏会", "concert"]):
+                assign_confirmed = ext(r, ["アサイン確定", "assign_confirmed"]) == "True"
+                break
+    except Exception:
+        pass
 
-    # アサイン結果取得
+    if not (proposal_done or assign_confirmed):
+        st.info("アサイン案がまだ提示されていません。提示後に閲覧できます。")
+        return
+
     try:
         all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
     except Exception:
         st.error("アサイン結果の取得に失敗しました。")
         return
 
-    concert_assigns = [r for r in all_assign
-                       if concert_id in ext_rel(r, ASSIGNMENT_CONCERT_REL_KEYS)
-                       and ext(r, ASSIGNMENT_FLAG_KEYS) == "True"]
-
+    concert_assigns = [
+        r for r in all_assign
+        if concert_id in ext_rel(r, ASSIGNMENT_CONCERT_REL_KEYS)
+        and ext(r, ASSIGNMENT_FLAG_KEYS) == "True"
+    ]
     if not concert_assigns:
         st.info("アサイン結果がまだ登録されていません。")
         return
 
-    # 曲・パート定義・奏者名マップ
     all_players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
-    player_name_map = {p.get("id",""): ext(p, PLAYER_NAME_KEYS) or "" for p in all_players}
+    player_name_map = {p.get("id", ""): ext(p, PLAYER_NAME_KEYS) or "" for p in all_players}
     all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
     song_name_map = build_song_name_map(ctx, all_songs)
     all_pd = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
-    pd_name_map = {p.get("id",""): ext(p, PARTDEF_NAME_KEYS) or "" for p in all_pd}
-    # パート定義→PART_MASTERのIDマップ
-    pd_part_map = {p.get("id",""): (ext_rel(p, PARTDEF_PART_REL_KEYS) or [""])[0]
-                   for p in all_pd}
+    pd_name_map = {p.get("id", ""): ext(p, PARTDEF_NAME_KEYS) or "" for p in all_pd}
+    pd_part_map = {
+        p.get("id", ""): (ext_rel(p, PARTDEF_PART_REL_KEYS) or [""])[0]
+        for p in all_pd
+    }
+
+    available_pm_ids = []
+    seen_pm_ids = set()
+    for r in concert_assigns:
+        pd_ids = ext_rel(r, ASSIGNMENT_PARTDEF_REL_KEYS)
+        if not pd_ids:
+            continue
+        pm_id = pd_part_map.get(pd_ids[0], "")
+        if not pm_id or pm_id in seen_pm_ids:
+            continue
+        seen_pm_ids.add(pm_id)
+        available_pm_ids.append(pm_id)
+
+    if role >= ROLE_MANAGER:
+        part_options = {}
+        for pm_id in available_pm_ids:
+            pm_name = (pm_map.get(pm_id, {}) or {}).get("name") or pm_id
+            part_options[pm_name] = pm_id
+        if not part_options:
+            st.info("表示対象パートが見つかりません。")
+            return
+        selected_part_name = st.selectbox(
+            "表示するパート",
+            list(part_options.keys()),
+            key=f"assign_view_part_{concert_id}",
+        )
+        target_part_master_id = part_options.get(selected_part_name, "")
+    else:
+        target_part_master_id = my_part_master_id
 
     rows = []
     for r in concert_assigns:
@@ -831,23 +862,40 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         song_ids   = ext_rel(r, ASSIGNMENT_SONG_REL_KEYS)
         if not player_ids or not pd_ids:
             continue
-        pd_id  = pd_ids[0]
-        pm_id  = pd_part_map.get(pd_id, "")
-        # LeaderはPART_MASTER IDで自パートのみ絞る
-        if role == ROLE_LEADER and pm_id != my_part_master_id:
+        pd_id = pd_ids[0]
+        pm_id = pd_part_map.get(pd_id, "")
+        if target_part_master_id and pm_id != target_part_master_id:
             continue
-        pname  = player_name_map.get(player_ids[0], "—")
-        part   = pd_name_map.get(pd_id, "—")
-        song   = song_name_map.get(song_ids[0], "—") if song_ids else "—"
-        rows.append({"曲": song, "パート": part, "奏者": pname})
+        pname = player_name_map.get(player_ids[0], "—")
+        part  = pd_name_map.get(pd_id, "—")
+        song  = song_name_map.get(song_ids[0], "—") if song_ids else "—"
+        rows.append({
+            "曲": song,
+            "担当": part,
+            "奏者": pname,
+        })
 
     if not rows:
         st.info("表示できるアサイン結果がありません。")
         return
 
     import pandas as pd
-    df = pd.DataFrame(rows).sort_values(["曲","パート"])
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    detail_df = pd.DataFrame(rows).sort_values(["曲", "担当", "奏者"])
+    matrix_df = detail_df.pivot_table(
+        index="曲",
+        columns="担当",
+        values="奏者",
+        aggfunc=lambda vals: " / ".join(dict.fromkeys([str(v) for v in vals if str(v).strip()])),
+        fill_value="",
+    )
+    matrix_df = matrix_df.sort_index(axis=0).sort_index(axis=1)
+
+    st.caption("表示のみです。フォーム上からは変更できません。")
+    st.markdown("**担当マトリクス**")
+    st.dataframe(matrix_df, use_container_width=True)
+
+    with st.expander("詳細一覧", expanded=False):
+        st.dataframe(detail_df, use_container_width=True, hide_index=True)
 
 
 def _render_concert_selector(ctx):
@@ -1742,11 +1790,9 @@ def render_form(ctx, concert_id: str = ""):
                     for _lbl, _url in _score_links:
                         st.markdown(f"[📄 {_lbl}]({_url})")
 
-            # Manager専用メニュー
-            if user_role >= ROLE_MANAGER:
-                # アサイン閲覧
-                with st.expander("🎯 アサイン結果閲覧", expanded=False):
-                    _render_assignment_view(ctx, concert_id, my_part_master_id, user_role)
+            # アサイン閲覧（案提示中以降 / 全ロール共通）
+            with st.expander("🎯 現在のアサイン状況", expanded=False):
+                _render_assignment_view(ctx, concert_id, my_part_master_id, user_role)
 
             # ── 直近の練習情報（全ロール共通） ──────────────
             st.divider()
