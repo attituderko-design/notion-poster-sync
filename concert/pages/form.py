@@ -901,11 +901,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         song = song_name_map.get(song_ids[0], "—") if song_ids else "—"
         partdef_name = pd_name_map.get(pd_id, "—") or "—"
         display_part_name = pd_display_name_map.get(pd_id, "") or partdef_name
-        inst_name = inst_name_map.get(inst_ids[0], "") if inst_ids else ""
-        if inst_name and inst_name not in (display_part_name, partdef_name):
-            duty_label = f"{display_part_name} / {inst_name}"
-        else:
-            duty_label = display_part_name
+        duty_label = display_part_name
         part_name = pm_map.get(pm_id, {}).get("name", "") if pm_id else ""
         rows.append({
             "パート": part_name or "—",
@@ -947,6 +943,8 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
 
     st.caption("※ 表示のみです。フォーム上では変更できません。")
     _matrix_html = matrix_df.to_html(classes="assign-matrix", escape=False)
+    _matrix_html = _matrix_html.replace('<th></th>', '<th style="width:1%;"></th>', 1)
+    _matrix_html = _matrix_html.replace('<tr style="text-align: right;">\n      <th style="width:1%;"></th>\n    </tr>', '')
     st.markdown(
         """
         <style>
