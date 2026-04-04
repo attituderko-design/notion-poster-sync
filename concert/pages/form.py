@@ -1052,7 +1052,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
                 player_display_parts.update(assign_display_lookup.get((selected_part_id, sid, pid), set()))
                 player_display_parts.update(assign_display_lookup_by_song.get((sid, pid), set()))
             row[song_name_map.get(sid, "—")] = "○" if is_assigned else "—"
-        row["担当パート"] = " / ".join(sorted(player_display_parts)) if player_display_parts else selected_part_name
+        row["担当パート"] = " / ".join(sorted(player_display_parts)) if player_display_parts else "-"
         matrix_rows.append(row)
 
     import pandas as pd
