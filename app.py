@@ -6394,13 +6394,28 @@ def _get_line_group_rows_cached(_db_id: str) -> list[dict]:
     return query_notion_database_all(_db_id) or []
 
 
-def _get_line_group_rows() -> list[dict]:
+def _get_line_group_rows(force_refresh: bool = False) -> list[dict]:
     if not LINE_GROUP_DB_ID:
         return []
     try:
+        if force_refresh:
+            try:
+                _get_line_group_rows_cached.clear()
+            except Exception:
+                pass
+            return query_notion_database_all(LINE_GROUP_DB_ID) or []
         return _get_line_group_rows_cached(LINE_GROUP_DB_ID)
     except Exception:
         return []
+
+
+def _clear_line_destination_runtime_cache() -> None:
+    try:
+        _get_line_group_rows_cached.clear()
+    except Exception:
+        pass
+    for k in [k for k in st.session_state.keys() if str(k).startswith('line_disabled_editor_') or str(k).startswith('line_enabled_editor_') or str(k).startswith('line_performer_select_') or str(k).startswith('line_refresh_ts_')]:
+        st.session_state.pop(k, None)
 
 
 def _build_line_group_option_label(row: dict) -> str:
@@ -6723,7 +6738,16 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
             return False, "Cloud Run /push から応答がありませんでした。"
         return False, f"HTTP {res.status_code} / {((res.text or '')[:500])}"
 
-    line_rows = _get_line_group_rows()
+    _line_refresh_col1, _line_refresh_col2 = st.columns([1.0, 4.0])
+    with _line_refresh_col1:
+        force_line_refresh = st.button("🔄 最新化", key=f"line_dest_refresh_{selected_concert_id}", use_container_width=True)
+    with _line_refresh_col2:
+        st.caption("必要に応じて LINE送信先DB を再取得します。通常は他画面と同様にキャッシュを使います。")
+
+    if force_line_refresh:
+        _clear_line_destination_runtime_cache()
+
+    line_rows = _get_line_group_rows(force_refresh=force_line_refresh)
     if not line_rows:
         st.caption("LINE送信先DB にレコードがまだありません。")
         return
@@ -6760,7 +6784,24 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
             })
         return pd.DataFrame(table_rows)
 
-    performer_rows = query_notion_database_all(NOTION_PERFORMER_DB_ID) if NOTION_PERFORMER_DB_ID else []
+    def _extract_cast_performer_relation_ids(row: dict) -> list[str]:
+        return _extract_relation_ids_exact(row, "出演者")
+
+    cast_rows = query_notion_database_all(NOTION_PERFORMANCE_CAST_DB_ID) if NOTION_PERFORMANCE_CAST_DB_ID else []
+    concert_cast_rows = [
+        r for r in cast_rows
+        if selected_concert_id and selected_concert_id in _extract_relation_ids_exact(r, "出演")
+    ]
+    cast_performer_ids = []
+    _seen_cast_performer_ids = set()
+    for crow in concert_cast_rows:
+        for pid in _extract_cast_performer_relation_ids(crow):
+            if pid and pid not in _seen_cast_performer_ids:
+                _seen_cast_performer_ids.add(pid)
+                cast_performer_ids.append(pid)
+
+    performer_rows_all = query_notion_database_all(NOTION_PERFORMER_DB_ID) if NOTION_PERFORMER_DB_ID else []
+    performer_rows = [r for r in performer_rows_all if r.get("id", "") in _seen_cast_performer_ids]
     performer_map = {r.get("id", ""): _performer_row_title(r) for r in performer_rows if r.get("id")}
 
     left_col, center_col, right_col = st.columns([1.0, 0.22, 1.0])
@@ -6837,11 +6878,7 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                     st.error(f"HARMONIA_CONCERT 側の同期に失敗しました。{msg_sync}")
                 else:
                     st.success(f"✅ {len(left_selected_ids)}件を送信対象に追加しました。")
-                    try:
-                        _get_line_group_rows_cached.clear()
-                    except Exception:
-                        pass
-                    st.cache_data.clear()
+                    _clear_line_destination_runtime_cache()
                     st.rerun()
 
         if st.button("←", key=f"line_disable_btn_{selected_concert_id}", use_container_width=True):
@@ -6867,11 +6904,7 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                     st.error(f"HARMONIA_CONCERT 側の同期に失敗しました。{msg_sync}")
                 else:
                     st.success(f"✅ {len(right_selected_ids)}件を送信対象から外しました。")
-                    try:
-                        _get_line_group_rows_cached.clear()
-                    except Exception:
-                        pass
-                    st.cache_data.clear()
+                    _clear_line_destination_runtime_cache()
                     st.rerun()
     
     with st.expander("LINEユーザとPERFORMERの紐づけ", expanded=False):
@@ -6881,7 +6914,7 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
         if not unresolved_user_rows:
             st.caption("PERFORMER 未紐づけの認証済み LINE user はありません。")
         elif not performer_rows:
-            st.caption("PERFORMER マスタが取得できないため、紐づけできません。")
+            st.caption("この演奏会の CONCERT_CAST に紐づく PERFORMER が取得できないため、紐づけできません。")
         else:
             performer_options = {"（未選択）": ""}
             for prow in performer_rows:
@@ -6921,11 +6954,7 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                             ok_perf, msg_perf = _patch_performer_user_relation(performer_id, line_row_id)
                             if ok_perf:
                                 st.success(f"✅ {row_name} を PERFORMER に紐づけました。")
-                                try:
-                                    _get_line_group_rows_cached.clear()
-                                except Exception:
-                                    pass
-                                st.cache_data.clear()
+                                _clear_line_destination_runtime_cache()
                                 st.rerun()
                             else:
                                 st.error(f"❌ PERFORMER 側の userId リレーション更新に失敗しました。{msg_perf}")
@@ -10163,6 +10192,7 @@ if system_mode == "HARMONIA":
                 ("CONCERT_DB_CONCERT_INSTRUMENT", None),
                 ("CONCERT_DB_PREFERENCE",         None),
                 ("CONCERT_DB_PLAYER_INSTRUMENT",  None),
+                ("LINE_GROUP_DB_ID",              None),
             ]
             _preload_total = len(_preload_dbs)
             _progress = st.progress(0, text="🎵 演奏会データを収集中...")
