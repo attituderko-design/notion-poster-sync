@@ -26,6 +26,7 @@ from concert.services.keys import (
     PI_PARTICIPANT_REL_KEYS, PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
     PREFERENCE_KEY_KEYS, PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     CONCERT_CONFIRMED_FEE_KEYS,
+    HARMONIA_CONCERT_PLAN_KEYS, HARMONIA_CONCERT_ASSIGN_KEYS,
 )
 from concert.services.relation_utils import find_relation_prop
 from concert.services.song_utils import get_song_display_name, build_song_name_map
@@ -166,19 +167,17 @@ def _save_password_hash(ctx: dict, player_id: str, password: str) -> bool:
     return res is not None and res.status_code == 200
 
 def _get_proposal_flag(ctx: dict, concert_id: str) -> bool:
-    """HARMONIA_CONCERTの「案提示」フラグを取得する。
-    formアプリは別プロセスのためキャッシュを使わずAPIを直接叩く。
+    """HARMONIA_CONCERTの表示解禁フラグを取得する。
+    「案提示」または「アサイン確定」のいずれかが真なら表示可。
     """
+    def _is_true(v: str) -> bool:
+        return (v or "").strip().lower() in ("true", "1", "yes", "y", "on")
+
     try:
         hc_db = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
         if not hc_db:
             return False
-        # キャッシュを使わず直接APIで取得
-        url = f"https://api.notion.com/v1/databases/{hc_db}/query"
-        res = ctx["api_request"]("post", url, json={"page_size": 100})
-        if not res or res.status_code != 200:
-            return False
-        hc_rows = res.json().get("results", [])
+        hc_rows = ctx["query_all"](hc_db, None)
         hc_row = next(
             (r for r in hc_rows
              if concert_id in ctx["extract_relation_ids_any"](r, ["演奏会", "FK演奏会", "concert"])),
@@ -186,7 +185,9 @@ def _get_proposal_flag(ctx: dict, concert_id: str) -> bool:
         )
         if not hc_row:
             return False
-        return ctx["extract_prop_text_any"](hc_row, ["案提示", "proposal_presented"]) == "True"
+        proposal_val = ctx["extract_prop_text_any"](hc_row, HARMONIA_CONCERT_PLAN_KEYS)
+        assign_val   = ctx["extract_prop_text_any"](hc_row, HARMONIA_CONCERT_ASSIGN_KEYS)
+        return _is_true(proposal_val) or _is_true(assign_val)
     except Exception:
         return False
 
