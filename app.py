@@ -6,6 +6,7 @@ import requests
 import time
 import random
 import streamlit as st
+import pandas as pd
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
@@ -6461,16 +6462,16 @@ def _patch_line_group_concert_relation(line_group_row_id: str, concert_ids: list
 
 
 def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest: dict | None):
-    """🏠ホーム画面下部のLINEグループ紐付け + テキスト送信 + 練習情報PDF送信UI。"""
+    """🏠ホーム画面下部のLINE送信先管理 + テキスト送信 + 練習情報PDF送信 + PERFORMER紐づけUI。"""
     st.divider()
-    st.markdown("### 💬 LINEグループ連携")
+    st.markdown("### 💬 LINE送信先管理")
 
     if not LINE_GROUP_DB_ID:
-        st.info("LINE_GROUP_DB_ID が未設定のため、LINEグループ一覧を表示できません。")
+        st.info("LINE_GROUP_DB_ID が未設定のため、LINE送信先一覧を表示できません。")
         return
 
     if not hc_row_latest:
-        st.info("HARMONIA_CONCERT 行が見つからないため、LINEグループ連携を表示できません。")
+        st.info("HARMONIA_CONCERT 行が見つからないため、LINE送信先管理を表示できません。")
         return
 
     line_push_api_url = (st.secrets.get("LINE_PUSH_API_URL", "") or "").strip()
@@ -6485,31 +6486,113 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
         except Exception:
             return None
 
-    def _line_extract_practice_name(ctx: dict, practice_row: dict) -> str:
-        return (
+    def _extract_checkbox_prop(row: dict, prop_name: str, default: bool = False) -> bool:
+        props = (row or {}).get("properties", {}) or {}
+        meta = props.get(prop_name) or {}
+        ptype = meta.get("type")
+        if ptype == "checkbox":
+            return bool(meta.get("checkbox"))
+        if ptype == "formula":
+            f = meta.get("formula") or {}
+            if f.get("type") == "boolean":
+                return bool(f.get("boolean"))
+            if f.get("type") == "string":
+                raw = str(f.get("string") or "").strip().lower()
+                return raw in ("true", "1", "yes", "on", "チェック済み")
+        raw = str(_extract_line_group_text(row, [prop_name]) or "").strip().lower()
+        if raw in ("true", "1", "yes", "on", "チェック済み"):
+            return True
+        if raw in ("false", "0", "no", "off"):
+            return False
+        return default
+
+    def _extract_relation_ids_exact(row: dict, prop_name: str) -> list[str]:
+        props = (row or {}).get("properties", {}) or {}
+        rels = ((props.get(prop_name) or {}).get("relation") or [])
+        return [r.get("id") for r in rels if r.get("id")]
+
+    def _extract_first_relation_id(row: dict, prop_name: str) -> str:
+        ids = _extract_relation_ids_exact(row, prop_name)
+        return ids[0] if ids else ""
+
+    def _extract_source_type(row: dict) -> str:
+        return (_extract_line_group_text(row, ["sourceType", "source_type"]) or "").strip().lower()
+
+    def _extract_destination_id(row: dict) -> str:
+        return _extract_line_group_text(
+            row,
+            ["destinationId", "DestinationId", "groupId", "GroupId", "LINE Destination ID", "LINE Group ID"]
+        )
+
+    def _extract_display_name(row: dict) -> str:
+        return _extract_line_group_title(row) or "（名称未設定）"
+
+    def _extract_performer_relation_id(row: dict) -> str:
+        return _extract_first_relation_id(row, "PERFORMER")
+
+    def _performer_row_title(row: dict) -> str:
+        props = (row or {}).get("properties", {}) or {}
+        for _, meta in props.items():
+            if isinstance(meta, dict) and meta.get("type") == "title":
+                txt = plain_text_join(meta.get("title", []))
+                if txt.strip():
+                    return txt.strip()
+        for name in ["氏名", "名前", "表示名", "Title", "title", "name"]:
+            meta = props.get(name) or {}
+            ptype = meta.get("type")
+            if ptype == "title":
+                txt = plain_text_join(meta.get("title", []))
+                if txt.strip():
+                    return txt.strip()
+            elif ptype == "rich_text":
+                txt = plain_text_join(meta.get("rich_text", []))
+                if txt.strip():
+                    return txt.strip()
+        return row.get("id", "")
+
+    def _patch_line_destination_properties(row_id: str, patch_properties: dict) -> tuple[bool, str]:
+        if not row_id:
+            return False, "LINE送信先の行IDが取得できませんでした。"
+        res = api_request(
+            "patch",
+            f"https://api.notion.com/v1/pages/{row_id}",
+            headers=NOTION_HEADERS,
+            json={"properties": patch_properties},
+        )
+        if res is not None and res.status_code == 200:
+            return True, ""
+        if res is None:
+            return False, "Notion API の応答がありませんでした。"
+        return False, f"HTTP {res.status_code}"
+
+    def _patch_line_enabled(row_id: str, enabled: bool) -> tuple[bool, str]:
+        return _patch_line_destination_properties(row_id, {"line_enabled": {"checkbox": bool(enabled)}})
+
+    def _patch_line_destination_concert_relation(line_row: dict, new_concert_ids: list[str]) -> tuple[bool, str]:
+        return _patch_line_destination_properties(
+            line_row.get("id", ""),
+            {"concert": {"relation": [{"id": rid} for rid in new_concert_ids if rid]}}
+        )
+
+    def _patch_line_destination_performer(line_row_id: str, performer_id: str) -> tuple[bool, str]:
+        relation_payload = [{"id": performer_id}] if performer_id else []
+        return _patch_line_destination_properties(
+            line_row_id,
+            {"PERFORMER": {"relation": relation_payload}}
+        )
+
+    def _sync_hc_line_relation_from_enabled_rows(enabled_concert_rows: list[dict]) -> tuple[bool, str]:
+        target_ids = [r.get("id", "") for r in enabled_concert_rows if r.get("id")]
+        return _patch_harmonia_concert_line_groups(hc_row_latest.get("id", ""), target_ids)
+
+    def _build_practice_pdf_message(ctx: dict, concert_id: str, practice_row: dict) -> str:
+        practice_name = (
             ctx["extract_prop_text_any"](practice_row, ["名称", "練習名", "タイトル", "PK名称"])
             or ctx["extract_title"](practice_row)
             or "練習"
         )
-
-    def _line_extract_practice_date(ctx: dict, practice_row: dict) -> date | None:
-        raw = ctx["extract_prop_text_any"](practice_row, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""
-        return _line_safe_parse_date(raw)
-
-    def _line_is_concert_day_practice(ctx: dict, practice_row: dict) -> bool:
-        name = _line_extract_practice_name(ctx, practice_row).strip()
-        if name == "本番当日":
-            return True
-
-        raw = (
-            ctx["extract_prop_text_any"](practice_row, ["演奏会当日", "本番当日", "本番日", "concert_day"])
-            or ""
-        ).strip().lower()
-        return raw in ("true", "1", "yes", "on", "チェック済み")
-
-    def _build_practice_pdf_message(ctx: dict, concert_id: str, practice_row: dict) -> str:
-        practice_name = _line_extract_practice_name(ctx, practice_row)
-        selected_practice_date = _line_extract_practice_date(ctx, practice_row)
+        raw_selected_practice_date = ctx["extract_prop_text_any"](practice_row, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""
+        selected_practice_date = _line_safe_parse_date(raw_selected_practice_date)
 
         concert_name_local = (
             ctx.get("SELECTED_CONCERT_NAME", "")
@@ -6522,10 +6605,28 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
         except Exception:
             practices = []
 
+        def _practice_name_local(row: dict) -> str:
+            return (
+                ctx["extract_prop_text_any"](row, ["名称", "練習名", "タイトル", "PK名称"])
+                or ctx["extract_title"](row)
+                or "練習"
+            )
+
+        def _practice_date_local(row: dict) -> date | None:
+            raw = ctx["extract_prop_text_any"](row, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""
+            return _line_safe_parse_date(raw)
+
+        def _is_concert_day_local(row: dict) -> bool:
+            nm = _practice_name_local(row).strip()
+            if nm == "本番当日":
+                return True
+            raw = (ctx["extract_prop_text_any"](row, ["演奏会当日", "本番当日", "本番日", "concert_day"]) or "").strip().lower()
+            return raw in ("true", "1", "yes", "on", "チェック済み")
+
         concert_day_date = None
         for row in practices:
-            if _line_is_concert_day_practice(ctx, row):
-                d = _line_extract_practice_date(ctx, row)
+            if _is_concert_day_local(row):
+                d = _practice_date_local(row)
                 if d:
                     concert_day_date = d
                     break
@@ -6550,9 +6651,9 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
         remaining_count = 0
         if selected_practice_date is not None:
             for row in practices:
-                if _line_is_concert_day_practice(ctx, row):
+                if _is_concert_day_local(row):
                     continue
-                d = _line_extract_practice_date(ctx, row)
+                d = _practice_date_local(row)
                 if d is not None and d >= selected_practice_date:
                     remaining_count += 1
         else:
@@ -6565,43 +6666,17 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
             f"- ArtéMis HARMONIA"
         )
 
-    def _patch_line_group_concert_relation(line_group_row_id: str, concert_relation_ids: list[str]) -> tuple[bool, str]:
-        if not line_group_row_id:
-            return False, "LINE_GROUP_ID の行IDが取得できませんでした。"
-
-        res = api_request(
-            "patch",
-            f"https://api.notion.com/v1/pages/{line_group_row_id}",
-            headers=NOTION_HEADERS,
-            json={
-                "properties": {
-                    "concert": {
-                        "relation": [{"id": rid} for rid in concert_relation_ids if rid]
-                    }
-                }
-            },
-        )
-        if res is not None and res.status_code == 200:
-            return True, ""
-        if res is None:
-            return False, "Notion API の応答がありませんでした。"
-        return False, f"HTTP {res.status_code}"
-
-    def _post_line_push(group_id: str, message: str) -> tuple[bool, str]:
+    def _post_line_push(destination_id: str, message: str) -> tuple[bool, str]:
         if not line_push_api_url:
             return False, "LINE_PUSH_API_URL が未設定です。"
         if not harmonia_push_api_key:
             return False, "HARMONIA_PUSH_API_KEY が未設定です。"
-        if not group_id:
-            return False, "groupId が空です。"
+        if not destination_id:
+            return False, "destinationId が空です。"
         if not message.strip():
             return False, "message が空です。"
 
-        payload = {
-            "groupId": group_id,
-            "message": message,
-        }
-
+        payload = {"groupId": destination_id, "message": message}
         try:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         except Exception as e:
@@ -6624,56 +6699,251 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
 
     line_rows = _get_line_group_rows()
     if not line_rows:
-        st.caption("LINE_GROUP_ID DB にグループがまだありません。")
+        st.caption("LINE送信先DB にレコードがまだありません。")
         return
 
     hc_row_id = hc_row_latest.get("id", "")
-    linked_ids = _extract_line_group_relation_ids(hc_row_latest, "LINE_GROUP_ID")
-    linked_set = set(linked_ids)
+    concert_related_rows = [
+        r for r in line_rows
+        if hc_row_id in _extract_relation_ids_exact(r, "concert")
+    ]
+    enabled_rows = [r for r in concert_related_rows if _extract_checkbox_prop(r, "line_enabled", False)]
+    disabled_rows = [r for r in concert_related_rows if not _extract_checkbox_prop(r, "line_enabled", False)]
+    unassigned_rows = [
+        r for r in line_rows
+        if hc_row_id not in _extract_relation_ids_exact(r, "concert")
+    ]
 
-    linked_rows = [r for r in line_rows if r.get("id") in linked_set]
-    unlinked_rows = [r for r in line_rows if r.get("id") not in linked_set]
+    st.markdown("#### 送信対象の設定")
+    st.caption("左: 演奏会に紐づいているが未送信対象 / 右: 演奏会に紐づいていて送信対象")
 
-    with st.expander("現在この演奏会に紐づいているLINEグループ", expanded=True):
-        if linked_rows:
-            for idx, row in enumerate(linked_rows, start=1):
-                title = _extract_line_group_title(row) or "（名称未設定）"
-                gid = _extract_line_group_text(row, ["groupId", "GroupId", "LINE Group ID"])
-                if gid:
-                    st.markdown(f"{idx}. **{title}**  \n`{gid}`")
+    def _rows_to_df(rows: list[dict]) -> pd.DataFrame:
+        table_rows = []
+        for row in rows:
+            performer_id = _extract_performer_relation_id(row)
+            performer_name = ""
+            if performer_id:
+                performer_name = performer_map.get(performer_id, "")
+            table_rows.append({
+                "選択": False,
+                "種別": _extract_source_type(row) or "unknown",
+                "表示名": _extract_display_name(row),
+                "destinationId": _extract_destination_id(row),
+                "PERFORMER": performer_name,
+                "_row_id": row.get("id", ""),
+            })
+        return pd.DataFrame(table_rows)
+
+    performer_rows = query_notion_database_all(NOTION_PERFORMER_MASTER_DB_ID) if NOTION_PERFORMER_MASTER_DB_ID else []
+    performer_map = {r.get("id", ""): _performer_row_title(r) for r in performer_rows if r.get("id")}
+
+    left_col, center_col, right_col = st.columns([1.0, 0.22, 1.0])
+
+    with left_col:
+        st.markdown("**未送信対象**")
+        left_df = _rows_to_df(disabled_rows)
+        left_edited = st.data_editor(
+            left_df,
+            key=f"line_disabled_editor_{selected_concert_id}",
+            hide_index=True,
+            use_container_width=True,
+            disabled=["種別", "表示名", "destinationId", "PERFORMER", "_row_id"],
+            column_config={
+                "_row_id": None,
+                "選択": st.column_config.CheckboxColumn("選択"),
+                "種別": st.column_config.TextColumn("種別"),
+                "表示名": st.column_config.TextColumn("表示名"),
+                "destinationId": st.column_config.TextColumn("destinationId"),
+                "PERFORMER": st.column_config.TextColumn("PERFORMER"),
+            },
+        )
+
+    with right_col:
+        st.markdown("**送信対象**")
+        right_df = _rows_to_df(enabled_rows)
+        right_edited = st.data_editor(
+            right_df,
+            key=f"line_enabled_editor_{selected_concert_id}",
+            hide_index=True,
+            use_container_width=True,
+            disabled=["種別", "表示名", "destinationId", "PERFORMER", "_row_id"],
+            column_config={
+                "_row_id": None,
+                "選択": st.column_config.CheckboxColumn("選択"),
+                "種別": st.column_config.TextColumn("種別"),
+                "表示名": st.column_config.TextColumn("表示名"),
+                "destinationId": st.column_config.TextColumn("destinationId"),
+                "PERFORMER": st.column_config.TextColumn("PERFORMER"),
+            },
+        )
+
+    left_selected_ids = []
+    if isinstance(left_edited, pd.DataFrame) and not left_edited.empty:
+        left_selected_ids = left_edited.loc[left_edited["選択"] == True, "_row_id"].tolist()
+
+    right_selected_ids = []
+    if isinstance(right_edited, pd.DataFrame) and not right_edited.empty:
+        right_selected_ids = right_edited.loc[right_edited["選択"] == True, "_row_id"].tolist()
+
+    with center_col:
+        st.write("")
+        st.write("")
+        if st.button("→", key=f"line_enable_btn_{selected_concert_id}", use_container_width=True):
+            if not left_selected_ids:
+                st.warning("未送信対象側で追加したい送信先を選択してください。")
+            else:
+                failed = []
+                for row_id in left_selected_ids:
+                    ok, msg = _patch_line_enabled(row_id, True)
+                    if not ok:
+                        failed.append(f"{row_id}: {msg}")
+
+                refreshed_rows = _get_line_group_rows()
+                refreshed_concert_rows = [r for r in refreshed_rows if hc_row_id in _extract_relation_ids_exact(r, "concert")]
+                refreshed_enabled_rows = [r for r in refreshed_concert_rows if _extract_checkbox_prop(r, "line_enabled", False)]
+                ok_sync, msg_sync = _sync_hc_line_relation_from_enabled_rows(refreshed_enabled_rows)
+
+                if failed:
+                    st.error("一部の送信先を送信対象にできませんでした。")
+                    for msg in failed:
+                        st.error(msg)
+                elif not ok_sync:
+                    st.error(f"HARMONIA_CONCERT 側の同期に失敗しました。{msg_sync}")
                 else:
-                    st.markdown(f"{idx}. **{title}**")
-        else:
-            st.caption("まだ紐づいているグループはありません。")
+                    st.success(f"✅ {len(left_selected_ids)}件を送信対象に追加しました。")
+                    try:
+                        _get_line_group_rows_cached.clear()
+                    except Exception:
+                        pass
+                    st.cache_data.clear()
+                    st.rerun()
 
-    with st.expander("未連携のLINEグループを追加", expanded=True):
-        if not unlinked_rows:
-            st.caption("未連携のLINEグループはありません。")
+        if st.button("←", key=f"line_disable_btn_{selected_concert_id}", use_container_width=True):
+            if not right_selected_ids:
+                st.warning("送信対象側で外したい送信先を選択してください。")
+            else:
+                failed = []
+                for row_id in right_selected_ids:
+                    ok, msg = _patch_line_enabled(row_id, False)
+                    if not ok:
+                        failed.append(f"{row_id}: {msg}")
+
+                refreshed_rows = _get_line_group_rows()
+                refreshed_concert_rows = [r for r in refreshed_rows if hc_row_id in _extract_relation_ids_exact(r, "concert")]
+                refreshed_enabled_rows = [r for r in refreshed_concert_rows if _extract_checkbox_prop(r, "line_enabled", False)]
+                ok_sync, msg_sync = _sync_hc_line_relation_from_enabled_rows(refreshed_enabled_rows)
+
+                if failed:
+                    st.error("一部の送信先を送信対象から外せませんでした。")
+                    for msg in failed:
+                        st.error(msg)
+                elif not ok_sync:
+                    st.error(f"HARMONIA_CONCERT 側の同期に失敗しました。{msg_sync}")
+                else:
+                    st.success(f"✅ {len(right_selected_ids)}件を送信対象から外しました。")
+                    try:
+                        _get_line_group_rows_cached.clear()
+                    except Exception:
+                        pass
+                    st.cache_data.clear()
+                    st.rerun()
+
+    with st.expander("この演奏会に未紐づけのLINE送信先を追加", expanded=False):
+        if not unassigned_rows:
+            st.caption("この演奏会に未紐づけの送信先はありません。")
         else:
-            options = {_build_line_group_option_label(r): r for r in unlinked_rows}
-            selected_label = st.selectbox(
-                "追加するLINEグループ",
-                options=list(options.keys()),
-                key=f"line_group_select_{selected_concert_id}",
+            unassigned_options = {
+                f"{_extract_display_name(r)} / {_extract_source_type(r) or 'unknown'} / {_extract_destination_id(r)}": r
+                for r in unassigned_rows
+            }
+            picked_label = st.selectbox(
+                "追加する送信先",
+                options=list(unassigned_options.keys()),
+                key=f"line_unassigned_select_{selected_concert_id}",
             )
-            selected_row = options.get(selected_label)
+            picked_row = unassigned_options.get(picked_label)
 
-            if st.button("➕ この演奏会に紐づける", key=f"line_group_add_btn_{selected_concert_id}", use_container_width=True):
-                if not selected_row:
-                    st.warning("LINEグループを選択してください。")
+            c1, c2 = st.columns(2)
+            enable_on_add = c1.checkbox(
+                "追加と同時に送信対象にする",
+                value=True,
+                key=f"line_enable_on_add_{selected_concert_id}",
+            )
+
+            if c2.button("➕ この演奏会に追加", key=f"line_assign_to_concert_{selected_concert_id}", use_container_width=True):
+                if not picked_row:
+                    st.warning("追加する送信先を選択してください。")
                 else:
-                    target_id = selected_row.get("id", "")
+                    current_concert_ids = _extract_relation_ids_exact(picked_row, "concert")
+                    new_concert_ids = list(dict.fromkeys([*current_concert_ids, hc_row_id]))
 
-                    new_ids_h = list(dict.fromkeys([*(linked_ids or []), target_id]))
-                    ok_h, msg_h = _patch_harmonia_concert_line_groups(hc_row_id, new_ids_h)
-                    if not ok_h:
-                        st.error(f"❌ HARMONIA_CONCERT 側の紐づけに失敗しました。{msg_h}")
+                    ok_rel, msg_rel = _patch_line_destination_concert_relation(picked_row, new_concert_ids)
+                    if not ok_rel:
+                        st.error(f"❌ 演奏会への紐づけに失敗しました。{msg_rel}")
                     else:
-                        line_group_concert_ids = _extract_line_group_relation_ids(selected_row, "concert")
-                        new_ids_l = list(dict.fromkeys([*(line_group_concert_ids or []), hc_row_id]))
-                        ok_l, msg_l = _patch_line_group_concert_relation(target_id, new_ids_l)
-                        if ok_l:
-                            st.success("✅ LINEグループを演奏会に紐づけました。")
+                        if enable_on_add:
+                            ok_en, msg_en = _patch_line_enabled(picked_row.get("id", ""), True)
+                            if not ok_en:
+                                st.error(f"❌ line_enabled 更新に失敗しました。{msg_en}")
+                                return
+
+                        refreshed_rows = _get_line_group_rows()
+                        refreshed_concert_rows = [r for r in refreshed_rows if hc_row_id in _extract_relation_ids_exact(r, "concert")]
+                        refreshed_enabled_rows = [r for r in refreshed_concert_rows if _extract_checkbox_prop(r, "line_enabled", False)]
+                        ok_sync, msg_sync = _sync_hc_line_relation_from_enabled_rows(refreshed_enabled_rows)
+
+                        if not ok_sync:
+                            st.error(f"❌ HARMONIA_CONCERT 側の同期に失敗しました。{msg_sync}")
+                        else:
+                            st.success("✅ 送信先をこの演奏会へ追加しました。")
+                            try:
+                                _get_line_group_rows_cached.clear()
+                            except Exception:
+                                pass
+                            st.cache_data.clear()
+                            st.rerun()
+
+    with st.expander("LINEユーザとPERFORMERの紐づけ", expanded=False):
+        user_rows = [r for r in concert_related_rows if _extract_source_type(r) == "user"]
+        unresolved_user_rows = [r for r in user_rows if not _extract_performer_relation_id(r)]
+
+        if not unresolved_user_rows:
+            st.caption("PERFORMER 未紐づけの認証済み LINE user はありません。")
+        elif not performer_rows:
+            st.caption("PERFORMER マスタが取得できないため、紐づけできません。")
+        else:
+            performer_options = {"（未選択）": ""}
+            for prow in performer_rows:
+                pid = prow.get("id", "")
+                performer_options[_performer_row_title(prow)] = pid
+
+            for idx, row in enumerate(unresolved_user_rows, start=1):
+                row_name = _extract_display_name(row)
+                row_dest = _extract_destination_id(row)
+                row_enabled = "有効" if _extract_checkbox_prop(row, "line_enabled", False) else "無効"
+
+                c1, c2, c3, c4 = st.columns([1.4, 1.4, 1.8, 0.8])
+                c1.markdown(f"**{idx}. {row_name}**")
+                c2.caption(f"{row_dest}")
+                c3.caption(f"送信対象: {row_enabled}")
+
+                selected_performer_label = c4.selectbox(
+                    "PERFORMER",
+                    options=list(performer_options.keys()),
+                    key=f"line_performer_select_{selected_concert_id}_{row.get('id','')}",
+                    label_visibility="collapsed",
+                )
+
+                c5, c6 = st.columns([4.0, 1.0])
+                c5.caption("この LINE user を PERFORMER に紐づけます。")
+                if c6.button("保存", key=f"line_performer_save_{selected_concert_id}_{row.get('id','')}", use_container_width=True):
+                    performer_id = performer_options.get(selected_performer_label, "")
+                    if not performer_id:
+                        st.warning("紐づける PERFORMER を選択してください。")
+                    else:
+                        ok_perf, msg_perf = _patch_line_destination_performer(row.get("id", ""), performer_id)
+                        if ok_perf:
+                            st.success(f"✅ {row_name} を PERFORMER に紐づけました。")
                             try:
                                 _get_line_group_rows_cached.clear()
                             except Exception:
@@ -6681,52 +6951,20 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                             st.cache_data.clear()
                             st.rerun()
                         else:
-                            st.error(f"❌ LINE_GROUP_ID 側の concert 更新に失敗しました。{msg_l}")
+                            st.error(f"❌ PERFORMER 紐づけに失敗しました。{msg_perf}")
 
-    with st.expander("紐づけ済みグループを解除", expanded=False):
-        if not linked_rows:
-            st.caption("解除対象のグループはありません。")
-        else:
-            linked_options = {_build_line_group_option_label(r): r for r in linked_rows}
-            remove_label = st.selectbox(
-                "解除するLINEグループ",
-                options=list(linked_options.keys()),
-                key=f"line_group_remove_select_{selected_concert_id}",
-            )
-            remove_row = linked_options.get(remove_label)
-
-            if st.button("🗑 この演奏会から解除", key=f"line_group_remove_btn_{selected_concert_id}", use_container_width=True):
-                if not remove_row:
-                    st.warning("解除するLINEグループを選択してください。")
-                else:
-                    remove_id = remove_row.get("id", "")
-
-                    new_ids_h = [rid for rid in linked_ids if rid != remove_id]
-                    ok_h, msg_h = _patch_harmonia_concert_line_groups(hc_row_id, new_ids_h)
-                    if not ok_h:
-                        st.error(f"❌ HARMONIA_CONCERT 側の解除に失敗しました。{msg_h}")
-                    else:
-                        line_group_concert_ids = _extract_line_group_relation_ids(remove_row, "concert")
-                        new_ids_l = [rid for rid in line_group_concert_ids if rid != hc_row_id]
-                        ok_l, msg_l = _patch_line_group_concert_relation(remove_id, new_ids_l)
-                        if ok_l:
-                            st.success("✅ LINEグループの紐づけを解除しました。")
-                            try:
-                                _get_line_group_rows_cached.clear()
-                            except Exception:
-                                pass
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error(f"❌ LINE_GROUP_ID 側の concert 解除に失敗しました。{msg_l}")
+    send_target_rows = [r for r in concert_related_rows if _extract_checkbox_prop(r, "line_enabled", False)]
 
     with st.expander("✉️ テキストをテスト送信", expanded=False):
-        if not linked_rows:
-            st.caption("先にLINEグループを紐づけてください。")
+        if not send_target_rows:
+            st.caption("この演奏会の送信対象がありません。")
         else:
-            send_options = {_build_line_group_option_label(r): r for r in linked_rows}
+            send_options = {
+                f"{_extract_display_name(r)} / {_extract_source_type(r) or 'unknown'} / {_extract_destination_id(r)}": r
+                for r in send_target_rows
+            }
             send_label = st.selectbox(
-                "送信先グループ",
+                "送信先",
                 options=list(send_options.keys()),
                 key=f"line_group_send_select_{selected_concert_id}",
             )
@@ -6740,18 +6978,18 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
 
             if st.button("📨 テキスト送信", key=f"line_group_send_btn_{selected_concert_id}", use_container_width=True):
                 if not send_row:
-                    st.warning("送信先グループを選択してください。")
+                    st.warning("送信先を選択してください。")
                 else:
-                    target_group_id = _extract_line_group_text(send_row, ["groupId", "GroupId", "LINE Group ID"])
-                    ok_send, msg_send = _post_line_push(target_group_id, send_message)
+                    target_destination_id = _extract_destination_id(send_row)
+                    ok_send, msg_send = _post_line_push(target_destination_id, send_message)
                     if ok_send:
                         st.success("✅ テキスト送信が完了しました。")
                     else:
                         st.error(f"❌ テスト送信に失敗しました。{msg_send}")
 
     with st.expander("📄 練習情報PDFを送信", expanded=False):
-        if not linked_rows:
-            st.caption("先にLINEグループを紐づけてください。")
+        if not send_target_rows:
+            st.caption("この演奏会の送信対象がありません。")
         else:
             try:
                 practices = concert_mgmt._load_practices(concert_ctx, selected_concert_id) if selected_concert_id else []
@@ -6765,14 +7003,11 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                 def _practice_sort_key_for_line(row: dict):
                     p_name = concert_ctx["extract_prop_text_any"](row, ["名称", "練習名", "タイトル", "PK名称"]) or concert_ctx["extract_title"](row) or ""
                     p_name = p_name.strip()
-
                     if p_name == "本番当日":
                         return (999999, p_name)
-
                     m = re.search(r"第\s*(\d+)\s*回", p_name)
                     if m:
                         return (int(m.group(1)), p_name)
-
                     p_date_raw = concert_ctx["extract_prop_text_any"](row, ["日時", "日付", "出演日", "体験日", "リリース日"]) or ""
                     p_date = p_date_raw[:10] if p_date_raw else "9999-99-99"
                     return (999998, f"{p_date}_{p_name}")
@@ -6787,22 +7022,25 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                     practice_options[p_label] = p
 
                 bulk_send = st.checkbox(
-                    "この演奏会に紐づく全LINEグループへ一斉送信する",
+                    "この演奏会の送信対象すべてへ一斉送信する",
                     value=False,
                     key=f"practice_pdf_bulk_send_{selected_concert_id}",
                 )
 
                 pdf_send_row = None
                 if not bulk_send:
-                    pdf_send_options = {_build_line_group_option_label(r): r for r in linked_rows}
+                    pdf_send_options = {
+                        f"{_extract_display_name(r)} / {_extract_source_type(r) or 'unknown'} / {_extract_destination_id(r)}": r
+                        for r in send_target_rows
+                    }
                     pdf_send_label = st.selectbox(
-                        "送信先グループ",
+                        "送信先",
                         options=list(pdf_send_options.keys()),
                         key=f"practice_pdf_group_select_{selected_concert_id}",
                     )
                     pdf_send_row = pdf_send_options.get(pdf_send_label)
                 else:
-                    st.caption(f"送信対象: {len(linked_rows)} グループ")
+                    st.caption(f"送信対象: {len(send_target_rows)} 件")
 
                 practice_label = st.selectbox(
                     "送信する練習",
@@ -6834,7 +7072,7 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
 
                 if st.button(send_button_label, key=f"practice_pdf_send_btn_{selected_concert_id}", use_container_width=True):
                     if not bulk_send and not pdf_send_row:
-                        st.warning("送信先グループを選択してください。")
+                        st.warning("送信先を選択してください。")
                     elif not practice_row:
                         st.warning("送信する練習を選択してください。")
                     else:
@@ -6863,18 +7101,18 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                                 success_count = 0
                                 failed = []
 
-                                for row in linked_rows:
-                                    target_group_id = _extract_line_group_text(row, ["groupId", "GroupId", "LINE Group ID"])
-                                    target_group_name = _extract_line_group_title(row) or "（名称未設定）"
+                                for row in send_target_rows:
+                                    target_destination_id = _extract_destination_id(row)
+                                    target_name = _extract_display_name(row) or "（名称未設定）"
 
-                                    ok_send, msg_send = _post_line_push(target_group_id, final_message)
+                                    ok_send, msg_send = _post_line_push(target_destination_id, final_message)
                                     if ok_send:
                                         success_count += 1
                                     else:
-                                        failed.append(f"{target_group_name}: {msg_send}")
+                                        failed.append(f"{target_name}: {msg_send}")
 
-                                if success_count == len(linked_rows):
-                                    st.success(f"✅ {success_count}グループへ一斉送信しました。")
+                                if success_count == len(send_target_rows):
+                                    st.success(f"✅ {success_count}件へ一斉送信しました。")
                                     st.caption(pdf_url)
                                 else:
                                     st.warning(f"⚠️ 一斉送信結果: 成功 {success_count} / 失敗 {len(failed)}")
@@ -6882,8 +7120,8 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
                                     for msg in failed:
                                         st.error(msg)
                             else:
-                                target_group_id = _extract_line_group_text(pdf_send_row, ["groupId", "GroupId", "LINE Group ID"])
-                                ok_send, msg_send = _post_line_push(target_group_id, final_message)
+                                target_destination_id = _extract_destination_id(pdf_send_row)
+                                ok_send, msg_send = _post_line_push(target_destination_id, final_message)
                                 if ok_send:
                                     st.success("✅ 練習情報PDFリンクを送信しました。")
                                     st.caption(pdf_url)
@@ -10655,7 +10893,6 @@ if mode == "新規登録":
         # ── CSVアップロード ──
         uploaded_csv = st.file_uploader("CSVファイルをアップロード", type=["csv"], key="csv_import_file")
         if uploaded_csv:
-            import pandas as pd
             try:
                 df = pd.read_csv(uploaded_csv, encoding="utf-8-sig", dtype=str).fillna("")
             except Exception as e:
