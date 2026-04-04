@@ -1412,7 +1412,7 @@ def _write_assignments_to_notion(ctx: dict, assignments: list[dict], pref_map: d
                 fail += 1
 
     if concert_id:
-        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PROPOSAL_KEYS, fail == 0 and ok > 0)
+        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PLAN_KEYS, fail == 0 and ok > 0)
         _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, False)
     if fail == 0:
         st.success(f"✅ {ok}件のアサインを書き込みました。")
