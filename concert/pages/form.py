@@ -16,7 +16,7 @@ from concert.services.keys import (
     PARTICIPANT_PART_REL_KEYS, PARTICIPANT_ROLE_KEYS, PARTICIPANT_ROLE_OPS_KEYS,
     PARTICIPANT_FEE_KEYS, PARTICIPANT_PAID_KEYS, PARTICIPANT_CONCERT_REL_KEYS,
     PARTICIPANT_PLAYER_REL_KEYS, PARTICIPANT_RECORD_KEYS, PARTICIPANT_SYSTEM_ROLE_KEYS,
-    PARTDEF_NAME_KEYS, PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS, PARTDEF_PART_REL_KEYS,
+    PARTDEF_NAME_KEYS, PARTDEF_DISPLAY_NAME_KEYS, PARTDEF_SONG_REL_KEYS, PARTDEF_INST_REL_KEYS, PARTDEF_PART_REL_KEYS,
     PARTMASTER_NAME_KEYS, PARTMASTER_TYPE_KEYS,
     SONG_NAME_KEYS, SONG_CREATOR_KEYS, SONG_CONCERT_REL_KEYS,
     INSTRUMENT_NAME_KEYS,
@@ -840,10 +840,11 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         p.get("id", ""): (ext_rel(p, PARTDEF_PART_REL_KEYS) or [""])[0]
         for p in all_pd
     }
-    pd_display_part_map = {
-        p.get("id", ""): (ext(p, PARTDEF_NAME_KEYS) or "")
-        for p in all_pd
-    }
+    pd_display_part_map = {}
+    for p in all_pd:
+        pdid = p.get("id", "")
+        disp = ext(p, PARTDEF_DISPLAY_NAME_KEYS) or ext(p, PARTDEF_NAME_KEYS) or ""
+        pd_display_part_map[pdid] = disp
 
     # PART_MASTER ID → パート名
     all_pm = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
