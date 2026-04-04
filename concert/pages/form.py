@@ -894,8 +894,7 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
     df = pd.DataFrame(rows).sort_values(["曲", "担当", "奏者"]).reset_index(drop=True)
     matrix_df = (
         df.groupby(["曲", "担当"], as_index=False)["奏者"]
-          .agg(lambda xs: "
-".join(dict.fromkeys([str(x) for x in xs if str(x).strip()])))
+          .agg(lambda xs: "\n".join(dict.fromkeys([str(x) for x in xs if str(x).strip()])))
           .pivot(index="曲", columns="担当", values="奏者")
           .fillna("")
     )
