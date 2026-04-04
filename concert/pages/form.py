@@ -64,11 +64,15 @@ def _resolve_user_role(ctx, player_id: str, concert_id: str) -> int:
     未設定またはPlayerの場合はROLE_PLAYER(0)を返す。
     """
     try:
-        all_cast = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+        all_cast = st.session_state.get("form_participant_rows_concert")
+        if all_cast is None:
+            all_cast = [
+                r for r in ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+                if concert_id in ctx["extract_relation_ids_any"](r, PARTICIPANT_CONCERT_REL_KEYS)
+            ]
         for r in all_cast:
             pids = ctx["extract_relation_ids_any"](r, PARTICIPANT_PLAYER_REL_KEYS)
-            cids = ctx["extract_relation_ids_any"](r, PARTICIPANT_CONCERT_REL_KEYS)
-            if player_id in pids and concert_id in cids:
+            if player_id in pids:
                 role_str = ctx["extract_prop_text_any"](r, PARTICIPANT_SYSTEM_ROLE_KEYS) or ""
                 return _ROLE_MAP.get(role_str, ROLE_PLAYER)
     except Exception:
@@ -177,7 +181,9 @@ def _get_proposal_flag(ctx: dict, concert_id: str) -> bool:
         hc_db = ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
         if not hc_db:
             return False
-        hc_rows = ctx["query_all"](hc_db, None)
+        hc_rows = st.session_state.get("form_harmonia_rows")
+        if hc_rows is None:
+            hc_rows = ctx["query_all"](hc_db, None)
         hc_row = next(
             (r for r in hc_rows
              if concert_id in ctx["extract_relation_ids_any"](r, ["演奏会", "FK演奏会", "concert"])),
@@ -199,7 +205,9 @@ def _has_published_assignments(ctx: dict, concert_id: str) -> bool:
         )
         ext = ctx["extract_prop_text_any"]
         ext_rel = ctx["extract_relation_ids_any"]
-        all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+        all_assign = st.session_state.get("form_assignment_rows")
+        if all_assign is None:
+            all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
         return any(
             concert_id in ext_rel(r, ASSIGNMENT_CONCERT_REL_KEYS)
             and (ext(r, ASSIGNMENT_FLAG_KEYS) or "").strip().lower() == "true"
@@ -214,14 +222,20 @@ def _load_existing_prefs(ctx: dict, concert_id: str, player_id: str, partdefs: l
         pref_db = ctx.get("CONCERT_DB_PREFERENCE", "")
         if not pref_db:
             return {}
-        all_pref = ctx["query_all"](pref_db, None)
+        all_pref = st.session_state.get("form_preference_rows")
+        if all_pref is None:
+            all_pref = ctx["query_all"](pref_db, None)
         # cast_idも考慮
-        all_cast = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+        all_cast = st.session_state.get("form_participant_rows_concert")
+        if all_cast is None:
+            all_cast = [
+                r for r in ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+                if concert_id in ctx["extract_relation_ids_any"](r, PARTICIPANT_CONCERT_REL_KEYS)
+            ]
         cast_id = ""
         for r in all_cast:
             pids = ctx["extract_relation_ids_any"](r, PARTICIPANT_PLAYER_REL_KEYS)
-            cids = ctx["extract_relation_ids_any"](r, PARTICIPANT_CONCERT_REL_KEYS)
-            if player_id in pids and concert_id in cids:
+            if player_id in pids:
                 cast_id = r.get("id", "")
                 break
         targets = {player_id}
@@ -337,6 +351,21 @@ def _load_form_data(ctx, concert_id: str, progress=None):
         key=lambda x: x.lower()
     )
 
+    _prog(0.98, "🚀 表示高速化データを準備中...")
+    participant_rows_all = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+    participant_rows_concert = [
+        r for r in participant_rows_all
+        if concert_id in ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)
+    ]
+    all_players = st.session_state.get("form_all_players")
+    if all_players is None:
+        all_players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    player_name_map = {p.get("id", ""): ext(p, PLAYER_NAME_KEYS) or "" for p in all_players}
+    attendance_rows = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], None)
+    preference_rows = ctx["query_all"](ctx["CONCERT_DB_PREFERENCE"], None)
+    assignment_rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+    hc_rows = ctx["query_all"](ctx["CONCERT_DB_HARMONIA_CONCERT"], None) if ctx.get("CONCERT_DB_HARMONIA_CONCERT") else []
+
     st.session_state.update({
         "form_data_loaded":       concert_id,
         "form_concert":           concert,
@@ -348,6 +377,13 @@ def _load_form_data(ctx, concert_id: str, progress=None):
         "form_req_insts":         sorted(req_inst_ids, key=lambda x: inst_map.get(x, x)),
         "form_part_opts":         part_opts + [OTHER_PART],
         "form_part_master_map":   part_master_map,
+        "form_participant_rows_concert": participant_rows_concert,
+        "form_all_players":       all_players,
+        "form_player_name_map":   player_name_map,
+        "form_attendance_rows":   attendance_rows,
+        "form_preference_rows":   preference_rows,
+        "form_assignment_rows":   assignment_rows,
+        "form_harmonia_rows":     hc_rows,
     })
 
 
@@ -373,11 +409,15 @@ def _get_form_cast_and_att_map(ctx, concert_id: str, player_id: str) -> tuple[st
     ext_txt = ctx["extract_prop_text_any"]
 
     cast_id = ""
-    all_cast = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+    all_cast = st.session_state.get("form_participant_rows_concert")
+    if all_cast is None:
+        all_cast = [
+            r for r in ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+            if concert_id in ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)
+        ]
     for r in all_cast:
         pids = ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
-        cids = ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)
-        if player_id in pids and concert_id in cids:
+        if player_id in pids:
             cast_id = r.get("id", "")
             break
 
@@ -408,7 +448,9 @@ def _get_form_cast_and_att_map(ctx, concert_id: str, player_id: str) -> tuple[st
     if cast_id:
         rel_targets.add(cast_id)
 
-    all_att = ctx["query_all"](att_db, None)
+    all_att = st.session_state.get("form_attendance_rows")
+    if all_att is None:
+        all_att = ctx["query_all"](att_db, None)
     for row in all_att:
         rel_ids = ext_rel(row, [player_rel_key])
         pr_ids = ext_rel(row, [practice_rel_key])
@@ -696,11 +738,15 @@ def _render_attendance_overview(ctx, concert_id: str, participant_rows: list,
         return
 
     # PERFORMER名マップ
-    all_players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    all_players = st.session_state.get("form_all_players")
+    if all_players is None:
+        all_players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
     player_name_map = {p.get("id",""): ext(p, PLAYER_NAME_KEYS) or "" for p in all_players}
 
     # 出欠データ取得
-    all_att = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], None)
+    all_att = st.session_state.get("form_attendance_rows")
+    if all_att is None:
+        all_att = ctx["query_all"](ctx["CONCERT_DB_ATTENDANCE"], None)
     # cast_id or player_id → {practice_id: status}
     att_map: dict[str, dict[str,str]] = {}
     for r in all_att:
@@ -761,7 +807,9 @@ def _render_member_list(ctx, concert_id: str, participant_rows: list,
         st.info("対象メンバーが見つかりません。")
         return
 
-    all_players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    all_players = st.session_state.get("form_all_players")
+    if all_players is None:
+        all_players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
     player_map  = {p.get("id",""): p for p in all_players}
 
     rows = []
@@ -808,7 +856,9 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
 
     # アサイン結果取得
     try:
-        all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+        all_assign = st.session_state.get("form_assignment_rows")
+        if all_assign is None:
+            all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
     except Exception:
         st.error("アサイン結果の取得に失敗しました。")
         return
@@ -824,16 +874,22 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         return
 
     # 曲・奏者・パート定義・PART_MASTER名マップ
-    all_players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    all_players = st.session_state.get("form_all_players")
+    if all_players is None:
+        all_players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
     player_name_map = {
         p.get("id", ""): ext(p, PLAYER_NAME_KEYS) or ""
         for p in all_players
     }
 
-    all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
+    all_songs = st.session_state.get("form_songs")
+    if all_songs is None:
+        all_songs = ctx["query_all"](ctx["CONCERT_DB_SONG"], None)
     song_name_map = build_song_name_map(ctx, all_songs)
 
-    all_pd = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
+    all_pd = st.session_state.get("form_partdefs")
+    if all_pd is None:
+        all_pd = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
 
     # PART_DEFINITION → PART_MASTER / 表示パート名
     pd_part_map = {
@@ -847,18 +903,23 @@ def _render_assignment_view(ctx, concert_id: str, my_part_master_id: str, role: 
         pd_display_part_map[pdid] = disp
 
     # PART_MASTER ID → パート名
-    all_pm = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
-    pm_name_map = {
-        p.get("id", ""): ext(p, PARTMASTER_NAME_KEYS) or ""
-        for p in all_pm
-    }
+    pm_cache = st.session_state.get("form_part_master_map") or {}
+    pm_name_map = {pid: (meta.get("name") or "") for pid, meta in pm_cache.items()}
+    if not pm_name_map:
+        all_pm = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
+        pm_name_map = {
+            p.get("id", ""): ext(p, PARTMASTER_NAME_KEYS) or ""
+            for p in all_pm
+        }
 
     # CONCERT_CAST（表示対象メンバー）
-    participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
-    cast_targets = [
-        r for r in participant_rows
-        if concert_id in ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)
-    ]
+    participant_rows = st.session_state.get("form_participant_rows_concert")
+    if participant_rows is None:
+        participant_rows = [
+            r for r in ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+            if concert_id in ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)
+        ]
+    cast_targets = participant_rows
 
     # role別のパート選択
     part_options = []
@@ -1685,7 +1746,12 @@ def render_form(ctx, concert_id: str = ""):
             st.subheader(f"こんにちは、{pname} さん")
 
             # パート・ロールをCONCERT_CASTから取得
-            participant_rows = ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+            participant_rows = st.session_state.get("form_participant_rows_concert")
+            if participant_rows is None:
+                participant_rows = [
+                    r for r in ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+                    if concert_id in ctx["extract_relation_ids_any"](r, PARTICIPANT_CONCERT_REL_KEYS)
+                ]
             my_part = ""
             my_part_master_id = ""
             my_cast_row = None
@@ -1767,6 +1833,18 @@ def render_form(ctx, concert_id: str = ""):
                             "form_menu_mode": True,
                         })
                         st.rerun()
+
+            # アサイン閲覧（🎵パート希望 の直下）
+            _can_show_assign_menu = (user_role >= ROLE_LEADER) or proposal_done or _has_published_assignments(ctx, concert_id)
+            if _can_show_assign_menu:
+                if user_role == ROLE_MANAGER:
+                    _assign_label = "アサイン状況（パート/曲で絞り込み）"
+                elif user_role == ROLE_LEADER:
+                    _assign_label = "自パートのアサイン状況（曲で絞り込み）"
+                else:
+                    _assign_label = "自パートのアサイン状況"
+                with st.expander(f"🎯 {_assign_label}", expanded=True):
+                    _render_assignment_view(ctx, concert_id, my_part_master_id, user_role)
 
             if IS_PERC(my_part):
                 if st.button("🥁 所有楽器を入力・変更する", use_container_width=True, key="menu_own"):
@@ -1890,18 +1968,6 @@ def render_form(ctx, concert_id: str = ""):
                     st.markdown("**🎼 楽譜リンク**")
                     for _lbl, _url in _score_links:
                         st.markdown(f"[📄 {_lbl}]({_url})")
-
-            # アサイン閲覧
-            _can_show_assign_menu = (user_role >= ROLE_LEADER) or proposal_done or _has_published_assignments(ctx, concert_id)
-            if _can_show_assign_menu:
-                if user_role == ROLE_MANAGER:
-                    _assign_label = "アサイン状況（パート/曲で絞り込み）"
-                elif user_role == ROLE_LEADER:
-                    _assign_label = "自パートのアサイン状況（曲で絞り込み）"
-                else:
-                    _assign_label = "自パートのアサイン状況"
-                with st.expander(f"🎯 {_assign_label}", expanded=True):
-                    _render_assignment_view(ctx, concert_id, my_part_master_id, user_role)
 
             # ── 直近の練習情報（全ロール共通） ──────────────
             st.divider()
