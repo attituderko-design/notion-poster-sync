@@ -780,7 +780,7 @@ def _render_pref_tab(ctx: dict):
             cur_p = ctx["extract_prop_text_any"](existing, PREF_PRIORITY_KEYS) if existing else "未回答"
             if cur_p not in PRIORITY_OPTIONS:
                 cur_p = "未回答"
-            status = "" if has_record else "🔴"
+            status = "🟢" if has_record else "🔴"
 
             all_pref_rows.append({"状態": status, "曲": sname, "パート": label, "希望": cur_p})
             all_pref_meta.append({
