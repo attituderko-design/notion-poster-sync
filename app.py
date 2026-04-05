@@ -1,6 +1,8 @@
 import re
 import json
 import tomllib
+import subprocess
+import sys
 from collections.abc import Mapping
 import requests
 import time
@@ -10597,6 +10599,47 @@ with st.sidebar:
         else:
             st.info("`docs/USER_GUIDE.md` が見つかりません。")
         st.markdown("[GitHubで見る](https://github.com/attituderko-design/artemis-cers/blob/main/docs/USER_GUIDE.md)")
+
+    with st.expander("📸 全頁キャプチャ", expanded=False):
+        st.caption("Playwrightでアプリ全ページのフルスクリーン画像を保存します。")
+        cap_url = st.text_input("対象URL", value="http://localhost:8501", key="capture_url")
+        cap_outdir = st.text_input("保存先", value="artifacts/screenshots", key="capture_outdir")
+        cap_delay = st.number_input("ページ遷移後の待機(ms)", min_value=300, max_value=5000, value=1200, step=100, key="capture_delay")
+        cap_muse = st.toggle("MUSEモードも巡回", value=True, key="capture_include_muse")
+        if st.button("📸 キャプチャ実行", use_container_width=True, key="run_fullpage_capture"):
+            project_root = Path(__file__).resolve().parent
+            cmd = [
+                sys.executable,
+                str(project_root / "tools" / "fullpage_capture.py"),
+                "--url", cap_url.strip(),
+                "--outdir", cap_outdir.strip(),
+                "--delay-ms", str(int(cap_delay)),
+            ]
+            if cap_muse:
+                cmd.append("--include-muse-modes")
+            with st.spinner("全ページをキャプチャ中..."):
+                try:
+                    result = subprocess.run(
+                        cmd,
+                        cwd=str(project_root),
+                        capture_output=True,
+                        text=True,
+                        timeout=1200,
+                        check=False,
+                    )
+                    if result.returncode == 0:
+                        st.success("キャプチャ完了")
+                    else:
+                        st.error("キャプチャ失敗（実行ログを確認してください）")
+                    if result.stdout:
+                        st.code(result.stdout, language="text")
+                    if result.stderr:
+                        st.code(result.stderr, language="text")
+                    st.caption(f"保存先: {project_root / cap_outdir.strip()}")
+                except subprocess.TimeoutExpired:
+                    st.error("タイムアウトしました。対象ページ数を減らすか待機時間を短くしてください。")
+                except Exception as e:
+                    st.error(f"実行に失敗しました: {e}")
 
     st.divider()
     st.toggle("Drive連携を一時停止", key="drive_skip_mode")
