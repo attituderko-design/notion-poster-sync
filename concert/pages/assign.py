@@ -28,6 +28,7 @@ PRIORITY_TO_INT  = {
 }
 INT_TO_PRIORITY  = {1: "第1希望", 2: "第2希望", 3: "第3希望", 0: "希望なし/降り番でも可", -1: "NG"}
 SCORE_LABEL      = {3.0: "第1希望", 2.0: "第2希望", 1.0: "第3希望", 0.5: "フォールバック", 0.0: "希望なし/降り番でも可", -9999.0: "NG"}
+ALL_PART_LABEL   = "（全パート）"
 
 
 # PLAYER_INSTRUMENT DB用キー（players.pyと共通）
@@ -281,9 +282,9 @@ def _render_shared_part_filter(
     all_parts = sorted({p for p in part_by_player.values() if p})
     all_player_ids = set(part_by_player.keys())
     if not all_parts:
-        return "（全パート）", all_player_ids, part_by_player
+        return ALL_PART_LABEL, all_player_ids, part_by_player
 
-    opts = ["（全パート）"] + all_parts
+    opts = [ALL_PART_LABEL] + all_parts
     filter_key = f"assign_part_filter_{concert_id}"
     if show_widget:
         selected_part = st.selectbox(
@@ -293,13 +294,27 @@ def _render_shared_part_filter(
             help="ここで選択したパートは『希望入力』『アルゴリズム実行』『アサイン確定』で共通適用されます。",
         )
     else:
-        selected_part = st.session_state.get(filter_key, "（全パート）")
+        selected_part = st.session_state.get(filter_key, ALL_PART_LABEL)
         if selected_part not in opts:
-            selected_part = "（全パート）"
-    if selected_part == "（全パート）":
+            selected_part = ALL_PART_LABEL
+    if selected_part == ALL_PART_LABEL:
         return selected_part, all_player_ids, part_by_player
     selected_player_ids = {pid for pid, pname in part_by_player.items() if pname == selected_part}
     return selected_part, selected_player_ids, part_by_player
+
+
+def _partdef_part_name(ctx, partdef_row: dict, part_master_name_map: dict[str, str]) -> str:
+    rel_ids = ctx["extract_relation_ids_any"](partdef_row, PARTDEF_PART_REL_KEYS)
+    for rid in rel_ids:
+        if rid in part_master_name_map:
+            return part_master_name_map[rid]
+    return ""
+
+
+def _partdef_matches_selected_part(ctx, partdef_row: dict, selected_part: str, part_master_name_map: dict[str, str]) -> bool:
+    if not selected_part or selected_part == ALL_PART_LABEL:
+        return True
+    return _partdef_part_name(ctx, partdef_row, part_master_name_map) == selected_part
 
 
 def _load_songs(ctx, concert_id: str) -> list[dict]:
@@ -449,7 +464,7 @@ def _save_preference(ctx, player_id: str, player_name: str,
 # assign_solver用データ変換
 # ============================================================
 
-def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
+def _build_solver_input(ctx, concert_id: str, songs: list, players: list, selected_part: str = ALL_PART_LABEL):
     """
     NotionのDBからsolve_all()に渡すPrefs/Requirementsを構築する。
     assign_solver.pyのPref/Requirementデータクラスを直接使わず、
@@ -460,6 +475,7 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
     # 楽器マスタ
     inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
     inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
+    part_master_name_map = _load_part_master_name_map(ctx)
 
     # Requirements: パート定義DBから構築
     requirements: list[Requirement] = []
@@ -468,6 +484,8 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
         sname = _song_name(song, ctx)
         part_rows = _load_song_instruments(ctx, sid)
         for part in part_rows:
+            if not _partdef_matches_selected_part(ctx, part, selected_part, part_master_name_map):
+                continue
             iids = ctx["extract_relation_ids_any"](part, PARTDEF_INST_REL_KEYS)
             iid   = iids[0] if iids else ""
             iname = inst_name_map.get(iid, iid) if iid else ""
@@ -511,6 +529,8 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list):
     for song in songs:
         _sid = song.get("id", "")
         for part in _load_song_instruments(ctx, _sid):
+            if not _partdef_matches_selected_part(ctx, part, selected_part, part_master_name_map):
+                continue
             _pid = part.get("id", "")
             _partdef_to_song[_pid] = _sid
             iids = ctx["extract_relation_ids_any"](part, PARTDEF_INST_REL_KEYS)
@@ -616,6 +636,7 @@ def _render_pref_tab(ctx: dict):
     # 楽器マスタ
     inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
     inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
+    part_master_name_map = _load_part_master_name_map(ctx)
 
     # パート定義→演奏曲の逆引きマップを構築
     # PREFERENCEには演奏曲リレーションがないため、パート定義IDから演奏曲IDを引く
@@ -623,6 +644,8 @@ def _render_pref_tab(ctx: dict):
     for song in songs:
         sid = song.get("id", "")
         for part in _load_song_instruments(ctx, sid):
+            if not _partdef_matches_selected_part(ctx, part, selected_part, part_master_name_map):
+                continue
             partdef_to_song[part.get("id", "")] = sid
 
     # 既存の希望入力を取得（奏者×パート定義 → レコード）
@@ -643,7 +666,10 @@ def _render_pref_tab(ctx: dict):
     song_part_ids: dict[str, set[str]] = {}
     for song in songs:
         sid = song.get("id", "")
-        req_rows = _load_song_instruments(ctx, sid)
+        req_rows = [
+            r for r in _load_song_instruments(ctx, sid)
+            if _partdef_matches_selected_part(ctx, r, selected_part, part_master_name_map)
+        ]
         song_part_ids[sid] = {r.get("id", "") for r in req_rows if r.get("id", "")}
     per_player_song_parts: dict[tuple[str, str], set[str]] = defaultdict(set)
     for (pid, sid, part_id), _row in pi_lookup.items():
@@ -733,7 +759,10 @@ def _render_pref_tab(ctx: dict):
     for song in sorted(songs, key=lambda x: _song_name(x, ctx)):
         sid   = song.get("id", "")
         sname = _song_name(song, ctx)
-        si_rows = _load_song_instruments(ctx, sid)
+        si_rows = [
+            r for r in _load_song_instruments(ctx, sid)
+            if _partdef_matches_selected_part(ctx, r, selected_part, part_master_name_map)
+        ]
         if not si_rows:
             continue
         for si_idx, si in enumerate(si_rows):
@@ -901,7 +930,9 @@ def _render_solver_tab(ctx: dict):
                     solve_exact,
                 )
                 absent   = _build_absent_set(ctx, concert_id)
-                prefs, requirements = _build_solver_input(ctx, concert_id, songs, players)
+                prefs, requirements = _build_solver_input(
+                    ctx, concert_id, songs, players, selected_part=selected_part
+                )
                 if not prefs:
                     st.warning("希望データがありません。先に希望入力を行ってください。")
                     return
