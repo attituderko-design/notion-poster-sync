@@ -111,6 +111,8 @@ def _render_brand_logo() -> None:
 _CODE_EXPIRY_MINUTES = 10
 _CODE_MAX_ATTEMPTS   = 5
 _CODE_RESEND_SECONDS = 30
+_INVITE_MAX_ATTEMPTS = 10
+_INVITE_WINDOW_MINUTES = 10
 
 def _generate_code() -> str:
     return "".join(random.choices(string.digits, k=6))
@@ -1072,6 +1074,27 @@ def _render_concert_selector(ctx):
         v.get("name", ""): k for k, v in pm_map_for_selector.items() if v.get("name")
     }
     pm_names = sorted(pm_name_to_id.keys(), key=lambda x: x.lower())
+
+    def _invite_rate_limited() -> bool:
+        now = datetime.now()
+        window_start = now - timedelta(minutes=_INVITE_WINDOW_MINUTES)
+        ts_list = st.session_state.get("sel_invite_fail_ts", [])
+        ts_list = [t for t in ts_list if isinstance(t, datetime) and t >= window_start]
+        st.session_state["sel_invite_fail_ts"] = ts_list
+        if len(ts_list) >= _INVITE_MAX_ATTEMPTS:
+            st.warning(
+                f"招待コードの入力失敗が一定回数を超えました。"
+                f"{_INVITE_WINDOW_MINUTES}分ほど待って再試行してください。"
+            )
+            return True
+        return False
+
+    def _record_invite_failure() -> None:
+        now = datetime.now()
+        ts_list = st.session_state.get("sel_invite_fail_ts", [])
+        ts_list.append(now)
+        st.session_state["sel_invite_fail_ts"] = ts_list
+
     selector_mode = st.session_state.get("selector_mode")  # None / "login" / "invite"
 
     # ── モード未選択 ─────────────────────────────────────────
@@ -1102,8 +1125,11 @@ def _render_concert_selector(ctx):
                 )
             submitted = st.form_submit_button("次へ →", type="primary", use_container_width=True)
         if submitted:
+            if _invite_rate_limited():
+                return
             cid = _resolve_concert_id_by_invite_code(ctx, code_input)
             if cid:
+                st.session_state.pop("sel_invite_fail_ts", None)
                 # selector内でログイン済みなら、演奏会紐付けしてログイン画面へ戻す
                 if _invite_logged_in:
                     part_id = pm_name_to_id.get(selected_part_name, "")
@@ -1119,11 +1145,15 @@ def _render_concert_selector(ctx):
                     else:
                         st.error(msg)
                 else:
-                    # 未ログイン時は演奏会IDを確定して通常認証フローへ
+                    # 未ログイン時は新規登録フローへ直行
                     st.session_state["form_resolved_concert_id"] = cid
+                    st.session_state["form_auth_mode"] = "new"
+                    st.session_state.pop("form_privacy_agreed", None)
+                    st.session_state.pop("auth_email_submitted", None)
                     st.session_state.pop("selector_mode", None)
                     st.rerun()
             else:
+                _record_invite_failure()
                 st.error("招待コードが見つかりませんでした。管理者に確認してください。")
         if st.button("← 戻る", key="invite_back"):
             st.session_state.pop("selector_mode", None)
@@ -1269,6 +1299,33 @@ def _render_concert_selector(ctx):
                 st.rerun()
             return
 
+        # パスワード未設定で認証成功した場合は、演奏会選択前に必ず設定させる
+        if st.session_state.get("sel_need_set_password"):
+            st.subheader(f"{sel_pname} さん、パスワードを設定してください")
+            st.caption("次回からメールアドレスとパスワードでログインできます。")
+            with st.form("sel_set_password_form"):
+                pw1 = st.text_input("パスワード（6文字以上）", type="password")
+                pw2 = st.text_input("パスワード（確認）", type="password")
+                c_set, c_logout = st.columns(2)
+                submitted_set = c_set.form_submit_button("設定する", type="primary", use_container_width=True)
+                submitted_logout = c_logout.form_submit_button("ログアウト", use_container_width=True)
+            if submitted_logout:
+                _logout_to_entry(_FORM_COOKIE_MGR)
+            if submitted_set:
+                if len((pw1 or "").strip()) < 6:
+                    st.error("パスワードは6文字以上で入力してください。")
+                elif pw1 != pw2:
+                    st.error("パスワードが一致しません。")
+                else:
+                    ok = _save_password_hash(ctx, sel_pid, pw1)
+                    if ok:
+                        st.session_state["sel_need_set_password"] = False
+                        st.success("パスワードを設定しました。")
+                        st.rerun()
+                    else:
+                        st.error("パスワード設定に失敗しました。")
+            return
+
         # 認証済み → 参加演奏会を選択
         st.subheader(f"こんにちは、{sel_pname} さん")
         my_concerts = _get_my_concerts(ctx, sel_pid)
@@ -1338,10 +1395,14 @@ def _render_concert_selector(ctx):
             )
             submitted_invite = st.form_submit_button("この招待コードで追加する", use_container_width=True)
         if submitted_invite:
+            if _invite_rate_limited():
+                return
             cid = _resolve_concert_id_by_invite_code(ctx, sel_invite_code)
             if not cid:
+                _record_invite_failure()
                 st.error("招待コードが見つかりませんでした。管理者に確認してください。")
             else:
+                st.session_state.pop("sel_invite_fail_ts", None)
                 part_id = pm_name_to_id.get(sel_part_name, "")
                 if not part_id:
                     st.error("担当パートを選択してください。")
