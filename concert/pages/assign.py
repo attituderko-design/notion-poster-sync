@@ -605,7 +605,7 @@ def _render_pref_tab(ctx: dict):
 
     # パートフィルタ（3タブ共通）
     selected_part, selected_player_ids, _ = _render_shared_part_filter(
-        ctx, concert_id, participant_rows, show_widget=False
+        ctx, concert_id, participant_rows, show_widget=True
     )
     if selected_player_ids:
         players = [p for p in players if p.get("id", "") in selected_player_ids]
@@ -1763,10 +1763,6 @@ def _render_result_tab(ctx: dict):
 
 def render(ctx: dict):
     st.header("🎯 パート割当")
-    _cid = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
-    if _cid:
-        _participant_rows = _load_participants(ctx, _cid)
-        _render_shared_part_filter(ctx, _cid, _participant_rows, show_widget=True)
 
     tab_pref, tab_solver, tab_result = st.tabs([
         "希望入力",
