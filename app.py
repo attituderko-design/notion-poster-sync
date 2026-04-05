@@ -10614,6 +10614,7 @@ with st.sidebar:
                 "--url", cap_url.strip(),
                 "--outdir", cap_outdir.strip(),
                 "--delay-ms", str(int(cap_delay)),
+                "--auto-install-browser",
             ]
             if cap_muse:
                 cmd.append("--include-muse-modes")

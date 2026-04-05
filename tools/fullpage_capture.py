@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
+import sys
 import time
 from pathlib import Path
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
@@ -60,11 +63,30 @@ def _capture(page, outdir: Path, order: int, name: str) -> None:
     print(f"[saved] {out}")
 
 
-def run(url: str, outdir: Path, delay_ms: int, include_muse_modes: bool) -> None:
+def _launch_chromium(playwright, auto_install_browser: bool):
+    try:
+        return playwright.chromium.launch(headless=True)
+    except PlaywrightError as e:
+        msg = str(e)
+        missing_browser = "Executable doesn't exist" in msg or "Please run the following command to download new browsers" in msg
+        if not missing_browser:
+            raise
+        if not auto_install_browser:
+            raise RuntimeError(
+                "PlaywrightのChromiumが未インストールです。"
+                " `python -m playwright install chromium` を実行してから再試行してください。"
+            ) from e
+        print("[info] Chromiumが未インストールのため、`python -m playwright install chromium` を実行します...")
+        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+        print("[info] Chromiumインストール完了。キャプチャを再開します。")
+        return playwright.chromium.launch(headless=True)
+
+
+def run(url: str, outdir: Path, delay_ms: int, include_muse_modes: bool, auto_install_browser: bool) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = _launch_chromium(p, auto_install_browser=auto_install_browser)
         context = browser.new_context(viewport={"width": 1600, "height": 1200})
         page = context.new_page()
         page.goto(url, wait_until="networkidle")
@@ -110,6 +132,7 @@ def main() -> None:
     parser.add_argument("--outdir", default="artifacts/screenshots", help="Output directory")
     parser.add_argument("--delay-ms", type=int, default=1200, help="Wait after each navigation")
     parser.add_argument("--include-muse-modes", action="store_true", help="Also capture MUSE mode radio pages")
+    parser.add_argument("--auto-install-browser", action="store_true", help="Install Playwright Chromium automatically if missing")
     args = parser.parse_args()
 
     run(
@@ -117,9 +140,9 @@ def main() -> None:
         outdir=Path(args.outdir),
         delay_ms=args.delay_ms,
         include_muse_modes=args.include_muse_modes,
+        auto_install_browser=args.auto_install_browser,
     )
 
 
 if __name__ == "__main__":
     main()
-
