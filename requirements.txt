@@ -8,3 +8,4 @@ scipy
 matplotlib
 streamlit-cookies-controller
 PyMuPDF
+playwright

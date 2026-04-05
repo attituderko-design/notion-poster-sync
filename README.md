@@ -112,6 +112,18 @@ DEFAULT_PERFORMER_NAME = "..."
 pip install -r requirements.txt
 ```
 
+### Full-Page Screenshot (All Pages)
+
+Streamlitの表示領域だけでなく、ページ全体を画像化したい場合:
+
+```bash
+python -m playwright install chromium
+python tools/fullpage_capture.py --url http://localhost:8501 --outdir artifacts/screenshots --include-muse-modes
+```
+
+- `--include-muse-modes` を外すと `MUSE` のモード巡回を省略します。
+- `HARMONIA` はサイドバーのページを自動巡回して full-page 保存します。
+
 ### 2. Prepare Secrets
 
 `.streamlit/secrets.toml` に以下を設定します。
