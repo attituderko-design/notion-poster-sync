@@ -109,7 +109,8 @@ def _render_brand_logo() -> None:
 # ── マジックコード認証 ──────────────────────────────────────────
 
 _CODE_EXPIRY_MINUTES = 10
-_CODE_MAX_ATTEMPTS   = 3
+_CODE_MAX_ATTEMPTS   = 5
+_CODE_RESEND_SECONDS = 30
 
 def _generate_code() -> str:
     return "".join(random.choices(string.digits, k=6))
@@ -1090,9 +1091,21 @@ def _render_concert_selector(ctx):
         if submitted:
             cid = _resolve_concert_id_by_invite_code(ctx, code_input)
             if cid:
-                st.session_state["form_resolved_concert_id"] = cid
-                st.session_state.pop("selector_mode", None)
-                st.rerun()
+                # selector内でログイン済みなら、演奏会紐付けしてログイン画面へ戻す
+                if st.session_state.get("sel_pw_verified") and st.session_state.get("sel_player_id"):
+                    ok, msg = _link_player_to_concert_by_invite(ctx, st.session_state.get("sel_player_id", ""), cid)
+                    if ok:
+                        st.session_state["selector_mode"] = "login"
+                        st.session_state["sel_preselect_cid"] = cid
+                        st.success("演奏会を追加しました。")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+                else:
+                    # 未ログイン時は演奏会IDを確定して通常認証フローへ
+                    st.session_state["form_resolved_concert_id"] = cid
+                    st.session_state.pop("selector_mode", None)
+                    st.rerun()
             else:
                 st.error("招待コードが見つかりませんでした。管理者に確認してください。")
         if st.button("← 戻る", key="invite_back"):
@@ -1120,7 +1133,9 @@ def _render_concert_selector(ctx):
                     None
                 )
                 if not matched:
-                    st.error("このメールアドレスは登録されていません。招待コードから新規参加してください。")
+                    st.warning("ユーザー登録がありません。参加予定の演奏会招待コードを入力し、ユーザー登録してください。")
+                    st.session_state["selector_mode"] = "invite"
+                    st.rerun()
                     return
                 st.session_state.update({
                     "sel_email":           email_lower,
@@ -1174,6 +1189,7 @@ def _render_concert_selector(ctx):
                                 "sel_magic_hash": _hash_code(code),
                                 "sel_magic_expires": datetime.now() + timedelta(minutes=_CODE_EXPIRY_MINUTES),
                                 "sel_magic_attempts": 0,
+                                "sel_magic_last_sent": datetime.now(),
                             })
                             st.success("確認コードを送信しました。")
                             st.rerun()
@@ -1187,6 +1203,11 @@ def _render_concert_selector(ctx):
                         submitted_code = c_ok.form_submit_button("確認", type="primary", use_container_width=True)
                         submitted_resend = c_resend.form_submit_button("再送信", use_container_width=True)
                     if submitted_resend:
+                        last_sent = st.session_state.get("sel_magic_last_sent")
+                        if last_sent and (datetime.now() - last_sent).total_seconds() < _CODE_RESEND_SECONDS:
+                            remaining_sec = int(_CODE_RESEND_SECONDS - (datetime.now() - last_sent).total_seconds())
+                            st.warning(f"再送信は{remaining_sec}秒後に行えます。")
+                            return
                         code = _generate_code()
                         ok = _send_magic_code(ctx, sel_email, code, "HARMONIA")
                         if ok:
@@ -1194,6 +1215,7 @@ def _render_concert_selector(ctx):
                                 "sel_magic_hash": _hash_code(code),
                                 "sel_magic_expires": datetime.now() + timedelta(minutes=_CODE_EXPIRY_MINUTES),
                                 "sel_magic_attempts": 0,
+                                "sel_magic_last_sent": datetime.now(),
                             })
                             st.success("確認コードを再送しました。")
                             st.rerun()
@@ -1206,7 +1228,7 @@ def _render_concert_selector(ctx):
                         elif _verify_code(entered_code, st.session_state.get("sel_magic_hash", "")):
                             st.session_state["sel_pw_verified"] = True
                             st.session_state["sel_need_set_password"] = True
-                            for k in ["sel_magic_sent", "sel_magic_hash", "sel_magic_expires", "sel_magic_attempts"]:
+                            for k in ["sel_magic_sent", "sel_magic_hash", "sel_magic_expires", "sel_magic_attempts", "sel_magic_last_sent"]:
                                 st.session_state.pop(k, None)
                             st.rerun()
                         else:
@@ -1214,10 +1236,10 @@ def _render_concert_selector(ctx):
                             st.session_state["sel_magic_attempts"] = attempts
                             remain = _CODE_MAX_ATTEMPTS - attempts
                             if remain <= 0:
-                                st.error("確認コードを3回間違えました。最初からやり直してください。")
+                                st.error(f"確認コードを{_CODE_MAX_ATTEMPTS}回間違えました。最初からやり直してください。")
                                 for k in ["sel_email_submitted","sel_email","sel_player_id","sel_player_name",
                                           "sel_has_password","sel_pw_verified","sel_need_set_password",
-                                          "sel_magic_sent","sel_magic_hash","sel_magic_expires","sel_magic_attempts"]:
+                                          "sel_magic_sent","sel_magic_hash","sel_magic_expires","sel_magic_attempts","sel_magic_last_sent"]:
                                     st.session_state.pop(k, None)
                                 st.rerun()
                             else:
@@ -1225,7 +1247,7 @@ def _render_concert_selector(ctx):
             if st.button("← 戻る", key="sel_pw_back"):
                 for k in ["sel_email_submitted","sel_email","sel_player_id",
                           "sel_player_name","sel_has_password","sel_pw_verified","sel_need_set_password",
-                          "sel_magic_sent","sel_magic_hash","sel_magic_expires","sel_magic_attempts"]:
+                          "sel_magic_sent","sel_magic_hash","sel_magic_expires","sel_magic_attempts","sel_magic_last_sent"]:
                     st.session_state.pop(k, None)
                 st.rerun()
             return
@@ -1234,49 +1256,77 @@ def _render_concert_selector(ctx):
         st.subheader(f"こんにちは、{sel_pname} さん")
         my_concerts = _get_my_concerts(ctx, sel_pid)
 
+        def _go_selected_concert(selected_cid: str):
+            st.session_state.update({
+                "form_resolved_concert_id": selected_cid,
+                "form_auth_verified":        True,
+                "form_auth_email":           sel_email,
+                "form_player_id":            sel_pid,
+                "form_player_name":          sel_pname,
+                "form_is_new":               False,
+                "form_is_existing_auth":     True,
+                "form_need_set_password":    bool(st.session_state.get("sel_need_set_password", False)),
+                "form_step":                 1,
+            })
+            _save_form_session_to_cookie(
+                _FORM_COOKIE_MGR, selected_cid, sel_pid, sel_pname)
+            for k in ["selector_mode","sel_email_submitted","sel_email",
+                      "sel_player_id","sel_player_name","sel_has_password",
+                      "sel_pw_verified","sel_need_set_password","sel_concert_select",
+                      "sel_magic_sent","sel_magic_hash","sel_magic_expires","sel_magic_attempts","sel_magic_last_sent",
+                      "sel_preselect_cid","sel_cid_autorouted"]:
+                st.session_state.pop(k, None)
+            st.rerun()
+
         if my_concerts:
             concert_opts = {
                 ext(c, CONCERT_NAME_KEYS) or c.get("id","")[:8]: c.get("id","")
                 for c in my_concerts
             }
+            # URLにcidがあり、参加済み演奏会なら自動遷移
+            _cid_q = (st.query_params.get("cid") or "").strip()
+            if _cid_q and _cid_q in concert_opts.values() and not st.session_state.get("sel_cid_autorouted"):
+                st.session_state["sel_cid_autorouted"] = True
+                _go_selected_concert(_cid_q)
+
+            # 招待コード経由で追加直後の演奏会を優先選択
+            _preselect_cid = st.session_state.get("sel_preselect_cid", "")
+            _labels = list(concert_opts.keys())
+            _default_index = 0
+            if _preselect_cid:
+                for i, _label in enumerate(_labels):
+                    if concert_opts.get(_label) == _preselect_cid:
+                        _default_index = i
+                        break
             selected_name = st.selectbox(
                 "参加している演奏会を選択してください",
-                list(concert_opts.keys()),
+                _labels,
+                index=_default_index,
                 key="sel_concert_select",
             )
             if st.button("この演奏会に進む →", type="primary",
                          use_container_width=True, key="sel_concert_go"):
-                selected_cid = concert_opts[selected_name]
-                # 既存ログインフローのsession_stateをセットしてform_stepへ
-                st.session_state.update({
-                    "form_resolved_concert_id": selected_cid,
-                    "form_auth_verified":        True,
-                    "form_auth_email":           sel_email,
-                    "form_player_id":            sel_pid,
-                    "form_player_name":          sel_pname,
-                    "form_is_new":               False,
-                    "form_is_existing_auth":     True,
-                    "form_need_set_password":    bool(st.session_state.get("sel_need_set_password", False)),
-                    "form_step":                 1,
-                })
-                # クッキーに保存
-                _save_form_session_to_cookie(
-                    _FORM_COOKIE_MGR, selected_cid, sel_pid, sel_pname)
-                for k in ["selector_mode","sel_email_submitted","sel_email",
-                          "sel_player_id","sel_player_name","sel_has_password",
-                          "sel_pw_verified","sel_need_set_password","sel_concert_select",
-                          "sel_magic_sent","sel_magic_hash","sel_magic_expires","sel_magic_attempts"]:
-                    st.session_state.pop(k, None)
-                st.rerun()
+                _go_selected_concert(concert_opts[selected_name])
         else:
-            st.info("参加登録されている演奏会が見つかりませんでした。")
+            st.info("演奏会出演履歴がデータベース上にありません。招待コードを入力してください。")
 
         st.divider()
-        if st.button("🎟 招待コードで別の演奏会に参加する",
-                     use_container_width=True, key="sel_add_concert"):
-            st.session_state["selector_mode"] = "invite"
-            # 認証情報はそのまま保持
-            st.rerun()
+        st.markdown("**🎟 招待コードで演奏会に参加する**")
+        with st.form("sel_add_concert_form"):
+            sel_invite_code = st.text_input("招待コード", max_chars=20, placeholder="例: K7X2MN9A")
+            submitted_invite = st.form_submit_button("この招待コードで追加する", use_container_width=True)
+        if submitted_invite:
+            cid = _resolve_concert_id_by_invite_code(ctx, sel_invite_code)
+            if not cid:
+                st.error("招待コードが見つかりませんでした。管理者に確認してください。")
+            else:
+                ok, msg = _link_player_to_concert_by_invite(ctx, sel_pid, cid)
+                if ok:
+                    st.session_state["sel_preselect_cid"] = cid
+                    st.success("演奏会を追加しました。")
+                    st.rerun()
+                else:
+                    st.error(msg)
 
         if st.button("🔓 ログアウト", use_container_width=True, key="sel_logout"):
             _logout_to_entry(_FORM_COOKIE_MGR)
@@ -1325,6 +1375,51 @@ def _get_my_concerts(ctx, player_id: str) -> list[dict]:
         return result
     except Exception:
         return []
+
+def _link_player_to_concert_by_invite(ctx, player_id: str, concert_id: str) -> tuple[bool, str]:
+    """既存奏者を指定演奏会へ紐付け（CONCERT_CAST作成）。既存なら成功扱い。"""
+    try:
+        ext_rel = ctx["extract_relation_ids_any"]
+        cast_db = ctx["CONCERT_DB_PARTICIPANT"]
+        t_cast = ctx["get_prop_types"](cast_db)
+        if not t_cast:
+            return False, "CONCERT_CASTの設定取得に失敗しました。"
+
+        all_cast = ctx["query_all"](cast_db, None)
+        # 既存紐付けチェック
+        for r in all_cast:
+            if (
+                player_id in ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS)
+                and concert_id in ext_rel(r, PARTICIPANT_CONCERT_REL_KEYS)
+            ):
+                return True, "already_linked"
+
+        # 既存出演履歴からパートを継承
+        part_master_id = ""
+        for r in all_cast:
+            if player_id in ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS):
+                pm_ids = ext_rel(r, PARTICIPANT_PART_REL_KEYS)
+                if pm_ids:
+                    part_master_id = pm_ids[0]
+                    break
+        if not part_master_id:
+            return False, "このユーザーの既存パート情報が見つかりません。管理者に連絡してください。"
+
+        props: dict = {}
+        ctx["put_prop_any"](props, t_cast, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
+        ctx["put_prop_any"](props, t_cast, PARTICIPANT_PLAYER_REL_KEYS, player_id)
+        ctx["put_prop_any"](props, t_cast, PARTICIPANT_PART_REL_KEYS, part_master_id)
+        ctx["put_key_any"](props, t_cast, PARTICIPANT_RECORD_KEYS, concert_id, player_id, prefix="participant")
+        res = ctx["api_request"](
+            "post",
+            "https://api.notion.com/v1/pages",
+            json={"parent": {"database_id": cast_db}, "properties": props},
+        )
+        if res and res.status_code == 200:
+            return True, "linked"
+        return False, f"紐付けに失敗しました (status={getattr(res, 'status_code', '?')})"
+    except Exception as e:
+        return False, f"紐付けに失敗しました: {e}"
 
 
 _FORM_COOKIE_PREFIX = "harmonia_form_"
@@ -1700,8 +1795,8 @@ def render_form(ctx, concert_id: str = ""):
 
         if submitted_resend:
             last_sent = st.session_state.get("auth_last_sent")
-            if last_sent and (datetime.now() - last_sent).total_seconds() < 60:
-                remaining_sec = int(60 - (datetime.now() - last_sent).total_seconds())
+            if last_sent and (datetime.now() - last_sent).total_seconds() < _CODE_RESEND_SECONDS:
+                remaining_sec = int(_CODE_RESEND_SECONDS - (datetime.now() - last_sent).total_seconds())
                 st.warning(f"再送信は{remaining_sec}秒後に行えます。")
                 return
             code = _generate_code()
@@ -1750,7 +1845,7 @@ def render_form(ctx, concert_id: str = ""):
                 st.session_state["auth_attempts"] = attempts
                 remaining = _CODE_MAX_ATTEMPTS - attempts
                 if remaining <= 0:
-                    st.error("確認コードを3回間違えました。最初からやり直してください。")
+                    st.error(f"確認コードを{_CODE_MAX_ATTEMPTS}回間違えました。最初からやり直してください。")
                     for k in ["auth_code_hash","auth_code_expires","auth_attempts",
                                "auth_code_sent","auth_last_sent","auth_player_id",
                                "auth_is_existing","auth_email_submitted"]:
