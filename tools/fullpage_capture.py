@@ -44,6 +44,8 @@ MUSE_MODES = [
     "自動同期",
 ]
 
+UNSELECTED_CONCERT_LABEL = "— 演奏会を選択してください —"
+
 
 def _slug(text: str) -> str:
     s = re.sub(r"[^\w\-]+", "_", text, flags=re.UNICODE).strip("_")
@@ -66,6 +68,60 @@ def _capture(page, outdir: Path, order: int, name: str) -> None:
     out = outdir / f"{order:02d}_{_slug(name)}.png"
     page.screenshot(path=str(out), full_page=True)
     print(f"[saved] {out}")
+
+
+def _open_concert_select(page) -> bool:
+    sidebar = page.locator("section[data-testid='stSidebar']")
+    box = sidebar.locator("div[data-testid='stSelectbox']").filter(has_text="対象演奏会")
+    if box.count() == 0:
+        return False
+    try:
+        box.first.locator("div[data-baseweb='select']").first.click(timeout=3000)
+        return True
+    except PlaywrightTimeoutError:
+        return False
+
+
+def _pick_concert_option(page, concert_name: str | None) -> str:
+    options = page.locator("[role='option']")
+    count = options.count()
+    if count == 0:
+        return ""
+
+    target = (concert_name or "").strip()
+    if target:
+        for i in range(count):
+            label = (options.nth(i).inner_text() or "").strip()
+            if label == target:
+                options.nth(i).click(timeout=3000)
+                return label
+        return ""
+
+    for i in range(count):
+        label = (options.nth(i).inner_text() or "").strip()
+        if not label or "選択してください" in label or label == UNSELECTED_CONCERT_LABEL:
+            continue
+        options.nth(i).click(timeout=3000)
+        return label
+    return ""
+
+
+def _select_concert(page, concert_name: str | None, delay_ms: int) -> str:
+    if not _open_concert_select(page):
+        return ""
+    time.sleep(0.2)
+    selected = _pick_concert_option(page, concert_name)
+    if selected:
+        time.sleep(delay_ms / 1000)
+        print(f"[info] 演奏会を選択: {selected}")
+        return selected
+    # close dropdown when no match
+    page.keyboard.press("Escape")
+    if concert_name:
+        print(f"[warn] 指定演奏会が見つかりませんでした: {concert_name}")
+    else:
+        print("[warn] 選択可能な演奏会が見つかりませんでした。")
+    return ""
 
 
 def _launch_chromium(playwright, auto_install_browser: bool):
@@ -100,7 +156,14 @@ def _launch_chromium(playwright, auto_install_browser: bool):
             raise _to_runtime_error(e2) from e2
 
 
-def run(url: str, outdir: Path, delay_ms: int, include_muse_modes: bool, auto_install_browser: bool) -> None:
+def run(
+    url: str,
+    outdir: Path,
+    delay_ms: int,
+    include_muse_modes: bool,
+    auto_install_browser: bool,
+    concert_name: str | None,
+) -> None:
     if sync_playwright is None:
         raise RuntimeError(
             "playwright が未インストールです。"
@@ -137,7 +200,11 @@ def run(url: str, outdir: Path, delay_ms: int, include_muse_modes: bool, auto_in
         # System mode: HARMONIA
         if _click_sidebar_text(page, "HARMONIA"):
             time.sleep(delay_ms / 1000)
-            _capture(page, outdir, order, "HARMONIA")
+            selected_concert = _select_concert(page, concert_name=concert_name, delay_ms=delay_ms)
+            harmonia_label = "HARMONIA"
+            if selected_concert:
+                harmonia_label = f"HARMONIA_{selected_concert}"
+            _capture(page, outdir, order, harmonia_label)
             order += 1
 
             for page_name in HARMONIA_PAGES:
@@ -157,6 +224,7 @@ def main() -> None:
     parser.add_argument("--delay-ms", type=int, default=1200, help="Wait after each navigation")
     parser.add_argument("--include-muse-modes", action="store_true", help="Also capture MUSE mode radio pages")
     parser.add_argument("--auto-install-browser", action="store_true", help="Install Playwright Chromium automatically if missing")
+    parser.add_argument("--concert-name", default="", help="HARMONIAで選択する演奏会名（未指定なら先頭を自動選択）")
     args = parser.parse_args()
 
     run(
@@ -165,6 +233,7 @@ def main() -> None:
         delay_ms=args.delay_ms,
         include_muse_modes=args.include_muse_modes,
         auto_install_browser=args.auto_install_browser,
+        concert_name=(args.concert_name or "").strip() or None,
     )
 
 

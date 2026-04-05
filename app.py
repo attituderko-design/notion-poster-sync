@@ -10604,6 +10604,7 @@ with st.sidebar:
         st.caption("Playwrightでアプリ全ページのフルスクリーン画像を保存します。")
         st.info("Streamlit Cloud ではOS依存ライブラリ制約により失敗する場合があります。確実に使う場合はローカル環境で実行してください。")
         cap_url = st.text_input("対象URL", value="http://localhost:8501", key="capture_url")
+        cap_concert = st.text_input("対象演奏会名（任意）", value="", key="capture_concert_name", help="空欄なら先頭の演奏会を自動選択します。")
         cap_outdir = st.text_input("保存先", value="artifacts/screenshots", key="capture_outdir")
         cap_delay = st.number_input("ページ遷移後の待機(ms)", min_value=300, max_value=5000, value=1200, step=100, key="capture_delay")
         cap_muse = st.toggle("MUSEモードも巡回", value=True, key="capture_include_muse")
@@ -10617,6 +10618,8 @@ with st.sidebar:
                 "--delay-ms", str(int(cap_delay)),
                 "--auto-install-browser",
             ]
+            if cap_concert.strip():
+                cmd.extend(["--concert-name", cap_concert.strip()])
             if cap_muse:
                 cmd.append("--include-muse-modes")
             with st.spinner("全ページをキャプチャ中..."):
