@@ -1158,29 +1158,74 @@ def _render_concert_selector(ctx):
                     else:
                         st.error("パスワードが違います。")
             else:
-                # パスワード未設定 → STEP0bの通常フローに戻して処理させる
+                # パスワード未設定 → selector内で確認コード認証
                 st.subheader(f"おかえりなさい、{sel_pname} さん")
                 st.warning("パスワードが設定されていません。確認コードでログインしてパスワードを設定してください。")
                 st.caption(f"登録メールアドレス: {sel_email}")
-                if st.button("📧 確認コードでログインする",
-                             type="primary", use_container_width=True,
-                             key="sel_goto_magic"):
-                    # selector stateをクリアしてSTEP0bへ
-                    # auth_email_submittedをTrueにすることでメール入力をスキップして
-                    # そのままマジックコード送信フローへ進む
-                    for k in ["sel_email_submitted", "sel_email", "sel_player_id",
-                              "sel_player_name", "sel_has_password", "sel_pw_verified",
-                              "selector_mode"]:
-                        st.session_state.pop(k, None)
-                    st.session_state.update({
-                        "form_auth_mode":        "login",
-                        "auth_email_submitted":  True,
-                        "form_auth_email":       sel_email,
-                    })
-                    st.rerun()
+                if not st.session_state.get("sel_magic_sent"):
+                    if st.button("📧 確認コードでログインする",
+                                 type="primary", use_container_width=True,
+                                 key="sel_goto_magic"):
+                        code = _generate_code()
+                        ok = _send_magic_code(ctx, sel_email, code, "HARMONIA")
+                        if ok:
+                            st.session_state.update({
+                                "sel_magic_sent": True,
+                                "sel_magic_hash": _hash_code(code),
+                                "sel_magic_expires": datetime.now() + timedelta(minutes=_CODE_EXPIRY_MINUTES),
+                                "sel_magic_attempts": 0,
+                            })
+                            st.success("確認コードを送信しました。")
+                            st.rerun()
+                        else:
+                            st.error("確認コード送信に失敗しました。")
+                else:
+                    st.info("確認コードを登録済みメールアドレスに送信しました。確認コードを入力してください。")
+                    with st.form("sel_magic_verify_form"):
+                        entered_code = st.text_input("確認コード（6桁）", max_chars=6, placeholder="123456")
+                        c_ok, c_resend = st.columns(2)
+                        submitted_code = c_ok.form_submit_button("確認", type="primary", use_container_width=True)
+                        submitted_resend = c_resend.form_submit_button("再送信", use_container_width=True)
+                    if submitted_resend:
+                        code = _generate_code()
+                        ok = _send_magic_code(ctx, sel_email, code, "HARMONIA")
+                        if ok:
+                            st.session_state.update({
+                                "sel_magic_hash": _hash_code(code),
+                                "sel_magic_expires": datetime.now() + timedelta(minutes=_CODE_EXPIRY_MINUTES),
+                                "sel_magic_attempts": 0,
+                            })
+                            st.success("確認コードを再送しました。")
+                            st.rerun()
+                        else:
+                            st.error("再送信に失敗しました。")
+                    if submitted_code:
+                        expires = st.session_state.get("sel_magic_expires")
+                        if not expires or datetime.now() >= expires:
+                            st.error("確認コードの有効期限が切れています。再送信してください。")
+                        elif _verify_code(entered_code, st.session_state.get("sel_magic_hash", "")):
+                            st.session_state["sel_pw_verified"] = True
+                            st.session_state["sel_need_set_password"] = True
+                            for k in ["sel_magic_sent", "sel_magic_hash", "sel_magic_expires", "sel_magic_attempts"]:
+                                st.session_state.pop(k, None)
+                            st.rerun()
+                        else:
+                            attempts = int(st.session_state.get("sel_magic_attempts", 0)) + 1
+                            st.session_state["sel_magic_attempts"] = attempts
+                            remain = _CODE_MAX_ATTEMPTS - attempts
+                            if remain <= 0:
+                                st.error("確認コードを3回間違えました。最初からやり直してください。")
+                                for k in ["sel_email_submitted","sel_email","sel_player_id","sel_player_name",
+                                          "sel_has_password","sel_pw_verified","sel_need_set_password",
+                                          "sel_magic_sent","sel_magic_hash","sel_magic_expires","sel_magic_attempts"]:
+                                    st.session_state.pop(k, None)
+                                st.rerun()
+                            else:
+                                st.error(f"確認コードが違います。あと{remain}回入力できます。")
             if st.button("← 戻る", key="sel_pw_back"):
                 for k in ["sel_email_submitted","sel_email","sel_player_id",
-                          "sel_player_name","sel_has_password","sel_pw_verified"]:
+                          "sel_player_name","sel_has_password","sel_pw_verified","sel_need_set_password",
+                          "sel_magic_sent","sel_magic_hash","sel_magic_expires","sel_magic_attempts"]:
                     st.session_state.pop(k, None)
                 st.rerun()
             return
@@ -1211,6 +1256,7 @@ def _render_concert_selector(ctx):
                     "form_player_name":          sel_pname,
                     "form_is_new":               False,
                     "form_is_existing_auth":     True,
+                    "form_need_set_password":    bool(st.session_state.get("sel_need_set_password", False)),
                     "form_step":                 1,
                 })
                 # クッキーに保存
@@ -1218,7 +1264,8 @@ def _render_concert_selector(ctx):
                     _FORM_COOKIE_MGR, selected_cid, sel_pid, sel_pname)
                 for k in ["selector_mode","sel_email_submitted","sel_email",
                           "sel_player_id","sel_player_name","sel_has_password",
-                          "sel_pw_verified","sel_concert_select"]:
+                          "sel_pw_verified","sel_need_set_password","sel_concert_select",
+                          "sel_magic_sent","sel_magic_hash","sel_magic_expires","sel_magic_attempts"]:
                     st.session_state.pop(k, None)
                 st.rerun()
         else:
