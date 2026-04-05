@@ -1232,15 +1232,7 @@ def _render_concert_selector(ctx):
             st.rerun()
 
         if st.button("🔓 ログアウト", use_container_width=True, key="sel_logout"):
-            try:
-                _clear_form_cookie(_FORM_COOKIE_MGR)
-            except Exception:
-                pass
-            for k in list(st.session_state.keys()):
-                if k.startswith("sel_") or k.startswith("form_"):
-                    st.session_state.pop(k, None)
-            st.session_state.pop("selector_mode", None)
-            st.rerun()
+            _logout_to_entry(_FORM_COOKIE_MGR)
 
 
 # ── フォームメイン ────────────────────────────────────────────
@@ -1326,6 +1318,27 @@ def _clear_form_cookie(cookie_mgr) -> None:
             cookie_mgr.delete(f"{_FORM_COOKIE_PREFIX}{key}")
         except Exception:
             pass
+
+def _logout_to_entry(cookie_mgr) -> None:
+    """ログアウトして入口画面（concert_id未確定）へ戻す。"""
+    try:
+        _clear_form_cookie(cookie_mgr)
+    except Exception:
+        pass
+    for k in list(st.session_state.keys()):
+        if (
+            k.startswith("form_")
+            or k.startswith("auth_")
+            or k.startswith("sel_")
+            or k == "selector_mode"
+            or k == "_form_cookie_pending"
+        ):
+            st.session_state.pop(k, None)
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+    st.rerun()
 
 
 def _restore_form_session_from_cookie(cookie_mgr) -> bool:
@@ -2079,11 +2092,7 @@ def render_form(ctx, concert_id: str = ""):
 
             st.divider()
             if st.button("🔓 ログアウト", use_container_width=True, key="menu_logout"):
-                _clear_form_cookie(_form_cookie_mgr)
-                for k in list(st.session_state.keys()):
-                    if k.startswith("form_") or k.startswith("auth_"):
-                        st.session_state.pop(k, None)
-                st.rerun()
+                _logout_to_entry(_form_cookie_mgr)
             return
         # 新規奏者の場合: 名前・パート入力
         st.subheader("Step 1 / 基本情報を入力してください")
