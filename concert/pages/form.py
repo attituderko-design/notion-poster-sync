@@ -26,7 +26,7 @@ from concert.services.keys import (
     PI_PARTICIPANT_REL_KEYS, PI_PLAYER_REL_KEYS, PI_INST_REL_KEYS, PI_CONCERT_REL_KEYS, PI_OWN_COUNT_KEYS,
     PREFERENCE_KEY_KEYS, PREF_PLAYER_REL_KEYS, PREF_PART_REL_KEYS, PREF_PRIORITY_KEYS,
     CONCERT_CONFIRMED_FEE_KEYS,
-    HARMONIA_CONCERT_PLAN_KEYS, HARMONIA_CONCERT_ASSIGN_KEYS,
+    HARMONIA_CONCERT_PLAN_KEYS, HARMONIA_CONCERT_ASSIGN_KEYS, HARMONIA_CONCERT_INVITE_CODE_KEYS,
 )
 from concert.services.relation_utils import find_relation_prop
 from concert.services.song_utils import get_song_display_name, build_song_name_map
@@ -1127,7 +1127,7 @@ def _render_concert_selector(ctx):
         if submitted:
             if _invite_rate_limited():
                 return
-            cid = _resolve_concert_id_by_invite_code(ctx, code_input)
+            cid, invite_err = _resolve_concert_id_by_invite_code(ctx, code_input)
             if cid:
                 st.session_state.pop("sel_invite_fail_ts", None)
                 # selector内でログイン済みなら、演奏会紐付けしてログイン画面へ戻す
@@ -1154,7 +1154,12 @@ def _render_concert_selector(ctx):
                     st.rerun()
             else:
                 _record_invite_failure()
-                st.error("招待コードが見つかりませんでした。管理者に確認してください。")
+                if invite_err == "ambiguous":
+                    st.error("同じ招待コードが複数の演奏会に設定されています。管理者に連絡してください。")
+                elif invite_err == "invalid":
+                    st.error("招待コードを入力してください。")
+                else:
+                    st.error("招待コードが見つかりませんでした。管理者に確認してください。")
         if st.button("← 戻る", key="invite_back"):
             st.session_state.pop("selector_mode", None)
             st.rerun()
@@ -1357,14 +1362,15 @@ def _render_concert_selector(ctx):
                 ext(c, CONCERT_NAME_KEYS) or c.get("id","")[:8]: c.get("id","")
                 for c in my_concerts
             }
+            # 招待コード経由で追加直後の演奏会を優先選択
+            _preselect_cid = st.session_state.get("sel_preselect_cid", "")
+
             # URLにcidがあり、参加済み演奏会なら自動遷移
             _cid_q = (st.query_params.get("cid") or "").strip()
-            if _cid_q and _cid_q in concert_opts.values() and not st.session_state.get("sel_cid_autorouted"):
+            if (not _preselect_cid) and _cid_q and _cid_q in concert_opts.values() and not st.session_state.get("sel_cid_autorouted"):
                 st.session_state["sel_cid_autorouted"] = True
                 _go_selected_concert(_cid_q)
 
-            # 招待コード経由で追加直後の演奏会を優先選択
-            _preselect_cid = st.session_state.get("sel_preselect_cid", "")
             _labels = list(concert_opts.keys())
             _default_index = 0
             if _preselect_cid:
@@ -1397,10 +1403,15 @@ def _render_concert_selector(ctx):
         if submitted_invite:
             if _invite_rate_limited():
                 return
-            cid = _resolve_concert_id_by_invite_code(ctx, sel_invite_code)
+            cid, invite_err = _resolve_concert_id_by_invite_code(ctx, sel_invite_code)
             if not cid:
                 _record_invite_failure()
-                st.error("招待コードが見つかりませんでした。管理者に確認してください。")
+                if invite_err == "ambiguous":
+                    st.error("同じ招待コードが複数の演奏会に設定されています。管理者に連絡してください。")
+                elif invite_err == "invalid":
+                    st.error("招待コードを入力してください。")
+                else:
+                    st.error("招待コードが見つかりませんでした。管理者に確認してください。")
             else:
                 st.session_state.pop("sel_invite_fail_ts", None)
                 part_id = pm_name_to_id.get(sel_part_name, "")
@@ -1421,20 +1432,35 @@ def _render_concert_selector(ctx):
 
 # ── フォームメイン ────────────────────────────────────────────
 
-def _resolve_concert_id_by_invite_code(ctx, code: str) -> str:
-    """招待コードからconcert_idを解決する。見つからなければ空文字を返す。"""
+def _resolve_concert_id_by_invite_code(ctx, code: str) -> tuple[str, str]:
+    """招待コードからconcert_idを解決する。
+    戻り値: (concert_id, error_code)
+      - ("<cid>", ""): 正常
+      - ("", "not_found"): 未検出
+      - ("", "ambiguous"): 同一コードが複数演奏会に存在
+      - ("", "invalid"): 入力不正
+    """
     try:
+        norm_code = (code or "").strip().upper()
+        if not norm_code:
+            return "", "invalid"
         hc_rows = ctx["query_all"](ctx["CONCERT_DB_HARMONIA_CONCERT"], None)
         ext = ctx["extract_prop_text_any"]
+        matched_cids: list[str] = []
         for r in hc_rows:
-            stored = (ext(r, ["招待コード", "invite_code"]) or "").strip().upper()
-            if stored and stored == code.strip().upper():
+            stored = (ext(r, HARMONIA_CONCERT_INVITE_CODE_KEYS) or "").strip().upper()
+            if stored and stored == norm_code:
                 rel_ids = ctx["extract_relation_ids_any"](r, ["演奏会", "FK演奏会", "concert"])
                 if rel_ids:
-                    return rel_ids[0]
+                    matched_cids.extend([cid for cid in rel_ids if cid])
+        uniq = sorted(set(matched_cids))
+        if len(uniq) == 1:
+            return uniq[0], ""
+        if len(uniq) >= 2:
+            return "", "ambiguous"
     except Exception:
         pass
-    return ""
+    return "", "not_found"
 
 
 def _get_my_concerts(ctx, player_id: str) -> list[dict]:
@@ -1530,6 +1556,7 @@ def _save_form_session_to_cookie(cookie_mgr, concert_id: str, player_id: str,
         "player_id": player_id,
         "player_name": player_name,
     }
+    st.session_state.pop("form_skip_cookie_restore", None)
 
 
 def _clear_form_cookie(cookie_mgr) -> None:
@@ -1556,6 +1583,7 @@ def _logout_to_entry(cookie_mgr) -> None:
             or k == "_form_cookie_pending"
         ):
             st.session_state.pop(k, None)
+    st.session_state["form_skip_cookie_restore"] = True
     try:
         st.query_params.clear()
     except Exception:
@@ -1565,6 +1593,8 @@ def _logout_to_entry(cookie_mgr) -> None:
 
 def _restore_form_session_from_cookie(cookie_mgr) -> bool:
     """クッキーからログイン状態を復元する。復元できたらTrueを返す。"""
+    if st.session_state.get("form_skip_cookie_restore"):
+        return False
     if st.session_state.get("form_is_existing_auth"): return False  # 既にログイン済み
 
     # pendingデータがあればクッキーに再保存（rerun後の保存）
