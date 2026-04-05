@@ -64,6 +64,16 @@ def _capture(page, outdir: Path, order: int, name: str) -> None:
 
 
 def _launch_chromium(playwright, auto_install_browser: bool):
+    def _to_runtime_error(err: Exception) -> RuntimeError:
+        msg = str(err)
+        if "error while loading shared libraries" in msg:
+            return RuntimeError(
+                "PlaywrightのLinux依存ライブラリが不足しています。"
+                " `python -m playwright install --with-deps chromium` を実行するか、"
+                " デプロイ環境では `packages.txt` に必要ライブラリ（例: libglib2.0-0, libnss3, libatk1.0-0, libx11-6）を追加してください。"
+            )
+        return RuntimeError(msg)
+
     try:
         return playwright.chromium.launch(headless=True)
     except PlaywrightError as e:
@@ -79,7 +89,10 @@ def _launch_chromium(playwright, auto_install_browser: bool):
         print("[info] Chromiumが未インストールのため、`python -m playwright install chromium` を実行します...")
         subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
         print("[info] Chromiumインストール完了。キャプチャを再開します。")
-        return playwright.chromium.launch(headless=True)
+        try:
+            return playwright.chromium.launch(headless=True)
+        except PlaywrightError as e2:
+            raise _to_runtime_error(e2) from e2
 
 
 def run(url: str, outdir: Path, delay_ms: int, include_muse_modes: bool, auto_install_browser: bool) -> None:

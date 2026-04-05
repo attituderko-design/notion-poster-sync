@@ -123,6 +123,7 @@ python tools/fullpage_capture.py --url http://localhost:8501 --outdir artifacts/
 
 - `--include-muse-modes` を外すと `MUSE` のモード巡回を省略します。
 - `HARMONIA` はサイドバーのページを自動巡回して full-page 保存します。
+- Linuxデプロイ環境で `libglib-2.0.so.0` などのエラーが出る場合は、`packages.txt` の依存ライブラリを反映後に再デプロイしてください。
 
 ### 2. Prepare Secrets
 
