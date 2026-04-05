@@ -10602,6 +10602,7 @@ with st.sidebar:
 
     with st.expander("📸 全頁キャプチャ", expanded=False):
         st.caption("Playwrightでアプリ全ページのフルスクリーン画像を保存します。")
+        st.info("Streamlit Cloud ではOS依存ライブラリ制約により失敗する場合があります。確実に使う場合はローカル環境で実行してください。")
         cap_url = st.text_input("対象URL", value="http://localhost:8501", key="capture_url")
         cap_outdir = st.text_input("保存先", value="artifacts/screenshots", key="capture_outdir")
         cap_delay = st.number_input("ページ遷移後の待機(ms)", min_value=300, max_value=5000, value=1200, step=100, key="capture_delay")

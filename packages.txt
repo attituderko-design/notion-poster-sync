@@ -1,2 +1,1 @@
 fonts-ipafont-gothic
-libglib2.0-0
