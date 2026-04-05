@@ -231,6 +231,77 @@ def _load_participants(ctx, concert_id: str, db_id_override: str = "") -> list[d
     return st.session_state.get(key, [])
 
 
+def _load_part_master_name_map(ctx) -> dict[str, str]:
+    key = "assign_part_master_name_map"
+    if key not in st.session_state:
+        db_id = (ctx.get("CONCERT_DB_PART_MASTER", "") or "").strip()
+        name_map: dict[str, str] = {}
+        if db_id:
+            rows = ctx["query_all"](db_id, None)
+            for r in rows:
+                rid = r.get("id", "")
+                if not rid:
+                    continue
+                name_map[rid] = (
+                    ctx["extract_prop_text_any"](r, PARTMASTER_NAME_KEYS)
+                    or ctx["extract_title"](r)
+                    or rid
+                )
+        st.session_state[key] = name_map
+    return st.session_state.get(key, {})
+
+
+def _participant_part_name(ctx, participant_row: dict, part_master_name_map: dict[str, str]) -> str:
+    rel_ids = ctx["extract_relation_ids_any"](participant_row, PARTICIPANT_PART_REL_KEYS)
+    for rid in rel_ids:
+        if rid in part_master_name_map:
+            return part_master_name_map[rid]
+    return (ctx["extract_prop_text_any"](participant_row, PARTICIPANT_PART_KEYS) or "").strip()
+
+
+def _render_shared_part_filter(
+    ctx,
+    concert_id: str,
+    participant_rows: list[dict],
+    *,
+    show_widget: bool,
+) -> tuple[str, set[str], dict[str, str]]:
+    """3タブ共通のパート絞り込み状態を返す。show_widget=True のときだけUIを描画。"""
+    part_master_name_map = _load_part_master_name_map(ctx)
+    part_by_player: dict[str, str] = {}
+    for row in participant_rows:
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if not pids:
+            continue
+        pid = pids[0]
+        part_name = _participant_part_name(ctx, row, part_master_name_map)
+        if part_name:
+            part_by_player[pid] = part_name
+
+    all_parts = sorted({p for p in part_by_player.values() if p})
+    all_player_ids = set(part_by_player.keys())
+    if not all_parts:
+        return "（全パート）", all_player_ids, part_by_player
+
+    opts = ["（全パート）"] + all_parts
+    filter_key = f"assign_part_filter_{concert_id}"
+    if show_widget:
+        selected_part = st.selectbox(
+            "パートを選択（全タブ共通）",
+            opts,
+            key=filter_key,
+            help="ここで選択したパートは『希望入力』『アルゴリズム実行』『アサイン確定』で共通適用されます。",
+        )
+    else:
+        selected_part = st.session_state.get(filter_key, "（全パート）")
+        if selected_part not in opts:
+            selected_part = "（全パート）"
+    if selected_part == "（全パート）":
+        return selected_part, all_player_ids, part_by_player
+    selected_player_ids = {pid for pid, pname in part_by_player.items() if pname == selected_part}
+    return selected_part, selected_player_ids, part_by_player
+
+
 def _load_songs(ctx, concert_id: str) -> list[dict]:
     key = f"song_list_{concert_id}"
     if key not in st.session_state:
@@ -532,24 +603,15 @@ def _render_pref_tab(ctx: dict):
         st.info("この演奏会に紐づく奏者が見つかりませんでした。参加者DBのリレーションを確認してください。")
         return
 
-    # パートフィルタ：CONCERT_CASTからパート一覧を取得して選択
-    part_by_player: dict[str, str] = {}
-    for row in participant_rows:
-        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
-        if pids:
-            part_by_player[pids[0]] = ctx["extract_prop_text_any"](row, PARTICIPANT_PART_KEYS) or ""
-    all_parts = sorted({p for p in part_by_player.values() if p})
-    if all_parts:
-        selected_part = st.selectbox(
-            "パートを選択", all_parts,
-            key="pref_part_filter",
-            help="選択したパートの奏者のみ希望入力・入力状況に表示されます。"
-        )
-        players = [p for p in players
-                   if part_by_player.get(p.get("id",""), "") == selected_part]
-        if not players:
-            st.info(f"「{selected_part}」の参加者が見つかりません。")
-            return
+    # パートフィルタ（3タブ共通）
+    selected_part, selected_player_ids, _ = _render_shared_part_filter(
+        ctx, concert_id, participant_rows, show_widget=False
+    )
+    if selected_player_ids:
+        players = [p for p in players if p.get("id", "") in selected_player_ids]
+    if not players:
+        st.info(f"「{selected_part}」の参加者が見つかりません。")
+        return
 
     # 楽器マスタ
     inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
@@ -816,6 +878,15 @@ def _render_solver_tab(ctx: dict):
     if not players or not songs:
         st.info("奏者・楽曲が登録されていません。")
         return
+    participant_rows = _load_participants(ctx, concert_id)
+    selected_part, selected_player_ids, _ = _render_shared_part_filter(
+        ctx, concert_id, participant_rows, show_widget=False
+    )
+    if selected_player_ids:
+        players = [p for p in players if p.get("id", "") in selected_player_ids]
+    if not players:
+        st.info(f"「{selected_part}」に該当する奏者がいません。")
+        return
 
     st.caption("ヒューリスティック解（高速）と厳密解（整数計画法）を同時に生成します。")
 
@@ -840,14 +911,16 @@ def _render_solver_tab(ctx: dict):
 
                 # 参加者DB全員リスト（希望未提出も含む）をfallback候補に
                 # ※ all_pidsより先に定義する必要がある
-                _all_cast = _load_participants(ctx, concert_id)
+                _all_cast = participant_rows
                 _part_to_pl = {}
                 for _r in _all_cast:
                     _pids = ctx["extract_relation_ids_any"](_r, PARTICIPANT_PLAYER_REL_KEYS)
                     if _pids:
                         _pid = _pids[0]
+                        if selected_player_ids and _pid not in selected_player_ids:
+                            continue
                         # 打楽器パート（Perc系）のみを対象にする
-                        _ppart = (ctx["extract_prop_text_any"](_r, PARTICIPANT_PART_KEYS) or "").strip()
+                        _ppart = _participant_part_name(ctx, _r, _load_part_master_name_map(ctx))
                         if not _is_perc_part(_ppart):
                             continue
                         _pobj = next((p for p in players if p.get("id","") == _pid), None)
@@ -1538,6 +1611,15 @@ def _render_result_tab(ctx: dict):
     if not players or not songs:
         st.info("奏者・楽曲が登録されていません。")
         return
+    participant_rows = _load_participants(ctx, concert_id)
+    selected_part, selected_player_ids, _ = _render_shared_part_filter(
+        ctx, concert_id, participant_rows, show_widget=False
+    )
+    if selected_player_ids:
+        players = [p for p in players if p.get("id", "") in selected_player_ids]
+    if not players:
+        st.info(f"「{selected_part}」に該当する奏者がいません。")
+        return
 
     inst_rows     = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
     inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
@@ -1562,6 +1644,9 @@ def _render_result_tab(ctx: dict):
     for r in all_rows:
         c_ids = ext_rel(r, ASSIGNMENT_CONCERT_REL_KEYS)
         if concert_id and c_ids and concert_id not in c_ids:
+            continue
+        p_ids = ext_rel(r, ASSIGNMENT_PLAYER_REL_KEYS)
+        if selected_player_ids and (not p_ids or p_ids[0] not in selected_player_ids):
             continue
         if ext_any(r, ASSIGNMENT_FLAG_KEYS) == "True":
             assigned_rows.append(r)
@@ -1678,6 +1763,10 @@ def _render_result_tab(ctx: dict):
 
 def render(ctx: dict):
     st.header("🎯 パート割当")
+    _cid = (ctx.get("SELECTED_CONCERT_ID") or "").strip()
+    if _cid:
+        _participant_rows = _load_participants(ctx, _cid)
+        _render_shared_part_filter(ctx, _cid, _participant_rows, show_widget=True)
 
     tab_pref, tab_solver, tab_result = st.tabs([
         "希望入力",
