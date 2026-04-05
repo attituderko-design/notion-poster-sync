@@ -15,9 +15,14 @@ import sys
 import time
 from pathlib import Path
 
-from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import Error as PlaywrightError
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    from playwright.sync_api import sync_playwright
+except Exception:
+    PlaywrightError = Exception
+    PlaywrightTimeoutError = Exception
+    sync_playwright = None
 
 
 HARMONIA_PAGES = [
@@ -96,6 +101,12 @@ def _launch_chromium(playwright, auto_install_browser: bool):
 
 
 def run(url: str, outdir: Path, delay_ms: int, include_muse_modes: bool, auto_install_browser: bool) -> None:
+    if sync_playwright is None:
+        raise RuntimeError(
+            "playwright が未インストールです。"
+            " `pip install playwright` と `python -m playwright install chromium` を実行してください。"
+        )
+
     outdir.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
