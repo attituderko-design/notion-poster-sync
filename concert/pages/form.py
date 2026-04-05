@@ -1067,6 +1067,11 @@ def _render_concert_selector(ctx):
     未ログイン   → ログイン or 招待コードで新規参加
     """
     ext = ctx["extract_prop_text_any"]
+    pm_map_for_selector = _get_part_master_map(ctx)
+    pm_name_to_id = {
+        v.get("name", ""): k for k, v in pm_map_for_selector.items() if v.get("name")
+    }
+    pm_names = sorted(pm_name_to_id.keys(), key=lambda x: x.lower())
     selector_mode = st.session_state.get("selector_mode")  # None / "login" / "invite"
 
     # ── モード未選択 ─────────────────────────────────────────
@@ -1085,15 +1090,27 @@ def _render_concert_selector(ctx):
     if selector_mode == "invite":
         st.subheader("招待コードを入力してください")
         st.caption("管理者から受け取った招待コードを入力してください。")
+        _invite_logged_in = bool(st.session_state.get("sel_pw_verified") and st.session_state.get("sel_player_id"))
         with st.form("invite_code_form"):
             code_input = st.text_input("招待コード", max_chars=20, placeholder="例: K7X2MN9A")
+            selected_part_name = ""
+            if _invite_logged_in:
+                selected_part_name = st.selectbox(
+                    "担当パート *",
+                    ["（選択してください）"] + pm_names,
+                    key="invite_part_select",
+                )
             submitted = st.form_submit_button("次へ →", type="primary", use_container_width=True)
         if submitted:
             cid = _resolve_concert_id_by_invite_code(ctx, code_input)
             if cid:
                 # selector内でログイン済みなら、演奏会紐付けしてログイン画面へ戻す
-                if st.session_state.get("sel_pw_verified") and st.session_state.get("sel_player_id"):
-                    ok, msg = _link_player_to_concert_by_invite(ctx, st.session_state.get("sel_player_id", ""), cid)
+                if _invite_logged_in:
+                    part_id = pm_name_to_id.get(selected_part_name, "")
+                    if not part_id:
+                        st.error("担当パートを選択してください。")
+                        return
+                    ok, msg = _link_player_to_concert_by_invite(ctx, st.session_state.get("sel_player_id", ""), cid, part_id)
                     if ok:
                         st.session_state["selector_mode"] = "login"
                         st.session_state["sel_preselect_cid"] = cid
@@ -1314,13 +1331,22 @@ def _render_concert_selector(ctx):
         st.markdown("**🎟 招待コードで演奏会に参加する**")
         with st.form("sel_add_concert_form"):
             sel_invite_code = st.text_input("招待コード", max_chars=20, placeholder="例: K7X2MN9A")
+            sel_part_name = st.selectbox(
+                "担当パート *",
+                ["（選択してください）"] + pm_names,
+                key="sel_add_part_select",
+            )
             submitted_invite = st.form_submit_button("この招待コードで追加する", use_container_width=True)
         if submitted_invite:
             cid = _resolve_concert_id_by_invite_code(ctx, sel_invite_code)
             if not cid:
                 st.error("招待コードが見つかりませんでした。管理者に確認してください。")
             else:
-                ok, msg = _link_player_to_concert_by_invite(ctx, sel_pid, cid)
+                part_id = pm_name_to_id.get(sel_part_name, "")
+                if not part_id:
+                    st.error("担当パートを選択してください。")
+                    return
+                ok, msg = _link_player_to_concert_by_invite(ctx, sel_pid, cid, part_id)
                 if ok:
                     st.session_state["sel_preselect_cid"] = cid
                     st.success("演奏会を追加しました。")
@@ -1376,7 +1402,8 @@ def _get_my_concerts(ctx, player_id: str) -> list[dict]:
     except Exception:
         return []
 
-def _link_player_to_concert_by_invite(ctx, player_id: str, concert_id: str) -> tuple[bool, str]:
+def _link_player_to_concert_by_invite(ctx, player_id: str, concert_id: str,
+                                      part_master_id: str) -> tuple[bool, str]:
     """既存奏者を指定演奏会へ紐付け（CONCERT_CAST作成）。既存なら成功扱い。"""
     try:
         ext_rel = ctx["extract_relation_ids_any"]
@@ -1394,16 +1421,8 @@ def _link_player_to_concert_by_invite(ctx, player_id: str, concert_id: str) -> t
             ):
                 return True, "already_linked"
 
-        # 既存出演履歴からパートを継承
-        part_master_id = ""
-        for r in all_cast:
-            if player_id in ext_rel(r, PARTICIPANT_PLAYER_REL_KEYS):
-                pm_ids = ext_rel(r, PARTICIPANT_PART_REL_KEYS)
-                if pm_ids:
-                    part_master_id = pm_ids[0]
-                    break
         if not part_master_id:
-            return False, "このユーザーの既存パート情報が見つかりません。管理者に連絡してください。"
+            return False, "担当パートを選択してください。"
 
         props: dict = {}
         ctx["put_prop_any"](props, t_cast, PARTICIPANT_CONCERT_REL_KEYS, concert_id)
