@@ -392,6 +392,50 @@ def _inject_form_styles() -> None:
             font-size: 11px; color: rgba(160,180,220,.35);
         }
 
+        /* ── attendance (step2) ── */
+        .h-att-headline {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 14px; font-weight: 500;
+            color: #e8edf7; margin-bottom: 2px;
+        }
+        .h-att-subline {
+            font-size: 12px;
+            color: rgba(160,180,220,.48);
+            margin-bottom: 12px;
+        }
+        .h-att-sec {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 11px;
+            color: rgba(160,180,220,.45);
+            letter-spacing: .1em;
+            text-transform: uppercase;
+            margin: 6px 0 8px;
+        }
+        .h-att-card {
+            background: rgba(255,255,255,.025);
+            border: .5px solid rgba(255,255,255,.06);
+            border-radius: 11px;
+            padding: 10px 11px 8px;
+            margin-bottom: 8px;
+        }
+        .h-att-date {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 12px;
+            color: rgba(160,180,220,.5);
+            margin-bottom: 2px;
+        }
+        .h-att-name {
+            font-size: 15px;
+            color: #d0daf0;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+        .h-save-bar {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: .5px solid rgba(255,255,255,.06);
+        }
+
         /* ── screen title ── */
         .h-scr-title {
             font-family: 'Outfit', sans-serif !important;
@@ -453,6 +497,34 @@ def _inject_form_styles() -> None:
         p, li, .stMarkdown p { font-size: 15px !important; line-height: 1.7 !important; }
         label[data-testid="stWidgetLabel"] { font-size: 13px !important; color: rgba(160,180,220,.65) !important; }
         .stAlert p { font-size: 14px !important; }
+
+        /* Step2の○/△/×をカードデザインに寄せる */
+        [data-testid="stRadio"] [role="radiogroup"],
+        [data-testid="stRadio"][role="radiogroup"] {
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 6px;
+            width: 100%;
+        }
+        [data-testid="stRadio"] [role="radiogroup"] label,
+        [data-testid="stRadio"][role="radiogroup"] label {
+            margin: 0 !important;
+            border-radius: 8px !important;
+            border: .5px solid rgba(255,255,255,.08) !important;
+            background: rgba(255,255,255,.03) !important;
+            min-height: 38px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            padding: 0 6px !important;
+        }
+        [data-testid="stRadio"] [role="radiogroup"] label [data-testid="stMarkdownContainer"] p,
+        [data-testid="stRadio"][role="radiogroup"] label [data-testid="stMarkdownContainer"] p {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 18px !important;
+            font-weight: 500 !important;
+            line-height: 1 !important;
+        }
         </style>
         """)
 
@@ -2758,7 +2830,7 @@ def render_form(ctx, concert_id: str = ""):
         is_new = st.session_state.get("form_is_new", False)
 
         st.html('<div class="h-scr-title">Step 2 / 練習出欠を入力してください</div>')
-        st.caption(f"👤 {pname}　　パート：{part}")
+        st.html(f'<div class="h-att-headline">出欠を入力してください</div><div class="h-att-subline">{pname} — {part}</div>')
         if is_new:
             st.success("✅ 新規奏者として登録しました。")
         st.caption("※ 本番当日の出席は自動で登録されます。")
@@ -2778,6 +2850,7 @@ def render_form(ctx, concert_id: str = ""):
         session_att = st.session_state.get("form_att") or {}
         session_att_comment = st.session_state.get("form_att_comment") or {}
 
+        st.html('<div class="h-att-sec">練習</div>')
         with st.form("step2"):
             att: dict[str, str] = {}
             att_comment: dict[str, str] = {}
@@ -2797,10 +2870,17 @@ def render_form(ctx, concert_id: str = ""):
                         weekday_jp = ["月","火","水","木","金","土","日"][_d.weekday()]
                     except Exception:
                         pass
-                label = f"**{pr_name}**　{date_disp}{'（' + weekday_jp + '）' if weekday_jp else ''}"
-                if time_disp: label += f" {time_disp}"
-                if pr_venue:  label += f"　📍 {pr_venue}"
-                st.markdown(label)
+                meta = f"{date_disp}{'（' + weekday_jp + '）' if weekday_jp else ''}"
+                if time_disp:
+                    meta += f" {time_disp}"
+                if pr_venue:
+                    meta += f" ・ {pr_venue}"
+                st.html(
+                    f'<div class="h-att-card">'
+                    f'<div class="h-att-date">{meta}</div>'
+                    f'<div class="h-att-name">{pr_name}</div>'
+                    f'</div>'
+                )
                 cur = existing_att.get(pr_id, {})
                 cur_status = session_att.get(pr_id) or cur.get("status", "△")
                 idx = ATT_OPTS.index(cur_status) if cur_status in ATT_OPTS else 1
@@ -2811,10 +2891,11 @@ def render_form(ctx, concert_id: str = ""):
                     "コメント（任意）",
                     value=session_att_comment.get(pr_id, cur.get("comment", "")),
                     key=f"att_note_{pr_id}",
+                    placeholder="必要な連絡事項があれば入力",
                 )
                 st.divider()
-            submitted = st.form_submit_button("次へ →", type="primary",
-                                              use_container_width=True)
+            st.html('<div class="h-save-bar"></div>')
+            submitted = st.form_submit_button("保存して次へ", type="primary", use_container_width=True)
         if submitted:
             st.session_state["form_att"]  = att
             st.session_state["form_att_comment"] = att_comment
