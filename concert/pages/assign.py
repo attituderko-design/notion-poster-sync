@@ -296,10 +296,17 @@ def _find_song_player_duplicates(assignments: list[dict]) -> dict[str, list[str]
 def _get_manual_assignments(concert_id: str, result_label: str, base_assignments: list[dict]) -> list[dict]:
     key = _manual_assignment_state_key(concert_id, result_label)
     sig_key = f"{key}_sig"
+    dirty_key = f"{key}_dirty"
     base_sig = _manual_assignment_sig(base_assignments)
-    if (key not in st.session_state) or (st.session_state.get(sig_key) != base_sig):
+    # dirtyフラグが無い旧セッション状態は破棄して初期化する
+    if dirty_key not in st.session_state:
         st.session_state[key] = [dict(a) for a in base_assignments]
         st.session_state[sig_key] = base_sig
+        st.session_state[dirty_key] = False
+    elif (key not in st.session_state) or (st.session_state.get(sig_key) != base_sig):
+        st.session_state[key] = [dict(a) for a in base_assignments]
+        st.session_state[sig_key] = base_sig
+        st.session_state[dirty_key] = False
     return st.session_state.get(key, [])
 
 
@@ -313,10 +320,13 @@ def _render_manual_assignment_editor(
 ) -> list[dict]:
     key = _manual_assignment_state_key(concert_id, result_label)
     open_key = f"{key}_open"
+    dirty_key = f"{key}_dirty"
     if key not in st.session_state:
         st.session_state[key] = [dict(a) for a in base_assignments]
     if open_key not in st.session_state:
         st.session_state[open_key] = True
+    if dirty_key not in st.session_state:
+        st.session_state[dirty_key] = False
     edited = st.session_state.get(key, [])
     if not edited:
         return edited
@@ -329,6 +339,7 @@ def _render_manual_assignment_editor(
         if st.button("↩ この候補の手動変更をリセット", key=f"manual_reset_{key}"):
             st.session_state[key] = [dict(a) for a in base_assignments]
             st.session_state[open_key] = True
+            st.session_state[dirty_key] = False
             st.rerun()
 
         base_map = {
@@ -352,6 +363,7 @@ def _render_manual_assignment_editor(
                         edited[row_idx]["player_name"] = b.get("player_name", b.get("player_id", ""))
                 st.session_state[key] = edited
                 st.session_state[open_key] = True
+                st.session_state[dirty_key] = True
                 st.rerun()
 
             if len(song_rows) >= 2 and _sort_items is not None:
@@ -411,6 +423,7 @@ def _render_manual_assignment_editor(
                             edited[row_idx]["player_name"] = player_label_map.get(new_pid, new_pid)
                         st.session_state[key] = edited
                         st.session_state[open_key] = True
+                        st.session_state[dirty_key] = True
                         st.rerun()
             elif len(song_rows) >= 2 and _sort_items is None:
                 st.info("ドラッグUIが利用できません。`streamlit-sortables` の導入状態を確認してください。")
@@ -425,6 +438,8 @@ def _render_manual_assignment_editor(
                 st.markdown(f"- {mark}{a.get('part_name', '—')} ← {a.get('player_name', '—')}")
             st.markdown("---")
         st.session_state[key] = edited
+        # 差分が無ければdirtyを落として「未操作状態」として扱う
+        st.session_state[dirty_key] = bool(_collect_assignment_changes(base_assignments, edited))
     return edited
 
 
