@@ -441,7 +441,20 @@ def _inject_form_styles() -> None:
             letter-spacing: 0.01em;
         }
         /* expanderトグル文字化け対策:
-           Materialアイコン依存をやめ、▸/▾を擬似要素で描画 */
+           Materialアイコン文字(_arrow_*)を非表示にして、▸/▾を擬似要素で描画 */
+        [data-testid="stExpander"] summary .material-icons,
+        [data-testid="stExpander"] summary .material-icons-outlined,
+        [data-testid="stExpander"] summary .material-symbols-rounded,
+        [data-testid="stExpander"] summary .material-symbols-outlined,
+        [data-testid="stExpander"] summary [class*="material-symbol"],
+        [data-testid="stExpander"] summary [class*="material-icon"] {
+            display: none !important;
+            width: 0 !important;
+            height: 0 !important;
+            overflow: hidden !important;
+            font-size: 0 !important;
+            line-height: 0 !important;
+        }
         [data-testid="stExpander"] [data-testid="stExpanderToggleIcon"],
         [data-testid="stExpander"] [data-testid="stExpanderToggleIcon"] * {
             font-size: 0 !important;
@@ -461,6 +474,21 @@ def _inject_form_styles() -> None:
             color: rgba(232, 237, 247, 0.88);
         }
         [data-testid="stExpander"] details[open] [data-testid="stExpanderToggleIcon"]::before {
+            content: "▾";
+        }
+        [data-testid="stExpander"] summary {
+            display: flex;
+            align-items: center;
+            gap: .45rem;
+        }
+        [data-testid="stExpander"] summary::before {
+            content: "▸";
+            font-size: 0.92rem;
+            line-height: 1;
+            color: rgba(232, 237, 247, 0.88);
+            transform: translateY(-.02rem);
+        }
+        [data-testid="stExpander"] details[open] > summary::before {
             content: "▾";
         }
         [data-testid="stMetricValue"] { font-size: 16px !important; }
