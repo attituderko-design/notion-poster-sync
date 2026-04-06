@@ -252,8 +252,11 @@ def _render_manual_assignment_editor(
     player_label_map: dict[str, str],
 ) -> list[dict]:
     key = _manual_assignment_state_key(concert_id, result_label)
+    open_key = f"{key}_open"
     if key not in st.session_state:
         st.session_state[key] = [dict(a) for a in assignments]
+    if open_key not in st.session_state:
+        st.session_state[open_key] = True
     edited = st.session_state.get(key, [])
     if not edited:
         return edited
@@ -262,10 +265,11 @@ def _render_manual_assignment_editor(
     if not player_ids:
         return edited
 
-    with st.expander("🛠 手動でパートを設定する（この候補のみ）", expanded=False):
+    with st.expander("🛠 手動でパートを設定する（この候補のみ）", expanded=bool(st.session_state.get(open_key, True))):
         st.caption("ここで変更した内容はこの候補にのみ反映されます。『採用』時にこの内容で書き込みます。")
         if st.button("↩ この候補の手動変更をリセット", key=f"manual_reset_{key}"):
             st.session_state[key] = [dict(a) for a in assignments]
+            st.session_state[open_key] = True
             st.rerun()
 
         for sid in song_order:
@@ -273,6 +277,40 @@ def _render_manual_assignment_editor(
             if not song_rows:
                 continue
             st.markdown(f"**{song_name_map.get(sid, sid)}**")
+            if len(song_rows) >= 2:
+                sw1, sw2, swb = st.columns([4, 4, 2])
+                _part_opts = {f"{edited[i].get('part_name', '—')}  ←  {edited[i].get('player_name', '—')}": i for i in song_rows}
+                _labels = list(_part_opts.keys())
+                pick1 = sw1.selectbox(
+                    "入れ替え元",
+                    options=_labels,
+                    key=f"manual_swap_a_{key}_{sid}",
+                )
+                pick2 = sw2.selectbox(
+                    "入れ替え先",
+                    options=_labels,
+                    index=1 if len(_labels) > 1 else 0,
+                    key=f"manual_swap_b_{key}_{sid}",
+                )
+                if swb.button("🔁 入れ替え", key=f"manual_swap_btn_{key}_{sid}", use_container_width=True):
+                    i1 = _part_opts.get(pick1)
+                    i2 = _part_opts.get(pick2)
+                    if i1 is None or i2 is None or i1 == i2:
+                        st.warning("入れ替える2つのパートを別々に選択してください。")
+                    else:
+                        p1_id = edited[i1].get("player_id", "")
+                        p1_name = edited[i1].get("player_name", p1_id)
+                        p2_id = edited[i2].get("player_id", "")
+                        p2_name = edited[i2].get("player_name", p2_id)
+                        edited[i1]["player_id"] = p2_id
+                        edited[i1]["player_name"] = p2_name
+                        edited[i2]["player_id"] = p1_id
+                        edited[i2]["player_name"] = p1_name
+                        st.session_state[key] = edited
+                        st.session_state[open_key] = True
+                        st.rerun()
+
+            st.caption("直接指定（必要なときのみ）")
             for idx in song_rows:
                 a = edited[idx]
                 c1, c2 = st.columns([5, 5])
@@ -301,6 +339,7 @@ def _render_manual_assignment_editor(
                     a["player_id"] = new_pid
                     a["player_name"] = local_map.get(new_pid, new_pid)
                     edited[idx] = a
+                    st.session_state[open_key] = True
         st.session_state[key] = edited
     return edited
 
