@@ -9168,6 +9168,20 @@ st.markdown(
     z-index: 1001;
     display: none;
   }
+  [data-testid="collapsedControl"] {
+    position: fixed !important;
+    top: 12px !important;
+    left: 12px !important;
+    z-index: 1004 !important;
+    background: rgba(14, 17, 23, 0.88) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    border-radius: 10px !important;
+    padding: 4px !important;
+    backdrop-filter: blur(4px);
+  }
+  header[data-testid="stHeader"] {
+    z-index: 1000 !important;
+  }
   @media (max-width: 900px) {
     :root {
       --harmonia-sidebar-width: min(86vw, 420px);
