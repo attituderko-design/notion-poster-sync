@@ -241,7 +241,16 @@ def _inject_form_styles() -> None:
         <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
         <style>
         /* ── base ── */
-        .stApp, .stApp * { font-family: 'Noto Sans JP', sans-serif !important; }
+        .stApp { font-family: 'Noto Sans JP', sans-serif !important; }
+        /* Streamlit内部のMaterialアイコンは専用フォントを維持（崩れると _arrow_right 等が生表示される） */
+        .stApp span[class*="material-symbols"],
+        .stApp span[class*="material-icons"],
+        .stApp i[class*="material-symbols"],
+        .stApp i[class*="material-icons"] {
+            font-family: "Material Symbols Rounded", "Material Symbols Outlined", "Material Icons" !important;
+            font-feature-settings: "liga" 1, "kern" 1;
+            letter-spacing: normal !important;
+        }
         .stApp .block-container {
             max-width: 480px !important;
             padding-top: 1.2rem !important;
