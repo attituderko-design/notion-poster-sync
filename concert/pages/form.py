@@ -498,32 +498,53 @@ def _inject_form_styles() -> None:
         label[data-testid="stWidgetLabel"] { font-size: 13px !important; color: rgba(160,180,220,.65) !important; }
         .stAlert p { font-size: 14px !important; }
 
-        /* Step2の○/△/×をカードデザインに寄せる */
-        [data-testid="stRadio"] [role="radiogroup"],
-        [data-testid="stRadio"][role="radiogroup"] {
+        /* Step2の○/△/×をカードデザインに寄せる（Streamlit/BaseWeb DOM直指定） */
+        div[data-testid="stRadio"] div[role="radiogroup"] {
             display: grid !important;
             grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 6px;
+            gap: 6px !important;
             width: 100%;
         }
-        [data-testid="stRadio"] [role="radiogroup"] label,
-        [data-testid="stRadio"][role="radiogroup"] label {
+        div[data-testid="stRadio"] div[role="radiogroup"] > div,
+        div[data-testid="stRadio"] div[role="radiogroup"] > label {
             margin: 0 !important;
-            border-radius: 8px !important;
-            border: .5px solid rgba(255,255,255,.08) !important;
-            background: rgba(255,255,255,.03) !important;
+        }
+        div[data-testid="stRadio"] div[data-baseweb="radio"] label,
+        div[data-testid="stRadio"] div[role="radiogroup"] > label {
+            width: 100% !important;
             min-height: 38px !important;
+            border-radius: 8px !important;
+            border: .5px solid rgba(255,255,255,.1) !important;
+            background: rgba(255,255,255,.03) !important;
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
-            padding: 0 6px !important;
+            padding: 0 8px !important;
+            cursor: pointer;
         }
-        [data-testid="stRadio"] [role="radiogroup"] label [data-testid="stMarkdownContainer"] p,
-        [data-testid="stRadio"][role="radiogroup"] label [data-testid="stMarkdownContainer"] p {
+        /* ラジオの丸を隠す */
+        div[data-testid="stRadio"] div[data-baseweb="radio"] label > div:first-child,
+        div[data-testid="stRadio"] div[role="radiogroup"] > label > div:first-child {
+            display: none !important;
+        }
+        div[data-testid="stRadio"] div[data-baseweb="radio"] label [data-testid="stMarkdownContainer"] p,
+        div[data-testid="stRadio"] div[role="radiogroup"] > label [data-testid="stMarkdownContainer"] p {
+            margin: 0 !important;
             font-family: 'Outfit', sans-serif !important;
             font-size: 18px !important;
             font-weight: 500 !important;
             line-height: 1 !important;
+            color: rgba(180,200,240,.78) !important;
+        }
+        /* 選択中 */
+        div[data-testid="stRadio"] div[data-baseweb="radio"] label:has(input:checked),
+        div[data-testid="stRadio"] div[role="radiogroup"] > label:has(input:checked) {
+            background: rgba(74,158,255,.15) !important;
+            border-color: rgba(74,158,255,.45) !important;
+        }
+        div[data-testid="stRadio"] div[data-baseweb="radio"] label:has(input:checked) [data-testid="stMarkdownContainer"] p,
+        div[data-testid="stRadio"] div[role="radiogroup"] > label:has(input:checked) [data-testid="stMarkdownContainer"] p {
+            color: #4a9eff !important;
         }
         [data-baseweb="button-group"] {
             width: 100%;
