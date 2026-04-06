@@ -9168,6 +9168,29 @@ st.markdown(
     z-index: 1001;
     display: none;
   }
+  #harmonia-sidebar-close-fab {
+    position: fixed;
+    top: 12px;
+    left: calc(var(--harmonia-sidebar-width) - 52px);
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(14, 17, 23, 0.92);
+    color: #ffffff;
+    font-size: 22px;
+    line-height: 1;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1005;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    backdrop-filter: blur(4px);
+  }
+  #harmonia-sidebar-close-fab:hover {
+    background: rgba(30, 36, 50, 0.95);
+  }
   [data-testid="collapsedControl"] {
     position: fixed !important;
     top: 12px !important;
@@ -9186,34 +9209,63 @@ st.markdown(
     :root {
       --harmonia-sidebar-width: min(86vw, 420px);
     }
+    #harmonia-sidebar-close-fab {
+      left: calc(min(86vw, 420px) - 52px);
+    }
   }
 </style>
 <script>
 (() => {
   const OVERLAY_ID = "harmonia-sidebar-overlay";
+  const CLOSE_FAB_ID = "harmonia-sidebar-close-fab";
+  const clickNativeClose = () => {
+    const sidebar = document.querySelector('section[data-testid="stSidebar"]');
+    const candidates = [
+      sidebar ? sidebar.querySelector('button[data-testid="stSidebarCollapseButton"]') : null,
+      sidebar ? sidebar.querySelector('button[aria-label="Close sidebar"]') : null,
+      sidebar ? sidebar.querySelector('button[title="Close sidebar"]') : null,
+      document.querySelector('[data-testid="collapsedControl"]'),
+    ];
+    const target = candidates.find(Boolean);
+    if (target) target.click();
+  };
   const ensureOverlay = () => {
     let ov = document.getElementById(OVERLAY_ID);
     if (!ov) {
       ov = document.createElement("div");
       ov.id = OVERLAY_ID;
       document.body.appendChild(ov);
-      ov.addEventListener("click", () => {
-        const ctl = document.querySelector('[data-testid="collapsedControl"]');
-        if (ctl) ctl.click();
-      });
+      ov.addEventListener("click", clickNativeClose);
     }
     return ov;
+  };
+  const ensureCloseFab = () => {
+    let fab = document.getElementById(CLOSE_FAB_ID);
+    if (!fab) {
+      fab = document.createElement("button");
+      fab.id = CLOSE_FAB_ID;
+      fab.type = "button";
+      fab.title = "サイドバーを閉じる";
+      fab.setAttribute("aria-label", "サイドバーを閉じる");
+      fab.textContent = "×";
+      document.body.appendChild(fab);
+      fab.addEventListener("click", clickNativeClose);
+    }
+    return fab;
   };
   const sync = () => {
     const sidebar = document.querySelector('section[data-testid="stSidebar"]');
     const ov = ensureOverlay();
+    const fab = ensureCloseFab();
     if (!sidebar) {
       ov.style.display = "none";
+      fab.style.display = "none";
       return;
     }
     const expanded = sidebar.getAttribute("aria-expanded") === "true";
     const desktop = window.innerWidth >= 901;
     ov.style.display = (expanded && desktop) ? "block" : "none";
+    fab.style.display = (expanded && desktop) ? "flex" : "none";
   };
   const start = () => {
     sync();
