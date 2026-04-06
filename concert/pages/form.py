@@ -225,124 +225,227 @@ def _render_next_practice_panel(ctx: dict, practices: list) -> None:
 
 
 def _render_brand_logo() -> None:
-    """フォーム上部ロゴを安全に1枚だけ表示。"""
-    logo_path = Path(__file__).resolve().parents[2] / "assets" / "logo.png"
-    logo_src = str(logo_path) if logo_path.exists() else "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/logo.png"
-    st.image(logo_src, width=320)
+    """フォーム上部ワードマークを表示。"""
+    st.markdown(
+        """
+        <div class="h-f1" style="padding: 16px 0 14px; text-align: center;">
+            <div class="h-wordmark">ArtéMis HARMONIA</div>
+            <div class="h-wordmark-sub">Concert Management</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _inject_form_styles() -> None:
-    """form.py専用の見た目調整。機能は変えず、可読性と統一感だけを上げる。"""
+    """form.py専用スタイル — モダンダークミニマル。"""
     st.markdown(
         """
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
         <style>
-        :root {
-            --form-surface: rgba(20, 27, 43, 0.76);
-            --form-surface-strong: rgba(24, 33, 52, 0.92);
-            --form-border: rgba(136, 162, 214, 0.28);
-            --form-text-muted: #b7c4df;
-            --form-accent: #4aa3ff;
-            --form-accent-2: #2b7fd8;
-        }
+        /* ── base ── */
+        .stApp, .stApp * { font-family: 'Noto Sans JP', sans-serif !important; }
         .stApp .block-container {
-            max-width: min(1000px, calc(100vw - 1.4rem));
-            padding-top: 1.0rem;
-            padding-left: clamp(.6rem, 1.5vw, 1.1rem);
-            padding-right: clamp(.6rem, 1.5vw, 1.1rem);
+            max-width: 480px !important;
+            padding-top: 1.2rem !important;
+            padding-left: clamp(.8rem, 4vw, 1.4rem) !important;
+            padding-right: clamp(.8rem, 4vw, 1.4rem) !important;
         }
-        .form-hero {
-            background:
-                radial-gradient(120% 150% at 0% 0%, rgba(74, 163, 255, 0.18), transparent 58%),
-                radial-gradient(120% 160% at 100% 100%, rgba(209, 75, 75, 0.16), transparent 55%),
-                linear-gradient(170deg, rgba(18, 25, 40, 0.95), rgba(10, 16, 28, 0.92));
-            border: 1px solid var(--form-border);
-            border-radius: 16px;
-            padding: 1.05rem 1.1rem;
-            margin: 0.45rem 0 1.0rem 0;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        @media (max-width: 520px) {
+            .stApp .block-container {
+                max-width: 100vw !important;
+                padding-left: .75rem !important;
+                padding-right: .75rem !important;
+            }
         }
-        .form-hero-title {
-            margin: 0 0 .42rem 0;
-            font-size: 1.72rem;
-            font-weight: 800;
-            line-height: 1.28;
-            letter-spacing: 0.01em;
+
+        /* ── fade-in animations ── */
+        @keyframes hFadeUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
         }
-        .form-hero-sub {
-            margin: 0;
-            font-size: 0.96rem;
-            line-height: 1.72;
-            color: var(--form-text-muted);
+        .h-f1 { animation: hFadeUp .35s ease both; }
+        .h-f2 { animation: hFadeUp .35s .08s ease both; }
+        .h-f3 { animation: hFadeUp .35s .16s ease both; }
+        .h-f4 { animation: hFadeUp .35s .24s ease both; }
+        .h-f5 { animation: hFadeUp .35s .32s ease both; }
+        .h-f6 { animation: hFadeUp .35s .40s ease both; }
+
+        /* ── wordmark ── */
+        .h-wordmark {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 20px; font-weight: 600;
+            color: #e8edf7; letter-spacing: .05em;
         }
-        .form-acro {
-            color: #d14b4b;
-            font-weight: 800;
+        .h-wordmark-sub {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 11px; color: rgba(160,180,220,.4);
+            letter-spacing: .13em; margin-top: 3px;
         }
-        .stButton > button,
-        .stDownloadButton > button {
-            border-radius: 12px !important;
-            border: 1px solid var(--form-border) !important;
-            min-height: 2.5rem;
-            transition: transform .08s ease, box-shadow .15s ease, border-color .15s ease;
+
+        /* ── concert header card ── */
+        .h-concert-card {
+            background: rgba(74,158,255,.07);
+            border: 0.5px solid rgba(74,158,255,.18);
+            border-radius: 14px;
+            padding: 14px 16px;
+            margin-bottom: 14px;
         }
-        .stButton > button:hover,
-        .stDownloadButton > button:hover {
-            border-color: rgba(74, 163, 255, 0.62) !important;
-            box-shadow: 0 0 0 2px rgba(74, 163, 255, 0.18);
-            transform: translateY(-1px);
+        .h-concert-name {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 18px; font-weight: 500;
+            color: #e8edf7; margin-bottom: 8px; line-height: 1.3;
         }
-        .stTextInput input,
-        .stTextArea textarea,
+        .h-concert-row {
+            display: flex; align-items: center;
+            gap: 8px; font-size: 13px;
+            color: rgba(160,180,220,.6); margin-bottom: 3px;
+        }
+        .h-concert-dot {
+            width: 4px; height: 4px; border-radius: 50%;
+            background: rgba(74,158,255,.55); flex-shrink: 0;
+        }
+
+        /* ── greeting ── */
+        .h-greet {
+            font-size: 15px; color: rgba(160,180,220,.7);
+            margin-bottom: 14px; line-height: 1.6;
+        }
+        .h-greet strong { color: #e8edf7; font-weight: 500; }
+        .h-greet-part {
+            display: block; font-size: 12px;
+            color: rgba(160,180,220,.35); margin-top: 1px;
+        }
+
+        /* ── menu items ── */
+        .h-menu-item {
+            display: flex; align-items: center;
+            background: rgba(255,255,255,.035);
+            border: 0.5px solid rgba(255,255,255,.08);
+            border-radius: 13px;
+            padding: 13px 14px;
+            margin-bottom: 8px;
+            min-height: 56px; gap: 12px;
+            cursor: pointer;
+            transition: border-color .15s ease, background .15s ease;
+        }
+        .h-menu-item:hover {
+            background: rgba(255,255,255,.055);
+            border-color: rgba(74,158,255,.3);
+        }
+        .h-mi-icon {
+            width: 36px; height: 36px; border-radius: 9px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 16px; flex-shrink: 0;
+        }
+        .h-ic-a { background: rgba(74,158,255,.13); }
+        .h-ic-b { background: rgba(100,200,130,.1); }
+        .h-ic-c { background: rgba(220,160,60,.1); }
+        .h-ic-d { background: rgba(180,100,240,.1); }
+        .h-mi-body { flex: 1; min-width: 0; }
+        .h-mi-ttl {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 15px; color: #c8d4ed;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .h-mi-hint { font-size: 12px; color: rgba(160,180,220,.4); margin-top: 2px; }
+        .h-mi-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+        .h-badge {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 11px; background: rgba(74,158,255,.15);
+            color: #4a9eff; border-radius: 6px;
+            padding: 3px 8px; white-space: nowrap;
+        }
+        .h-badge-ok { background: rgba(100,200,130,.12); color: #64c882; }
+        .h-chev { font-size: 14px; color: rgba(160,180,220,.25); }
+
+        /* ── section label ── */
+        .h-section {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 11px; color: rgba(160,180,220,.4);
+            letter-spacing: .1em; text-transform: uppercase;
+            margin-bottom: 8px; margin-top: 4px;
+        }
+
+        /* ── step indicator ── */
+        .h-steps {
+            display: flex; align-items: center;
+            gap: 5px; margin-bottom: 16px;
+        }
+        .h-s-dot {
+            width: 5px; height: 5px; border-radius: 50%;
+            background: rgba(255,255,255,.12);
+        }
+        .h-s-dot.active { background: #4a9eff; width: 16px; border-radius: 3px; }
+        .h-s-dot.done   { background: rgba(100,200,130,.55); }
+        .h-s-line { flex: 1; height: .5px; background: rgba(255,255,255,.06); margin-left: 2px; }
+        .h-s-lbl {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 11px; color: rgba(160,180,220,.35);
+        }
+
+        /* ── screen title ── */
+        .h-scr-title {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 20px; font-weight: 500; color: #e8edf7;
+            margin-bottom: 4px;
+        }
+        .h-scr-sub {
+            font-size: 13px; color: rgba(160,180,220,.55);
+            margin-bottom: 16px; line-height: 1.55;
+        }
+
+        /* ── footer ── */
+        .h-footer {
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 11px; color: rgba(160,180,220,.18);
+            text-align: center; margin-top: 20px;
+            padding-top: 14px;
+            border-top: .5px solid rgba(255,255,255,.05);
+        }
+
+        /* ── streamlit overrides ── */
+        .stButton > button, .stDownloadButton > button {
+            border-radius: 11px !important;
+            border: .5px solid rgba(255,255,255,.12) !important;
+            min-height: 48px !important;
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 15px !important;
+            transition: border-color .15s ease, background .15s ease;
+        }
+        .stButton > button:hover, .stDownloadButton > button:hover {
+            border-color: rgba(74,158,255,.5) !important;
+            background: rgba(74,158,255,.08) !important;
+        }
+        .stTextInput input, .stTextArea textarea,
         .stSelectbox [data-baseweb="select"] > div,
-        .stMultiSelect [data-baseweb="select"] > div,
-        .stDateInput input,
-        .stNumberInput input {
-            border-radius: 12px !important;
-            border: 1px solid var(--form-border) !important;
-            background: var(--form-surface-strong) !important;
+        .stMultiSelect [data-baseweb="select"] > div {
+            border-radius: 11px !important;
+            border: .5px solid rgba(255,255,255,.12) !important;
+            background: rgba(255,255,255,.04) !important;
+            font-size: 15px !important;
+        }
+        .stTextInput input:focus, .stTextArea textarea:focus {
+            border-color: rgba(74,158,255,.45) !important;
+            box-shadow: 0 0 0 3px rgba(74,158,255,.1) !important;
         }
         [data-testid="stExpander"] {
-            border: 1px solid var(--form-border);
-            border-radius: 14px;
+            border: .5px solid rgba(255,255,255,.09) !important;
+            border-radius: 13px !important;
             overflow: hidden;
-            background: var(--form-surface);
+            background: rgba(255,255,255,.025) !important;
         }
-        [data-testid="stExpander"] > details > summary {
-            background: rgba(24, 34, 54, 0.78);
-        }
-        [data-testid="stMetricValue"] {
-            font-size: 1.06rem;
-            line-height: 1.25;
-        }
+        [data-testid="stMetricValue"] { font-size: 16px !important; }
         [data-testid="stMetricLabel"] > div {
-            color: var(--form-text-muted);
-            font-weight: 600;
+            font-size: 12px !important;
+            color: rgba(160,180,220,.55) !important;
         }
-        /* Responsive: モバイルは操作優先で広く、PCは可読性優先で幅を絞る */
-        @media (max-width: 768px) {
-            .stApp .block-container {
-                max-width: calc(100vw - .5rem);
-                padding-left: .5rem;
-                padding-right: .5rem;
-            }
-            .form-hero {
-                border-radius: 12px;
-                padding: .85rem .8rem;
-                margin: .3rem 0 .8rem 0;
-            }
-            .form-hero-title {
-                font-size: 1.28rem;
-            }
-            .stButton > button,
-            .stDownloadButton > button {
-                min-height: 2.75rem;
-            }
-        }
-        @media (min-width: 1200px) {
-            .stApp .block-container {
-                max-width: 940px;
-            }
-        }
+        .stRadio label { font-size: 15px !important; }
+        .stCheckbox label { font-size: 15px !important; min-height: 28px; }
+        p, li, .stMarkdown p { font-size: 15px !important; line-height: 1.7 !important; }
+        label[data-testid="stWidgetLabel"] { font-size: 13px !important; color: rgba(160,180,220,.65) !important; }
+        .stAlert p { font-size: 14px !important; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -1342,7 +1445,7 @@ def _render_concert_selector(ctx):
 
     # ── モード未選択 ─────────────────────────────────────────
     if not selector_mode:
-        st.subheader("ArtéMis HARMONIA ログイン")
+        st.markdown('<div class="h-scr-title">ArtéMis HARMONIA ログイン</div>', unsafe_allow_html=True)
         col_l, col_i = st.columns(2)
         if col_l.button("🔑 ログイン", use_container_width=True, type="primary", key="sel_login"):
             st.session_state["selector_mode"] = "login"
@@ -1354,7 +1457,7 @@ def _render_concert_selector(ctx):
 
     # ── 招待コード入力モード ──────────────────────────────────
     if selector_mode == "invite":
-        st.subheader("招待コードを入力してください")
+        st.markdown('<div class="h-scr-title">招待コードを入力してください</div>', unsafe_allow_html=True)
         st.caption("管理者から受け取った招待コードを入力してください。")
         _invite_logged_in = bool(st.session_state.get("sel_pw_verified") and st.session_state.get("sel_player_id"))
         with st.form("invite_code_form"):
@@ -1412,7 +1515,7 @@ def _render_concert_selector(ctx):
     if selector_mode == "login":
         # メールアドレス未入力フェーズ
         if not st.session_state.get("sel_email_submitted"):
-            st.subheader("ログイン")
+            st.markdown('<div class="h-scr-title">ログイン</div>', unsafe_allow_html=True)
             with st.form("sel_email_form"):
                 sel_email = st.text_input("メールアドレス", placeholder="yamada@example.com")
                 submitted_e = st.form_submit_button("次へ", type="primary", use_container_width=True)
@@ -1454,7 +1557,7 @@ def _render_concert_selector(ctx):
 
         if not sel_pw_verified:
             if sel_has_pw:
-                st.subheader(f"おかえりなさい、{sel_pname} さん")
+                st.markdown(f'<div class="h-scr-title">おかえりなさい、{sel_pname} さん</div>', unsafe_allow_html=True)
                 with st.form("sel_pw_form"):
                     pw = st.text_input("パスワード", type="password")
                     submitted_pw = st.form_submit_button("ログイン", type="primary", use_container_width=True)
@@ -1469,7 +1572,7 @@ def _render_concert_selector(ctx):
                         st.error("パスワードが違います。")
             else:
                 # パスワード未設定 → selector内で確認コード認証
-                st.subheader(f"おかえりなさい、{sel_pname} さん")
+                st.markdown(f'<div class="h-scr-title">おかえりなさい、{sel_pname} さん</div>', unsafe_allow_html=True)
                 st.warning("パスワードが設定されていません。確認コードでログインしてパスワードを設定してください。")
                 st.caption(f"登録メールアドレス: {sel_email}")
                 if not st.session_state.get("sel_magic_sent"):
@@ -1549,7 +1652,7 @@ def _render_concert_selector(ctx):
 
         # パスワード未設定で認証成功した場合は、演奏会選択前に必ず設定させる
         if st.session_state.get("sel_need_set_password"):
-            st.subheader(f"{sel_pname} さん、パスワードを設定してください")
+            st.markdown(f'<div class="h-scr-title">{sel_pname} さん、パスワードを設定してください</div>', unsafe_allow_html=True)
             st.caption("次回からメールアドレスとパスワードでログインできます。")
             with st.form("sel_set_password_form"):
                 pw1 = st.text_input("パスワード（6文字以上）", type="password")
@@ -1575,7 +1678,7 @@ def _render_concert_selector(ctx):
             return
 
         # 認証済み → 参加演奏会を選択
-        st.subheader(f"こんにちは、{sel_pname} さん")
+        st.markdown(f'<div class="h-scr-title">こんにちは、{sel_pname} さん</div>', unsafe_allow_html=True)
         my_concerts = _get_my_concerts(ctx, sel_pid)
 
         def _go_selected_concert(selected_cid: str):
@@ -1880,25 +1983,6 @@ def render_form(ctx, concert_id: str = ""):
 
     # form.py を直接 entrypoint にしていない場合でもロゴを表示
     _render_brand_logo()
-    st.markdown(
-        """
-        <div class="form-hero">
-            <div class="form-hero-title">ArtéMis HARMONIA</div>
-            <p class="form-hero-sub">
-                <strong style="color:#ffffff;">HARMONIA</strong> :
-                <span class="form-acro">H</span>armonized
-                <span class="form-acro">A</span>ssignment and
-                <span class="form-acro">R</span>esource
-                <span class="form-acro">M</span>anagement for
-                <span class="form-acro">O</span>rchestral
-                <span class="form-acro">N</span>eeds,
-                <span class="form-acro">I</span>nstruments, and
-                <span class="form-acro">A</span>ttendance
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
     # ── concert_id未確定時：ログイン→演奏会選択 or 招待コード入力 ──
     if not concert_id:
@@ -1935,7 +2019,7 @@ def render_form(ctx, concert_id: str = ""):
     c_conductor = ext(concert, CONCERT_CONDUCTOR_KEYS) or ""
     c_soloist   = ext(concert, CONCERT_SOLOIST_KEYS) or ""
 
-    # カバー画像表示
+    # カバー画像（あれば表示）
     if concert:
         _cover = concert.get("cover") or {}
         _cover_type = _cover.get("type", "")
@@ -1947,30 +2031,31 @@ def render_form(ctx, concert_id: str = ""):
         if _cover_url:
             st.image(_cover_url, use_container_width=True)
 
+    # 演奏会情報カード
+    _meta_rows = ""
+    if c_date:      _meta_rows += f'<div class="h-concert-row"><div class="h-concert-dot"></div>{c_date}</div>'
+    if c_venue:     _meta_rows += f'<div class="h-concert-row"><div class="h-concert-dot"></div>{c_venue}</div>'
+    if c_conductor: _meta_rows += f'<div class="h-concert-row"><div class="h-concert-dot"></div>指揮：{c_conductor}</div>'
+    if c_soloist:   _meta_rows += f'<div class="h-concert-row"><div class="h-concert-dot"></div>ソリスト：{c_soloist}</div>'
+    if songs:
+        _song_txt = "　/　".join(
+            f"{get_song_display_name(ctx, s)}" for s in songs
+        )
+        _meta_rows += f'<div class="h-concert-row"><div class="h-concert-dot"></div>{_song_txt}</div>'
+
     st.markdown(
         f"""
-        <div class="form-hero">
-            <h1 class="form-hero-title" style="margin-bottom:.2rem;">
-                <span style="font-size: 0.88em; opacity:.92;">🎵 {c_name} My Page</span>
-            </h1>
+        <div class="h-f2 h-concert-card">
+            <div class="h-concert-name">{c_name}</div>
+            {_meta_rows}
         </div>
         """,
         unsafe_allow_html=True,
     )
-    if c_date:      st.caption(f"📅 本番日：{c_date}")
-    if c_venue:     st.caption(f"📍 会場：{c_venue}")
-    if c_conductor: st.caption(f"🎼 指揮：{c_conductor}")
-    if c_soloist:   st.caption(f"🌟 ソリスト：{c_soloist}")
-    if songs:
-        st.caption("🎶 演奏曲目：" + "　/　".join(
-            f"{get_song_display_name(ctx, s)}（{ext(s, SONG_CREATOR_KEYS)}）" if ext(s, SONG_CREATOR_KEYS)
-            else get_song_display_name(ctx, s)
-            for s in songs
-        ))
+
     if st.query_params.get("debug") == "1" and st.session_state.get("form_att_debug"):
         with st.expander("🔧 出欠読込デバッグ", expanded=False):
             st.json(st.session_state.get("form_att_debug"))
-    st.divider()
 
     step = st.session_state.get("form_step", 1)
 
@@ -1983,7 +2068,8 @@ def render_form(ctx, concert_id: str = ""):
 
     # ── STEP 0: 新規登録 / ログイン 選択 ─────────────────────
     if step == 1 and not st.session_state.get("form_auth_verified") and not st.session_state.get("form_auth_mode"):
-        st.subheader("はじめに")
+        st.markdown('<div class="h-f3 h-scr-title">はじめに</div>', unsafe_allow_html=True)
+        st.markdown('<div class="h-scr-sub">初めての方は新規登録、2回目以降はログインをお選びください</div>', unsafe_allow_html=True)
         col_new, col_login = st.columns(2)
         if col_new.button("📝 新規登録", use_container_width=True, type="primary", key="mode_new"):
             st.session_state["form_auth_mode"] = "new"
@@ -1996,7 +2082,7 @@ def render_form(ctx, concert_id: str = ""):
     # ── STEP 0a: プライバシーポリシー同意（新規登録のみ） ─────
     auth_mode = st.session_state.get("form_auth_mode", "new")
     if step == 1 and not st.session_state.get("form_auth_verified") and auth_mode == "new" and not st.session_state.get("form_privacy_agreed"):
-        st.subheader("プライバシーポリシー")
+        st.markdown('<div class="h-scr-title">プライバシーポリシー</div>', unsafe_allow_html=True)
         st.markdown(_PRIVACY_POLICY)
         col_agree, col_back = st.columns(2)
         if col_agree.button("✅ 同意して進む", type="primary", use_container_width=True, key="privacy_agree"):
@@ -2013,9 +2099,11 @@ def render_form(ctx, concert_id: str = ""):
         # メールアドレス入力フェーズ
         if not st.session_state.get("auth_email_submitted"):
             if auth_mode == "login":
-                st.subheader("ログイン")
+                st.markdown('<div class="h-f3 h-scr-title">ログイン</div>', unsafe_allow_html=True)
+                st.markdown('<div class="h-scr-sub">登録済みのメールアドレスを入力してください</div>', unsafe_allow_html=True)
             else:
-                st.subheader("メールアドレスを入力してください")
+                st.markdown('<div class="h-f3 h-scr-title">メールアドレスを入力</div>', unsafe_allow_html=True)
+                st.markdown('<div class="h-scr-sub">確認コードをお送りします</div>', unsafe_allow_html=True)
             with st.form("auth_email_form"):
                 auth_email = st.text_input("メールアドレス *", placeholder="yamada@example.com")
                 submitted_email = st.form_submit_button("次へ", type="primary",
@@ -2063,8 +2151,9 @@ def render_form(ctx, concert_id: str = ""):
             players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
             matched_player = next((p for p in players if p.get("id") == existing_pid), None)
             pname_display = ext(matched_player, PLAYER_NAME_KEYS) if matched_player else ""
-            st.subheader(f"おかえりなさい、{pname_display} さん" if pname_display else "パスワードでログイン")
-            st.caption(f"メールアドレス: {auth_email}")
+            _greet = f"おかえりなさい、{pname_display} さん" if pname_display else "パスワードでログイン"
+            st.markdown(f'<div class="h-f3 h-scr-title">{_greet}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="h-scr-sub">{auth_email}</div>', unsafe_allow_html=True)
             with st.form("auth_password_form"):
                 entered_pw = st.text_input("パスワード", type="password")
                 col_ok, col_forgot = st.columns(2)
@@ -2093,13 +2182,13 @@ def render_form(ctx, concert_id: str = ""):
         # ── パスワードリセット or 新規 or パスワード未設定 → マジックコード ──
         is_reset = st.session_state.get("auth_reset_mode", False)
         if is_reset:
-            st.subheader("パスワードをリセット")
+            st.markdown('<div class="h-scr-title">パスワードをリセット</div>', unsafe_allow_html=True)
             st.caption("登録済みのメールアドレスに確認コードを送ります。")
         elif is_existing and not has_password:
-            st.subheader("初回ログイン")
+            st.markdown('<div class="h-scr-title">初回ログイン</div>', unsafe_allow_html=True)
             st.caption("確認コードを送りますので、ログイン後にパスワードを設定してください。")
         else:
-            st.subheader("メールアドレスで本人確認")
+            st.markdown('<div class="h-scr-title">メールアドレスで本人確認</div>', unsafe_allow_html=True)
             st.caption("確認コードを送ります。")
 
         if not st.session_state.get("auth_code_sent"):
@@ -2208,7 +2297,7 @@ def render_form(ctx, concert_id: str = ""):
         # ── パスワード設定が必要な場合（初回マジックコード認証後） ──
         if st.session_state.get("form_need_set_password") and st.session_state.get("form_is_existing_auth"):
             pname = st.session_state.get("form_player_name", "")
-            st.subheader(f"{pname} さん、パスワードを設定してください")
+            st.markdown(f'<div class="h-scr-title">{pname} さん、パスワードを設定してください</div>', unsafe_allow_html=True)
             st.caption("次回から、メールアドレスとパスワードでログインできます。")
             with st.form("set_password_form"):
                 pw1 = st.text_input("パスワード（6文字以上）", type="password")
@@ -2246,7 +2335,6 @@ def render_form(ctx, concert_id: str = ""):
         if st.session_state.get("form_is_existing_auth"):
             pname = st.session_state.get("form_player_name", "")
             pid   = st.session_state.get("form_player_id", "")
-            st.subheader(f"こんにちは、{pname} さん")
 
             # パート・ロールをCONCERT_CASTから取得
             participant_rows = st.session_state.get("form_participant_rows_concert")
@@ -2276,14 +2364,13 @@ def render_form(ctx, concert_id: str = ""):
             user_role = _resolve_user_role(ctx, pid, concert_id)
             st.session_state["form_user_role"] = user_role
 
-            # デバッグ：URLに?debug=1がある場合のみロール情報を表示
             if st.query_params.get("debug") == "1":
                 st.caption(f"🔧 DEBUG: user_role={user_role} (0=Player,1=Leader,2=Manager), pid={pid[:8]}, concert_id={concert_id[:8]}")
 
             # 案提示フラグ確認
             proposal_done = _get_proposal_flag(ctx, concert_id)
 
-            # ── サマリカード ─────────────────────────────────
+            # 出欠・希望の回答状況
             _, p_to_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
             att_answered = sum(1 for pr in practices
                                if (p_to_att_map.get(pr.get("id",""), {}) or {}).get("status","") not in ("", "未回答"))
@@ -2292,24 +2379,77 @@ def render_form(ctx, concert_id: str = ""):
             pref_answered = sum(1 for v in existing_pref.values() if v not in ("未回答", ""))
             pref_total    = len(partdefs)
 
-            _role_label = {ROLE_PLAYER: "", ROLE_LEADER: "　🎖 パートリーダー", ROLE_MANAGER: "　👑 Manager"}.get(user_role, "")
-            if _role_label:
-                st.caption(f"パート：{my_part}{_role_label}" if my_part else _role_label.strip())
-            elif my_part:
-                st.caption(f"パート：{my_part}")
+            _role_label = {ROLE_LEADER: "パートリーダー", ROLE_MANAGER: "Manager"}.get(user_role, "")
+            _part_disp  = f"{my_part}　{_role_label}" if my_part and _role_label else (my_part or _role_label)
 
-            with st.container(border=True):
-                c1, c2 = st.columns(2)
-                att_status  = "✅ 完了" if att_answered == att_total and att_total > 0 else f"⚠️ {att_answered}/{att_total}回 回答済"
-                pref_status = "✅ 完了" if pref_answered == pref_total and pref_total > 0 else (f"⚠️ {pref_answered}/{pref_total}パート 回答済" if pref_total > 0 else "—")
-                c1.metric("出欠", att_status)
-                c2.metric("パート希望", pref_status)
+            # ── グリーティング ──
+            st.markdown(
+                f"""
+                <div class="h-f3 h-greet">
+                    こんにちは、<strong>{pname}</strong> さん
+                    {"" if not _part_disp else f'<span class="h-greet-part">{_part_disp}</span>'}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-            # 直近練習はメニュー上部に表示（導線優先）
-            _render_next_practice_panel(ctx, practices)
-            st.divider()
+            # ── メニューカード ──
+            att_unanswered = att_total - att_answered
+            att_badge_html = (f'<div class="h-badge">{att_unanswered}件</div>' if att_unanswered > 0
+                              else '<div class="h-badge h-badge-ok">完了</div>')
+            att_hint = f"未回答 {att_unanswered}件" if att_unanswered > 0 else f"{att_answered}/{att_total}回 回答済"
 
-            # ── 基本メニュー（全ロール共通） ─────────────────
+            pref_badge_html = ""
+            pref_hint = ""
+            if pref_total > 0:
+                if pref_answered == pref_total:
+                    pref_badge_html = '<div class="h-badge h-badge-ok">完了</div>'
+                    pref_hint = "入力済み"
+                elif proposal_done:
+                    pref_badge_html = '<div class="h-badge" style="background:rgba(180,100,240,.15);color:#c070f0;">確定済</div>'
+                    pref_hint = "アサイン案提示中"
+                else:
+                    pref_badge_html = f'<div class="h-badge">{pref_total - pref_answered}件未入力</div>'
+                    pref_hint = f"{pref_answered}/{pref_total}パート 回答済"
+
+            st.markdown(
+                f"""
+                <div class="h-f4">
+                  <div class="h-section">メニュー</div>
+                  <div class="h-menu-item" id="menu-att">
+                    <div class="h-mi-icon h-ic-a">📅</div>
+                    <div class="h-mi-body">
+                      <div class="h-mi-ttl">出欠入力</div>
+                      <div class="h-mi-hint">{att_hint}</div>
+                    </div>
+                    <div class="h-mi-right">{att_badge_html}<div class="h-chev">›</div></div>
+                  </div>
+                  {"" if pref_total == 0 else f'''
+                  <div class="h-menu-item" id="menu-pref">
+                    <div class="h-mi-icon h-ic-b">🎵</div>
+                    <div class="h-mi-body">
+                      <div class="h-mi-ttl">楽器・パート希望</div>
+                      <div class="h-mi-hint">{pref_hint}</div>
+                    </div>
+                    <div class="h-mi-right">{pref_badge_html}<div class="h-chev">›</div></div>
+                  </div>
+                  '''}
+                  {"" if not IS_PERC(my_part) else '''
+                  <div class="h-menu-item" id="menu-own">
+                    <div class="h-mi-icon h-ic-d">🥁</div>
+                    <div class="h-mi-body">
+                      <div class="h-mi-ttl">所有楽器</div>
+                      <div class="h-mi-hint">入力・変更</div>
+                    </div>
+                    <div class="h-mi-right"><div class="h-chev">›</div></div>
+                  </div>
+                  '''}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # 実際のボタン（非表示HTMLカードの裏で動くStreamlitボタン）
             if st.button("📅 出欠を入力・変更する", use_container_width=True, key="menu_att"):
                 _, existing_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
                 preload_att: dict[str, str] = {}
@@ -2339,7 +2479,7 @@ def render_form(ctx, concert_id: str = ""):
                         })
                         st.rerun()
 
-            # アサイン閲覧（🎵パート希望 の直下）
+            # アサイン閲覧
             _can_show_assign_menu = (user_role >= ROLE_LEADER) or proposal_done or _has_published_assignments(ctx, concert_id)
             if _can_show_assign_menu:
                 if user_role == ROLE_MANAGER:
@@ -2362,9 +2502,11 @@ def render_form(ctx, concert_id: str = ""):
 
             # ── Leader / Manager 専用メニュー ─────────────────
             if user_role >= ROLE_LEADER:
-                st.divider()
                 _section_label = "パートリーダーメニュー" if user_role == ROLE_LEADER else "Managerメニュー"
-                st.markdown(f"**🎖 {_section_label}**")
+                st.markdown(
+                    f'<div class="h-section" style="margin-top:18px;">🎖 {_section_label}</div>',
+                    unsafe_allow_html=True,
+                )
                 tab_att, tab_mem, tab_doc = st.tabs(["📋 出欠", "👥 メンバー", "📄 資料"])
                 with tab_att:
                     _att_label = "自パートの出欠一覧" if user_role == ROLE_LEADER else "全員の出欠一覧"
@@ -2386,7 +2528,6 @@ def render_form(ctx, concert_id: str = ""):
                 with tab_doc:
                     if practices:
                         with st.expander("📄 練習情報PDF（全練習回）", expanded=False):
-                            # スケジュール・レンタル・持参情報を事前取得してステータス判定
                             _all_sched  = ctx["query_all"](ctx.get("CONCERT_DB_SCHEDULE","") or "", None) if ctx.get("CONCERT_DB_SCHEDULE") else []
                             _all_rental = ctx["query_all"](ctx.get("CONCERT_DB_RENTAL","") or "", None) if ctx.get("CONCERT_DB_RENTAL") else []
                             _all_pi     = ctx["query_all"](ctx.get("CONCERT_DB_PLAYER_INSTRUMENT","") or "", None) if ctx.get("CONCERT_DB_PLAYER_INSTRUMENT") else []
@@ -2445,10 +2586,8 @@ def render_form(ctx, concert_id: str = ""):
             # ── 楽譜リンク（全ロール共通：自パートのもの） ──────
             _player_score_links: list[tuple[str,str]] = []
             for _pd in partdefs:
-                # パート区分リレーションで自パートと照合（設定済みの場合）
                 _pd_pm_ids = ctx["extract_relation_ids_any"](_pd, PARTDEF_PART_REL_KEYS)
                 _is_my_part = _pd_pm_ids and _pd_pm_ids[0] == my_part_master_id
-                # フォールバック：パート区分未設定の場合は全パート定義を対象に
                 if not _pd_pm_ids:
                     _is_my_part = True
                 if not _is_my_part:
@@ -2458,7 +2597,6 @@ def render_form(ctx, concert_id: str = ""):
                 if _pd_url:
                     _player_score_links.append((_pd_lbl, _pd_url))
                 else:
-                    # パート別URLがなければ曲全体のURLを探す
                     _pd_song_ids = ctx["extract_relation_ids_any"](_pd, PARTDEF_SONG_REL_KEYS)
                     if _pd_song_ids:
                         _s = next((s for s in songs if s.get("id") == _pd_song_ids[0]), None)
@@ -2467,7 +2605,6 @@ def render_form(ctx, concert_id: str = ""):
                             _s_lbl = get_song_display_name(ctx, _s) or "楽譜"
                             if _s_url:
                                 _player_score_links.append((f"{_s_lbl}（全体）", _s_url))
-            # 重複除去（同じURLが複数のパート定義から来る場合）
             _seen_urls: set[str] = set()
             _deduped_links = []
             for _lbl, _url in _player_score_links:
@@ -2475,17 +2612,18 @@ def render_form(ctx, concert_id: str = ""):
                     _seen_urls.add(_url)
                     _deduped_links.append((_lbl, _url))
             if _deduped_links:
-                st.divider()
                 with st.expander("🎼 楽譜リンク", expanded=False):
                     for _lbl, _url in _deduped_links:
                         st.markdown(f"[📄 {_lbl}]({_url})")
 
-            st.divider()
-            if st.button("🔓 ログアウト", use_container_width=True, key="menu_logout"):
+            # ── フッター ──────────────────────────────────────
+            st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
+            if st.button("ログアウト", use_container_width=True, key="menu_logout"):
                 _logout_to_entry(_form_cookie_mgr)
+            st.markdown('<div class="h-footer">ArtéMis HARMONIA</div>', unsafe_allow_html=True)
             return
         # 新規奏者の場合: 名前・パート入力
-        st.subheader("Step 1 / 基本情報を入力してください")
+        st.markdown('<div class="h-scr-title">Step 1 / 基本情報を入力してください</div>', unsafe_allow_html=True)
         _auth_email = st.session_state.get("form_auth_email", "")
 
         # ── 種別選択はフォーム外（変更即時反映のため） ──────────
@@ -2620,7 +2758,7 @@ def render_form(ctx, concert_id: str = ""):
         part   = st.session_state.get("form_player_part","")
         is_new = st.session_state.get("form_is_new", False)
 
-        st.subheader("Step 2 / 練習出欠を入力してください")
+        st.markdown('<div class="h-scr-title">Step 2 / 練習出欠を入力してください</div>', unsafe_allow_html=True)
         st.caption(f"👤 {pname}　　パート：{part}")
         if is_new:
             st.success("✅ 新規奏者として登録しました。")
@@ -2710,7 +2848,7 @@ def render_form(ctx, concert_id: str = ""):
 
         visible_partdefs = [pd for pd in partdefs if _partdef_matches(pd)]
 
-        st.subheader("Step 3 / パート希望を入力してください")
+        st.markdown('<div class="h-scr-title">Step 3 / パート希望を入力してください</div>', unsafe_allow_html=True)
         st.caption("希望・NGのあるパートだけ入力してください。入力しないパートは「希望なし/降り番でも可」として扱われます。")
 
         if not visible_partdefs:
@@ -2771,7 +2909,7 @@ def render_form(ctx, concert_id: str = ""):
 
     # ── STEP 4: 所有楽器（Percのみ） ─────────────────────────
     elif step == 4:
-        st.subheader("Step 4 / 所有楽器の台数を入力してください")
+        st.markdown('<div class="h-scr-title">Step 4 / 所有楽器の台数を入力してください</div>', unsafe_allow_html=True)
         st.caption("所有していない楽器は 0 のままで構いません。")
 
         if not req_insts:
@@ -2809,7 +2947,7 @@ def render_form(ctx, concert_id: str = ""):
         own          = st.session_state.get("form_own",  {})
         concert_name = ext(concert, CONCERT_NAME_KEYS) or ""
 
-        st.subheader("Step 5 / 内容を確認して送信してください")
+        st.markdown('<div class="h-scr-title">Step 5 / 内容を確認して送信してください</div>', unsafe_allow_html=True)
         st.markdown(f"**氏名：** {player_name}　　**パート：** {part}")
 
         if att:
