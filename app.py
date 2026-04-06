@@ -30,6 +30,10 @@ from services.performance_ops import create_song_assignment_rows_service as _cre
 from services.performance_ops import get_cast_row_map_for_performance_service as _get_cast_row_map_service
 from services.performance_ops import upsert_score_master_links_service as _upsert_score_master_links_service
 try:
+    from streamlit_sortables import sort_items as _sort_items
+except Exception:
+    _sort_items = None
+try:
     from concert.services.notion_client import build_concert_ctx
     from concert.pages import (
         concert_mgmt,
@@ -6830,108 +6834,132 @@ def _render_home_line_group_link_section(selected_concert_id: str, hc_row_latest
     performer_rows = [r for r in performer_rows_all if r.get("id", "") in _seen_cast_performer_ids]
     performer_map = {r.get("id", ""): _performer_row_title(r) for r in performer_rows if r.get("id")}
 
-    left_col, center_col, right_col = st.columns([1.0, 0.22, 1.0])
+    token_to_row_id: dict[str, str] = {}
+    row_id_to_name: dict[str, str] = {}
+    def _token(row: dict) -> str:
+        row_id = row.get("id", "")
+        name = _extract_display_name(row)
+        src = _extract_source_type(row) or "unknown"
+        performer_id = _extract_performer_relation_id(row)
+        performer_name = performer_map.get(performer_id, "") if performer_id else ""
+        suffix = f" / {performer_name}" if performer_name else ""
+        base = f"{name} [{src}]{suffix}"
+        t = base
+        n = 2
+        while t in token_to_row_id:
+            t = f"{base} ({n})"
+            n += 1
+        token_to_row_id[t] = row_id
+        row_id_to_name[row_id] = name
+        return t
 
-    with left_col:
+    left_tokens = [_token(r) for r in sorted(disabled_rows, key=lambda x: _extract_display_name(x))]
+    right_tokens = [_token(r) for r in sorted(enabled_rows, key=lambda x: _extract_display_name(x))]
+    moved_left = left_tokens
+    moved_right = right_tokens
+
+    dnd_cols = st.columns(2)
+    with dnd_cols[0]:
         st.markdown("**未送信対象**")
-        left_df = _rows_to_df(disabled_rows)
-        left_edited = st.data_editor(
-            left_df,
-            key=f"line_disabled_editor_{selected_concert_id}",
-            hide_index=True,
-            use_container_width=True,
-            disabled=["種別", "表示名", "destinationId", "PERFORMER", "_row_id"],
-            column_config={
-                "_row_id": None,
-                "選択": st.column_config.CheckboxColumn("選択"),
-                "種別": st.column_config.TextColumn("種別"),
-                "表示名": st.column_config.TextColumn("表示名"),
-                "destinationId": st.column_config.TextColumn("destinationId"),
-                "PERFORMER": st.column_config.TextColumn("PERFORMER"),
-            },
-        )
-
-    with right_col:
+        st.caption(f"{len(left_tokens)}件")
+    with dnd_cols[1]:
         st.markdown("**送信対象**")
+        st.caption(f"{len(right_tokens)}件")
+
+    if _sort_items is not None:
+        try:
+            dnd_style = """
+            .sortable-component {
+                display: flex !important;
+                flex-wrap: nowrap !important;
+                gap: 12px !important;
+                align-items: flex-start !important;
+            }
+            .sortable-container {
+                flex: 1 1 0 !important;
+                min-width: 320px !important;
+                width: calc(50% - 6px) !important;
+                display: inline-block !important;
+                vertical-align: top !important;
+            }
+            @media (max-width: 900px) {
+                .sortable-component {
+                    display: block !important;
+                }
+                .sortable-container {
+                    min-width: 0 !important;
+                    width: 100% !important;
+                    display: block !important;
+                }
+            }
+            """
+            moved = _sort_items(
+                [
+                    {"header": "未送信対象", "items": left_tokens},
+                    {"header": "送信対象", "items": right_tokens},
+                ],
+                multi_containers=True,
+                direction="horizontal",
+                custom_style=dnd_style,
+                key=f"line_dnd_{selected_concert_id}",
+            )
+            if isinstance(moved, list) and len(moved) >= 2:
+                moved_left = moved[0].get("items", left_tokens) if isinstance(moved[0], dict) else moved[0]
+                moved_right = moved[1].get("items", right_tokens) if isinstance(moved[1], dict) else moved[1]
+        except Exception as e:
+            st.warning(f"DnD描画に失敗したため標準表示に切り替えます: {e}")
+            left_df = _rows_to_df(disabled_rows)
+            right_df = _rows_to_df(enabled_rows)
+            st.dataframe(left_df.drop(columns=["_row_id"]), hide_index=True, use_container_width=True)
+            st.dataframe(right_df.drop(columns=["_row_id"]), hide_index=True, use_container_width=True)
+    else:
+        st.info("DnDコンポーネント未導入です。`streamlit-sortables` を導入するとドラッグ操作が有効になります。")
+        left_df = _rows_to_df(disabled_rows)
         right_df = _rows_to_df(enabled_rows)
-        right_edited = st.data_editor(
-            right_df,
-            key=f"line_enabled_editor_{selected_concert_id}",
-            hide_index=True,
-            use_container_width=True,
-            disabled=["種別", "表示名", "destinationId", "PERFORMER", "_row_id"],
-            column_config={
-                "_row_id": None,
-                "選択": st.column_config.CheckboxColumn("選択"),
-                "種別": st.column_config.TextColumn("種別"),
-                "表示名": st.column_config.TextColumn("表示名"),
-                "destinationId": st.column_config.TextColumn("destinationId"),
-                "PERFORMER": st.column_config.TextColumn("PERFORMER"),
-            },
-        )
+        st.dataframe(left_df.drop(columns=["_row_id"]), hide_index=True, use_container_width=True)
+        st.dataframe(right_df.drop(columns=["_row_id"]), hide_index=True, use_container_width=True)
 
-    left_selected_ids = []
-    if isinstance(left_edited, pd.DataFrame) and not left_edited.empty:
-        left_selected_ids = left_edited.loc[left_edited["選択"] == True, "_row_id"].tolist()
+    before_right = set(right_tokens)
+    after_right = set(moved_right or [])
+    add_ids = [token_to_row_id[t] for t in sorted(after_right - before_right) if token_to_row_id.get(t)]
+    remove_ids = [token_to_row_id[t] for t in sorted(before_right - after_right) if token_to_row_id.get(t)]
 
-    right_selected_ids = []
-    if isinstance(right_edited, pd.DataFrame) and not right_edited.empty:
-        right_selected_ids = right_edited.loc[right_edited["選択"] == True, "_row_id"].tolist()
+    if add_ids or remove_ids:
+        st.caption(f"変更プレビュー: 追加 {len(add_ids)} 件 / 除外 {len(remove_ids)} 件")
 
-    with center_col:
-        st.write("")
-        st.write("")
-        if st.button("→", key=f"line_enable_btn_{selected_concert_id}", use_container_width=True):
-            if not left_selected_ids:
-                st.warning("未送信対象側で追加したい送信先を選択してください。")
+    c_apply, c_reset = st.columns([3, 1])
+    if c_apply.button("💾 DnD変更を反映", type="primary", use_container_width=True):
+        if not add_ids and not remove_ids:
+            st.info("変更はありません。")
+        else:
+            failed = []
+            for row_id in add_ids:
+                ok, msg = _patch_line_enabled(row_id, True)
+                if not ok:
+                    failed.append(f"{row_id_to_name.get(row_id, row_id)}: {msg}")
+            for row_id in remove_ids:
+                ok, msg = _patch_line_enabled(row_id, False)
+                if not ok:
+                    failed.append(f"{row_id_to_name.get(row_id, row_id)}: {msg}")
+
+            refreshed_rows = _get_line_group_rows()
+            refreshed_concert_rows = [r for r in refreshed_rows if hc_row_id in _extract_relation_ids_exact(r, "concert")]
+            refreshed_enabled_rows = [r for r in refreshed_concert_rows if _extract_checkbox_prop(r, "line_enabled", False)]
+            ok_sync, msg_sync = _sync_hc_line_relation_from_enabled_rows(refreshed_enabled_rows)
+
+            if failed:
+                st.error("一部の送信先更新に失敗しました。")
+                for msg in failed:
+                    st.error(msg)
+            elif not ok_sync:
+                st.error(f"HARMONIA_CONCERT 側の同期に失敗しました。{msg_sync}")
             else:
-                failed = []
-                for row_id in left_selected_ids:
-                    ok, msg = _patch_line_enabled(row_id, True)
-                    if not ok:
-                        failed.append(f"{row_id}: {msg}")
+                st.success(f"✅ 反映しました（追加 {len(add_ids)} 件 / 除外 {len(remove_ids)} 件）")
+                _clear_line_destination_runtime_cache()
+                st.rerun()
 
-                refreshed_rows = _get_line_group_rows()
-                refreshed_concert_rows = [r for r in refreshed_rows if hc_row_id in _extract_relation_ids_exact(r, "concert")]
-                refreshed_enabled_rows = [r for r in refreshed_concert_rows if _extract_checkbox_prop(r, "line_enabled", False)]
-                ok_sync, msg_sync = _sync_hc_line_relation_from_enabled_rows(refreshed_enabled_rows)
-
-                if failed:
-                    st.error("一部の送信先を送信対象にできませんでした。")
-                    for msg in failed:
-                        st.error(msg)
-                elif not ok_sync:
-                    st.error(f"HARMONIA_CONCERT 側の同期に失敗しました。{msg_sync}")
-                else:
-                    st.success(f"✅ {len(left_selected_ids)}件を送信対象に追加しました。")
-                    _clear_line_destination_runtime_cache()
-                    st.rerun()
-
-        if st.button("←", key=f"line_disable_btn_{selected_concert_id}", use_container_width=True):
-            if not right_selected_ids:
-                st.warning("送信対象側で外したい送信先を選択してください。")
-            else:
-                failed = []
-                for row_id in right_selected_ids:
-                    ok, msg = _patch_line_enabled(row_id, False)
-                    if not ok:
-                        failed.append(f"{row_id}: {msg}")
-
-                refreshed_rows = _get_line_group_rows()
-                refreshed_concert_rows = [r for r in refreshed_rows if hc_row_id in _extract_relation_ids_exact(r, "concert")]
-                refreshed_enabled_rows = [r for r in refreshed_concert_rows if _extract_checkbox_prop(r, "line_enabled", False)]
-                ok_sync, msg_sync = _sync_hc_line_relation_from_enabled_rows(refreshed_enabled_rows)
-
-                if failed:
-                    st.error("一部の送信先を送信対象から外せませんでした。")
-                    for msg in failed:
-                        st.error(msg)
-                elif not ok_sync:
-                    st.error(f"HARMONIA_CONCERT 側の同期に失敗しました。{msg_sync}")
-                else:
-                    st.success(f"✅ {len(right_selected_ids)}件を送信対象から外しました。")
-                    _clear_line_destination_runtime_cache()
-                    st.rerun()
+    if c_reset.button("↩ DnD変更を破棄", use_container_width=True):
+        st.rerun()
     
     with st.expander("LINEユーザとPERFORMERの紐づけ", expanded=False):
         user_rows = [r for r in concert_related_rows if _extract_source_type(r) == "user"]
