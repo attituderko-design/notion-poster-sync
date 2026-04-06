@@ -1018,6 +1018,107 @@ def _build_solver_input(
     return prefs, requirements
 
 
+def _compute_preference_completion(ctx: dict, concert_id: str) -> tuple[bool, int, int]:
+    """
+    希望入力の全件完了判定。
+    参加者 ×（演奏会内の全パート定義）が埋まっている場合のみ True。
+    """
+    participants = _load_participants(ctx, concert_id)
+    songs = _load_songs(ctx, concert_id)
+    if not participants or not songs:
+        return False, 0, 0
+
+    partdef_ids: set[str] = set()
+    for s in songs:
+        sid = s.get("id", "")
+        for pd in _load_song_instruments(ctx, sid):
+            pdid = pd.get("id", "")
+            if pdid:
+                partdef_ids.add(pdid)
+    if not partdef_ids:
+        return False, 0, 0
+
+    participant_ids: set[str] = set()
+    player_to_participant: dict[str, str] = {}
+    for row in participants:
+        rid = row.get("id", "")
+        if rid:
+            participant_ids.add(rid)
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if rid and pids:
+            player_to_participant[pids[0]] = rid
+
+    target_pairs: set[tuple[str, str]] = {(pid, part_id) for pid in participant_ids for part_id in partdef_ids}
+    pref_rows = _load_player_instruments(ctx, concert_id)
+    answered_pairs: set[tuple[str, str]] = set()
+    for r in pref_rows:
+        player_ids = ctx["extract_relation_ids_any"](r, PREF_PLAYER_REL_KEYS)
+        part_ids = ctx["extract_relation_ids_any"](r, PREF_PART_REL_KEYS)
+        if not (player_ids and part_ids):
+            continue
+        part_id = part_ids[0]
+        if part_id not in partdef_ids:
+            continue
+        raw_pid = player_ids[0]
+        participant_id = raw_pid if raw_pid in participant_ids else player_to_participant.get(raw_pid, "")
+        if not participant_id:
+            continue
+        answered_pairs.add((participant_id, part_id))
+
+    missing_count = max(0, len(target_pairs) - len(answered_pairs))
+    return len(target_pairs) > 0 and missing_count == 0, len(target_pairs), missing_count
+
+
+def _compute_assignment_completion(ctx: dict, concert_id: str) -> tuple[bool, int, list[str]]:
+    """
+    アサイン確定可否判定。
+    演奏会内の全パート定義に対して、担当フラグONの割当が1件以上あることを要件とする。
+    """
+    songs = _load_songs(ctx, concert_id)
+    if not songs:
+        return False, 0, []
+    song_id_set = {s.get("id", "") for s in songs if s.get("id", "")}
+
+    partdef_rows = ctx["query_all"](ctx["CONCERT_DB_PART_DEFINITION"], None)
+    required_part_ids: set[str] = set()
+    partdef_label: dict[str, str] = {}
+    for pd in partdef_rows:
+        pdid = pd.get("id", "")
+        if not pdid:
+            continue
+        pd_song_ids = set(ctx["extract_relation_ids_any"](pd, PARTDEF_SONG_REL_KEYS))
+        if not song_id_set.intersection(pd_song_ids):
+            continue
+        required_part_ids.add(pdid)
+        partdef_label[pdid] = (
+            (ctx["extract_prop_text_any"](pd, PARTDEF_DISPLAY_NAME_KEYS) or "").strip()
+            or (ctx["extract_prop_text_any"](pd, PARTDEF_NAME_KEYS) or "").strip()
+            or pdid
+        )
+
+    if not required_part_ids:
+        return False, 0, []
+
+    db_id = ctx.get("CONCERT_DB_CONCERT_ASSIGNMENT", "")
+    if not db_id:
+        return False, len(required_part_ids), sorted(partdef_label.values())[:10]
+    rows = ctx["query_all"](db_id, None)
+    assigned_part_ids: set[str] = set()
+    for r in rows:
+        c_ids = ctx["extract_relation_ids_any"](r, ASSIGNMENT_CONCERT_REL_KEYS)
+        if concert_id and c_ids and concert_id not in c_ids:
+            continue
+        if ctx["extract_prop_text_any"](r, ASSIGNMENT_FLAG_KEYS) != "True":
+            continue
+        p_ids = ctx["extract_relation_ids_any"](r, ASSIGNMENT_PARTDEF_REL_KEYS)
+        if p_ids and p_ids[0] in required_part_ids:
+            assigned_part_ids.add(p_ids[0])
+
+    missing_ids = sorted(required_part_ids - assigned_part_ids)
+    missing_labels = [partdef_label.get(pid, pid) for pid in missing_ids]
+    return len(missing_ids) == 0, len(required_part_ids), missing_labels
+
+
 # ============================================================
 # タブ1：希望入力
 # ============================================================
@@ -1310,14 +1411,14 @@ def _render_pref_tab(ctx: dict):
                 ok_count += 1 if ok else 0
                 fail_count += 0 if ok else 1
 
-        part_ids = {r.get("id","") for r in _load_participants(ctx, concert_id)}
-        pref_rows_after = _load_preferences(ctx, concert_id) if "_load_preferences" in globals() else []
-        pref_player_ids = set()
-        for _r in pref_rows_after:
-            pref_player_ids.update(ctx["extract_relation_ids_any"](_r, PREF_PLAYER_REL_KEYS))
-        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PREFERENCE_KEYS, bool(part_ids) and part_ids.issubset(pref_player_ids), selected_concert)
+        pref_complete, pref_total, pref_missing = _compute_preference_completion(ctx, concert_id)
+        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_PREFERENCE_KEYS, pref_complete, selected_concert)
         if fail_count == 0:
             st.success(f"✅ {ok_count}件を保存しました。")
+            if pref_complete:
+                st.caption(f"希望入力確定条件を満たしました（{pref_total} / {pref_total}）。")
+            else:
+                st.caption(f"希望入力の未入力が残っています（未入力 {pref_missing} / 全{pref_total}）。")
             st.cache_data.clear()
             st.session_state.pop(f"pi_list_{concert_id}", None)
             _bump_pref_editor_version(concert_id, player_id)
@@ -2110,10 +2211,16 @@ def _render_result_tab(ctx: dict):
         use_container_width=True,
         disabled=bool(not _proposal_on or _assign_on),
     ):
-        _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, True, concert_name)
-        st.cache_data.clear()
-        _clear_assign_cache()
-        st.rerun()
+        assign_complete, required_count, missing_labels = _compute_assignment_completion(ctx, concert_id)
+        if not assign_complete:
+            st.error(f"未割当のパート定義があります（未割当 {len(missing_labels)} / 全{required_count}）。")
+            if missing_labels:
+                st.caption(f"未割当（先頭10件）: {' / '.join(missing_labels[:10])}")
+        else:
+            _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_ASSIGN_KEYS, True, concert_name)
+            st.cache_data.clear()
+            _clear_assign_cache()
+            st.rerun()
 
     # アサインをやり直す
     if _col4.button(

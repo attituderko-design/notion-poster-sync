@@ -17,6 +17,7 @@ from concert.services.keys import (
     EXPENSE_KEY_KEYS, EXPENSE_CONCERT_REL_KEYS, EXPENSE_TYPE_KEYS,
     EXPENSE_CONTENT_KEYS, EXPENSE_AMOUNT_KEYS, EXPENSE_CONFIRMED_KEYS,
     EXPENSE_NOTE_KEYS, EXPENSE_TYPE_OPTIONS,
+    RENTAL_PRACTICE_REL_KEYS, RENTAL_CONFIRMED_KEYS,
     BILLING_KEY_KEYS, BILLING_CONCERT_REL_KEYS, BILLING_DOC_TYPE_KEYS,
     BILLING_ISSUE_DATE_KEYS, BILLING_DUE_DATE_KEYS, BILLING_MEMBER_COUNT_KEYS,
     BILLING_PRACTICE_COUNT_KEYS, BILLING_OPTION_KEYS, BILLING_DISCOUNT_KEYS,
@@ -173,6 +174,32 @@ def _count_practices(ctx, concert_id: str) -> int:
         return 0
     rows = ctx["query_all"](db_id, {"filter": {"property": rel, "relation": {"contains": concert_id}}})
     return len(rows or [])
+
+
+def _list_practice_ids(ctx, concert_id: str) -> list[str]:
+    db_id = ctx.get("CONCERT_DB_PRACTICE", "")
+    if not db_id:
+        return []
+    t = ctx["get_prop_types"](db_id)
+    rel = ctx["find_prop_name"](t, PRACTICE_CONCERT_REL_KEYS) if t else None
+    rows = ctx["query_all"](db_id, {"filter": {"property": rel, "relation": {"contains": concert_id}}}) if rel else []
+    return [r.get("id", "") for r in (rows or []) if r.get("id", "")]
+
+
+def _count_unconfirmed_rentals(ctx, concert_id: str) -> int:
+    db_id = (ctx.get("CONCERT_DB_RENTAL") or "").strip()
+    if not db_id:
+        return 0
+    practice_ids = set(_list_practice_ids(ctx, concert_id))
+    rows = ctx["query_all"](db_id, None)
+    count = 0
+    for r in rows:
+        rel_practice = set(ctx["extract_relation_ids_any"](r, RENTAL_PRACTICE_REL_KEYS))
+        if practice_ids and not practice_ids.intersection(rel_practice):
+            continue
+        if ctx["extract_prop_text_any"](r, RENTAL_CONFIRMED_KEYS) != "True":
+            count += 1
+    return count
 
 
 def _load_billing_rows(ctx, concert_id: str) -> list[dict]:
@@ -1048,9 +1075,21 @@ def render(ctx: dict):
         return
     st.caption(f"対象演奏会: {concert_name or concert_id}")
 
+    expense_rows_for_confirm = _load_expenses(ctx, concert_id)
+    unconfirmed_expense_count = sum(
+        1 for r in expense_rows_for_confirm
+        if ctx["extract_prop_text_any"](r, EXPENSE_CONFIRMED_KEYS) != "True"
+    )
+    unconfirmed_rental_count = _count_unconfirmed_rentals(ctx, concert_id)
+    st.caption(
+        f"確定チェック: 経費未確定 {unconfirmed_expense_count} 件 / レンタル未確定 {unconfirmed_rental_count} 件"
+    )
+
     c1, c2 = st.columns(2)
     if c1.button("✅ 収支確定", key=f"finance_confirm_{concert_id}", use_container_width=True):
-        if _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_FINANCE_KEYS, True, concert_name):
+        if unconfirmed_expense_count > 0 or unconfirmed_rental_count > 0:
+            st.error("未確定の経費またはレンタルが残っているため、収支確定できません。")
+        elif _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_FINANCE_KEYS, True, concert_name):
             st.success("✅ 収支確定を反映しました。")
             _clear_finance_cache(concert_id)
             st.rerun()

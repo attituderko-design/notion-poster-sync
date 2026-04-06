@@ -761,6 +761,31 @@ def _refresh_harmonia_song_info_status(ctx: dict, concert_id: str) -> bool:
     return _set_harmonia_concert_checkbox(ctx, concert_id, HARMONIA_CONCERT_SONG_INFO_KEYS, all_done)
 
 
+def _collect_partdef_completion(ctx: dict, concert_id: str) -> tuple[int, int, list[str]]:
+    """
+    パート定義タブの一括確定判定。
+    演奏会内の CONCERT_SONG 全件が「定義完了」であることを完了条件とする。
+    """
+    rows = _load_concert_song_rows(ctx, concert_id)
+    if not rows:
+        return 0, 0, []
+    db_id = ctx.get("CONCERT_DB_CONCERT_SONG", "")
+    type_map = ctx["get_prop_types"](db_id) or {} if db_id else {}
+    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_DONE_KEYS) or _find_prop_name_from_rows_loose(rows, CONCERT_SONG_DONE_KEYS)
+    if not flag_key:
+        return len(rows), 0, []
+    pending_names: list[str] = []
+    done_count = 0
+    for r in rows:
+        if _extract_checkbox_value(r, flag_key):
+            done_count += 1
+        else:
+            pending_names.append(
+                (ctx["extract_prop_text_any"](r, ["曲名", "名称", "タイトル"]) or ctx["extract_title"](r) or r.get("id", ""))
+            )
+    return len(rows), done_count, pending_names
+
+
 def _set_concert_song_song_confirmed(
     ctx: dict,
     concert_id: str,
@@ -802,6 +827,58 @@ def _set_concert_song_song_confirmed(
     _clear_concert_song_cache(concert_id)
     _refresh_harmonia_song_info_status(ctx, concert_id)
     return len(targets), updated
+
+
+def _set_all_concert_song_instrument_completed(ctx: dict, concert_id: str, checked: bool) -> tuple[int, int]:
+    rows = _load_concert_song_rows(ctx, concert_id)
+    if not rows or not ctx.get("CONCERT_DB_CONCERT_SONG"):
+        return 0, 0
+    db_id = ctx["CONCERT_DB_CONCERT_SONG"]
+    type_map = ctx["get_prop_types"](db_id) or {}
+    flag_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_INSTRUMENT_KEYS) or _find_prop_name_from_rows_loose(rows, CONCERT_SONG_INSTRUMENT_KEYS)
+    if not flag_key:
+        return 0, 0
+    updated = 0
+    for row in rows:
+        row_id = row.get("id", "")
+        if not row_id:
+            continue
+        res = ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{row_id}",
+            json={"properties": {flag_key: {"checkbox": bool(checked)}}},
+        )
+        if res is not None and res.status_code == 200:
+            updated += 1
+    _clear_concert_song_cache(concert_id)
+    _set_harmonia_concert_required_instrument_status(ctx, concert_id)
+    return len(rows), updated
+
+
+def _collect_required_inst_completion(ctx: dict, concert_id: str) -> tuple[int, int, list[str]]:
+    """
+    必要楽器タブの一括確定判定。
+    演奏会内の全 CONCERT_SONG に対し、CONCERT_INSTRUMENT が1件以上あることを要件とする。
+    """
+    cs_rows = _load_concert_song_rows(ctx, concert_id)
+    if not cs_rows:
+        return 0, 0, []
+    ci_rows = _load_concert_instruments(ctx, concert_id)
+    ci_by_cs: dict[str, int] = {}
+    for ci in ci_rows:
+        for csid in (ctx["extract_relation_ids_any"](ci, CONCERT_INST_SONG_REL_KEYS) or []):
+            ci_by_cs[csid] = ci_by_cs.get(csid, 0) + 1
+    missing_names: list[str] = []
+    ready_count = 0
+    for cs in cs_rows:
+        csid = cs.get("id", "")
+        if ci_by_cs.get(csid, 0) > 0:
+            ready_count += 1
+        else:
+            missing_names.append(
+                (ctx["extract_prop_text_any"](cs, ["曲名", "名称", "タイトル"]) or ctx["extract_title"](cs) or csid)
+            )
+    return len(cs_rows), ready_count, missing_names
 
 
 def _get_concert_song_confirmation_stats(ctx: dict, concert_id: str) -> dict:
@@ -903,6 +980,21 @@ def _render_song_tab(ctx: dict):
                     f"楽曲情報確定：{confirmed} / {total} 曲　"
                     f"未確定：{'、'.join(pending[:5])}{'…' if len(pending) > 5 else ''}"
                 )
+            c_all1, c_all2 = st.columns(2)
+            if c_all1.button("✅ 楽曲情報を一括確定", key=f"song_confirm_all_{filter_concert_id}", use_container_width=True):
+                total_rows, updated_rows = _set_concert_song_song_confirmed(ctx, filter_concert_id, True, song_id="")
+                if total_rows == 0:
+                    st.warning("対象の演奏曲がありません。")
+                else:
+                    st.success(f"✅ 一括確定しました（更新 {updated_rows} / 対象 {total_rows}）。")
+                    st.rerun()
+            if c_all2.button("↩ 楽曲情報確定を一括解除", key=f"song_unconfirm_all_{filter_concert_id}", use_container_width=True):
+                total_rows, updated_rows = _set_concert_song_song_confirmed(ctx, filter_concert_id, False, song_id="")
+                if total_rows == 0:
+                    st.warning("対象の演奏曲がありません。")
+                else:
+                    st.success(f"↩ 一括解除しました（更新 {updated_rows} / 対象 {total_rows}）。")
+                    st.rerun()
 
         col_h, col_r = st.columns([8, 1])
         col_h.subheader(f"楽曲一覧（{len(songs)}件）" if songs else "楽曲一覧")
@@ -1002,45 +1094,9 @@ def _render_song_row(
     expander_label = f"{confirm_badge} {song_label}" + (f"　*{sub_cap}*" if sub_cap else "")
 
     with st.expander(expander_label, expanded=False):
-        # 確定ボタン（行内）
+        # 個別確定は廃止。上部の一括確定ボタンを利用。
         if has_flag_key:
-            c_conf1, c_conf2 = st.columns(2)
-            if not is_confirmed:
-                if c_conf1.button("✅ 楽曲情報を確定", key=f"song_confirm_{concert_id}_{song_id}",
-                                   use_container_width=True, type="primary"):
-                    total, updated = _set_concert_song_song_confirmed(ctx, concert_id, True, song_id=song_id)
-                    if updated:
-                        st.success(f"✅ {updated}件を更新しました。")
-                        st.rerun()
-                    else:
-                        atlas_ids = _resolve_atlas_song_ids(ctx, concert_id, song_id)
-                        cs_rows_all = ctx["query_all"](ctx.get("CONCERT_DB_CONCERT_SONG",""), None)
-                        db_id = ctx.get("CONCERT_DB_CONCERT_SONG","")
-                        type_map = ctx["get_prop_types"](db_id) or {}
-                        rel_key = _find_prop_name_loose(ctx, type_map, CONCERT_SONG_CONCERT_REL_KEYS)
-                        # CONCERT_SONGの演奏会IDサンプルを取得
-                        cs_concert_ids = []
-                        for r in cs_rows_all[:3]:
-                            ids = ctx["extract_relation_ids_any"](r, [rel_key] if rel_key else CONCERT_SONG_CONCERT_REL_KEYS)
-                            cs_concert_ids.append([x[:8] for x in ids])
-                        # APOLLOの「演奏曲」リレーションを直接確認
-                        apollo_row = next((r for r in ctx["query_all"](ctx["CONCERT_DB_SONG"], None) if r.get("id","") == song_id), None)
-                        apollo_atlas_ids = ctx["extract_relation_ids_any"](apollo_row, APOLLO_ATLAS_SONG_REL_KEYS) if apollo_row else []
-                        st.error(
-                            f"CONCERT_SONG 行が見つかりません。\n"
-                            f"APOLLO ID: {song_id[:8]}\n"
-                            f"APOLLO.演奏曲リレーション: {[x[:8] for x in apollo_atlas_ids]}\n"
-                            f"解決したATLAS ID: {[x[:8] for x in atlas_ids]}\n"
-                            f"CONCERT_SONG全件: {len(cs_rows_all)}件 / rel_key: '{rel_key}'\n"
-                            f"CONCERT_SONGの演奏会IDサンプル: {cs_concert_ids}\n"
-                            f"検索中のconcert_id: {concert_id[:8]}"
-                        )
-            else:
-                if c_conf2.button("↩ 確定を解除", key=f"song_unconfirm_{concert_id}_{song_id}",
-                                   use_container_width=True):
-                    total, updated = _set_concert_song_song_confirmed(ctx, concert_id, False, song_id=song_id)
-                    st.success(f"✅ {updated}件を更新しました。") if updated else st.error("CONCERT_SONG 行が見つかりません。")
-                    st.rerun()
+            st.caption("この画面の確定/解除は上部の一括ボタンで行ってください。")
 
         # 編集フォーム
         existing_concert_ids   = ctx["extract_relation_ids_any"](s, SONG_CONCERT_REL_KEYS)
@@ -1286,27 +1342,9 @@ def _render_concert_instrument_section(ctx: dict, c_id: str, song_id: str, song_
     has_flag_key, current_done = _get_concert_song_instrument_confirmation_status(ctx, c_id, song_id)
     if has_flag_key:
         badge = "✅ 必要楽器確定" if current_done else "⬜ 未確定"
-        col_badge, col_btn1, col_btn2 = st.columns([3, 2, 2])
+        col_badge, _col_note = st.columns([3, 4])
         col_badge.markdown(f"**必要楽器状態：{badge}**")
-        complete_note = st.text_input(
-            "完了メモ（任意）",
-            key=f"ci_complete_note_{c_id}_{song_id}",
-            placeholder="例: 2026-03-30 確認済み",
-        )
-        if not current_done:
-            if col_btn1.button("✅ 必要楽器を確定する", key=f"ci_done_{c_id}_{song_id}", type="primary", use_container_width=True):
-                ok = _set_concert_song_instrument_completed(ctx, c_id, song_id, True, note=complete_note)
-                st.success("✅ 更新しました。") if ok else st.error("❌ 更新に失敗しました。")
-                if ok:
-                    _clear_concert_song_cache(c_id)
-                    st.rerun()
-        else:
-            if col_btn2.button("↩ 必要楽器確定を解除", key=f"ci_undone_{c_id}_{song_id}", use_container_width=True):
-                ok = _set_concert_song_instrument_completed(ctx, c_id, song_id, False, note=complete_note)
-                st.success("✅ 更新しました。") if ok else st.error("❌ 更新に失敗しました。")
-                if ok:
-                    _clear_concert_song_cache(c_id)
-                    st.rerun()
+        st.caption("確定/解除は必要楽器タブ上部の一括ボタンで行ってください。")
     else:
         st.info("CONCERT_SONG に『必要楽器確定』プロパティが見つからないため、編集のみ可能です。")
 
@@ -1463,6 +1501,28 @@ def _render_concert_instrument_tab(ctx: dict):
         st.info("この演奏会に楽曲がありません。先に『楽曲』タブで登録してください。")
         return
 
+    total_cs, ready_cs, missing_song_names = _collect_required_inst_completion(ctx, c_id)
+    st.caption(f"必要楽器入力状況: {ready_cs} / {total_cs} 曲")
+    c_all1, c_all2 = st.columns(2)
+    if c_all1.button("✅ 必要楽器を一括確定", key=f"required_inst_confirm_all_{c_id}", use_container_width=True):
+        if total_cs == 0:
+            st.error("対象の演奏曲がありません。")
+        elif missing_song_names:
+            st.error(f"必要楽器未入力の演奏曲があるため確定できません（未入力 {len(missing_song_names)}曲）。")
+            st.caption(f"未入力（先頭10件）: {' / '.join(missing_song_names[:10])}")
+            _set_harmonia_concert_required_instrument_status(ctx, c_id)
+        else:
+            total_rows, updated_rows = _set_all_concert_song_instrument_completed(ctx, c_id, True)
+            st.success(f"✅ 一括確定しました（更新 {updated_rows} / 対象 {total_rows}）。")
+            st.rerun()
+    if c_all2.button("↩ 必要楽器確定を一括解除", key=f"required_inst_unconfirm_all_{c_id}", use_container_width=True):
+        total_rows, updated_rows = _set_all_concert_song_instrument_completed(ctx, c_id, False)
+        if total_rows == 0:
+            st.warning("対象の演奏曲がありません。")
+        else:
+            st.success(f"↩ 一括解除しました（更新 {updated_rows} / 対象 {total_rows}）。")
+            st.rerun()
+
     song_opts = {_song_name(s, ctx): s for s in songs}
     s_name = st.selectbox("楽曲を選択", list(song_opts.keys()), key="concert_instrument_song_sel")
     s = song_opts[s_name]
@@ -1492,6 +1552,29 @@ def _render_partdef_tab(ctx: dict):
     if not songs:
         st.info("この演奏会に楽曲がありません。先に「楽曲」タブで登録してください。")
         return
+
+    total_cs, done_cs, pending_song_names = _collect_partdef_completion(ctx, c_id)
+    st.caption(f"パート定義入力状況: {done_cs} / {total_cs} 曲")
+    c_all1, c_all2 = st.columns(2)
+    if c_all1.button("✅ パート定義を確定", key=f"partdef_confirm_all_{c_id}", use_container_width=True):
+        if total_cs == 0:
+            st.error("対象の演奏曲がありません。")
+        elif pending_song_names:
+            st.error(f"未完了の演奏曲があるため確定できません（未完了 {len(pending_song_names)}曲）。")
+            st.caption(f"未完了（先頭10件）: {' / '.join(pending_song_names[:10])}")
+            _set_harmonia_concert_checkbox(ctx, c_id, HARMONIA_CONCERT_PARTDEF_KEYS, False)
+        else:
+            ok = _set_harmonia_concert_checkbox(ctx, c_id, HARMONIA_CONCERT_PARTDEF_KEYS, True)
+            if ok:
+                st.success("✅ パート定義を確定しました。")
+                st.rerun()
+            st.warning("HARMONIA_CONCERT の『パート定義確定』更新に失敗しました。")
+    if c_all2.button("↩ パート定義確定を解除", key=f"partdef_unconfirm_all_{c_id}", use_container_width=True):
+        ok = _set_harmonia_concert_checkbox(ctx, c_id, HARMONIA_CONCERT_PARTDEF_KEYS, False)
+        if ok:
+            st.success("↩ パート定義確定を解除しました。")
+            st.rerun()
+        st.warning("HARMONIA_CONCERT の『パート定義確定』更新に失敗しました。")
 
     instruments = _load_instruments(ctx)
     if not instruments:
@@ -1526,25 +1609,9 @@ def _render_partdef_tab(ctx: dict):
             else False
         )
         badge = "✅ 定義完了" if current_done else "⬜ 未完了"
-        col_badge, col_btn1, col_btn2 = st.columns([3, 2, 2])
+        col_badge, _col_note = st.columns([3, 4])
         col_badge.markdown(f"**パート定義状態：{badge}**")
-        complete_note = st.text_input(
-            "完了メモ（任意）",
-            key=f"cs_complete_note_{c_id}_{s_id}",
-            placeholder="例: 2026-03-30 確認済み",
-        )
-        if not current_done:
-            if col_btn1.button("✅ 完了にする", use_container_width=True,
-                               key=f"cs_done_{c_id}_{s_id}", type="primary"):
-                ok = _set_concert_song_partdef_completed(ctx, c_id, s_id, True, note=complete_note)
-                st.success("✅ 更新しました。") if ok else st.error("❌ 更新に失敗しました。")
-                if ok: st.rerun()
-        else:
-            if col_btn2.button("↩ 完了を取り消す", use_container_width=True,
-                               key=f"cs_undone_{c_id}_{s_id}"):
-                ok = _set_concert_song_partdef_completed(ctx, c_id, s_id, False, note=complete_note)
-                st.success("✅ 更新しました。") if ok else st.error("❌ 更新に失敗しました。")
-                if ok: st.rerun()
+        st.caption("確定/解除はパート定義タブ上部の一括ボタンで行ってください。")
     else:
         st.warning("CONCERT_SONG に対応する行がありません。完了フラグの更新はできません。")
         current_done = False

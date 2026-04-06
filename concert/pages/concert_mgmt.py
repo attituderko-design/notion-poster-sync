@@ -1310,6 +1310,11 @@ def _clear_schedule_cache(practice_id: str = ""):
             st.session_state.pop(k, None)
 
 
+def _practice_schedule_count(ctx: dict, practice_id: str) -> int:
+    rows = _load_schedules(ctx, practice_id)
+    return len(rows or [])
+
+
 def _upsert_schedule(ctx, practice_id: str, practice_name: str,
                      start: str, end: str, type_: str, content: str,
                      song_id: str, order: int,
@@ -1550,6 +1555,25 @@ def render(ctx: dict):
             st.caption("各通常練習日の『日時設定済み + 練習日確定』をもとに、HARMONIA_CONCERT の『練習情報確定』/『練習日確定』を自動更新します。")
             c1, c2 = st.columns(2)
             if c1.button("✅ 練習日確定", key="practice_confirm_all", use_container_width=True):
+                regular_practices = [p for p in _load_practices(ctx, filter_concert_id) if not _extract_bool_any(ctx, p, PRACTICE_CONCERT_DAY_KEYS, False)]
+                missing_date = [
+                    _practice_display_name(p, ctx)
+                    for p in regular_practices
+                    if not (ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS) or "").strip()
+                ]
+                missing_schedule = [
+                    _practice_display_name(p, ctx)
+                    for p in regular_practices
+                    if _practice_schedule_count(ctx, p.get("id", "")) == 0
+                ]
+                if missing_date or missing_schedule:
+                    st.error("未入力の練習日があるため、練習日確定は実行できません。")
+                    if missing_date:
+                        st.caption(f"日時未入力（先頭10件）: {' / '.join(missing_date[:10])}")
+                    if missing_schedule:
+                        st.caption(f"スケジュール未入力（先頭10件）: {' / '.join(missing_schedule[:10])}")
+                    _refresh_harmonia_practice_info_status(ctx, filter_concert_id, ctx.get("SELECTED_CONCERT_NAME", ""))
+                    return
                 total_rows, updated_rows = _set_all_practice_date_confirmed(ctx, filter_concert_id, True, ctx.get("SELECTED_CONCERT_NAME", ""))
                 if total_rows == 0:
                     st.warning("通常練習の対象行が見つかりませんでした。")
@@ -1722,28 +1746,7 @@ def render(ctx: dict):
                     st.caption("本番日は練習情報確定の対象外です。")
                 else:
                     st.caption(f"練習日確定: {'✅ 確定' if p_is_confirmed else '⬜ 未確定'} / {'日時設定済み' if p_has_date else '日時未設定'}")
-                    cc1, cc2 = st.columns(2)
-                    if cc1.button("✅ この練習日を確定", key=f"practice_confirm_one_{p_id_pdf}", use_container_width=True):
-                        if not p_has_date:
-                            st.error("日時未設定のため確定できません。")
-                        else:
-                            ok = _set_practice_checkbox(ctx, p_id_pdf, PRACTICE_DATE_CONFIRM_KEYS, True)
-                            _refresh_harmonia_practice_info_status(ctx, filter_concert_id, ctx.get("SELECTED_CONCERT_NAME", ""))
-                            if ok:
-                                st.success("✅ 練習日確定を更新しました。")
-                                _clear_concert_cache(ctx)
-                                st.rerun()
-                            else:
-                                st.error("❌ 練習日確定の更新に失敗しました。")
-                    if cc2.button("↩ この練習日の確定を解除", key=f"practice_unconfirm_one_{p_id_pdf}", use_container_width=True):
-                        ok = _set_practice_checkbox(ctx, p_id_pdf, PRACTICE_DATE_CONFIRM_KEYS, False)
-                        _refresh_harmonia_practice_info_status(ctx, filter_concert_id, ctx.get("SELECTED_CONCERT_NAME", ""))
-                        if ok:
-                            st.success("↩ 練習日確定を解除しました。")
-                            _clear_concert_cache(ctx)
-                            st.rerun()
-                        else:
-                            st.error("❌ 練習日確定の更新に失敗しました。")
+                    st.caption("個別の確定/解除は廃止しました。上部の一括確定ボタンを使用してください。")
                 st.divider()
                 # 演奏曲設定（multiselect必須のためexpander内に残す）
                 song_opts_e: dict = {}
