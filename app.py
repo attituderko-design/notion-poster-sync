@@ -641,6 +641,32 @@ def reset_score_search_state(clear_cache: bool = False):
         except Exception:
             pass
 
+
+def _clear_concert_page_runtime_cache():
+    """演奏会切替時に、concert配下ページの表示キャッシュをクリアする。"""
+    prefixes = (
+        "song_list_", "participant_list_", "practice_list_",
+        "pref_list_", "pi_list_", "si_list_",
+        "partdef_list_", "attendance_list_",
+        "cast_editor_", "cast_editor_version_",
+        "remove_sel_", "transfer_sel_", "cast_dnd_",
+        "dnd_left_part_", "dnd_right_part_",
+        "assign_result_", "assign_manual_", "assign_generation_", "assign_all_",
+        "pref_editor_", "pref_editor_version_",
+        "rental_", "summary_concert",
+        "players_concert_search", "songs_concert_list",
+    )
+    exact_keys = {
+        "result_song_filter",
+    }
+    for k in list(st.session_state.keys()):
+        if k in exact_keys or any(str(k).startswith(p) for p in prefixes):
+            st.session_state.pop(k, None)
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
 def upsert_page_in_state(page: dict):
     if not page or "id" not in page:
         return
@@ -10168,6 +10194,10 @@ if system_mode == "HARMONIA":
                 concert_ctx["SELECTED_CONCERT_NAME"] = selected_name
 
     selected_concert_id = concert_ctx.get("SELECTED_CONCERT_ID", "").strip()
+    _prev_selected_concert_id = (st.session_state.get("_last_selected_concert_id") or "").strip()
+    if selected_concert_id != _prev_selected_concert_id:
+        _clear_concert_page_runtime_cache()
+        st.session_state["_last_selected_concert_id"] = selected_concert_id
     selected_concert_row = next((r for r in concert_rows if r.get("id", "") == selected_concert_id), None)
 
     concert_mgmt.render_sidebar_summary_pdf(concert_ctx)
