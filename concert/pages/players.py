@@ -494,6 +494,7 @@ def _upsert_participant(
     part: str = "",
     role_music: str = "",
     role_ops: str = "",
+    role_system: str = "",
     _prop_types: dict | None = None,
 ) -> bool:
     db_id = ctx["CONCERT_DB_PARTICIPANT"]
@@ -514,6 +515,7 @@ def _upsert_participant(
             ctx["put_prop_any"](props, t, PARTICIPANT_PART_REL_KEYS, pm_id)
     ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_KEYS,     role_music)
     ctx["put_prop_any"](props, t, PARTICIPANT_ROLE_OPS_KEYS, role_ops)
+    ctx["put_prop_any"](props, t, PARTICIPANT_SYSTEM_ROLE_KEYS, role_system)
     # 新規登録時のみ：session_stateの確定参加費をセット
     if not existing_id:
         confirmed_fee = st.session_state.get(f"confirmed_fee_{concert_id}")
@@ -746,6 +748,7 @@ def _render_player_tab(ctx: dict):
     part_opts     = sorted(v["name"] for v in pm_map_pl.values() if v["name"])
     role_m_opts   = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_ROLE_KEYS)
     role_ops_opts = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_ROLE_OPS_KEYS)
+    role_sys_opts = _get_select_options(ctx, ctx["CONCERT_DB_PARTICIPANT"], PARTICIPANT_SYSTEM_ROLE_KEYS)
 
     # 演奏会参加者設定：CONCERT_CASTに登録済みの奏者のみ表示
     cast_rows = []
@@ -763,6 +766,7 @@ def _render_player_tab(ctx: dict):
         cur_part    = pm_map_pl.get(cur_part_pm_ids[0], {}).get("name", "") if cur_part_pm_ids else ""
         cur_role_m  = ctx["extract_prop_text_any"](row, PARTICIPANT_ROLE_KEYS)  if row else ""
         cur_role_o  = ctx["extract_prop_text_any"](row, PARTICIPANT_ROLE_OPS_KEYS) if row else ""
+        cur_role_s  = ctx["extract_prop_text_any"](row, PARTICIPANT_SYSTEM_ROLE_KEYS) if row else ""
         fee_s       = ctx["extract_prop_text_any"](row, PARTICIPANT_FEE_KEYS)   if row else ""
         paid        = ctx["extract_prop_text_any"](row, PARTICIPANT_PAID_KEYS) == "True" if row else False
         try: fee = int(float(fee_s)) if fee_s != "" else None
@@ -775,12 +779,14 @@ def _render_player_tab(ctx: dict):
             "パート":   cur_part or "",
             "役職(音楽)": cur_role_m or "",
             "役職(運営)": cur_role_o or "",
+            "システムロール": cur_role_s or "",
         })
         cast_meta.append({
             "pid": pid, "pname": pname, "rid": rid,
             "in_cast": in_cast, "is_extra": is_extra,
             "cur_part": cur_part, "cur_role_m": cur_role_m,
-            "cur_role_o": cur_role_o, "fee": fee, "paid": paid,
+            "cur_role_o": cur_role_o, "cur_role_s": cur_role_s,
+            "fee": fee, "paid": paid,
         })
 
     # ── 演奏会参加者設定：左右2軸DnD UI ──────────────────────
@@ -919,10 +925,11 @@ def _render_player_tab(ctx: dict):
             rid = existing_row.get("id", "") if existing_row else ""
             cur_role_m = ctx["extract_prop_text_any"](existing_row, PARTICIPANT_ROLE_KEYS) if existing_row else ""
             cur_role_o = ctx["extract_prop_text_any"](existing_row, PARTICIPANT_ROLE_OPS_KEYS) if existing_row else ""
+            cur_role_s = ctx["extract_prop_text_any"](existing_row, PARTICIPANT_SYSTEM_ROLE_KEYS) if existing_row else ""
             ok = _upsert_participant(
                 ctx, global_concert_id, global_concert_name,
                 pid, pname, rid,
-                part=right_part, role_music=cur_role_m, role_ops=cur_role_o,
+                part=right_part, role_music=cur_role_m, role_ops=cur_role_o, role_system=cur_role_s,
                 _prop_types=_t_cast,
             )
             ok_n += 1 if ok else 0
@@ -969,6 +976,8 @@ def _render_player_tab(ctx: dict):
                        else st.column_config.TextColumn("役職(音楽)", max_chars=30),
         "役職(運営)": st.column_config.SelectboxColumn("役職(運営)", options=role_ops_opts) if role_ops_opts
                        else st.column_config.TextColumn("役職(運営)", max_chars=30),
+        "システムロール": st.column_config.SelectboxColumn("システムロール", options=role_sys_opts) if role_sys_opts
+                       else st.column_config.TextColumn("システムロール", max_chars=30),
     }
     edited_cast = st.data_editor(
         df_cast, num_rows="fixed", use_container_width=True,
@@ -1003,12 +1012,14 @@ def _render_player_tab(ctx: dict):
                 new_part   = str(row.get("パート")     or "").strip()
                 new_role_m = str(row.get("役職(音楽)") or "").strip()
                 new_role_o = str(row.get("役職(運営)") or "").strip()
+                new_role_s = str(row.get("システムロール") or "").strip()
 
                 # 変更なしはスキップ
                 no_change = (new_extra == meta["is_extra"] and
                              new_part   == (meta["cur_part"]   or "") and
                              new_role_m == (meta["cur_role_m"] or "") and
-                             new_role_o == (meta["cur_role_o"] or ""))
+                             new_role_o == (meta["cur_role_o"] or "") and
+                             new_role_s == (meta["cur_role_s"] or ""))
                 if no_change:
                     skip_n += 1; continue
 
@@ -1016,7 +1027,7 @@ def _render_player_tab(ctx: dict):
                     ctx, global_concert_id, global_concert_name,
                     meta["pid"], meta["pname"], meta["rid"],
                     is_extra=new_extra,
-                    part=new_part, role_music=new_role_m, role_ops=new_role_o,
+                    part=new_part, role_music=new_role_m, role_ops=new_role_o, role_system=new_role_s,
                     _prop_types=_t_cast,
                 )
                 ok_n += 1 if ok else 0
