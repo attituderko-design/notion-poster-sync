@@ -278,24 +278,48 @@ def _render_manual_assignment_editor(
                 continue
             st.markdown(f"**{song_name_map.get(sid, sid)}**")
             if len(song_rows) >= 2:
+                st.caption("同じ曲の中で、選んだ2つのパートの担当者を入れ替えます。")
                 sw1, sw2, swb = st.columns([4, 4, 2])
-                _part_opts = {f"{edited[i].get('part_name', '—')}  ←  {edited[i].get('player_name', '—')}": i for i in song_rows}
-                _labels = list(_part_opts.keys())
+                _swap_meta = {
+                    i: {
+                        "part": edited[i].get("part_name", "—"),
+                        "player": edited[i].get("player_name", "—"),
+                    }
+                    for i in song_rows
+                }
+                _swap_options = song_rows
                 pick1 = sw1.selectbox(
-                    "入れ替え元",
-                    options=_labels,
+                    "パートA",
+                    options=_swap_options,
+                    format_func=lambda i: f"{_swap_meta[i]['part']}（現在: {_swap_meta[i]['player']}）",
                     key=f"manual_swap_a_{key}_{sid}",
                 )
                 pick2 = sw2.selectbox(
-                    "入れ替え先",
-                    options=_labels,
-                    index=1 if len(_labels) > 1 else 0,
+                    "パートB",
+                    options=_swap_options,
+                    index=1 if len(_swap_options) > 1 else 0,
+                    format_func=lambda i: f"{_swap_meta[i]['part']}（現在: {_swap_meta[i]['player']}）",
                     key=f"manual_swap_b_{key}_{sid}",
                 )
-                if swb.button("🔁 入れ替え", key=f"manual_swap_btn_{key}_{sid}", use_container_width=True):
-                    i1 = _part_opts.get(pick1)
-                    i2 = _part_opts.get(pick2)
-                    if i1 is None or i2 is None or i1 == i2:
+                _same_pick = (pick1 == pick2)
+                if _same_pick:
+                    st.warning("パートAとパートBは別のパートを選択してください。")
+                else:
+                    st.info(
+                        f"実行内容: "
+                        f"{_swap_meta[pick1]['part']}（{_swap_meta[pick1]['player']}） "
+                        f"⇔ "
+                        f"{_swap_meta[pick2]['part']}（{_swap_meta[pick2]['player']}）"
+                    )
+                if swb.button(
+                    "🔁 この2つを入れ替える",
+                    key=f"manual_swap_btn_{key}_{sid}",
+                    use_container_width=True,
+                    disabled=_same_pick,
+                ):
+                    i1 = pick1
+                    i2 = pick2
+                    if i1 == i2:
                         st.warning("入れ替える2つのパートを別々に選択してください。")
                     else:
                         p1_id = edited[i1].get("player_id", "")
