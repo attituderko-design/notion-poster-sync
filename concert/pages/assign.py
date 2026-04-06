@@ -306,19 +306,15 @@ def _render_manual_assignment_editor(
 ) -> list[dict]:
     key = _manual_assignment_state_key(concert_id, result_label)
     open_key = f"{key}_open"
-    tap_open_key = f"{key}_tap_open"
     if key not in st.session_state:
         st.session_state[key] = [dict(a) for a in base_assignments]
     if open_key not in st.session_state:
         st.session_state[open_key] = True
-    if tap_open_key not in st.session_state:
-        st.session_state[tap_open_key] = False
     edited = st.session_state.get(key, [])
     if not edited:
         return edited
 
-    player_ids = list(player_label_map.keys())
-    if not player_ids:
+    if not player_label_map:
         return edited
 
     with st.expander("🛠 手動でパートを設定する（この候補のみ）", expanded=bool(st.session_state.get(open_key, True))):
@@ -362,8 +358,13 @@ def _render_manual_assignment_editor(
                     continue
                 token_to_pid: dict[str, str] = {}
                 player_tokens: list[str] = []
+                _name_seen: dict[str, int] = {}
                 for row_idx, pname, pid in zip(song_rows, cur_pnames, cur_pids):
-                    token = f"{pname} ｜{pid[:6]}"
+                    _name_seen[pname] = _name_seen.get(pname, 0) + 1
+                    if _name_seen[pname] == 1:
+                        token = pname
+                    else:
+                        token = f"{pname} ({_name_seen[pname]})"
                     player_tokens.append(token)
                     token_to_pid[token] = pid
 
@@ -376,15 +377,27 @@ def _render_manual_assignment_editor(
                     st.caption("担当者（ドラッグ）")
                     ordered_tokens = _sort_items(player_tokens, direction="vertical", key=f"manual_dnd_{key}_{sid}")
                 if isinstance(ordered_tokens, list) and len(ordered_tokens) == len(song_rows):
-                    for pos, row_idx in enumerate(song_rows):
-                        tok = ordered_tokens[pos]
-                        new_pid = token_to_pid.get(tok, edited[row_idx].get("player_id", ""))
-                        if new_pid != edited[row_idx].get("player_id", ""):
+                    _same_order = (ordered_tokens == player_tokens)
+                    if _same_order:
+                        st.caption("現在の順序と同じです。")
+                    else:
+                        st.info("並べ替え結果を確認して「この順序を反映」を押すと割当を更新します。")
+                    if st.button(
+                        "✅ この順序を反映",
+                        key=f"manual_apply_order_{key}_{sid}",
+                        use_container_width=True,
+                        disabled=_same_order,
+                    ):
+                        for pos, row_idx in enumerate(song_rows):
+                            tok = ordered_tokens[pos]
+                            new_pid = token_to_pid.get(tok, edited[row_idx].get("player_id", ""))
                             edited[row_idx]["player_id"] = new_pid
                             edited[row_idx]["player_name"] = player_label_map.get(new_pid, new_pid)
-                            st.session_state[open_key] = True
+                        st.session_state[key] = edited
+                        st.session_state[open_key] = True
+                        st.rerun()
             elif len(song_rows) >= 2 and _sort_items is None:
-                st.info("ドラッグUIが利用できないため、下のタップ操作を使ってください。")
+                st.info("ドラッグUIが利用できません。`streamlit-sortables` の導入状態を確認してください。")
 
             st.caption("現在の割当（変更点は ✨）")
             for row_idx in song_rows:
@@ -394,95 +407,6 @@ def _render_manual_assignment_editor(
                 changed = bool(b and b.get("player_id", "") != a.get("player_id", ""))
                 mark = "✨ " if changed else ""
                 st.markdown(f"- {mark}{a.get('part_name', '—')} ← {a.get('player_name', '—')}")
-
-            with st.expander("タップ操作（必要なときのみ）", expanded=bool(st.session_state.get(tap_open_key, False))):
-                st.caption("スマホ等でドラッグしづらい場合はこちらを使用します。")
-                sw1, sw2, swb = st.columns([4, 4, 2])
-                _swap_meta = {
-                    i: {
-                        "part": edited[i].get("part_name", "—"),
-                        "player": edited[i].get("player_name", "—"),
-                    }
-                    for i in song_rows
-                }
-                _swap_options = song_rows
-                pick1 = sw1.selectbox(
-                    "パートA",
-                    options=_swap_options,
-                    format_func=lambda i: f"{_swap_meta[i]['part']}（現在: {_swap_meta[i]['player']}）",
-                    key=f"manual_swap_a_{key}_{sid}",
-                )
-                pick2 = sw2.selectbox(
-                    "パートB",
-                    options=_swap_options,
-                    index=1 if len(_swap_options) > 1 else 0,
-                    format_func=lambda i: f"{_swap_meta[i]['part']}（現在: {_swap_meta[i]['player']}）",
-                    key=f"manual_swap_b_{key}_{sid}",
-                )
-                _same_pick = (pick1 == pick2)
-                if _same_pick:
-                    st.warning("パートAとパートBは別のパートを選択してください。")
-                else:
-                    st.info(
-                        f"実行内容: "
-                        f"{_swap_meta[pick1]['part']}（{_swap_meta[pick1]['player']}） "
-                        f"⇔ "
-                        f"{_swap_meta[pick2]['part']}（{_swap_meta[pick2]['player']}）"
-                    )
-                if swb.button(
-                    "🔁 この2つを入れ替える",
-                    key=f"manual_swap_btn_{key}_{sid}",
-                    use_container_width=True,
-                    disabled=_same_pick,
-                ):
-                    i1 = pick1
-                    i2 = pick2
-                    if i1 == i2:
-                        st.warning("入れ替える2つのパートを別々に選択してください。")
-                    else:
-                        p1_id = edited[i1].get("player_id", "")
-                        p1_name = edited[i1].get("player_name", p1_id)
-                        p2_id = edited[i2].get("player_id", "")
-                        p2_name = edited[i2].get("player_name", p2_id)
-                        edited[i1]["player_id"] = p2_id
-                        edited[i1]["player_name"] = p2_name
-                        edited[i2]["player_id"] = p1_id
-                        edited[i2]["player_name"] = p1_name
-                        st.session_state[key] = edited
-                        st.session_state[open_key] = True
-                        st.session_state[tap_open_key] = True
-                        st.rerun()
-
-                for idx in song_rows:
-                    a = edited[idx]
-                    c1, c2 = st.columns([5, 5])
-                    c1.caption(f"パート: {a.get('part_name', '—')}")
-                    cur_pid = a.get("player_id", "")
-                    if cur_pid and cur_pid not in player_ids:
-                        player_ids_local = [cur_pid] + player_ids
-                        local_map = dict(player_label_map)
-                        local_map[cur_pid] = a.get("player_name", cur_pid)
-                    else:
-                        player_ids_local = player_ids
-                        local_map = player_label_map
-                    try:
-                        default_idx = player_ids_local.index(cur_pid)
-                    except ValueError:
-                        default_idx = 0
-                    new_pid = c2.selectbox(
-                        "奏者",
-                        options=player_ids_local,
-                        index=default_idx,
-                        format_func=lambda pid: local_map.get(pid, pid),
-                        key=f"manual_pick_{key}_{idx}",
-                        label_visibility="collapsed",
-                    )
-                    if new_pid != cur_pid:
-                        a["player_id"] = new_pid
-                        a["player_name"] = local_map.get(new_pid, new_pid)
-                        edited[idx] = a
-                        st.session_state[open_key] = True
-                        st.session_state[tap_open_key] = True
             st.markdown("---")
         st.session_state[key] = edited
     return edited
