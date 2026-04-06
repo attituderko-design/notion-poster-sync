@@ -8,6 +8,7 @@ concert.pages.assign
 import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
 from collections import defaultdict
+from itertools import zip_longest
 import re
 import math
 try:
@@ -245,29 +246,60 @@ def _manual_assignment_sig(assignments: list[dict]) -> tuple:
     return tuple(sig_items)
 
 
-def _collect_assignment_changes(base_assignments: list[dict], edited_assignments: list[dict]) -> list[dict]:
-    def _k(a: dict) -> tuple[str, str, str]:
-        return (
-            a.get("song_id", ""),
-            a.get("part_id", ""),
-            a.get("instrument_id", ""),
-        )
+def _slot_key(a: dict) -> tuple[str, str, str]:
+    return (
+        a.get("song_id", ""),
+        a.get("part_id", ""),
+        a.get("instrument_id", ""),
+    )
 
-    base_map = {_k(a): a for a in base_assignments}
+
+def _collect_assignment_changes(base_assignments: list[dict], edited_assignments: list[dict]) -> list[dict]:
     out: list[dict] = []
+    base_by_slot: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
+    edited_by_slot: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
+    for a in base_assignments:
+        base_by_slot[_slot_key(a)].append(a)
     for a in edited_assignments:
-        k = _k(a)
-        b = base_map.get(k)
-        if not b:
+        edited_by_slot[_slot_key(a)].append(a)
+
+    for sk in sorted(set(base_by_slot.keys()) | set(edited_by_slot.keys())):
+        b_rows = base_by_slot.get(sk, [])
+        e_rows = edited_by_slot.get(sk, [])
+        b_cnt: dict[str, int] = defaultdict(int)
+        e_cnt: dict[str, int] = defaultdict(int)
+        b_name: dict[str, str] = {}
+        e_name: dict[str, str] = {}
+        for r in b_rows:
+            pid = r.get("player_id", "")
+            b_cnt[pid] += 1
+            b_name[pid] = r.get("player_name", pid or "—")
+        for r in e_rows:
+            pid = r.get("player_id", "")
+            e_cnt[pid] += 1
+            e_name[pid] = r.get("player_name", pid or "—")
+        if dict(b_cnt) == dict(e_cnt):
             continue
-        bpid = b.get("player_id", "")
-        epid = a.get("player_id", "")
-        if bpid != epid:
+
+        removed: list[str] = []
+        added: list[str] = []
+        for pid, n in b_cnt.items():
+            d = n - e_cnt.get(pid, 0)
+            if d > 0:
+                removed.extend([b_name.get(pid, pid)] * d)
+        for pid, n in e_cnt.items():
+            d = n - b_cnt.get(pid, 0)
+            if d > 0:
+                added.extend([e_name.get(pid, pid)] * d)
+
+        part_name = (e_rows[0].get("part_name", "—") if e_rows else (b_rows[0].get("part_name", "—") if b_rows else "—"))
+        song_id = sk[0]
+        for frm, to in zip_longest(removed, added, fillvalue="—"):
             out.append({
-                "song_id": a.get("song_id", ""),
-                "part_name": a.get("part_name", "—"),
-                "from_player": b.get("player_name", bpid or "—"),
-                "to_player": a.get("player_name", epid or "—"),
+                "song_id": song_id,
+                "part_name": part_name,
+                "from_player": frm,
+                "to_player": to,
             })
     return out
 
@@ -350,11 +382,6 @@ def _render_manual_assignment_editor(
             st.session_state[dirty_key] = False
             st.rerun()
 
-        base_map = {
-            (a.get("song_id", ""), a.get("part_id", ""), a.get("instrument_id", "")): a
-            for a in base_assignments
-        }
-
         for sid in song_order:
             song_rows = [i for i, a in enumerate(edited) if a.get("song_id") == sid]
             if not song_rows:
@@ -362,11 +389,16 @@ def _render_manual_assignment_editor(
             h1, h2 = st.columns([8, 2])
             h1.markdown(f"**{song_name_map.get(sid, sid)}**")
             if h2.button("↩ この曲を元に戻す", key=f"manual_song_reset_{key}_{sid}", use_container_width=True):
+                _base_q: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
+                for _b in base_assignments:
+                    if _b.get("song_id", "") != sid:
+                        continue
+                    _base_q[_slot_key(_b)].append(_b)
                 for row_idx in song_rows:
                     a = edited[row_idx]
-                    k = (a.get("song_id", ""), a.get("part_id", ""), a.get("instrument_id", ""))
-                    b = base_map.get(k)
-                    if b:
+                    k = _slot_key(a)
+                    if _base_q.get(k):
+                        b = _base_q[k].pop(0)
                         edited[row_idx]["player_id"] = b.get("player_id", "")
                         edited[row_idx]["player_name"] = b.get("player_name", b.get("player_id", ""))
                 st.session_state[key] = edited
@@ -405,13 +437,22 @@ def _render_manual_assignment_editor(
                     ordered_tokens = _sort_items(player_tokens, direction="vertical", key=f"manual_dnd_{key}_{sid}")
                 if isinstance(ordered_tokens, list) and len(ordered_tokens) == len(song_rows):
                     _same_order = (ordered_tokens == player_tokens)
-                    _song_changed_count = 0
+                    _base_song_counter: dict[tuple[str, str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+                    for _b in base_assignments:
+                        if _b.get("song_id", "") != sid:
+                            continue
+                        _base_song_counter[_slot_key(_b)][_b.get("player_id", "")] += 1
+                    _song_changed_flags: dict[int, bool] = {}
                     for row_idx in song_rows:
                         a = edited[row_idx]
-                        k = (a.get("song_id", ""), a.get("part_id", ""), a.get("instrument_id", ""))
-                        b = base_map.get(k)
-                        if b and b.get("player_id", "") != a.get("player_id", ""):
-                            _song_changed_count += 1
+                        k = _slot_key(a)
+                        pid = a.get("player_id", "")
+                        if _base_song_counter[k].get(pid, 0) > 0:
+                            _base_song_counter[k][pid] -= 1
+                            _song_changed_flags[row_idx] = False
+                        else:
+                            _song_changed_flags[row_idx] = True
+                    _song_changed_count = sum(1 for _v in _song_changed_flags.values() if _v)
                     if _same_order and _song_changed_count == 0:
                         st.caption("現在の割当順と同じです（この曲の手動変更はありません）。")
                     elif _same_order and _song_changed_count > 0:
@@ -437,11 +478,20 @@ def _render_manual_assignment_editor(
                 st.info("ドラッグUIが利用できません。`streamlit-sortables` の導入状態を確認してください。")
 
             st.caption("現在の割当（変更点は ✨）")
+            _base_song_counter2: dict[tuple[str, str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+            for _b in base_assignments:
+                if _b.get("song_id", "") != sid:
+                    continue
+                _base_song_counter2[_slot_key(_b)][_b.get("player_id", "")] += 1
             for row_idx in song_rows:
                 a = edited[row_idx]
-                k = (a.get("song_id", ""), a.get("part_id", ""), a.get("instrument_id", ""))
-                b = base_map.get(k)
-                changed = bool(b and b.get("player_id", "") != a.get("player_id", ""))
+                k = _slot_key(a)
+                pid = a.get("player_id", "")
+                if _base_song_counter2[k].get(pid, 0) > 0:
+                    _base_song_counter2[k][pid] -= 1
+                    changed = False
+                else:
+                    changed = True
                 mark = "✨ " if changed else ""
                 st.markdown(f"- {mark}{a.get('part_name', '—')} ← {a.get('player_name', '—')}")
             st.markdown("---")
