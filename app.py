@@ -9130,6 +9130,94 @@ def build_update_log(log_title, src, need_notion, notion_ok, need_drive, drive_o
 
 st.set_page_config(page_title="ArtéMis MUSE", page_icon=get_asset_path_or_url("favicon.png"), layout="wide")
 
+# ── Sidebar Overlay UI（PCでもオーバーレイ表示） ──
+st.markdown(
+    """
+<style>
+  :root {
+    --harmonia-sidebar-width: 420px;
+  }
+  section[data-testid="stSidebar"] {
+    width: var(--harmonia-sidebar-width) !important;
+    min-width: var(--harmonia-sidebar-width) !important;
+    max-width: var(--harmonia-sidebar-width) !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    height: 100dvh !important;
+    z-index: 1002 !important;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 12px 28px rgba(0,0,0,0.35);
+    transform: translateX(calc(-1 * var(--harmonia-sidebar-width)));
+    transition: transform 220ms ease;
+  }
+  section[data-testid="stSidebar"][aria-expanded="true"] {
+    transform: translateX(0);
+  }
+  section[data-testid="stSidebar"] > div {
+    width: 100% !important;
+  }
+  [data-testid="stAppViewContainer"] > .main {
+    margin-left: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  #harmonia-sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.42);
+    z-index: 1001;
+    display: none;
+  }
+  @media (max-width: 900px) {
+    :root {
+      --harmonia-sidebar-width: min(86vw, 420px);
+    }
+  }
+</style>
+<script>
+(() => {
+  const OVERLAY_ID = "harmonia-sidebar-overlay";
+  const ensureOverlay = () => {
+    let ov = document.getElementById(OVERLAY_ID);
+    if (!ov) {
+      ov = document.createElement("div");
+      ov.id = OVERLAY_ID;
+      document.body.appendChild(ov);
+      ov.addEventListener("click", () => {
+        const ctl = document.querySelector('[data-testid="collapsedControl"]');
+        if (ctl) ctl.click();
+      });
+    }
+    return ov;
+  };
+  const sync = () => {
+    const sidebar = document.querySelector('section[data-testid="stSidebar"]');
+    const ov = ensureOverlay();
+    if (!sidebar) {
+      ov.style.display = "none";
+      return;
+    }
+    const expanded = sidebar.getAttribute("aria-expanded") === "true";
+    const desktop = window.innerWidth >= 901;
+    ov.style.display = (expanded && desktop) ? "block" : "none";
+  };
+  const start = () => {
+    sync();
+    const sidebar = document.querySelector('section[data-testid="stSidebar"]');
+    if (sidebar) {
+      const mo = new MutationObserver(sync);
+      mo.observe(sidebar, { attributes: true, attributeFilter: ["aria-expanded"] });
+    }
+    window.addEventListener("resize", sync);
+    document.addEventListener("click", () => setTimeout(sync, 0));
+  };
+  start();
+})();
+</script>
+""",
+    unsafe_allow_html=True,
+)
+
 # ── PWA対応 metaタグ ──
 st.markdown("""
 <head>
