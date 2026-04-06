@@ -9,6 +9,12 @@ from concert.services.relation_utils import find_relation_prop
 from concert.services.part_master_utils import (
     load_part_master_map, build_player_part_map, part_id_from_name, is_perc_from_pm
 )
+try:
+    from streamlit_sortables import sort_items as _sort_items
+except Exception:
+    _sort_items = None
+
+PERFORMER_PART_REL_KEYS = ["パート", "担当パート", "FKパート", "PART_MASTER", "主担当パート"]
 
 
 
@@ -69,6 +75,13 @@ def _find_prop_name_loose(ctx: dict, type_map: dict, candidates: list[str]) -> s
         if got:
             return got
     return ""
+
+
+def _player_master_part_name(ctx: dict, player_row: dict, pm_map: dict[str, dict]) -> str:
+    rel_ids = ctx["extract_relation_ids_any"](player_row, PERFORMER_PART_REL_KEYS)
+    if rel_ids:
+        return pm_map.get(rel_ids[0], {}).get("name", "")
+    return (ctx["extract_prop_text_any"](player_row, PERFORMER_PART_REL_KEYS) or "").strip()
 
 
 
@@ -770,100 +783,144 @@ def _render_player_tab(ctx: dict):
             "cur_role_o": cur_role_o, "fee": fee, "paid": paid,
         })
 
-    # ── 演奏会参加者設定：左右2カラムUI ──────────────────────
-    unregistered = sorted(
-        [p for p in players if p.get("id", "") not in current_pids],
-        key=lambda x: _player_name(x, ctx)
+    # ── 演奏会参加者設定：左右2軸DnD UI ──────────────────────
+    st.markdown("**DnDで参加者を管理**")
+    st.caption("左はPERFORMERのパートで候補抽出、右はCONCERT_CASTのパート（今回の参加パート）を表示・追加します。")
+
+    performer_part_by_pid = {
+        p.get("id", ""): _player_master_part_name(ctx, p, pm_map_pl)
+        for p in players
+        if p.get("id", "")
+    }
+    left_part_opts = ["（全パート）"] + sorted({v for v in performer_part_by_pid.values() if v})
+    left_part = st.selectbox("左: PERFORMERパートで絞り込み", left_part_opts, key=f"dnd_left_part_{global_concert_id}")
+
+    right_part = st.selectbox(
+        "右: CONCERT_CASTのパート（表示・追加先）",
+        part_opts if part_opts else [""],
+        key=f"dnd_right_part_{global_concert_id}",
     )
+    if not right_part:
+        st.warning("右カラムの追加先パートを選択してください。")
 
-    col_l, col_arrow, col_r = st.columns([5, 1, 5])
+    cast_pid_to_row = {}
+    for row in participants:
+        pids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+        if pids:
+            cast_pid_to_row[pids[0]] = row
 
-    # ── 左：奏者マスタ（未登録） ─────────────────────────────
-    with col_l:
-        st.markdown("**👤 奏者マスタ**")
-        st.caption(f"未登録 {len(unregistered)}名")
-        if unregistered:
-            sel_key = f"transfer_sel_{global_concert_id}"
-            sel_names = st.multiselect(
-                "選択して → で追加",
-                [_player_name(p, ctx) for p in unregistered],
-                key=sel_key,
-                label_visibility="collapsed",
+    right_pids = []
+    for pid, row in cast_pid_to_row.items():
+        pm_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PART_REL_KEYS)
+        cur_part = pm_map_pl.get(pm_ids[0], {}).get("name", "") if pm_ids else ""
+        if cur_part == right_part:
+            right_pids.append(pid)
+
+    left_candidates = []
+    for p in sorted(players, key=lambda x: _player_name(x, ctx)):
+        pid = p.get("id", "")
+        if not pid or pid in right_pids:
+            continue
+        p_part = performer_part_by_pid.get(pid, "")
+        if left_part != "（全パート）" and p_part != left_part:
+            continue
+        left_candidates.append(pid)
+
+    pid_to_name = {p.get("id", ""): _player_name(p, ctx) for p in players}
+    token_to_pid: dict[str, str] = {}
+
+    def _token(pid: str) -> str:
+        base = f"{pid_to_name.get(pid, pid)}"
+        t = base
+        n = 2
+        while t in token_to_pid:
+            t = f"{base} ({n})"
+            n += 1
+        token_to_pid[t] = pid
+        return t
+
+    left_tokens = [_token(pid) for pid in left_candidates]
+    right_tokens = [_token(pid) for pid in sorted(right_pids, key=lambda x: pid_to_name.get(x, x))]
+
+    dnd_key = f"cast_dnd_{global_concert_id}_{left_part}_{right_part}"
+    dnd_cols = st.columns(2)
+    with dnd_cols[0]:
+        st.markdown("**👤 PERFORMER候補**")
+        st.caption(f"{len(left_tokens)}名")
+    with dnd_cols[1]:
+        st.markdown(f"**🎻 CONCERT_CAST（{right_part or '未選択'}）**")
+        st.caption(f"{len(right_tokens)}名")
+
+    moved_left = left_tokens
+    moved_right = right_tokens
+    if _sort_items is not None:
+        try:
+            moved = _sort_items(
+                [
+                    {"header": "👤 PERFORMER候補", "items": left_tokens},
+                    {"header": f"🎻 CONCERT_CAST（{right_part or '未選択'}）", "items": right_tokens},
+                ],
+                multi_containers=True,
+                direction="horizontal",
+                key=dnd_key,
             )
-            # パート・役職設定（追加時の初期値）
-            if sel_names:
-                add_part   = st.selectbox("パート（初期値）",   [""] + part_opts,          key=f"tr_part_{global_concert_id}")
-                add_role_m = st.selectbox("役職(音楽)（初期値）", [""] + (role_m_opts or []), key=f"tr_role_m_{global_concert_id}")
-                add_role_o = st.selectbox("役職(運営)（初期値）", [""] + (role_ops_opts or []), key=f"tr_role_o_{global_concert_id}")
+            if isinstance(moved, list) and len(moved) >= 2:
+                moved_left = moved[0].get("items", left_tokens) if isinstance(moved[0], dict) else moved[0]
+                moved_right = moved[1].get("items", right_tokens) if isinstance(moved[1], dict) else moved[1]
+        except Exception as e:
+            st.warning(f"DnD描画に失敗したため標準表示に切り替えます: {e}")
+    else:
+        st.info("DnDコンポーネント未導入です。`streamlit-sortables` を導入するとドラッグ操作が有効になります。")
+
+    before_right = set(right_tokens)
+    after_right = set(moved_right or [])
+    add_tokens = sorted(after_right - before_right)
+    remove_tokens = sorted(before_right - after_right)
+
+    c_apply, c_reset = st.columns([3, 1])
+    if c_apply.button("💾 DnD変更を反映", type="primary", use_container_width=True, disabled=not right_part):
+        _t_cast = ctx["get_prop_types"](ctx["CONCERT_DB_PARTICIPANT"])
+        ok_n = ng_n = 0
+
+        # 左→右: 追加（既存CASTが別パートで存在する場合はその行を更新）
+        for tk in add_tokens:
+            pid = token_to_pid.get(tk, "")
+            if not pid:
+                continue
+            pname = pid_to_name.get(pid, pid)
+            existing_row = cast_pid_to_row.get(pid, {})
+            rid = existing_row.get("id", "") if existing_row else ""
+            cur_role_m = ctx["extract_prop_text_any"](existing_row, PARTICIPANT_ROLE_KEYS) if existing_row else ""
+            cur_role_o = ctx["extract_prop_text_any"](existing_row, PARTICIPANT_ROLE_OPS_KEYS) if existing_row else ""
+            ok = _upsert_participant(
+                ctx, global_concert_id, global_concert_name,
+                pid, pname, rid,
+                part=right_part, role_music=cur_role_m, role_ops=cur_role_o,
+                _prop_types=_t_cast,
+            )
+            ok_n += 1 if ok else 0
+            ng_n += 0 if ok else 1
+
+        # 右→左: CONCERT_CASTレコードを削除（archive）
+        for tk in remove_tokens:
+            pid = token_to_pid.get(tk, "")
+            row = cast_pid_to_row.get(pid, {})
+            rid = row.get("id", "") if row else ""
+            if rid and _archive_participant(ctx, rid):
+                ok_n += 1
             else:
-                add_part = add_role_m = add_role_o = ""
+                ng_n += 1
+
+        if ng_n == 0:
+            st.success(f"✅ 反映完了（追加/更新/削除 合計 {ok_n}件）")
         else:
-            st.caption("✅ 全奏者が参加者として登録済みです。")
-            sel_names = []
-            add_part = add_role_m = add_role_o = ""
+            st.warning(f"⚠️ {ok_n}件成功、{ng_n}件失敗")
+        _clear_player_cache()
+        st.rerun()
 
-    # ── 中央：矢印ボタン ────────────────────────────────────
-    with col_arrow:
-        st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
-        unreg_name_to_pid = {_player_name(p, ctx): p.get("id", "") for p in unregistered}
-
-        # 追加ボタン（左→右）
-        if st.button("→", key=f"btn_add_{global_concert_id}",
-                     use_container_width=True, type="primary",
-                     disabled=not sel_names,
-                     help="選択した奏者を演奏会参加者に追加"):
-            _t_add = ctx["get_prop_types"](ctx["CONCERT_DB_PARTICIPANT"])
-            ok_n = ng_n = 0
-            for sname in sel_names:
-                pid_add = unreg_name_to_pid.get(sname, "")
-                if not pid_add: continue
-                ok = _upsert_participant(
-                    ctx, global_concert_id, global_concert_name,
-                    pid_add, sname, "",
-                    part=add_part, role_music=add_role_m, role_ops=add_role_o,
-                    _prop_types=_t_add,
-                )
-                ok_n += 1 if ok else 0
-                ng_n += 0 if ok else 1
-            st.success(f"✅ {ok_n}名追加") if ng_n == 0 else st.warning(f"{ok_n}名成功/{ng_n}名失敗")
-            _clear_player_cache()
-            st.rerun()
-
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
-        # 除外ボタン（右→左）
-        remove_sel = st.session_state.get(f"remove_sel_{global_concert_id}", [])
-        if st.button("←", key=f"btn_remove_{global_concert_id}",
-                     use_container_width=True,
-                     disabled=not remove_sel,
-                     help="選択した参加者を除外"):
-            ok_n = ng_n = 0
-            for pname_r in remove_sel:
-                rid_r = next((m["rid"] for m in cast_meta if m["pname"] == pname_r), "")
-                if rid_r and _archive_participant(ctx, rid_r):
-                    ok_n += 1
-                else:
-                    ng_n += 1
-            st.success(f"✅ {ok_n}名除外") if ng_n == 0 else st.warning(f"{ok_n}名成功/{ng_n}名失敗")
-            st.session_state.pop(f"remove_sel_{global_concert_id}", None)
-            _clear_player_cache()
-            st.rerun()
-
-    # ── 右：演奏会参加者（登録済み） ─────────────────────────
-    with col_r:
-        st.markdown("**🎻 演奏会参加者**")
-        st.caption(f"登録済み {len(cast_rows)}名")
-
-        if not cast_rows:
-            st.info("左から奏者を選んで → で追加してください。")
-        else:
-            # 除外用のmultiselect
-            st.multiselect(
-                "選択して ← で除外",
-                [m["pname"] for m in cast_meta],
-                key=f"remove_sel_{global_concert_id}",
-                label_visibility="collapsed",
-            )
+    if c_reset.button("↩ DnDを破棄", use_container_width=True):
+        st.session_state.pop(dnd_key, None)
+        st.rerun()
 
     st.divider()
 
