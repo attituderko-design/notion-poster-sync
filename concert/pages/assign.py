@@ -237,6 +237,33 @@ def _manual_assignment_sig(assignments: list[dict]) -> tuple:
     return tuple(sig_items)
 
 
+def _collect_assignment_changes(base_assignments: list[dict], edited_assignments: list[dict]) -> list[dict]:
+    def _k(a: dict) -> tuple[str, str, str]:
+        return (
+            a.get("song_id", ""),
+            a.get("part_id", ""),
+            a.get("instrument_id", ""),
+        )
+
+    base_map = {_k(a): a for a in base_assignments}
+    out: list[dict] = []
+    for a in edited_assignments:
+        k = _k(a)
+        b = base_map.get(k)
+        if not b:
+            continue
+        bpid = b.get("player_id", "")
+        epid = a.get("player_id", "")
+        if bpid != epid:
+            out.append({
+                "song_id": a.get("song_id", ""),
+                "part_name": a.get("part_name", "—"),
+                "from_player": b.get("player_name", bpid or "—"),
+                "to_player": a.get("player_name", epid or "—"),
+            })
+    return out
+
+
 def _get_manual_assignments(concert_id: str, result_label: str, base_assignments: list[dict]) -> list[dict]:
     key = _manual_assignment_state_key(concert_id, result_label)
     sig_key = f"{key}_sig"
@@ -252,15 +279,18 @@ def _render_manual_assignment_editor(
     result_label: str,
     song_order: list[str],
     song_name_map: dict[str, str],
-    assignments: list[dict],
+    base_assignments: list[dict],
     player_label_map: dict[str, str],
 ) -> list[dict]:
     key = _manual_assignment_state_key(concert_id, result_label)
     open_key = f"{key}_open"
+    tap_open_key = f"{key}_tap_open"
     if key not in st.session_state:
-        st.session_state[key] = [dict(a) for a in assignments]
+        st.session_state[key] = [dict(a) for a in base_assignments]
     if open_key not in st.session_state:
         st.session_state[open_key] = True
+    if tap_open_key not in st.session_state:
+        st.session_state[tap_open_key] = False
     edited = st.session_state.get(key, [])
     if not edited:
         return edited
@@ -272,33 +302,52 @@ def _render_manual_assignment_editor(
     with st.expander("🛠 手動でパートを設定する（この候補のみ）", expanded=bool(st.session_state.get(open_key, True))):
         st.caption("ここで変更した内容はこの候補にのみ反映されます。『採用』時にこの内容で書き込みます。")
         if st.button("↩ この候補の手動変更をリセット", key=f"manual_reset_{key}"):
-            st.session_state[key] = [dict(a) for a in assignments]
+            st.session_state[key] = [dict(a) for a in base_assignments]
             st.session_state[open_key] = True
             st.rerun()
+
+        base_map = {
+            (a.get("song_id", ""), a.get("part_id", ""), a.get("instrument_id", "")): a
+            for a in base_assignments
+        }
 
         for sid in song_order:
             song_rows = [i for i, a in enumerate(edited) if a.get("song_id") == sid]
             if not song_rows:
                 continue
-            st.markdown(f"**{song_name_map.get(sid, sid)}**")
-            if _sort_items is not None and len(song_rows) >= 2:
-                st.caption("ドラッグで担当者の順番を並べ替えると、上から順にパートへ再割当します。")
+            h1, h2 = st.columns([8, 2])
+            h1.markdown(f"**{song_name_map.get(sid, sid)}**")
+            if h2.button("↩ この曲を元に戻す", key=f"manual_song_reset_{key}_{sid}", use_container_width=True):
+                for row_idx in song_rows:
+                    a = edited[row_idx]
+                    k = (a.get("song_id", ""), a.get("part_id", ""), a.get("instrument_id", ""))
+                    b = base_map.get(k)
+                    if b:
+                        edited[row_idx]["player_id"] = b.get("player_id", "")
+                        edited[row_idx]["player_name"] = b.get("player_name", b.get("player_id", ""))
+                st.session_state[key] = edited
+                st.session_state[open_key] = True
+                st.rerun()
+
+            if len(song_rows) >= 2 and _sort_items is not None:
+                st.caption("ドラッグして並べ替え: 右側の順番が、左のパート順にそのまま割り当てられます。")
                 part_labels = [edited[i].get("part_name", "—") for i in song_rows]
                 cur_pids = [edited[i].get("player_id", "") for i in song_rows]
                 cur_pnames = [edited[i].get("player_name", pid or "—") for i, pid in zip(song_rows, cur_pids)]
                 token_to_pid: dict[str, str] = {}
                 player_tokens: list[str] = []
-                for n, (pid, pname) in enumerate(zip(cur_pids, cur_pnames), start=1):
+                for n, (row_idx, pname, pid) in enumerate(zip(song_rows, cur_pnames, cur_pids), start=1):
                     token = f"{n}. {pname}"
                     player_tokens.append(token)
                     token_to_pid[token] = pid
+
                 d1, d2 = st.columns([5, 5])
                 with d1:
                     st.caption("パート順（固定）")
                     for p in part_labels:
                         st.markdown(f"- {p}")
                 with d2:
-                    st.caption("担当者（ドラッグで並べ替え）")
+                    st.caption("担当者（ドラッグ）")
                     ordered_tokens = _sort_items(player_tokens, direction="vertical", key=f"manual_dnd_{key}_{sid}")
                 if isinstance(ordered_tokens, list) and len(ordered_tokens) == len(song_rows):
                     for pos, row_idx in enumerate(song_rows):
@@ -308,12 +357,20 @@ def _render_manual_assignment_editor(
                             edited[row_idx]["player_id"] = new_pid
                             edited[row_idx]["player_name"] = player_label_map.get(new_pid, new_pid)
                             st.session_state[open_key] = True
-                st.caption("現在の割当プレビュー")
-                for row_idx in song_rows:
-                    st.markdown(f"- {edited[row_idx].get('part_name', '—')} ← {edited[row_idx].get('player_name', '—')}")
-                st.markdown("---")
-            if len(song_rows) >= 2:
-                st.caption("タップ操作向け: 下の2選択でも入れ替えできます。")
+            elif len(song_rows) >= 2 and _sort_items is None:
+                st.info("ドラッグUIが利用できないため、下のタップ操作を使ってください。")
+
+            st.caption("現在の割当（変更点は ✨）")
+            for row_idx in song_rows:
+                a = edited[row_idx]
+                k = (a.get("song_id", ""), a.get("part_id", ""), a.get("instrument_id", ""))
+                b = base_map.get(k)
+                changed = bool(b and b.get("player_id", "") != a.get("player_id", ""))
+                mark = "✨ " if changed else ""
+                st.markdown(f"- {mark}{a.get('part_name', '—')} ← {a.get('player_name', '—')}")
+
+            with st.expander("タップ操作（必要なときのみ）", expanded=bool(st.session_state.get(tap_open_key, False))):
+                st.caption("スマホ等でドラッグしづらい場合はこちらを使用します。")
                 sw1, sw2, swb = st.columns([4, 4, 2])
                 _swap_meta = {
                     i: {
@@ -367,38 +424,40 @@ def _render_manual_assignment_editor(
                         edited[i2]["player_name"] = p1_name
                         st.session_state[key] = edited
                         st.session_state[open_key] = True
+                        st.session_state[tap_open_key] = True
                         st.rerun()
 
-            st.caption("直接指定（必要なときのみ）")
-            for idx in song_rows:
-                a = edited[idx]
-                c1, c2 = st.columns([5, 5])
-                c1.caption(f"パート: {a.get('part_name', '—')}")
-                cur_pid = a.get("player_id", "")
-                if cur_pid and cur_pid not in player_ids:
-                    player_ids_local = [cur_pid] + player_ids
-                    local_map = dict(player_label_map)
-                    local_map[cur_pid] = a.get("player_name", cur_pid)
-                else:
-                    player_ids_local = player_ids
-                    local_map = player_label_map
-                try:
-                    default_idx = player_ids_local.index(cur_pid)
-                except ValueError:
-                    default_idx = 0
-                new_pid = c2.selectbox(
-                    "奏者",
-                    options=player_ids_local,
-                    index=default_idx,
-                    format_func=lambda pid: local_map.get(pid, pid),
-                    key=f"manual_pick_{key}_{idx}",
-                    label_visibility="collapsed",
-                )
-                if new_pid != cur_pid:
-                    a["player_id"] = new_pid
-                    a["player_name"] = local_map.get(new_pid, new_pid)
-                    edited[idx] = a
-                    st.session_state[open_key] = True
+                for idx in song_rows:
+                    a = edited[idx]
+                    c1, c2 = st.columns([5, 5])
+                    c1.caption(f"パート: {a.get('part_name', '—')}")
+                    cur_pid = a.get("player_id", "")
+                    if cur_pid and cur_pid not in player_ids:
+                        player_ids_local = [cur_pid] + player_ids
+                        local_map = dict(player_label_map)
+                        local_map[cur_pid] = a.get("player_name", cur_pid)
+                    else:
+                        player_ids_local = player_ids
+                        local_map = player_label_map
+                    try:
+                        default_idx = player_ids_local.index(cur_pid)
+                    except ValueError:
+                        default_idx = 0
+                    new_pid = c2.selectbox(
+                        "奏者",
+                        options=player_ids_local,
+                        index=default_idx,
+                        format_func=lambda pid: local_map.get(pid, pid),
+                        key=f"manual_pick_{key}_{idx}",
+                        label_visibility="collapsed",
+                    )
+                    if new_pid != cur_pid:
+                        a["player_id"] = new_pid
+                        a["player_name"] = local_map.get(new_pid, new_pid)
+                        edited[idx] = a
+                        st.session_state[open_key] = True
+                        st.session_state[tap_open_key] = True
+            st.markdown("---")
         st.session_state[key] = edited
     return edited
 
@@ -1608,7 +1667,7 @@ def _render_solver_tab(ctx: dict):
                 result_label=result["label"],
                 song_order=song_order,
                 song_name_map=song_name_map,
-                assignments=_manual_assignments,
+                base_assignments=result["assignments"],
                 player_label_map=_player_label_map,
             )
             display_assignments = _manual_assignments if _manual_assignments else result["assignments"]
@@ -1686,6 +1745,18 @@ def _render_solver_tab(ctx: dict):
 
             # 採用ボタン
             st.divider()
+            _changes = _collect_assignment_changes(result["assignments"], display_assignments)
+            if _changes:
+                st.warning(f"手動変更 {len(_changes)}件（採用時は下記の内容で書き込みます）")
+                for c in _changes[:30]:
+                    st.markdown(
+                        f"- {song_name_map.get(c.get('song_id', ''), c.get('song_id', ''))} / "
+                        f"{c.get('part_name', '—')}: {c.get('from_player', '—')} → {c.get('to_player', '—')}"
+                    )
+                if len(_changes) > 30:
+                    st.caption(f"…ほか {len(_changes) - 30}件")
+            else:
+                st.caption("手動変更なし（候補案そのままで採用されます）")
             if st.button(f"✅ この案を採用してNotionに書き込む",
                          key=f"adopt_{result['label']}", type="primary"):
                 _write_assignments_to_notion(ctx, display_assignments, result["pref_map"])
