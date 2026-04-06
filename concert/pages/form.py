@@ -432,6 +432,18 @@ def _inject_form_styles() -> None:
             overflow: hidden;
             background: rgba(255,255,255,.025) !important;
         }
+        /* expander見出しテキストのフォントを明示 */
+        [data-testid="stExpander"] summary p {
+            font-family: "Outfit", "Noto Sans JP", sans-serif !important;
+            font-weight: 500 !important;
+            letter-spacing: 0.01em;
+        }
+        /* expanderトグルはMaterial系フォントへ戻す（_arrow_*文字化け対策） */
+        [data-testid="stExpander"] [data-testid="stExpanderToggleIcon"],
+        [data-testid="stExpander"] [data-testid="stExpanderToggleIcon"] * {
+            font-family: "Material Symbols Rounded", "Material Symbols Outlined", "Material Icons", "Material Icons Outlined", sans-serif !important;
+            font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+        }
         [data-testid="stMetricValue"] { font-size: 16px !important; }
         [data-testid="stMetricLabel"] > div {
             font-size: 12px !important;
