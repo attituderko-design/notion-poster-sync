@@ -106,6 +106,98 @@ def _render_brand_logo() -> None:
     logo_src = str(logo_path) if logo_path.exists() else "https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/logo.png"
     st.image(logo_src, width=320)
 
+
+def _inject_form_styles() -> None:
+    """form.py専用の見た目調整。機能は変えず、可読性と統一感だけを上げる。"""
+    st.markdown(
+        """
+        <style>
+        :root {
+            --form-surface: rgba(20, 27, 43, 0.76);
+            --form-surface-strong: rgba(24, 33, 52, 0.92);
+            --form-border: rgba(136, 162, 214, 0.28);
+            --form-text-muted: #b7c4df;
+            --form-accent: #4aa3ff;
+            --form-accent-2: #2b7fd8;
+        }
+        .stApp .block-container {
+            max-width: 1120px;
+            padding-top: 1.0rem;
+        }
+        .form-hero {
+            background:
+                radial-gradient(120% 150% at 0% 0%, rgba(74, 163, 255, 0.18), transparent 58%),
+                radial-gradient(120% 160% at 100% 100%, rgba(209, 75, 75, 0.16), transparent 55%),
+                linear-gradient(170deg, rgba(18, 25, 40, 0.95), rgba(10, 16, 28, 0.92));
+            border: 1px solid var(--form-border);
+            border-radius: 16px;
+            padding: 1.05rem 1.1rem;
+            margin: 0.45rem 0 1.0rem 0;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        }
+        .form-hero-title {
+            margin: 0 0 .42rem 0;
+            font-size: 1.72rem;
+            font-weight: 800;
+            line-height: 1.28;
+            letter-spacing: 0.01em;
+        }
+        .form-hero-sub {
+            margin: 0;
+            font-size: 0.96rem;
+            line-height: 1.72;
+            color: var(--form-text-muted);
+        }
+        .form-acro {
+            color: #d14b4b;
+            font-weight: 800;
+        }
+        .stButton > button,
+        .stDownloadButton > button {
+            border-radius: 12px !important;
+            border: 1px solid var(--form-border) !important;
+            min-height: 2.5rem;
+            transition: transform .08s ease, box-shadow .15s ease, border-color .15s ease;
+        }
+        .stButton > button:hover,
+        .stDownloadButton > button:hover {
+            border-color: rgba(74, 163, 255, 0.62) !important;
+            box-shadow: 0 0 0 2px rgba(74, 163, 255, 0.18);
+            transform: translateY(-1px);
+        }
+        .stTextInput input,
+        .stTextArea textarea,
+        .stSelectbox [data-baseweb="select"] > div,
+        .stMultiSelect [data-baseweb="select"] > div,
+        .stDateInput input,
+        .stNumberInput input {
+            border-radius: 12px !important;
+            border: 1px solid var(--form-border) !important;
+            background: var(--form-surface-strong) !important;
+        }
+        [data-testid="stExpander"] {
+            border: 1px solid var(--form-border);
+            border-radius: 14px;
+            overflow: hidden;
+            background: var(--form-surface);
+        }
+        [data-testid="stExpander"] > details > summary {
+            background: rgba(24, 34, 54, 0.78);
+        }
+        [data-testid="stMetricValue"] {
+            font-size: 1.06rem;
+            line-height: 1.25;
+        }
+        [data-testid="stMetricLabel"] > div {
+            color: var(--form-text-muted);
+            font-weight: 600;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # ── マジックコード認証 ──────────────────────────────────────────
 
 _CODE_EXPIRY_MINUTES = 10
@@ -1629,6 +1721,7 @@ def _restore_form_session_from_cookie(cookie_mgr) -> bool:
 
 def render_form(ctx, concert_id: str = ""):
     ext = ctx["extract_prop_text_any"]
+    _inject_form_styles()
 
     # クッキーからセッション復元（サーバー再起動後のログイン維持）
     _form_cookie_mgr = _FORM_COOKIE_MGR
@@ -1638,21 +1731,19 @@ def render_form(ctx, concert_id: str = ""):
     _render_brand_logo()
     st.markdown(
         """
-        <div style="
-            margin: .35rem 0 1.0rem 0;
-            font-size: 0.95rem;
-            line-height: 1.7;
-            color: #BFC7D5;
-        ">
-            <span style="font-weight:700; color:#ffffff;">HARMONIA</span> :
-            <span style="color:#d14b4b; font-weight:700;">H</span>armonized
-            <span style="color:#d14b4b; font-weight:700;">A</span>ssignment and
-            <span style="color:#d14b4b; font-weight:700;">R</span>esource
-            <span style="color:#d14b4b; font-weight:700;">M</span>anagement for
-            <span style="color:#d14b4b; font-weight:700;">O</span>rchestral
-            <span style="color:#d14b4b; font-weight:700;">N</span>eeds,
-            <span style="color:#d14b4b; font-weight:700;">I</span>nstruments, and
-            <span style="color:#d14b4b; font-weight:700;">A</span>ttendance
+        <div class="form-hero">
+            <div class="form-hero-title">ArtéMis HARMONIA</div>
+            <p class="form-hero-sub">
+                <strong style="color:#ffffff;">HARMONIA</strong> :
+                <span class="form-acro">H</span>armonized
+                <span class="form-acro">A</span>ssignment and
+                <span class="form-acro">R</span>esource
+                <span class="form-acro">M</span>anagement for
+                <span class="form-acro">O</span>rchestral
+                <span class="form-acro">N</span>eeds,
+                <span class="form-acro">I</span>nstruments, and
+                <span class="form-acro">A</span>ttendance
+            </p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1707,15 +1798,11 @@ def render_form(ctx, concert_id: str = ""):
 
     st.markdown(
         f"""
-        <h1 style="
-            margin: 0 0 .35rem 0;
-            font-size: 1.8rem;
-            font-weight: 700;
-            line-height: 1.35;
-        ">
-            ArtéMis HARMONIA<br>
-            <span style="font-size: 0.95em;">🎵 {c_name} 奏者入力フォーム</span>
-        </h1>
+        <div class="form-hero">
+            <h1 class="form-hero-title" style="margin-bottom:.2rem;">
+                <span style="font-size: 0.88em; opacity:.92;">🎵 {c_name} 奏者入力フォーム</span>
+            </h1>
+        </div>
         """,
         unsafe_allow_html=True,
     )
