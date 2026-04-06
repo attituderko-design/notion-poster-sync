@@ -2444,6 +2444,8 @@ def render_form(ctx, concert_id: str = ""):
                 st.query_params.pop("menu_action", None)
                 st.rerun()
 
+            _pref_anchor_open = '<a class="h-menu-link" href="?menu_action=pref">' if (pref_total > 0 and not proposal_done) else ""
+            _pref_anchor_close = "</a>" if (pref_total > 0 and not proposal_done) else ""
             st.html(f"""
                 <div class="h-f4">
                   <div class="h-section">メニュー</div>
@@ -2458,7 +2460,7 @@ def render_form(ctx, concert_id: str = ""):
                   </div>
                   </a>
                   {"" if pref_total == 0 else f'''
-                  {"<a class=\\"h-menu-link\\" href=\\"?menu_action=pref\\">" if not proposal_done else ""}
+                  {_pref_anchor_open}
                   <div class="h-menu-item" id="menu-pref">
                     <div class="h-mi-icon h-ic-b">🎵</div>
                     <div class="h-mi-body">
@@ -2467,7 +2469,7 @@ def render_form(ctx, concert_id: str = ""):
                     </div>
                     <div class="h-mi-right">{pref_badge_html}<div class="h-chev">›</div></div>
                   </div>
-                  {"</a>" if not proposal_done else ""}
+                  {_pref_anchor_close}
                   '''}
                   {"" if not IS_PERC(my_part) else '''
                   <a class="h-menu-link" href="?menu_action=own">
