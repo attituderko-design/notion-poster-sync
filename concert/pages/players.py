@@ -855,6 +855,25 @@ def _render_player_tab(ctx: dict):
     moved_right = right_tokens
     if _sort_items is not None:
         try:
+            dnd_style = """
+            .sortable-component {
+                display: flex;
+                gap: 12px;
+                align-items: flex-start;
+            }
+            .sortable-container {
+                flex: 1 1 0;
+                min-width: 320px;
+            }
+            @media (max-width: 900px) {
+                .sortable-component {
+                    display: block;
+                }
+                .sortable-container {
+                    min-width: 0;
+                }
+            }
+            """
             moved = _sort_items(
                 [
                     {"header": "👤 PERFORMER候補", "items": left_tokens},
@@ -862,6 +881,7 @@ def _render_player_tab(ctx: dict):
                 ],
                 multi_containers=True,
                 direction="horizontal",
+                custom_style=dnd_style,
                 key=dnd_key,
             )
             if isinstance(moved, list) and len(moved) >= 2:
