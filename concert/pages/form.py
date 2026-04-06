@@ -224,6 +224,19 @@ def _render_next_practice_panel(ctx: dict, practices: list) -> None:
                 st.rerun()
 
 
+def _collapsible_open(title: str, key: str, default_open: bool = False) -> bool:
+    """st.expander代替の折りたたみ。文字化け耐性のためシンプルなボタンで実装。"""
+    state_key = f"form_collapse_{key}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = bool(default_open)
+    is_open = bool(st.session_state.get(state_key, False))
+    icon = "▾" if is_open else "▸"
+    if st.button(f"{icon} {title}", key=f"{state_key}_btn", use_container_width=True):
+        st.session_state[state_key] = not is_open
+        st.rerun()
+    return bool(st.session_state.get(state_key, False))
+
+
 def _render_brand_logo() -> None:
     """フォーム上部ワードマークを表示。"""
     st.html("""
@@ -241,19 +254,31 @@ def _inject_form_styles() -> None:
         <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
         <style>
         /* ── base ── */
+        :root {
+            --h-container-max: 480px;
+            --h-font-body: 15px;
+            --h-font-sub: 13px;
+            --h-font-heading: 20px;
+            --h-font-button: 15px;
+            --h-font-caption: 12px;
+            --h-tap-min: 48px;
+            --h-pad-x: clamp(.8rem, 4vw, 1.4rem);
+        }
         .stApp, .stApp * { font-family: 'Noto Sans JP', sans-serif !important; }
         .stApp .block-container {
-            max-width: 480px !important;
+            max-width: var(--h-container-max) !important;
             padding-top: 1.2rem !important;
-            padding-left: clamp(.8rem, 4vw, 1.4rem) !important;
-            padding-right: clamp(.8rem, 4vw, 1.4rem) !important;
+            padding-left: var(--h-pad-x) !important;
+            padding-right: var(--h-pad-x) !important;
         }
-        @media (max-width: 520px) {
-            .stApp .block-container {
-                max-width: 100vw !important;
-                padding-left: .75rem !important;
-                padding-right: .75rem !important;
-            }
+        @media (max-width: 359px) { :root { --h-container-max: 100vw; --h-font-body: 14px; --h-font-sub: 12px; --h-font-heading: 18px; --h-font-button: 14px; --h-font-caption: 12px; --h-tap-min: 48px; --h-pad-x: .6rem; } }
+        @media (min-width: 360px) and (max-width: 639px) { :root { --h-container-max: 480px; --h-font-body: 15px; --h-font-sub: 13px; --h-font-heading: 20px; --h-font-button: 15px; --h-font-caption: 12px; --h-tap-min: 48px; --h-pad-x: clamp(.75rem, 3.2vw, 1.1rem); } }
+        @media (min-width: 640px) and (max-width: 1023px) { :root { --h-container-max: 700px; --h-font-body: 16px; --h-font-sub: 14px; --h-font-heading: 23px; --h-font-button: 16px; --h-font-caption: 13.5px; --h-tap-min: 48px; --h-pad-x: clamp(1rem, 3vw, 1.7rem); } }
+        @media (min-width: 1024px) { :root { --h-container-max: 920px; --h-font-body: 16px; --h-font-sub: 14px; --h-font-heading: 26px; --h-font-button: 16px; --h-font-caption: 14px; --h-tap-min: 46px; --h-pad-x: clamp(1.1rem, 2.4vw, 2rem); } }
+
+        /* メニューカードの裏にある実ボタンを隠し、カードクリックで発火させる */
+        .st-key-menu_att, .st-key-menu_pref, .st-key-menu_pref_disabled, .st-key-menu_own {
+            display: none !important;
         }
 
         /* ── fade-in animations ── */
@@ -271,12 +296,12 @@ def _inject_form_styles() -> None:
         /* ── wordmark ── */
         .h-wordmark {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 20px; font-weight: 600;
+            font-size: calc(var(--h-font-heading) + 1px); font-weight: 600;
             color: #e8edf7; letter-spacing: .05em;
         }
         .h-wordmark-sub {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 11px; color: rgba(160,180,220,.4);
+            font-size: var(--h-font-caption); color: rgba(160,180,220,.4);
             letter-spacing: .13em; margin-top: 3px;
         }
 
@@ -290,12 +315,12 @@ def _inject_form_styles() -> None:
         }
         .h-concert-name {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 18px; font-weight: 500;
+            font-size: calc(var(--h-font-heading) - 2px); font-weight: 500;
             color: #e8edf7; margin-bottom: 8px; line-height: 1.3;
         }
         .h-concert-row {
             display: flex; align-items: center;
-            gap: 8px; font-size: 13px;
+            gap: 8px; font-size: var(--h-font-sub);
             color: rgba(160,180,220,.6); margin-bottom: 3px;
         }
         .h-concert-dot {
@@ -305,12 +330,12 @@ def _inject_form_styles() -> None:
 
         /* ── greeting ── */
         .h-greet {
-            font-size: 15px; color: rgba(160,180,220,.7);
+            font-size: var(--h-font-body); color: rgba(160,180,220,.7);
             margin-bottom: 14px; line-height: 1.6;
         }
         .h-greet strong { color: #e8edf7; font-weight: 500; }
         .h-greet-part {
-            display: block; font-size: 12px;
+            display: block; font-size: var(--h-font-caption);
             color: rgba(160,180,220,.35); margin-top: 1px;
         }
 
@@ -342,14 +367,14 @@ def _inject_form_styles() -> None:
         .h-mi-body { flex: 1; min-width: 0; }
         .h-mi-ttl {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 15px; color: #c8d4ed;
+            font-size: var(--h-font-body); color: #c8d4ed;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        .h-mi-hint { font-size: 12px; color: rgba(160,180,220,.4); margin-top: 2px; }
+        .h-mi-hint { font-size: var(--h-font-caption); color: rgba(160,180,220,.4); margin-top: 2px; }
         .h-mi-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
         .h-badge {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 11px; background: rgba(74,158,255,.15);
+            font-size: var(--h-font-caption); background: rgba(74,158,255,.15);
             color: #4a9eff; border-radius: 6px;
             padding: 3px 8px; white-space: nowrap;
         }
@@ -359,7 +384,7 @@ def _inject_form_styles() -> None:
         /* ── section label ── */
         .h-section {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 11px; color: rgba(160,180,220,.4);
+            font-size: var(--h-font-caption); color: rgba(160,180,220,.4);
             letter-spacing: .1em; text-transform: uppercase;
             margin-bottom: 8px; margin-top: 4px;
         }
@@ -384,18 +409,18 @@ def _inject_form_styles() -> None:
         /* ── screen title ── */
         .h-scr-title {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 20px; font-weight: 500; color: #e8edf7;
+            font-size: var(--h-font-heading); font-weight: 500; color: #e8edf7;
             margin-bottom: 4px;
         }
         .h-scr-sub {
-            font-size: 13px; color: rgba(160,180,220,.55);
+            font-size: var(--h-font-sub); color: rgba(160,180,220,.55);
             margin-bottom: 16px; line-height: 1.55;
         }
 
         /* ── footer ── */
         .h-footer {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 11px; color: rgba(160,180,220,.18);
+            font-size: var(--h-font-caption); color: rgba(160,180,220,.18);
             text-align: center; margin-top: 20px;
             padding-top: 14px;
             border-top: .5px solid rgba(255,255,255,.05);
@@ -403,16 +428,27 @@ def _inject_form_styles() -> None:
 
         /* ── streamlit overrides ── */
         .stButton > button, .stDownloadButton > button {
-            border-radius: 11px !important;
-            border: .5px solid rgba(255,255,255,.12) !important;
-            min-height: 48px !important;
-            font-family: 'Outfit', sans-serif !important;
-            font-size: 15px !important;
+            border-radius: 13px !important;
+            border: .5px solid rgba(255,255,255,.08) !important;
+            min-height: var(--h-tap-min) !important;
+            font-family: 'Outfit', 'Noto Sans JP', sans-serif !important;
+            font-size: var(--h-font-button) !important;
+            background: rgba(255,255,255,.035) !important;
+            color: #dbe5f9 !important;
             transition: border-color .15s ease, background .15s ease;
         }
         .stButton > button:hover, .stDownloadButton > button:hover {
             border-color: rgba(74,158,255,.5) !important;
             background: rgba(74,158,255,.08) !important;
+        }
+        div[data-testid="stFormSubmitButton"] > button {
+            border-radius: 13px !important;
+            border: .5px solid rgba(255,255,255,.08) !important;
+            min-height: var(--h-tap-min) !important;
+            font-family: 'Outfit', 'Noto Sans JP', sans-serif !important;
+            font-size: var(--h-font-button) !important;
+            background: rgba(255,255,255,.035) !important;
+            color: #dbe5f9 !important;
         }
         .stTextInput input, .stTextArea textarea,
         .stSelectbox [data-baseweb="select"] > div,
@@ -420,7 +456,17 @@ def _inject_form_styles() -> None:
             border-radius: 11px !important;
             border: .5px solid rgba(255,255,255,.12) !important;
             background: rgba(255,255,255,.04) !important;
-            font-size: 15px !important;
+            font-size: var(--h-font-body) !important;
+        }
+        .stSelectbox [data-baseweb="select"] *,
+        .stMultiSelect [data-baseweb="select"] *,
+        .stDateInput *, .stNumberInput *, .stRadio *,
+        .stTabs [data-baseweb="tab-list"] *, .stProgress * {
+            font-family: 'Outfit', 'Noto Sans JP', sans-serif !important;
+        }
+        .stTabs [data-baseweb="tab"] {
+            font-family: 'Outfit', 'Noto Sans JP', sans-serif !important;
+            font-size: var(--h-font-button) !important;
         }
         .stTextInput input:focus, .stTextArea textarea:focus {
             border-color: rgba(74,158,255,.45) !important;
@@ -432,17 +478,37 @@ def _inject_form_styles() -> None:
             overflow: hidden;
             background: rgba(255,255,255,.025) !important;
         }
-        [data-testid="stMetricValue"] { font-size: 16px !important; }
+        [data-testid="stMetricValue"] { font-size: var(--h-font-body) !important; }
         [data-testid="stMetricLabel"] > div {
-            font-size: 12px !important;
+            font-size: var(--h-font-caption) !important;
             color: rgba(160,180,220,.55) !important;
         }
-        .stRadio label { font-size: 15px !important; }
-        .stCheckbox label { font-size: 15px !important; min-height: 28px; }
-        p, li, .stMarkdown p { font-size: 15px !important; line-height: 1.7 !important; }
-        label[data-testid="stWidgetLabel"] { font-size: 13px !important; color: rgba(160,180,220,.65) !important; }
-        .stAlert p { font-size: 14px !important; }
+        .stRadio label { font-size: var(--h-font-body) !important; }
+        .stCheckbox label { font-size: var(--h-font-body) !important; min-height: 28px; }
+        p, li, .stMarkdown p { font-size: var(--h-font-body) !important; line-height: 1.7 !important; }
+        label[data-testid="stWidgetLabel"] { font-size: var(--h-font-sub) !important; color: rgba(160,180,220,.65) !important; }
+        .stAlert p { font-size: var(--h-font-sub) !important; }
         </style>
+        <script>
+        (() => {
+          const bindCard = (id, key) => {
+            const card = document.getElementById(id);
+            const btn = document.querySelector(`.st-key-${key} button`);
+            if (!card || !btn || card.dataset.bound === "1") return;
+            card.dataset.bound = "1";
+            card.style.cursor = "pointer";
+            card.addEventListener("click", () => btn.click());
+          };
+          const run = () => {
+            bindCard("menu-att", "menu_att");
+            bindCard("menu-pref", "menu_pref");
+            bindCard("menu-own", "menu_own");
+          };
+          run();
+          const mo = new MutationObserver(run);
+          mo.observe(document.body, { childList: true, subtree: true });
+        })();
+        </script>
         """)
 
 
@@ -2473,7 +2539,7 @@ def render_form(ctx, concert_id: str = ""):
                     _assign_label = "自パートのアサイン状況（曲で絞り込み）"
                 else:
                     _assign_label = "自パートのアサイン状況"
-                with st.expander(f"🎯 {_assign_label}", expanded=False):
+                if _collapsible_open(f"🎯 {_assign_label}", "assign_view", default_open=False):
                     _render_assignment_view(ctx, concert_id, my_part_master_id, user_role)
 
             if IS_PERC(my_part):
@@ -2492,7 +2558,7 @@ def render_form(ctx, concert_id: str = ""):
                 tab_att, tab_mem, tab_doc = st.tabs(["📋 出欠", "👥 メンバー", "📄 資料"])
                 with tab_att:
                     _att_label = "自パートの出欠一覧" if user_role == ROLE_LEADER else "全員の出欠一覧"
-                    with st.expander(f"📋 {_att_label}", expanded=True):
+                    if _collapsible_open(f"📋 {_att_label}", "leader_att_overview", default_open=False):
                         if practices:
                             _render_attendance_overview(
                                 ctx, concert_id, participant_rows, practices,
@@ -2502,14 +2568,14 @@ def render_form(ctx, concert_id: str = ""):
                             st.info("練習日が登録されていません。")
                 with tab_mem:
                     _mem_label = "自パートのメンバー一覧" if user_role == ROLE_LEADER else "全員のメンバー一覧（連絡先含む）"
-                    with st.expander(f"👥 {_mem_label}", expanded=True):
+                    if _collapsible_open(f"👥 {_mem_label}", "leader_member_overview", default_open=False):
                         _render_member_list(
                             ctx, concert_id, participant_rows,
                             my_part_master_id, user_role
                         )
                 with tab_doc:
                     if practices:
-                        with st.expander("📄 練習情報PDF（全練習回）", expanded=False):
+                        if _collapsible_open("📄 練習情報PDF（全練習回）", "leader_all_practice_pdf", default_open=False):
                             _all_sched  = ctx["query_all"](ctx.get("CONCERT_DB_SCHEDULE","") or "", None) if ctx.get("CONCERT_DB_SCHEDULE") else []
                             _all_rental = ctx["query_all"](ctx.get("CONCERT_DB_RENTAL","") or "", None) if ctx.get("CONCERT_DB_RENTAL") else []
                             _all_pi     = ctx["query_all"](ctx.get("CONCERT_DB_PLAYER_INSTRUMENT","") or "", None) if ctx.get("CONCERT_DB_PLAYER_INSTRUMENT") else []
@@ -2594,7 +2660,7 @@ def render_form(ctx, concert_id: str = ""):
                     _seen_urls.add(_url)
                     _deduped_links.append((_lbl, _url))
             if _deduped_links:
-                with st.expander("🎼 楽譜リンク", expanded=False):
+                if _collapsible_open("🎼 楽譜リンク", "player_score_links", default_open=False):
                     for _lbl, _url in _deduped_links:
                         st.markdown(f"[📄 {_lbl}]({_url})")
 
@@ -2932,7 +2998,7 @@ def render_form(ctx, concert_id: str = ""):
         st.markdown(f"**氏名：** {player_name}　　**パート：** {part}")
 
         if att:
-            with st.expander("出欠", expanded=True):
+            with st.expander("出欠", expanded=False):
                 prac_map = {p.get("id",""): ext(p, PRACTICE_NAME_KEYS) or "" for p in practices}
                 for pr_id, status in att.items():
                     st.write(f"{prac_map.get(pr_id, pr_id)}：**{status}**")
@@ -2942,14 +3008,14 @@ def render_form(ctx, concert_id: str = ""):
                 st.caption("※ 本番当日は自動で○が登録されます。")
 
         if pref:
-            with st.expander("パート希望", expanded=True):
+            with st.expander("パート希望", expanded=False):
                 pd_map = {p.get("id",""): ext(p, PARTDEF_NAME_KEYS) or "" for p in partdefs}
                 for pd_id, priority in pref.items():
                     st.write(f"{pd_map.get(pd_id, pd_id)}：**{priority}**")
 
         owned = {iid: cnt for iid, cnt in own.items() if cnt > 0}
         if owned:
-            with st.expander("所有楽器", expanded=True):
+            with st.expander("所有楽器", expanded=False):
                 for iid, cnt in owned.items():
                     st.write(f"{inst_map.get(iid, iid)}：{cnt}台")
 
@@ -3097,7 +3163,7 @@ def render_form(ctx, concert_id: str = ""):
 
         # テスト用デバッグ情報（URLにdebug=1がある場合のみ表示）
         if st.query_params.get("debug") == "1" and debug:
-            with st.expander("🔧 デバッグ情報", expanded=True):
+            with st.expander("🔧 デバッグ情報", expanded=False):
                 for k, v in debug.items():
                     st.code(f"{k}: {v}")
 
