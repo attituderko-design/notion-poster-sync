@@ -9202,6 +9202,24 @@ st.markdown(
     padding: 4px !important;
     backdrop-filter: blur(4px);
   }
+  section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] {
+    position: fixed !important;
+    top: 12px !important;
+    left: calc(var(--harmonia-sidebar-width) - 52px) !important;
+    z-index: 1006 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 40px !important;
+    height: 40px !important;
+    border-radius: 12px !important;
+    border: 1px solid rgba(255,255,255,0.18) !important;
+    background: rgba(14, 17, 23, 0.92) !important;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35) !important;
+  }
+  section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"]:hover {
+    background: rgba(30, 36, 50, 0.95) !important;
+  }
   header[data-testid="stHeader"] {
     z-index: 1000 !important;
   }
@@ -9211,6 +9229,9 @@ st.markdown(
     }
     #harmonia-sidebar-close-fab {
       left: calc(min(86vw, 420px) - 52px);
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] {
+      left: calc(min(86vw, 420px) - 52px) !important;
     }
   }
 </style>
