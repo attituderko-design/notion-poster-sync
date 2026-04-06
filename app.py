@@ -9456,40 +9456,6 @@ if system_mode == "HARMONIA":
             return "🟡 進行中"
         return "⚪ 未着手"
 
-    def _set_home_harmonia_flag(concert_id: str, key_candidates: list[str], checked: bool, concert_name: str = "") -> bool:
-        db_id = concert_ctx.get("CONCERT_DB_HARMONIA_CONCERT", "")
-        if not db_id or not concert_id:
-            return False
-        rows = concert_ctx["query_all"](db_id, None)
-        target = None
-        for r in rows:
-            if concert_id in _h_rel(r, _H_KEYS["harmonia_concert_rel"]):
-                target = r
-                break
-        if not target:
-            # 必要最低限の行を作成
-            t = concert_ctx["get_prop_types"](db_id) or {}
-            props: dict = {}
-            concert_ctx["put_key_any"](props, t, ["concert_key", "harmonia_concert_key", "タイトル"], concert_id, concert_name or concert_id, prefix="harmonia")
-            concert_ctx["put_prop_any"](props, t, _H_KEYS["harmonia_concert_rel"], concert_id)
-            concert_ctx["put_prop_any"](props, t, ["管理開始", "managed", "management_started"], True)
-            res_new = concert_ctx["api_request"]("post", "https://api.notion.com/v1/pages", json={"parent": {"database_id": db_id}, "properties": props})
-            if not (res_new and res_new.status_code == 200):
-                return False
-            target = res_new.json() or {}
-        row_id = target.get("id", "")
-        if not row_id:
-            return False
-        t = concert_ctx["get_prop_types"](db_id) or {}
-        flag_key = concert_ctx["find_prop_name"](t, key_candidates)
-        if not flag_key:
-            return False
-        res = concert_ctx["api_request"](
-            "patch",
-            f"https://api.notion.com/v1/pages/{row_id}",
-            json={"properties": {flag_key: {"checkbox": bool(checked)}}},
-        )
-        return res is not None and res.status_code == 200
 
     def _h_collect_apollo_song_ids_for_concert(concert_id: str, atlas_song_ids: list[str]) -> set[str]:
         """
@@ -9834,83 +9800,6 @@ if system_mode == "HARMONIA":
                         unsafe_allow_html=True,
                     )
 
-    def _render_harmonia_confirm_center(stats: dict, concert_row: dict | None):
-        if not concert_row:
-            return
-        concert_id = concert_row.get("id", "")
-        concert_name = _h_text(concert_row, ["名称", "演奏会名", "タイトル", "PK名称"]) or concert_ctx["extract_title"](concert_row)
-        if not concert_id:
-            return
-
-        st.markdown("### ✅ 確定センター")
-        st.caption("各工程の不足を確認し、条件を満たした工程だけをここで確定できます。")
-
-        page_map = {
-            "②": "楽曲・楽器管理",
-            "③": "練習管理",
-            "④": "奏者・出欠・持参楽器",
-            "⑤": "楽曲・楽器管理",
-            "⑥": "楽曲・楽器管理",
-            "⑦": "奏者・出欠・持参楽器",
-            "⑧": "奏者・出欠・持参楽器",
-            "⑨": "奏者・出欠・持参楽器",
-            "⑩": "アサイン検討",
-            "⑪": "アサイン検討",
-            "⑫": "アサイン検討",
-            "⑬": "収支・振込管理",
-        }
-
-        rules = [
-            ("② 楽曲情報", _H_KEYS["harmonia_song_info_confirm"], stats.get("song_count", 0) > 0, f"入力 {stats.get('song_count', 0)} 曲"),
-            ("③ 練習情報", _H_KEYS["harmonia_practice_info_confirm"], (stats.get("practice_count", 0) > 0 and stats.get("practice_ready_count", 0) == stats.get("practice_count", 0) and stats.get("schedule_input_count", 0) >= stats.get("practice_count", 0)), f"日時+確定 {stats.get('practice_ready_count', 0)} / {stats.get('practice_count', 0)} 日, スケジュール {stats.get('schedule_input_count', 0)} 件"),
-            ("④ 奏者情報", _H_KEYS["harmonia_player_info_confirm"], stats.get("participant_count", 0) > 0, f"入力 {stats.get('participant_count', 0)} 人"),
-            ("⑤ 必要楽器", _H_KEYS["harmonia_required_inst_confirm"], stats.get("concert_instrument_count", 0) > 0, f"入力 {stats.get('concert_instrument_count', 0)} 件"),
-            ("⑥ パート定義", _H_KEYS["harmonia_partdef_confirm"], (stats.get("partdef_count", 0) > 0 and stats.get("song_done_count", 0) >= stats.get("song_count", 0) and stats.get("song_count", 0) > 0), f"定義完了曲 {stats.get('song_done_count', 0)} / {stats.get('song_count', 0)}"),
-            ("⑦ 所有楽器", _H_KEYS["harmonia_own_inst_confirm"], (stats.get("ownership_target_count", 0) > 0 and stats.get("ownership_confirm_count", 0) == stats.get("ownership_target_count", 0)), f"確定 {stats.get('ownership_confirm_count', 0)} / {stats.get('ownership_target_count', 0)} 人"),
-            ("⑧ 持参楽器", _H_KEYS["harmonia_bring_confirm"], (stats.get("attendance_practice_count", 0) > 0 and stats.get("practice_bring_confirm_count", 0) == stats.get("attendance_practice_count", 0)), f"確定 {stats.get('practice_bring_confirm_count', 0)} / {stats.get('attendance_practice_count', 0)} 回"),
-            ("⑨ 出欠", _H_KEYS["harmonia_attendance_confirm"], (stats.get("participant_count", 0) > 0 and stats.get("unanswered_count", 0) == 0), f"未回答 {stats.get('unanswered_count', 0)} 人"),
-            ("⑩ 希望入力", _H_KEYS["harmonia_preference_confirm"], (stats.get("participant_count", 0) > 0 and stats.get("preference_pending_count", 0) == 0), f"未提出 {stats.get('preference_pending_count', 0)} 人"),
-            ("⑪ 案提示", _H_KEYS["harmonia_proposal"], stats.get("proposal_count", 0) > 0, f"提示候補 {stats.get('proposal_count', 0)} 件"),
-            ("⑫ アサイン確定", _H_KEYS["harmonia_assign_confirm"], stats.get("assign_header_confirmed", False), "※厳密判定はアサイン検討画面で実施"),
-            ("⑬ 収支確定", _H_KEYS["harmonia_finance_confirm"], (stats.get("rental_unconfirmed_count", 0) == 0 and stats.get("expense_unconfirmed_count", 0) == 0), f"レンタル未確定 {stats.get('rental_unconfirmed_count', 0)} / 経費未確定 {stats.get('expense_unconfirmed_count', 0)}"),
-        ]
-
-        _concert_page_options = [
-            "🏠 ホーム", "練習管理", "楽曲・楽器管理",
-            "奏者・出欠・持参楽器", "アサイン検討",
-            "レンタル管理", "収支・振込管理", "🧪 テストデータ管理",
-        ]
-
-        for step_title, flag_keys, can_confirm, detail in rules:
-            step_num = step_title[:2].strip()
-            is_done = False
-            if step_num == "⑫":
-                is_done = bool(stats.get("assign_header_confirmed", False))
-            else:
-                key_map = {
-                    "②": "song_info_header_confirmed", "③": "practice_info_header_confirmed", "④": "participant_header_confirmed",
-                    "⑤": "required_inst_header_confirmed", "⑥": "partdef_header_confirmed", "⑦": "ownership_header_confirmed",
-                    "⑧": "bring_header_confirmed", "⑨": "attendance_header_confirmed", "⑩": "preference_header_confirmed",
-                    "⑪": "proposal_header_done", "⑬": "finance_header_confirmed",
-                }
-                is_done = bool(stats.get(key_map.get(step_num, ""), False))
-            c1, c2, c3 = st.columns([4, 2, 2])
-            state_txt = "✅ 完了" if is_done else ("🟡 進行中" if can_confirm else "⚪ 未着手/不足あり")
-            c1.markdown(f"**{step_title}**  {state_txt}")
-            c1.caption(detail)
-            dest = page_map.get(step_num, "")
-            if dest and c2.button(f"→ {dest}", key=f"confirm_center_jump_{step_num}", use_container_width=True):
-                if dest in _concert_page_options:
-                    st.session_state["concert_page_index"] = _concert_page_options.index(dest)
-                st.rerun()
-            if step_num != "⑫":
-                if c3.button("確定", key=f"confirm_center_apply_{step_num}", use_container_width=True, disabled=bool(is_done or not can_confirm)):
-                    ok = _set_home_harmonia_flag(concert_id, flag_keys, True, concert_name)
-                    if ok:
-                        st.success(f"{step_title} を確定しました。")
-                        st.cache_data.clear()
-                        st.rerun()
-                    st.error("確定フラグ更新に失敗しました。")
 
 
     def _cleanup_harmonia_smoketest_pages() -> dict:
@@ -10468,7 +10357,6 @@ if system_mode == "HARMONIA":
                 st.markdown("### 作業の流れ")
                 _home_stats = _build_harmonia_progress(selected_concert_row)
                 _render_harmonia_progress_cards(_home_stats)
-                _render_harmonia_confirm_center(_home_stats, selected_concert_row)
 
                 # ── 招待コード・フォームURL ───────────────────────
                 st.divider()
