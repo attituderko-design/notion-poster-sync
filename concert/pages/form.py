@@ -506,10 +506,11 @@ def _inject_form_styles() -> None:
             width: 100%;
         }
         div[data-testid="stRadio"] div[role="radiogroup"] > div,
-        div[data-testid="stRadio"] div[role="radiogroup"] > label {
+        div[data-testid="stRadio"] div[role="radiogroup"] > label,
+        div[data-testid="stRadio"] [data-baseweb="radio"] {
             margin: 0 !important;
         }
-        div[data-testid="stRadio"] div[data-baseweb="radio"] label,
+        div[data-testid="stRadio"] [data-baseweb="radio"] label,
         div[data-testid="stRadio"] div[role="radiogroup"] > label {
             width: 100% !important;
             min-height: 38px !important;
@@ -522,12 +523,14 @@ def _inject_form_styles() -> None:
             padding: 0 8px !important;
             cursor: pointer;
         }
-        /* ラジオの丸を隠す */
-        div[data-testid="stRadio"] div[data-baseweb="radio"] label > div:first-child,
+        /* ラジオ丸/ネイティブinputを強制的に隠す */
+        div[data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"],
+        div[data-testid="stRadio"] [data-baseweb="radio"] svg,
+        div[data-testid="stRadio"] [data-baseweb="radio"] label > div:first-child,
         div[data-testid="stRadio"] div[role="radiogroup"] > label > div:first-child {
             display: none !important;
         }
-        div[data-testid="stRadio"] div[data-baseweb="radio"] label [data-testid="stMarkdownContainer"] p,
+        div[data-testid="stRadio"] [data-baseweb="radio"] label [data-testid="stMarkdownContainer"] p,
         div[data-testid="stRadio"] div[role="radiogroup"] > label [data-testid="stMarkdownContainer"] p {
             margin: 0 !important;
             font-family: 'Outfit', sans-serif !important;
@@ -537,12 +540,12 @@ def _inject_form_styles() -> None:
             color: rgba(180,200,240,.78) !important;
         }
         /* 選択中 */
-        div[data-testid="stRadio"] div[data-baseweb="radio"] label:has(input:checked),
+        div[data-testid="stRadio"] [data-baseweb="radio"] label:has(input:checked),
         div[data-testid="stRadio"] div[role="radiogroup"] > label:has(input:checked) {
             background: rgba(74,158,255,.15) !important;
             border-color: rgba(74,158,255,.45) !important;
         }
-        div[data-testid="stRadio"] div[data-baseweb="radio"] label:has(input:checked) [data-testid="stMarkdownContainer"] p,
+        div[data-testid="stRadio"] [data-baseweb="radio"] label:has(input:checked) [data-testid="stMarkdownContainer"] p,
         div[data-testid="stRadio"] div[role="radiogroup"] > label:has(input:checked) [data-testid="stMarkdownContainer"] p {
             color: #4a9eff !important;
         }
