@@ -9805,23 +9805,38 @@ if system_mode == "HARMONIA":
         if not stats:
             st.sidebar.caption("演奏会を選択するとタスクを表示します。")
             return
-        task_items = [
-            ("出欠未回答", int(stats.get("unanswered_count", 0)), "奏者・出欠・持参楽器"),
-            ("希望未提出", int(stats.get("preference_pending_count", 0)), "アサイン検討"),
-            ("練習未準備", max(0, int(stats.get("practice_count", 0)) - int(stats.get("practice_ready_count", 0))), "練習管理"),
-            ("収支未確定", int(stats.get("rental_unconfirmed_count", 0)) + int(stats.get("expense_unconfirmed_count", 0)), "収支・振込管理"),
-        ]
-        total_pending = sum(max(0, n) for _, n, _ in task_items)
-        if total_pending <= 0:
+        page_map = {
+            "③": "練習管理",
+            "④": "奏者・出欠・持参楽器",
+            "⑤": "楽曲・楽器管理",
+            "⑥": "楽曲・楽器管理",
+            "⑦": "奏者・出欠・持参楽器",
+            "⑧": "奏者・出欠・持参楽器",
+            "⑨": "奏者・出欠・持参楽器",
+            "⑩": "アサイン検討",
+            "⑪": "アサイン検討",
+            "⑫": "アサイン検討",
+            "⑬": "収支・振込管理",
+        }
+        pending_steps = []
+        for title, ratio, desc in (stats.get("step_items", []) or []):
+            if title.startswith("①"):
+                continue
+            if float(ratio) >= 1.0:
+                continue
+            step_num = title[:2].strip()
+            pending_steps.append((title, ratio, desc, page_map.get(step_num, "")))
+
+        if not pending_steps:
             st.sidebar.success("未完了タスクはありません。")
             return
-        st.sidebar.caption(f"未完了タスク合計: {total_pending} 件")
-        for label, count, page in task_items:
-            if count <= 0:
-                continue
+        st.sidebar.caption(f"未完了ステップ: {len(pending_steps)} 件")
+        for title, ratio, desc, page in pending_steps[:6]:
             c1, c2 = st.sidebar.columns([3, 2])
-            c1.caption(f"{label}: {count} 件")
-            if c2.button(f"→ {page}", key=f"sidebar_inbox_jump_{label}"):
+            state = "🟡 進行中" if float(ratio) > 0 else "⚪ 未着手"
+            c1.caption(f"{state} {title}")
+            c1.caption(desc)
+            if page and c2.button(f"→ {page}", key=f"sidebar_inbox_jump_{title}"):
                 _concert_page_options_local = [
                     "🏠 ホーム", "練習管理", "楽曲・楽器管理",
                     "奏者・出欠・持参楽器", "アサイン検討",
