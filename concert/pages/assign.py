@@ -2174,6 +2174,40 @@ def _render_result_tab(ctx: dict):
         unsafe_allow_html=True,
     )
 
+    # ── 確定前プレビュー（差分/不足確認）────────────────────────
+    _assign_db = ctx.get("CONCERT_DB_CONCERT_ASSIGNMENT", "")
+    _preview_rows = ctx["query_all"](_assign_db, None) if _assign_db else []
+    _assigned_for_concert = []
+    for _r in _preview_rows:
+        _cids = ctx["extract_relation_ids_any"](_r, ASSIGNMENT_CONCERT_REL_KEYS)
+        if concert_id and _cids and concert_id not in _cids:
+            continue
+        if ctx["extract_prop_text_any"](_r, ASSIGNMENT_FLAG_KEYS) == "True":
+            _assigned_for_concert.append(_r)
+    _by_song_count: dict[str, int] = defaultdict(int)
+    _unique_players: set[str] = set()
+    for _r in _assigned_for_concert:
+        _sids = ctx["extract_relation_ids_any"](_r, ASSIGNMENT_SONG_REL_KEYS)
+        _pids = ctx["extract_relation_ids_any"](_r, ASSIGNMENT_PLAYER_REL_KEYS)
+        if _sids:
+            _by_song_count[_sids[0]] += 1
+        if _pids:
+            _unique_players.add(_pids[0])
+    _assign_ok, _req_total, _missing_labels = _compute_assignment_completion(ctx, concert_id)
+    with st.expander("🧪 確定前プレビュー", expanded=False):
+        st.caption(
+            f"担当レコード: {len(_assigned_for_concert)} 件 / 担当者数: {len(_unique_players)} 人 / "
+            f"未割当パート定義: {len(_missing_labels)} 件"
+        )
+        if _by_song_count:
+            _song_map = {s.get("id", ""): _song_name(s, ctx) for s in _load_songs(ctx, concert_id)}
+            _rows = [{"演奏曲": _song_map.get(_sid, _sid), "担当件数": _cnt} for _sid, _cnt in sorted(_by_song_count.items(), key=lambda x: x[0])]
+            st.dataframe(_rows, use_container_width=True, hide_index=True)
+        if _missing_labels:
+            st.caption(f"未割当（先頭15件）: {' / '.join(_missing_labels[:15])}")
+        if st.button("🔄 プレビューを更新", key="assign_preview_refresh", use_container_width=True):
+            st.rerun()
+
     # ── フラグ操作ボタン ────────────────────────────────────────
     _col1, _col2 = st.columns(2)
 

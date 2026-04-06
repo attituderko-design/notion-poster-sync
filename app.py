@@ -9800,6 +9800,37 @@ if system_mode == "HARMONIA":
                         unsafe_allow_html=True,
                     )
 
+    def _render_harmonia_sidebar_inbox(stats: dict | None):
+        st.sidebar.markdown("### 📥 タスク")
+        if not stats:
+            st.sidebar.caption("演奏会を選択するとタスクを表示します。")
+            return
+        task_items = [
+            ("出欠未回答", int(stats.get("unanswered_count", 0)), "奏者・出欠・持参楽器"),
+            ("希望未提出", int(stats.get("preference_pending_count", 0)), "アサイン検討"),
+            ("練習未準備", max(0, int(stats.get("practice_count", 0)) - int(stats.get("practice_ready_count", 0))), "練習管理"),
+            ("収支未確定", int(stats.get("rental_unconfirmed_count", 0)) + int(stats.get("expense_unconfirmed_count", 0)), "収支・振込管理"),
+        ]
+        total_pending = sum(max(0, n) for _, n, _ in task_items)
+        if total_pending <= 0:
+            st.sidebar.success("未完了タスクはありません。")
+            return
+        st.sidebar.caption(f"未完了タスク合計: {total_pending} 件")
+        for label, count, page in task_items:
+            if count <= 0:
+                continue
+            c1, c2 = st.sidebar.columns([3, 2])
+            c1.caption(f"{label}: {count} 件")
+            if c2.button(f"→ {page}", key=f"sidebar_inbox_jump_{label}"):
+                _concert_page_options_local = [
+                    "🏠 ホーム", "練習管理", "楽曲・楽器管理",
+                    "奏者・出欠・持参楽器", "アサイン検討",
+                    "レンタル管理", "収支・振込管理", "🧪 テストデータ管理",
+                ]
+                if page in _concert_page_options_local:
+                    st.session_state["concert_page_index"] = _concert_page_options_local.index(page)
+                st.rerun()
+
 
 
     def _cleanup_harmonia_smoketest_pages() -> dict:
@@ -10251,6 +10282,8 @@ if system_mode == "HARMONIA":
         _clear_concert_page_runtime_cache()
         st.session_state["_last_selected_concert_id"] = selected_concert_id
     selected_concert_row = next((r for r in concert_rows if r.get("id", "") == selected_concert_id), None)
+    _global_h_stats = _build_harmonia_progress(selected_concert_row) if selected_concert_row else None
+    _render_harmonia_sidebar_inbox(_global_h_stats)
 
     concert_mgmt.render_sidebar_summary_pdf(concert_ctx)
 
@@ -10355,8 +10388,7 @@ if system_mode == "HARMONIA":
                 if _cover2_url:
                     st.image(_cover2_url, width=360)
                 st.markdown("### 作業の流れ")
-                _home_stats = _build_harmonia_progress(selected_concert_row)
-                _render_harmonia_progress_cards(_home_stats)
+                _render_harmonia_progress_cards(_global_h_stats or _build_harmonia_progress(selected_concert_row))
 
                 # ── 招待コード・フォームURL ───────────────────────
                 st.divider()
