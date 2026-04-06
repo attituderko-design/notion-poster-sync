@@ -276,11 +276,6 @@ def _inject_form_styles() -> None:
         @media (min-width: 640px) and (max-width: 1023px) { :root { --h-container-max: 700px; --h-font-body: 16px; --h-font-sub: 14px; --h-font-heading: 23px; --h-font-button: 16px; --h-font-caption: 13.5px; --h-tap-min: 48px; --h-pad-x: clamp(1rem, 3vw, 1.7rem); } }
         @media (min-width: 1024px) { :root { --h-container-max: 920px; --h-font-body: 16px; --h-font-sub: 14px; --h-font-heading: 26px; --h-font-button: 16px; --h-font-caption: 14px; --h-tap-min: 46px; --h-pad-x: clamp(1.1rem, 2.4vw, 2rem); } }
 
-        /* メニューカードの裏にある実ボタンを隠し、カードクリックで発火させる */
-        .st-key-menu_att, .st-key-menu_pref, .st-key-menu_pref_disabled, .st-key-menu_own {
-            display: none !important;
-        }
-
         /* ── fade-in animations ── */
         @keyframes hFadeUp {
             from { opacity: 0; transform: translateY(10px); }
@@ -436,6 +431,11 @@ def _inject_form_styles() -> None:
             background: rgba(255,255,255,.035) !important;
             color: #dbe5f9 !important;
             transition: border-color .15s ease, background .15s ease;
+            text-align: left !important;
+            justify-content: flex-start !important;
+            white-space: pre-line !important;
+            line-height: 1.25 !important;
+            padding: 0 14px !important;
         }
         .stButton > button:hover, .stDownloadButton > button:hover {
             border-color: rgba(74,158,255,.5) !important;
@@ -449,6 +449,11 @@ def _inject_form_styles() -> None:
             font-size: var(--h-font-button) !important;
             background: rgba(255,255,255,.035) !important;
             color: #dbe5f9 !important;
+            text-align: left !important;
+            justify-content: flex-start !important;
+            white-space: pre-line !important;
+            line-height: 1.25 !important;
+            padding: 0 14px !important;
         }
         .stTextInput input, .stTextArea textarea,
         .stSelectbox [data-baseweb="select"] > div,
@@ -489,26 +494,6 @@ def _inject_form_styles() -> None:
         label[data-testid="stWidgetLabel"] { font-size: var(--h-font-sub) !important; color: rgba(160,180,220,.65) !important; }
         .stAlert p { font-size: var(--h-font-sub) !important; }
         </style>
-        <script>
-        (() => {
-          const bindCard = (id, key) => {
-            const card = document.getElementById(id);
-            const btn = document.querySelector(`.st-key-${key} button`);
-            if (!card || !btn || card.dataset.bound === "1") return;
-            card.dataset.bound = "1";
-            card.style.cursor = "pointer";
-            card.addEventListener("click", () => btn.click());
-          };
-          const run = () => {
-            bindCard("menu-att", "menu_att");
-            bindCard("menu-pref", "menu_pref");
-            bindCard("menu-own", "menu_own");
-          };
-          run();
-          const mo = new MutationObserver(run);
-          mo.observe(document.body, { childList: true, subtree: true });
-        })();
-        </script>
         """)
 
 
@@ -2449,59 +2434,21 @@ def render_form(ctx, concert_id: str = ""):
 
             # ── メニューカード ──
             att_unanswered = att_total - att_answered
-            att_badge_html = (f'<div class="h-badge">{att_unanswered}件</div>' if att_unanswered > 0
-                              else '<div class="h-badge h-badge-ok">完了</div>')
             att_hint = f"未回答 {att_unanswered}件" if att_unanswered > 0 else f"{att_answered}/{att_total}回 回答済"
 
-            pref_badge_html = ""
             pref_hint = ""
             if pref_total > 0:
                 if pref_answered == pref_total:
-                    pref_badge_html = '<div class="h-badge h-badge-ok">完了</div>'
                     pref_hint = "入力済み"
                 elif proposal_done:
-                    pref_badge_html = '<div class="h-badge" style="background:rgba(180,100,240,.15);color:#c070f0;">確定済</div>'
                     pref_hint = "アサイン案提示中"
                 else:
-                    pref_badge_html = f'<div class="h-badge">{pref_total - pref_answered}件未入力</div>'
                     pref_hint = f"{pref_answered}/{pref_total}パート 回答済"
 
-            st.html(f"""
-                <div class="h-f4">
-                  <div class="h-section">メニュー</div>
-                  <div class="h-menu-item" id="menu-att">
-                    <div class="h-mi-icon h-ic-a">📅</div>
-                    <div class="h-mi-body">
-                      <div class="h-mi-ttl">出欠入力</div>
-                      <div class="h-mi-hint">{att_hint}</div>
-                    </div>
-                    <div class="h-mi-right">{att_badge_html}<div class="h-chev">›</div></div>
-                  </div>
-                  {"" if pref_total == 0 else f'''
-                  <div class="h-menu-item" id="menu-pref">
-                    <div class="h-mi-icon h-ic-b">🎵</div>
-                    <div class="h-mi-body">
-                      <div class="h-mi-ttl">楽器・パート希望</div>
-                      <div class="h-mi-hint">{pref_hint}</div>
-                    </div>
-                    <div class="h-mi-right">{pref_badge_html}<div class="h-chev">›</div></div>
-                  </div>
-                  '''}
-                  {"" if not IS_PERC(my_part) else '''
-                  <div class="h-menu-item" id="menu-own">
-                    <div class="h-mi-icon h-ic-d">🥁</div>
-                    <div class="h-mi-body">
-                      <div class="h-mi-ttl">所有楽器</div>
-                      <div class="h-mi-hint">入力・変更</div>
-                    </div>
-                    <div class="h-mi-right"><div class="h-chev">›</div></div>
-                  </div>
-                  '''}
-                </div>
-                """)
+            st.html(f'<div class="h-f4"><div class="h-section">メニュー</div></div>')
 
-            # 実際のボタン（非表示HTMLカードの裏で動くStreamlitボタン）
-            if st.button("📅 出欠を入力・変更する", use_container_width=True, key="menu_att"):
+            # メニュー操作ボタン（カード調の実ボタン）
+            if st.button(f"📅 出欠入力\n{att_hint}", use_container_width=True, key="menu_att"):
                 _, existing_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
                 preload_att: dict[str, str] = {}
                 preload_comment: dict[str, str] = {}
@@ -2518,11 +2465,11 @@ def render_form(ctx, concert_id: str = ""):
 
             if partdefs:
                 if proposal_done:
-                    st.button("🎵 パート希望（アサイン案提示中のため変更不可）",
+                    st.button("🎵 楽器・パート希望\nアサイン案提示中のため変更不可",
                               use_container_width=True, disabled=True, key="menu_pref_disabled")
                     st.caption("アサイン案が提示されています。変更が必要な場合は管理者にご連絡ください。")
                 else:
-                    if st.button("🎵 パート希望を入力・変更する", use_container_width=True, key="menu_pref"):
+                    if st.button(f"🎵 楽器・パート希望\n{pref_hint or '入力・変更'}", use_container_width=True, key="menu_pref"):
                         st.session_state.update({
                             "form_pref": existing_pref,
                             "form_step": 3,
@@ -2543,7 +2490,7 @@ def render_form(ctx, concert_id: str = ""):
                     _render_assignment_view(ctx, concert_id, my_part_master_id, user_role)
 
             if IS_PERC(my_part):
-                if st.button("🥁 所有楽器を入力・変更する", use_container_width=True, key="menu_own"):
+                if st.button("🥁 所有楽器\n入力・変更", use_container_width=True, key="menu_own"):
                     st.session_state.update({
                         "form_own":  {},
                         "form_step": 4,
