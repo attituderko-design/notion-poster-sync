@@ -197,7 +197,7 @@ def _clear_assign_cache():
     for k in list(st.session_state.keys()):
         if any(k.startswith(p) for p in (
             "pi_list_", "confirmed_rows_", "assign_result_",
-            "pref_list_", "participant_list_",
+            "pref_list_", "participant_list_", "assign_manual_",
         )):
             st.session_state.pop(k, None)
         if k.startswith("pref_editor_version_") or k.startswith("pref_editor_"):
@@ -214,6 +214,95 @@ def _is_perc_part(part_name: str) -> bool:
     if not name:
         return False  # パート未設定はPercでないとみなす
     return name in ("perc", "percussion", "打楽器")
+
+
+def _manual_assignment_state_key(concert_id: str, result_label: str) -> str:
+    safe = re.sub(r"[^0-9A-Za-z_]+", "_", (result_label or "").strip())
+    return f"assign_manual_{concert_id}_{safe}"
+
+
+def _manual_assignment_sig(assignments: list[dict]) -> tuple:
+    sig_items = []
+    for idx, a in enumerate(assignments):
+        sig_items.append((
+            idx,
+            a.get("song_id", ""),
+            a.get("part_id", ""),
+            a.get("instrument_id", ""),
+        ))
+    return tuple(sig_items)
+
+
+def _get_manual_assignments(concert_id: str, result_label: str, base_assignments: list[dict]) -> list[dict]:
+    key = _manual_assignment_state_key(concert_id, result_label)
+    sig_key = f"{key}_sig"
+    base_sig = _manual_assignment_sig(base_assignments)
+    if (key not in st.session_state) or (st.session_state.get(sig_key) != base_sig):
+        st.session_state[key] = [dict(a) for a in base_assignments]
+        st.session_state[sig_key] = base_sig
+    return st.session_state.get(key, [])
+
+
+def _render_manual_assignment_editor(
+    concert_id: str,
+    result_label: str,
+    song_order: list[str],
+    song_name_map: dict[str, str],
+    assignments: list[dict],
+    player_label_map: dict[str, str],
+) -> list[dict]:
+    key = _manual_assignment_state_key(concert_id, result_label)
+    if key not in st.session_state:
+        st.session_state[key] = [dict(a) for a in assignments]
+    edited = st.session_state.get(key, [])
+    if not edited:
+        return edited
+
+    player_ids = list(player_label_map.keys())
+    if not player_ids:
+        return edited
+
+    with st.expander("🛠 手動でパートを設定する（この候補のみ）", expanded=False):
+        st.caption("ここで変更した内容はこの候補にのみ反映されます。『採用』時にこの内容で書き込みます。")
+        if st.button("↩ この候補の手動変更をリセット", key=f"manual_reset_{key}"):
+            st.session_state[key] = [dict(a) for a in assignments]
+            st.rerun()
+
+        for sid in song_order:
+            song_rows = [i for i, a in enumerate(edited) if a.get("song_id") == sid]
+            if not song_rows:
+                continue
+            st.markdown(f"**{song_name_map.get(sid, sid)}**")
+            for idx in song_rows:
+                a = edited[idx]
+                c1, c2 = st.columns([5, 5])
+                c1.caption(f"パート: {a.get('part_name', '—')}")
+                cur_pid = a.get("player_id", "")
+                if cur_pid and cur_pid not in player_ids:
+                    player_ids_local = [cur_pid] + player_ids
+                    local_map = dict(player_label_map)
+                    local_map[cur_pid] = a.get("player_name", cur_pid)
+                else:
+                    player_ids_local = player_ids
+                    local_map = player_label_map
+                try:
+                    default_idx = player_ids_local.index(cur_pid)
+                except ValueError:
+                    default_idx = 0
+                new_pid = c2.selectbox(
+                    "奏者",
+                    options=player_ids_local,
+                    index=default_idx,
+                    format_func=lambda pid: local_map.get(pid, pid),
+                    key=f"manual_pick_{key}_{idx}",
+                    label_visibility="collapsed",
+                )
+                if new_pid != cur_pid:
+                    a["player_id"] = new_pid
+                    a["player_name"] = local_map.get(new_pid, new_pid)
+                    edited[idx] = a
+        st.session_state[key] = edited
+    return edited
 
 
 def _load_players(ctx) -> list[dict]:
@@ -1408,6 +1497,23 @@ def _render_solver_tab(ctx: dict):
             desc = CANDIDATE_DESC.get(result["label"], "")
             if desc:
                 st.caption(desc)
+            _ap = st.session_state.get(f"assign_all_participants_{concert_id}", [])
+            _player_label_map = {pid: pname for pid, pname in _ap if pid}
+            for _a in result["assignments"]:
+                _pid = _a.get("player_id", "")
+                _pname = _a.get("player_name", "") or _pid
+                if _pid and _pid not in _player_label_map:
+                    _player_label_map[_pid] = _pname
+            _manual_assignments = _get_manual_assignments(concert_id, result["label"], result["assignments"])
+            _manual_assignments = _render_manual_assignment_editor(
+                concert_id=concert_id,
+                result_label=result["label"],
+                song_order=song_order,
+                song_name_map=song_name_map,
+                assignments=_manual_assignments,
+                player_label_map=_player_label_map,
+            )
+            display_assignments = _manual_assignments if _manual_assignments else result["assignments"]
             _vm = _vui(result)
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("総スコア",   f"{_vm['total_score']:.1f}点")
@@ -1417,7 +1523,7 @@ def _render_solver_tab(ctx: dict):
 
             # 曲ごとの割当（HTML表示）
             by_song: dict[str, list] = defaultdict(list)
-            for a in result["assignments"]:
+            for a in display_assignments:
                 by_song[a["song_id"]].append(a)
 
             for sid in song_order:
@@ -1436,7 +1542,6 @@ def _render_solver_tab(ctx: dict):
             player_unassigned: dict[str, int]  = defaultdict(int)
 
             # 表示対象はCONCERT_CASTの打楽器奏者のみ（_all_participants）
-            _ap = st.session_state.get(f"assign_all_participants_{concert_id}", [])
             _valid_pids = {pid for pid, _ in _ap}
             for _pid, _pname in _ap:
                 if _pid and _pname:
@@ -1444,7 +1549,7 @@ def _render_solver_tab(ctx: dict):
 
             # 割当済みスコアと曲セットを集計
             assigned_songs_per_player: dict[str, set] = defaultdict(set)
-            for a in result["assignments"]:
+            for a in display_assignments:
                 pk   = str((a["player_id"], a["song_id"], a["part_id"]))
                 pref = result["pref_map"].get(pk)
                 sc   = ({1:3.0,2:2.0,3:1.0}.get(pref["priority"],0.0)
@@ -1485,7 +1590,7 @@ def _render_solver_tab(ctx: dict):
             st.divider()
             if st.button(f"✅ この案を採用してNotionに書き込む",
                          key=f"adopt_{result['label']}", type="primary"):
-                _write_assignments_to_notion(ctx, result["assignments"], result["pref_map"])
+                _write_assignments_to_notion(ctx, display_assignments, result["pref_map"])
 
 
 def _render_assignment_html(items: list[dict], pref_map: dict) -> str:
