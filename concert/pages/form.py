@@ -254,18 +254,73 @@ def _inject_form_styles() -> None:
         <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
         <style>
         /* ── base ── */
+        :root {
+            --h-container-max: 480px;
+            --h-font-body: 15px;
+            --h-font-sub: 13px;
+            --h-font-heading: 20px;
+            --h-font-button: 15px;
+            --h-font-caption: 12px;
+            --h-tap-min: 48px;
+            --h-pad-x: clamp(.8rem, 4vw, 1.4rem);
+        }
         .stApp, .stApp * { font-family: 'Noto Sans JP', sans-serif !important; }
         .stApp .block-container {
-            max-width: 480px !important;
+            max-width: var(--h-container-max) !important;
             padding-top: 1.2rem !important;
-            padding-left: clamp(.8rem, 4vw, 1.4rem) !important;
-            padding-right: clamp(.8rem, 4vw, 1.4rem) !important;
+            padding-left: var(--h-pad-x) !important;
+            padding-right: var(--h-pad-x) !important;
         }
-        @media (max-width: 520px) {
-            .stApp .block-container {
-                max-width: 100vw !important;
-                padding-left: .75rem !important;
-                padding-right: .75rem !important;
+        /* xs: ~359 */
+        @media (max-width: 359px) {
+            :root {
+                --h-container-max: 100vw;
+                --h-font-body: 14px;
+                --h-font-sub: 12px;
+                --h-font-heading: 18px;
+                --h-font-button: 14px;
+                --h-font-caption: 12px;
+                --h-tap-min: 48px;
+                --h-pad-x: .6rem;
+            }
+        }
+        /* base: 360~639 */
+        @media (min-width: 360px) and (max-width: 639px) {
+            :root {
+                --h-container-max: 480px;
+                --h-font-body: 15px;
+                --h-font-sub: 13px;
+                --h-font-heading: 20px;
+                --h-font-button: 15px;
+                --h-font-caption: 12px;
+                --h-tap-min: 48px;
+                --h-pad-x: clamp(.75rem, 3.2vw, 1.1rem);
+            }
+        }
+        /* md: 640~1023 */
+        @media (min-width: 640px) and (max-width: 1023px) {
+            :root {
+                --h-container-max: 700px;
+                --h-font-body: 16px;
+                --h-font-sub: 14px;
+                --h-font-heading: 23px;
+                --h-font-button: 16px;
+                --h-font-caption: 13.5px;
+                --h-tap-min: 48px;
+                --h-pad-x: clamp(1rem, 3vw, 1.7rem);
+            }
+        }
+        /* lg: 1024~ */
+        @media (min-width: 1024px) {
+            :root {
+                --h-container-max: 920px;
+                --h-font-body: 16px;
+                --h-font-sub: 14px;
+                --h-font-heading: 26px;
+                --h-font-button: 16px;
+                --h-font-caption: 14px;
+                --h-tap-min: 46px;
+                --h-pad-x: clamp(1.1rem, 2.4vw, 2rem);
             }
         }
 
@@ -284,12 +339,12 @@ def _inject_form_styles() -> None:
         /* ── wordmark ── */
         .h-wordmark {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 20px; font-weight: 600;
+            font-size: calc(var(--h-font-heading) + 1px); font-weight: 600;
             color: #e8edf7; letter-spacing: .05em;
         }
         .h-wordmark-sub {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 11px; color: rgba(160,180,220,.4);
+            font-size: var(--h-font-caption); color: rgba(160,180,220,.4);
             letter-spacing: .13em; margin-top: 3px;
         }
 
@@ -303,12 +358,12 @@ def _inject_form_styles() -> None:
         }
         .h-concert-name {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 18px; font-weight: 500;
+            font-size: calc(var(--h-font-heading) - 2px); font-weight: 500;
             color: #e8edf7; margin-bottom: 8px; line-height: 1.3;
         }
         .h-concert-row {
             display: flex; align-items: center;
-            gap: 8px; font-size: 13px;
+            gap: 8px; font-size: var(--h-font-sub);
             color: rgba(160,180,220,.6); margin-bottom: 3px;
         }
         .h-concert-dot {
@@ -318,12 +373,12 @@ def _inject_form_styles() -> None:
 
         /* ── greeting ── */
         .h-greet {
-            font-size: 15px; color: rgba(160,180,220,.7);
+            font-size: var(--h-font-body); color: rgba(160,180,220,.7);
             margin-bottom: 14px; line-height: 1.6;
         }
         .h-greet strong { color: #e8edf7; font-weight: 500; }
         .h-greet-part {
-            display: block; font-size: 12px;
+            display: block; font-size: var(--h-font-caption);
             color: rgba(160,180,220,.35); margin-top: 1px;
         }
 
@@ -355,14 +410,14 @@ def _inject_form_styles() -> None:
         .h-mi-body { flex: 1; min-width: 0; }
         .h-mi-ttl {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 15px; color: #c8d4ed;
+            font-size: var(--h-font-body); color: #c8d4ed;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        .h-mi-hint { font-size: 12px; color: rgba(160,180,220,.4); margin-top: 2px; }
+        .h-mi-hint { font-size: var(--h-font-caption); color: rgba(160,180,220,.4); margin-top: 2px; }
         .h-mi-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
         .h-badge {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 11px; background: rgba(74,158,255,.15);
+            font-size: var(--h-font-caption); background: rgba(74,158,255,.15);
             color: #4a9eff; border-radius: 6px;
             padding: 3px 8px; white-space: nowrap;
         }
@@ -372,7 +427,7 @@ def _inject_form_styles() -> None:
         /* ── section label ── */
         .h-section {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 11px; color: rgba(160,180,220,.4);
+            font-size: var(--h-font-caption); color: rgba(160,180,220,.4);
             letter-spacing: .1em; text-transform: uppercase;
             margin-bottom: 8px; margin-top: 4px;
         }
@@ -397,18 +452,18 @@ def _inject_form_styles() -> None:
         /* ── screen title ── */
         .h-scr-title {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 20px; font-weight: 500; color: #e8edf7;
+            font-size: var(--h-font-heading); font-weight: 500; color: #e8edf7;
             margin-bottom: 4px;
         }
         .h-scr-sub {
-            font-size: 13px; color: rgba(160,180,220,.55);
+            font-size: var(--h-font-sub); color: rgba(160,180,220,.55);
             margin-bottom: 16px; line-height: 1.55;
         }
 
         /* ── footer ── */
         .h-footer {
             font-family: 'Outfit', sans-serif !important;
-            font-size: 11px; color: rgba(160,180,220,.18);
+            font-size: var(--h-font-caption); color: rgba(160,180,220,.18);
             text-align: center; margin-top: 20px;
             padding-top: 14px;
             border-top: .5px solid rgba(255,255,255,.05);
@@ -418,17 +473,17 @@ def _inject_form_styles() -> None:
         .stButton > button, .stDownloadButton > button {
             border-radius: 11px !important;
             border: .5px solid rgba(255,255,255,.12) !important;
-            min-height: 48px !important;
+            min-height: var(--h-tap-min) !important;
             font-family: 'Outfit', sans-serif !important;
-            font-size: 15px !important;
+            font-size: var(--h-font-button) !important;
             transition: border-color .15s ease, background .15s ease;
         }
         div[data-testid="stFormSubmitButton"] > button {
             border-radius: 11px !important;
             border: .5px solid rgba(255,255,255,.12) !important;
-            min-height: 48px !important;
+            min-height: var(--h-tap-min) !important;
             font-family: 'Outfit', sans-serif !important;
-            font-size: 15px !important;
+            font-size: var(--h-font-button) !important;
         }
         .stButton > button:hover, .stDownloadButton > button:hover {
             border-color: rgba(74,158,255,.5) !important;
@@ -444,7 +499,7 @@ def _inject_form_styles() -> None:
             border-radius: 11px !important;
             border: .5px solid rgba(255,255,255,.12) !important;
             background: rgba(255,255,255,.04) !important;
-            font-size: 15px !important;
+            font-size: var(--h-font-body) !important;
         }
         .stSelectbox [data-baseweb="select"] *,
         .stMultiSelect [data-baseweb="select"] *,
@@ -457,7 +512,7 @@ def _inject_form_styles() -> None:
         }
         .stTabs [data-baseweb="tab"] {
             font-family: 'Outfit', 'Noto Sans JP', sans-serif !important;
-            font-size: 15px !important;
+            font-size: var(--h-font-button) !important;
             letter-spacing: .01em;
         }
         .stTextInput input:focus, .stTextArea textarea:focus {
@@ -539,16 +594,16 @@ def _inject_form_styles() -> None:
             font-size: 1rem !important;
             line-height: 1.45 !important;
         }
-        [data-testid="stMetricValue"] { font-size: 16px !important; }
+        [data-testid="stMetricValue"] { font-size: var(--h-font-body) !important; }
         [data-testid="stMetricLabel"] > div {
-            font-size: 12px !important;
+            font-size: var(--h-font-caption) !important;
             color: rgba(160,180,220,.55) !important;
         }
-        .stRadio label { font-size: 15px !important; }
-        .stCheckbox label { font-size: 15px !important; min-height: 28px; }
-        p, li, .stMarkdown p { font-size: 15px !important; line-height: 1.7 !important; }
-        label[data-testid="stWidgetLabel"] { font-size: 13px !important; color: rgba(160,180,220,.65) !important; }
-        .stAlert p { font-size: 14px !important; }
+        .stRadio label { font-size: var(--h-font-body) !important; }
+        .stCheckbox label { font-size: var(--h-font-body) !important; min-height: 28px; }
+        p, li, .stMarkdown p { font-size: var(--h-font-body) !important; line-height: 1.7 !important; }
+        label[data-testid="stWidgetLabel"] { font-size: var(--h-font-sub) !important; color: rgba(160,180,220,.65) !important; }
+        .stAlert p { font-size: var(--h-font-sub) !important; }
         </style>
         <script>
         (() => {
