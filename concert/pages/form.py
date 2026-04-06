@@ -423,7 +423,18 @@ def _inject_form_styles() -> None:
             font-size: 15px !important;
             transition: border-color .15s ease, background .15s ease;
         }
+        div[data-testid="stFormSubmitButton"] > button {
+            border-radius: 11px !important;
+            border: .5px solid rgba(255,255,255,.12) !important;
+            min-height: 48px !important;
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 15px !important;
+        }
         .stButton > button:hover, .stDownloadButton > button:hover {
+            border-color: rgba(74,158,255,.5) !important;
+            background: rgba(74,158,255,.08) !important;
+        }
+        div[data-testid="stFormSubmitButton"] > button:hover {
             border-color: rgba(74,158,255,.5) !important;
             background: rgba(74,158,255,.08) !important;
         }
@@ -434,6 +445,20 @@ def _inject_form_styles() -> None:
             border: .5px solid rgba(255,255,255,.12) !important;
             background: rgba(255,255,255,.04) !important;
             font-size: 15px !important;
+        }
+        .stSelectbox [data-baseweb="select"] *,
+        .stMultiSelect [data-baseweb="select"] *,
+        .stDateInput * ,
+        .stNumberInput * ,
+        .stRadio * ,
+        .stTabs [data-baseweb="tab-list"] *,
+        .stProgress * {
+            font-family: 'Outfit', 'Noto Sans JP', sans-serif !important;
+        }
+        .stTabs [data-baseweb="tab"] {
+            font-family: 'Outfit', 'Noto Sans JP', sans-serif !important;
+            font-size: 15px !important;
+            letter-spacing: .01em;
         }
         .stTextInput input:focus, .stTextArea textarea:focus {
             border-color: rgba(74,158,255,.45) !important;
@@ -2486,58 +2511,19 @@ def render_form(ctx, concert_id: str = ""):
                 </div>
                 """)
 
-            # ── メニューカード ──
+            # ── メニュー（実ボタンを主役に統一） ──
             att_unanswered = att_total - att_answered
-            att_badge_html = (f'<div class="h-badge">{att_unanswered}件</div>' if att_unanswered > 0
-                              else '<div class="h-badge h-badge-ok">完了</div>')
             att_hint = f"未回答 {att_unanswered}件" if att_unanswered > 0 else f"{att_answered}/{att_total}回 回答済"
-
-            pref_badge_html = ""
             pref_hint = ""
             if pref_total > 0:
                 if pref_answered == pref_total:
-                    pref_badge_html = '<div class="h-badge h-badge-ok">完了</div>'
                     pref_hint = "入力済み"
                 elif proposal_done:
-                    pref_badge_html = '<div class="h-badge" style="background:rgba(180,100,240,.15);color:#c070f0;">確定済</div>'
                     pref_hint = "アサイン案提示中"
                 else:
-                    pref_badge_html = f'<div class="h-badge">{pref_total - pref_answered}件未入力</div>'
                     pref_hint = f"{pref_answered}/{pref_total}パート 回答済"
-
-            st.html(f"""
-                <div class="h-f4">
-                  <div class="h-section">メニュー</div>
-                  <div class="h-menu-item" id="menu-att">
-                    <div class="h-mi-icon h-ic-a">📅</div>
-                    <div class="h-mi-body">
-                      <div class="h-mi-ttl">出欠入力</div>
-                      <div class="h-mi-hint">{att_hint}</div>
-                    </div>
-                    <div class="h-mi-right">{att_badge_html}<div class="h-chev">›</div></div>
-                  </div>
-                  {"" if pref_total == 0 else f'''
-                  <div class="h-menu-item" id="menu-pref">
-                    <div class="h-mi-icon h-ic-b">🎵</div>
-                    <div class="h-mi-body">
-                      <div class="h-mi-ttl">楽器・パート希望</div>
-                      <div class="h-mi-hint">{pref_hint}</div>
-                    </div>
-                    <div class="h-mi-right">{pref_badge_html}<div class="h-chev">›</div></div>
-                  </div>
-                  '''}
-                  {"" if not IS_PERC(my_part) else '''
-                  <div class="h-menu-item" id="menu-own">
-                    <div class="h-mi-icon h-ic-d">🥁</div>
-                    <div class="h-mi-body">
-                      <div class="h-mi-ttl">所有楽器</div>
-                      <div class="h-mi-hint">入力・変更</div>
-                    </div>
-                    <div class="h-mi-right"><div class="h-chev">›</div></div>
-                  </div>
-                  '''}
-                </div>
-                """)
+            st.html(f'<div class="h-section">メニュー</div>')
+            st.caption(f"📅 出欠: {att_hint}" + (f" / 🎵 希望: {pref_hint}" if pref_hint else ""))
 
             # 実際のボタン（非表示HTMLカードの裏で動くStreamlitボタン）
             if st.button("📅 出欠を入力・変更する", use_container_width=True, key="menu_att"):
@@ -2607,14 +2593,14 @@ def render_form(ctx, concert_id: str = ""):
                             st.info("練習日が登録されていません。")
                 with tab_mem:
                     _mem_label = "自パートのメンバー一覧" if user_role == ROLE_LEADER else "全員のメンバー一覧（連絡先含む）"
-                    with st.expander(f"👥 {_mem_label}", expanded=False):
+                    if _collapsible_open(f"👥 {_mem_label}", "leader_member_overview", default_open=False):
                         _render_member_list(
                             ctx, concert_id, participant_rows,
                             my_part_master_id, user_role
                         )
                 with tab_doc:
                     if practices:
-                        with st.expander("📄 練習情報PDF（全練習回）", expanded=False):
+                        if _collapsible_open("📄 練習情報PDF（全練習回）", "leader_all_practice_pdf", default_open=False):
                             _all_sched  = ctx["query_all"](ctx.get("CONCERT_DB_SCHEDULE","") or "", None) if ctx.get("CONCERT_DB_SCHEDULE") else []
                             _all_rental = ctx["query_all"](ctx.get("CONCERT_DB_RENTAL","") or "", None) if ctx.get("CONCERT_DB_RENTAL") else []
                             _all_pi     = ctx["query_all"](ctx.get("CONCERT_DB_PLAYER_INSTRUMENT","") or "", None) if ctx.get("CONCERT_DB_PLAYER_INSTRUMENT") else []
