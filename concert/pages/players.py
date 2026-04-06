@@ -793,9 +793,10 @@ def _render_player_tab(ctx: dict):
         if p.get("id", "")
     }
     left_part_opts = ["（全パート）"] + sorted({v for v in performer_part_by_pid.values() if v})
-    left_part = st.selectbox("左: PERFORMERパートで絞り込み", left_part_opts, key=f"dnd_left_part_{global_concert_id}")
+    fl, fr = st.columns(2)
+    left_part = fl.selectbox("左: PERFORMERパートで絞り込み", left_part_opts, key=f"dnd_left_part_{global_concert_id}")
 
-    right_part = st.selectbox(
+    right_part = fr.selectbox(
         "右: CONCERT_CASTのパート（表示・追加先）",
         part_opts if part_opts else [""],
         key=f"dnd_right_part_{global_concert_id}",
@@ -857,20 +858,26 @@ def _render_player_tab(ctx: dict):
         try:
             dnd_style = """
             .sortable-component {
-                display: flex;
-                gap: 12px;
-                align-items: flex-start;
+                display: flex !important;
+                flex-wrap: nowrap !important;
+                gap: 12px !important;
+                align-items: flex-start !important;
             }
             .sortable-container {
-                flex: 1 1 0;
-                min-width: 320px;
+                flex: 1 1 0 !important;
+                min-width: 320px !important;
+                width: calc(50% - 6px) !important;
+                display: inline-block !important;
+                vertical-align: top !important;
             }
             @media (max-width: 900px) {
                 .sortable-component {
-                    display: block;
+                    display: block !important;
                 }
                 .sortable-container {
-                    min-width: 0;
+                    min-width: 0 !important;
+                    width: 100% !important;
+                    display: block !important;
                 }
             }
             """
