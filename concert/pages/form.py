@@ -226,21 +226,17 @@ def _render_next_practice_panel(ctx: dict, practices: list) -> None:
 
 def _render_brand_logo() -> None:
     """フォーム上部ワードマークを表示。"""
-    st.markdown(
-        """
+    st.html("""
         <div class="h-f1" style="padding: 16px 0 14px; text-align: center;">
             <div class="h-wordmark">ArtéMis HARMONIA</div>
             <div class="h-wordmark-sub">Concert Management</div>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        """)
 
 
 def _inject_form_styles() -> None:
     """form.py専用スタイル — モダンダークミニマル。"""
-    st.markdown(
-        """
+    st.html("""
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
         <style>
@@ -447,9 +443,7 @@ def _inject_form_styles() -> None:
         label[data-testid="stWidgetLabel"] { font-size: 13px !important; color: rgba(160,180,220,.65) !important; }
         .stAlert p { font-size: 14px !important; }
         </style>
-        """,
-        unsafe_allow_html=True,
-    )
+        """)
 
 
 # ── マジックコード認証 ──────────────────────────────────────────
@@ -1445,7 +1439,7 @@ def _render_concert_selector(ctx):
 
     # ── モード未選択 ─────────────────────────────────────────
     if not selector_mode:
-        st.markdown('<div class="h-scr-title">ArtéMis HARMONIA ログイン</div>', unsafe_allow_html=True)
+        st.html('<div class="h-scr-title">ArtéMis HARMONIA ログイン</div>')
         col_l, col_i = st.columns(2)
         if col_l.button("🔑 ログイン", use_container_width=True, type="primary", key="sel_login"):
             st.session_state["selector_mode"] = "login"
@@ -1457,7 +1451,7 @@ def _render_concert_selector(ctx):
 
     # ── 招待コード入力モード ──────────────────────────────────
     if selector_mode == "invite":
-        st.markdown('<div class="h-scr-title">招待コードを入力してください</div>', unsafe_allow_html=True)
+        st.html('<div class="h-scr-title">招待コードを入力してください</div>')
         st.caption("管理者から受け取った招待コードを入力してください。")
         _invite_logged_in = bool(st.session_state.get("sel_pw_verified") and st.session_state.get("sel_player_id"))
         with st.form("invite_code_form"):
@@ -1515,7 +1509,7 @@ def _render_concert_selector(ctx):
     if selector_mode == "login":
         # メールアドレス未入力フェーズ
         if not st.session_state.get("sel_email_submitted"):
-            st.markdown('<div class="h-scr-title">ログイン</div>', unsafe_allow_html=True)
+            st.html('<div class="h-scr-title">ログイン</div>')
             with st.form("sel_email_form"):
                 sel_email = st.text_input("メールアドレス", placeholder="yamada@example.com")
                 submitted_e = st.form_submit_button("次へ", type="primary", use_container_width=True)
@@ -1557,7 +1551,7 @@ def _render_concert_selector(ctx):
 
         if not sel_pw_verified:
             if sel_has_pw:
-                st.markdown(f'<div class="h-scr-title">おかえりなさい、{sel_pname} さん</div>', unsafe_allow_html=True)
+                st.html(f'<div class="h-scr-title">おかえりなさい、{sel_pname} さん</div>')
                 with st.form("sel_pw_form"):
                     pw = st.text_input("パスワード", type="password")
                     submitted_pw = st.form_submit_button("ログイン", type="primary", use_container_width=True)
@@ -1572,7 +1566,7 @@ def _render_concert_selector(ctx):
                         st.error("パスワードが違います。")
             else:
                 # パスワード未設定 → selector内で確認コード認証
-                st.markdown(f'<div class="h-scr-title">おかえりなさい、{sel_pname} さん</div>', unsafe_allow_html=True)
+                st.html(f'<div class="h-scr-title">おかえりなさい、{sel_pname} さん</div>')
                 st.warning("パスワードが設定されていません。確認コードでログインしてパスワードを設定してください。")
                 st.caption(f"登録メールアドレス: {sel_email}")
                 if not st.session_state.get("sel_magic_sent"):
@@ -1652,7 +1646,7 @@ def _render_concert_selector(ctx):
 
         # パスワード未設定で認証成功した場合は、演奏会選択前に必ず設定させる
         if st.session_state.get("sel_need_set_password"):
-            st.markdown(f'<div class="h-scr-title">{sel_pname} さん、パスワードを設定してください</div>', unsafe_allow_html=True)
+            st.html(f'<div class="h-scr-title">{sel_pname} さん、パスワードを設定してください</div>')
             st.caption("次回からメールアドレスとパスワードでログインできます。")
             with st.form("sel_set_password_form"):
                 pw1 = st.text_input("パスワード（6文字以上）", type="password")
@@ -1678,7 +1672,7 @@ def _render_concert_selector(ctx):
             return
 
         # 認証済み → 参加演奏会を選択
-        st.markdown(f'<div class="h-scr-title">こんにちは、{sel_pname} さん</div>', unsafe_allow_html=True)
+        st.html(f'<div class="h-scr-title">こんにちは、{sel_pname} さん</div>')
         my_concerts = _get_my_concerts(ctx, sel_pid)
 
         def _go_selected_concert(selected_cid: str):
@@ -2043,15 +2037,12 @@ def render_form(ctx, concert_id: str = ""):
         )
         _meta_rows += f'<div class="h-concert-row"><div class="h-concert-dot"></div>{_song_txt}</div>'
 
-    st.markdown(
-        f"""
+    st.html(f"""
         <div class="h-f2 h-concert-card">
             <div class="h-concert-name">{c_name}</div>
             {_meta_rows}
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        """)
 
     if st.query_params.get("debug") == "1" and st.session_state.get("form_att_debug"):
         with st.expander("🔧 出欠読込デバッグ", expanded=False):
@@ -2068,8 +2059,8 @@ def render_form(ctx, concert_id: str = ""):
 
     # ── STEP 0: 新規登録 / ログイン 選択 ─────────────────────
     if step == 1 and not st.session_state.get("form_auth_verified") and not st.session_state.get("form_auth_mode"):
-        st.markdown('<div class="h-f3 h-scr-title">はじめに</div>', unsafe_allow_html=True)
-        st.markdown('<div class="h-scr-sub">初めての方は新規登録、2回目以降はログインをお選びください</div>', unsafe_allow_html=True)
+        st.html('<div class="h-f3 h-scr-title">はじめに</div>')
+        st.html('<div class="h-scr-sub">初めての方は新規登録、2回目以降はログインをお選びください</div>')
         col_new, col_login = st.columns(2)
         if col_new.button("📝 新規登録", use_container_width=True, type="primary", key="mode_new"):
             st.session_state["form_auth_mode"] = "new"
@@ -2082,7 +2073,7 @@ def render_form(ctx, concert_id: str = ""):
     # ── STEP 0a: プライバシーポリシー同意（新規登録のみ） ─────
     auth_mode = st.session_state.get("form_auth_mode", "new")
     if step == 1 and not st.session_state.get("form_auth_verified") and auth_mode == "new" and not st.session_state.get("form_privacy_agreed"):
-        st.markdown('<div class="h-scr-title">プライバシーポリシー</div>', unsafe_allow_html=True)
+        st.html('<div class="h-scr-title">プライバシーポリシー</div>')
         st.markdown(_PRIVACY_POLICY)
         col_agree, col_back = st.columns(2)
         if col_agree.button("✅ 同意して進む", type="primary", use_container_width=True, key="privacy_agree"):
@@ -2099,11 +2090,11 @@ def render_form(ctx, concert_id: str = ""):
         # メールアドレス入力フェーズ
         if not st.session_state.get("auth_email_submitted"):
             if auth_mode == "login":
-                st.markdown('<div class="h-f3 h-scr-title">ログイン</div>', unsafe_allow_html=True)
-                st.markdown('<div class="h-scr-sub">登録済みのメールアドレスを入力してください</div>', unsafe_allow_html=True)
+                st.html('<div class="h-f3 h-scr-title">ログイン</div>')
+                st.html('<div class="h-scr-sub">登録済みのメールアドレスを入力してください</div>')
             else:
-                st.markdown('<div class="h-f3 h-scr-title">メールアドレスを入力</div>', unsafe_allow_html=True)
-                st.markdown('<div class="h-scr-sub">確認コードをお送りします</div>', unsafe_allow_html=True)
+                st.html('<div class="h-f3 h-scr-title">メールアドレスを入力</div>')
+                st.html('<div class="h-scr-sub">確認コードをお送りします</div>')
             with st.form("auth_email_form"):
                 auth_email = st.text_input("メールアドレス *", placeholder="yamada@example.com")
                 submitted_email = st.form_submit_button("次へ", type="primary",
@@ -2152,8 +2143,8 @@ def render_form(ctx, concert_id: str = ""):
             matched_player = next((p for p in players if p.get("id") == existing_pid), None)
             pname_display = ext(matched_player, PLAYER_NAME_KEYS) if matched_player else ""
             _greet = f"おかえりなさい、{pname_display} さん" if pname_display else "パスワードでログイン"
-            st.markdown(f'<div class="h-f3 h-scr-title">{_greet}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="h-scr-sub">{auth_email}</div>', unsafe_allow_html=True)
+            st.html(f'<div class="h-f3 h-scr-title">{_greet}</div>')
+            st.html(f'<div class="h-scr-sub">{auth_email}</div>')
             with st.form("auth_password_form"):
                 entered_pw = st.text_input("パスワード", type="password")
                 col_ok, col_forgot = st.columns(2)
@@ -2182,13 +2173,13 @@ def render_form(ctx, concert_id: str = ""):
         # ── パスワードリセット or 新規 or パスワード未設定 → マジックコード ──
         is_reset = st.session_state.get("auth_reset_mode", False)
         if is_reset:
-            st.markdown('<div class="h-scr-title">パスワードをリセット</div>', unsafe_allow_html=True)
+            st.html('<div class="h-scr-title">パスワードをリセット</div>')
             st.caption("登録済みのメールアドレスに確認コードを送ります。")
         elif is_existing and not has_password:
-            st.markdown('<div class="h-scr-title">初回ログイン</div>', unsafe_allow_html=True)
+            st.html('<div class="h-scr-title">初回ログイン</div>')
             st.caption("確認コードを送りますので、ログイン後にパスワードを設定してください。")
         else:
-            st.markdown('<div class="h-scr-title">メールアドレスで本人確認</div>', unsafe_allow_html=True)
+            st.html('<div class="h-scr-title">メールアドレスで本人確認</div>')
             st.caption("確認コードを送ります。")
 
         if not st.session_state.get("auth_code_sent"):
@@ -2297,7 +2288,7 @@ def render_form(ctx, concert_id: str = ""):
         # ── パスワード設定が必要な場合（初回マジックコード認証後） ──
         if st.session_state.get("form_need_set_password") and st.session_state.get("form_is_existing_auth"):
             pname = st.session_state.get("form_player_name", "")
-            st.markdown(f'<div class="h-scr-title">{pname} さん、パスワードを設定してください</div>', unsafe_allow_html=True)
+            st.html(f'<div class="h-scr-title">{pname} さん、パスワードを設定してください</div>')
             st.caption("次回から、メールアドレスとパスワードでログインできます。")
             with st.form("set_password_form"):
                 pw1 = st.text_input("パスワード（6文字以上）", type="password")
@@ -2383,15 +2374,12 @@ def render_form(ctx, concert_id: str = ""):
             _part_disp  = f"{my_part}　{_role_label}" if my_part and _role_label else (my_part or _role_label)
 
             # ── グリーティング ──
-            st.markdown(
-                f"""
+            st.html(f"""
                 <div class="h-f3 h-greet">
                     こんにちは、<strong>{pname}</strong> さん
                     {"" if not _part_disp else f'<span class="h-greet-part">{_part_disp}</span>'}
                 </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                """)
 
             # ── メニューカード ──
             att_unanswered = att_total - att_answered
@@ -2412,8 +2400,7 @@ def render_form(ctx, concert_id: str = ""):
                     pref_badge_html = f'<div class="h-badge">{pref_total - pref_answered}件未入力</div>'
                     pref_hint = f"{pref_answered}/{pref_total}パート 回答済"
 
-            st.markdown(
-                f"""
+            st.html(f"""
                 <div class="h-f4">
                   <div class="h-section">メニュー</div>
                   <div class="h-menu-item" id="menu-att">
@@ -2445,9 +2432,7 @@ def render_form(ctx, concert_id: str = ""):
                   </div>
                   '''}
                 </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                """)
 
             # 実際のボタン（非表示HTMLカードの裏で動くStreamlitボタン）
             if st.button("📅 出欠を入力・変更する", use_container_width=True, key="menu_att"):
@@ -2503,10 +2488,7 @@ def render_form(ctx, concert_id: str = ""):
             # ── Leader / Manager 専用メニュー ─────────────────
             if user_role >= ROLE_LEADER:
                 _section_label = "パートリーダーメニュー" if user_role == ROLE_LEADER else "Managerメニュー"
-                st.markdown(
-                    f'<div class="h-section" style="margin-top:18px;">🎖 {_section_label}</div>',
-                    unsafe_allow_html=True,
-                )
+                st.html(f'<div class="h-section" style="margin-top:18px;">🎖 {_section_label}</div>')
                 tab_att, tab_mem, tab_doc = st.tabs(["📋 出欠", "👥 メンバー", "📄 資料"])
                 with tab_att:
                     _att_label = "自パートの出欠一覧" if user_role == ROLE_LEADER else "全員の出欠一覧"
@@ -2617,13 +2599,13 @@ def render_form(ctx, concert_id: str = ""):
                         st.markdown(f"[📄 {_lbl}]({_url})")
 
             # ── フッター ──────────────────────────────────────
-            st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
+            st.html('<div style="height:16px;"></div>')
             if st.button("ログアウト", use_container_width=True, key="menu_logout"):
                 _logout_to_entry(_form_cookie_mgr)
-            st.markdown('<div class="h-footer">ArtéMis HARMONIA</div>', unsafe_allow_html=True)
+            st.html('<div class="h-footer">ArtéMis HARMONIA</div>')
             return
         # 新規奏者の場合: 名前・パート入力
-        st.markdown('<div class="h-scr-title">Step 1 / 基本情報を入力してください</div>', unsafe_allow_html=True)
+        st.html('<div class="h-scr-title">Step 1 / 基本情報を入力してください</div>')
         _auth_email = st.session_state.get("form_auth_email", "")
 
         # ── 種別選択はフォーム外（変更即時反映のため） ──────────
@@ -2758,7 +2740,7 @@ def render_form(ctx, concert_id: str = ""):
         part   = st.session_state.get("form_player_part","")
         is_new = st.session_state.get("form_is_new", False)
 
-        st.markdown('<div class="h-scr-title">Step 2 / 練習出欠を入力してください</div>', unsafe_allow_html=True)
+        st.html('<div class="h-scr-title">Step 2 / 練習出欠を入力してください</div>')
         st.caption(f"👤 {pname}　　パート：{part}")
         if is_new:
             st.success("✅ 新規奏者として登録しました。")
@@ -2848,7 +2830,7 @@ def render_form(ctx, concert_id: str = ""):
 
         visible_partdefs = [pd for pd in partdefs if _partdef_matches(pd)]
 
-        st.markdown('<div class="h-scr-title">Step 3 / パート希望を入力してください</div>', unsafe_allow_html=True)
+        st.html('<div class="h-scr-title">Step 3 / パート希望を入力してください</div>')
         st.caption("希望・NGのあるパートだけ入力してください。入力しないパートは「希望なし/降り番でも可」として扱われます。")
 
         if not visible_partdefs:
@@ -2878,8 +2860,7 @@ def render_form(ctx, concert_id: str = ""):
                 pd_name = ext(pd, PARTDEF_NAME_KEYS) or pd_id
                 cur_val = pref.get(pd_id, "希望なし/降り番でも可")
                 col_name, col_sel = st.columns([3, 3])
-                col_name.markdown(f"<div style='padding-top:8px'>{pd_name}</div>",
-                                  unsafe_allow_html=True)
+                col_name.html(f"<div style='padding-top:8px'>{pd_name}</div>")
                 new_val = col_sel.selectbox(
                     pd_name, PRIORITY_OPTS,
                     index=PRIORITY_OPTS.index(cur_val) if cur_val in PRIORITY_OPTS else 3,
@@ -2909,7 +2890,7 @@ def render_form(ctx, concert_id: str = ""):
 
     # ── STEP 4: 所有楽器（Percのみ） ─────────────────────────
     elif step == 4:
-        st.markdown('<div class="h-scr-title">Step 4 / 所有楽器の台数を入力してください</div>', unsafe_allow_html=True)
+        st.html('<div class="h-scr-title">Step 4 / 所有楽器の台数を入力してください</div>')
         st.caption("所有していない楽器は 0 のままで構いません。")
 
         if not req_insts:
@@ -2947,7 +2928,7 @@ def render_form(ctx, concert_id: str = ""):
         own          = st.session_state.get("form_own",  {})
         concert_name = ext(concert, CONCERT_NAME_KEYS) or ""
 
-        st.markdown('<div class="h-scr-title">Step 5 / 内容を確認して送信してください</div>', unsafe_allow_html=True)
+        st.html('<div class="h-scr-title">Step 5 / 内容を確認して送信してください</div>')
         st.markdown(f"**氏名：** {player_name}　　**パート：** {part}")
 
         if att:
