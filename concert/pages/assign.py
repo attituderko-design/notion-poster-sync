@@ -233,6 +233,7 @@ def _manual_assignment_sig(assignments: list[dict]) -> tuple:
             a.get("song_id", ""),
             a.get("part_id", ""),
             a.get("instrument_id", ""),
+            a.get("player_id", ""),
         ))
     return tuple(sig_items)
 
@@ -261,6 +262,27 @@ def _collect_assignment_changes(base_assignments: list[dict], edited_assignments
                 "from_player": b.get("player_name", bpid or "—"),
                 "to_player": a.get("player_name", epid or "—"),
             })
+    return out
+
+
+def _find_song_player_duplicates(assignments: list[dict]) -> dict[str, list[str]]:
+    by_song: dict[str, dict[str, int]] = {}
+    by_name: dict[str, dict[str, str]] = {}
+    for a in assignments:
+        sid = a.get("song_id", "")
+        pid = a.get("player_id", "")
+        pname = a.get("player_name", pid or "—")
+        if not sid or not pid:
+            continue
+        by_song.setdefault(sid, {})
+        by_name.setdefault(sid, {})
+        by_song[sid][pid] = by_song[sid].get(pid, 0) + 1
+        by_name[sid][pid] = pname
+    out: dict[str, list[str]] = {}
+    for sid, cnts in by_song.items():
+        dup_names = [by_name[sid].get(pid, pid) for pid, n in cnts.items() if n > 1]
+        if dup_names:
+            out[sid] = dup_names
     return out
 
 
@@ -334,10 +356,14 @@ def _render_manual_assignment_editor(
                 part_labels = [edited[i].get("part_name", "—") for i in song_rows]
                 cur_pids = [edited[i].get("player_id", "") for i in song_rows]
                 cur_pnames = [edited[i].get("player_name", pid or "—") for i, pid in zip(song_rows, cur_pids)]
+                if len(set(cur_pids)) != len(cur_pids):
+                    st.error("同一曲で同じ奏者が重複しています。まず「この曲を元に戻す」で解消してください。")
+                    st.markdown("---")
+                    continue
                 token_to_pid: dict[str, str] = {}
                 player_tokens: list[str] = []
-                for n, (row_idx, pname, pid) in enumerate(zip(song_rows, cur_pnames, cur_pids), start=1):
-                    token = f"{n}. {pname}"
+                for row_idx, pname, pid in zip(song_rows, cur_pnames, cur_pids):
+                    token = f"{pname} ｜{pid[:6]}"
                     player_tokens.append(token)
                     token_to_pid[token] = pid
 
@@ -1498,6 +1524,12 @@ def _render_solver_tab(ctx: dict):
     else:
         results = _e_res_sw
 
+    # 生成結果の健全性チェック（同一曲で同一奏者の重複割当は不可）
+    for _r in results:
+        _dup = _find_song_player_duplicates(_r.get("assignments", []))
+        if _dup:
+            st.error(f"{_r.get('label', '候補')} に重複割当が含まれています。再生成または手動修正してください。")
+
     # 検証：共通再採点で解の品質を比較
     with st.expander("🔬 解の検証（共通再採点）", expanded=False):
         try:
@@ -1746,6 +1778,14 @@ def _render_solver_tab(ctx: dict):
             # 採用ボタン
             st.divider()
             _changes = _collect_assignment_changes(result["assignments"], display_assignments)
+            _dup_map = _find_song_player_duplicates(display_assignments)
+            if _dup_map:
+                _dup_lines: list[str] = []
+                for _sid, _names in _dup_map.items():
+                    _dup_lines.append(f"{song_name_map.get(_sid, _sid)}: {', '.join(_names)}")
+                st.error("同一曲で同一奏者の重複割当があります。採用前に解消してください。")
+                for _line in _dup_lines:
+                    st.markdown(f"- {_line}")
             if _changes:
                 st.warning(f"手動変更 {len(_changes)}件（採用時は下記の内容で書き込みます）")
                 for c in _changes[:30]:
@@ -1758,7 +1798,8 @@ def _render_solver_tab(ctx: dict):
             else:
                 st.caption("手動変更なし（候補案そのままで採用されます）")
             if st.button(f"✅ この案を採用してNotionに書き込む",
-                         key=f"adopt_{result['label']}", type="primary"):
+                         key=f"adopt_{result['label']}", type="primary",
+                         disabled=bool(_dup_map)):
                 _write_assignments_to_notion(ctx, display_assignments, result["pref_map"])
 
 
