@@ -525,6 +525,22 @@ def _inject_form_styles() -> None:
             font-weight: 500 !important;
             line-height: 1 !important;
         }
+        [data-baseweb="button-group"] {
+            width: 100%;
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 6px;
+        }
+        [data-baseweb="button-group"] button {
+            min-height: 38px !important;
+            border-radius: 8px !important;
+            border: .5px solid rgba(255,255,255,.08) !important;
+            background: rgba(255,255,255,.03) !important;
+            color: rgba(180,200,240,.8) !important;
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 16px !important;
+            justify-content: center !important;
+        }
         </style>
         """)
 
@@ -2884,8 +2900,26 @@ def render_form(ctx, concert_id: str = ""):
                 cur = existing_att.get(pr_id, {})
                 cur_status = session_att.get(pr_id) or cur.get("status", "△")
                 idx = ATT_OPTS.index(cur_status) if cur_status in ATT_OPTS else 1
-                val = st.radio("　", ATT_OPTS, index=idx, horizontal=True,
-                               key=f"att_{pr_id}", label_visibility="collapsed")
+                if hasattr(st, "segmented_control"):
+                    val = st.segmented_control(
+                        "出欠",
+                        ATT_OPTS,
+                        selection_mode="single",
+                        default=ATT_OPTS[idx],
+                        key=f"att_{pr_id}",
+                        label_visibility="collapsed",
+                    )
+                    if not val:
+                        val = ATT_OPTS[idx]
+                else:
+                    val = st.radio(
+                        "　",
+                        ATT_OPTS,
+                        index=idx,
+                        horizontal=True,
+                        key=f"att_{pr_id}",
+                        label_visibility="collapsed",
+                    )
                 att[pr_id] = val
                 att_comment[pr_id] = st.text_input(
                     "コメント（任意）",
