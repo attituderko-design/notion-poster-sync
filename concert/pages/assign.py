@@ -378,8 +378,17 @@ def _render_manual_assignment_editor(
                     ordered_tokens = _sort_items(player_tokens, direction="vertical", key=f"manual_dnd_{key}_{sid}")
                 if isinstance(ordered_tokens, list) and len(ordered_tokens) == len(song_rows):
                     _same_order = (ordered_tokens == player_tokens)
-                    if _same_order:
-                        st.caption("現在の順序と同じです。")
+                    _song_changed_count = 0
+                    for row_idx in song_rows:
+                        a = edited[row_idx]
+                        k = (a.get("song_id", ""), a.get("part_id", ""), a.get("instrument_id", ""))
+                        b = base_map.get(k)
+                        if b and b.get("player_id", "") != a.get("player_id", ""):
+                            _song_changed_count += 1
+                    if _same_order and _song_changed_count == 0:
+                        st.caption("現在の割当順と同じです（この曲の手動変更はありません）。")
+                    elif _same_order and _song_changed_count > 0:
+                        st.caption(f"現在の割当順と同じです（この曲は手動変更 {_song_changed_count}件を保持中）。")
                     else:
                         st.info("並べ替え結果を確認して「この順序を反映」を押すと割当を更新します。")
                     if st.button(
