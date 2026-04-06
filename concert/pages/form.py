@@ -433,16 +433,35 @@ def _inject_form_styles() -> None:
             background: rgba(255,255,255,.025) !important;
         }
         /* expander見出しテキストのフォントを明示 */
-        [data-testid="stExpander"] summary p {
+        [data-testid="stExpander"] summary p,
+        [data-testid="stExpander"] summary span,
+        [data-testid="stExpander"] summary div {
             font-family: "Outfit", "Noto Sans JP", sans-serif !important;
             font-weight: 500 !important;
             letter-spacing: 0.01em;
         }
-        /* expanderトグルはMaterial系フォントへ戻す（_arrow_*文字化け対策） */
+        /* expanderトグル文字化け対策:
+           Materialアイコン依存をやめ、▸/▾を擬似要素で描画 */
         [data-testid="stExpander"] [data-testid="stExpanderToggleIcon"],
         [data-testid="stExpander"] [data-testid="stExpanderToggleIcon"] * {
-            font-family: "Material Symbols Rounded", "Material Symbols Outlined", "Material Icons", "Material Icons Outlined", sans-serif !important;
-            font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+            font-size: 0 !important;
+            line-height: 0 !important;
+            color: transparent !important;
+            width: 1.05rem;
+            min-width: 1.05rem;
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        [data-testid="stExpander"] [data-testid="stExpanderToggleIcon"]::before {
+            content: "▸";
+            font-size: 0.92rem;
+            line-height: 1;
+            color: rgba(232, 237, 247, 0.88);
+        }
+        [data-testid="stExpander"] details[open] [data-testid="stExpanderToggleIcon"]::before {
+            content: "▾";
         }
         [data-testid="stMetricValue"] { font-size: 16px !important; }
         [data-testid="stMetricLabel"] > div {
