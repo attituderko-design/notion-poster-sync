@@ -477,13 +477,6 @@ def _inject_form_styles() -> None:
             font-family: 'Outfit', sans-serif !important;
             font-size: var(--h-font-button) !important;
             transition: border-color .15s ease, background .15s ease;
-            background: rgba(255,255,255,.035) !important;
-            color: #dbe5f9 !important;
-            text-align: left !important;
-            justify-content: flex-start !important;
-            padding: 0 14px !important;
-            line-height: 1.25 !important;
-            font-weight: 500 !important;
         }
         div[data-testid="stFormSubmitButton"] > button {
             border-radius: 11px !important;
@@ -491,13 +484,6 @@ def _inject_form_styles() -> None:
             min-height: var(--h-tap-min) !important;
             font-family: 'Outfit', sans-serif !important;
             font-size: var(--h-font-button) !important;
-            background: rgba(255,255,255,.035) !important;
-            color: #dbe5f9 !important;
-            text-align: left !important;
-            justify-content: flex-start !important;
-            padding: 0 14px !important;
-            line-height: 1.25 !important;
-            font-weight: 500 !important;
         }
         .stButton > button:hover, .stDownloadButton > button:hover {
             border-color: rgba(74,158,255,.5) !important;
@@ -506,12 +492,6 @@ def _inject_form_styles() -> None:
         div[data-testid="stFormSubmitButton"] > button:hover {
             border-color: rgba(74,158,255,.5) !important;
             background: rgba(74,158,255,.08) !important;
-        }
-        .stButton > button:disabled,
-        div[data-testid="stFormSubmitButton"] > button:disabled {
-            opacity: .62 !important;
-            color: rgba(198, 210, 232, .8) !important;
-            background: rgba(255,255,255,.025) !important;
         }
         .stTextInput input, .stTextArea textarea,
         .stSelectbox [data-baseweb="select"] > div,
