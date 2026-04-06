@@ -9724,10 +9724,10 @@ if system_mode == "HARMONIA":
             ("⑥ パート定義の確定", _progress_state(stats['partdef_header_confirmed'], (_any_checked(filtered_cs, _H_KEYS['concert_song_done']) or stats['partdef_count'] > 0)), f"PART_DEFINITION {stats['partdef_count']} 件"),
             ("⑦ 所有楽器の確定", _progress_state(stats['ownership_header_confirmed'], stats['ownership_confirm_count'] > 0), f"所有楽器入力 {stats['ownership_confirm_count']} / {stats['ownership_target_count']} 人"),
             ("⑧ 持参楽器の確定", _progress_state(stats['bring_header_confirmed'], stats['practice_bring_confirm_count'] > 0), f"持参楽器入力 {stats['practice_bring_confirm_count']} / {stats['attendance_practice_count']} 回"),
-            ("⑨ 出欠の確定", _progress_state(stats['attendance_header_confirmed'], stats['attendance_record_count'] > 0), f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"),
-            ("⑩ 各奏者パート希望の確定", _progress_state(stats['preference_header_confirmed'], stats['participant_count'] > 0 and stats['preference_pending_count'] < stats['participant_count']), f"希望未提出 {stats['preference_pending_count']} 人"),
+            ("⑨ 出欠の確定", 1.0 if (stats['attendance_header_confirmed'] or (stats['participant_count'] > 0 and stats['unanswered_count'] == 0)) else _progress_state(False, stats['attendance_record_count'] > 0), f"参加者 {stats['participant_count']} 人 / 出欠未回答 {stats['unanswered_count']} 人"),
+            ("⑩ 各奏者パート希望の確定", 1.0 if (stats['preference_header_confirmed'] or (stats['participant_count'] > 0 and stats['preference_pending_count'] == 0)) else _progress_state(False, stats['participant_count'] > 0 and stats['preference_pending_count'] < stats['participant_count']), f"希望未提出 {stats['preference_pending_count']} 人"),
             ("⑪ アサイン案の提示", _progress_state(stats['proposal_header_done'], stats['proposal_count'] > 0), "案提示済み" if stats['proposal_header_done'] else "未着手"),
-            ("⑫ アサイン情報の確定", _progress_state(stats['assign_header_confirmed'], stats['assign_confirm_count'] > 0), "アサイン確定済み" if stats['assign_header_confirmed'] else "未着手"),
+            ("⑫ アサイン情報の確定", _progress_state(stats['assign_header_confirmed'], stats['proposal_header_done'] or stats['assign_confirm_count'] > 0), "アサイン確定済み" if stats['assign_header_confirmed'] else ("案提示済み・確定待ち" if stats['proposal_header_done'] else "未着手")),
             ("⑬ レンタル・収支", _progress_state(stats['finance_header_confirmed'], (stats['rental_unconfirmed_count'] > 0 or confirmed_expense_count > 0 or stats['expense_confirmed_total'] > 0)), f"見積未確定 {stats['rental_unconfirmed_count']} 件 / 経費確定 ¥{stats['expense_confirmed_total']:,}"),
         ]
         ratios = [x[1] for x in stats['step_items']]
@@ -9736,6 +9736,16 @@ if system_mode == "HARMONIA":
         return stats
 
     def _render_harmonia_progress_cards(stats: dict):
+        def _go_to_page(dest: str):
+            _concert_page_options_local = [
+                "🏠 ホーム", "練習管理", "楽曲・楽器管理",
+                "奏者・出欠・持参楽器", "アサイン検討",
+                "レンタル管理", "収支・振込管理", "🧪 テストデータ管理",
+            ]
+            if dest in _concert_page_options_local:
+                st.session_state["concert_page_index"] = _concert_page_options_local.index(dest)
+                st.session_state["concert_page_radio"] = dest
+
         # ── 全体進捗バー ──────────────────────────────────────
         ratio = max(0.0, min(1.0, float(stats.get("overall_progress_ratio", 0.0))))
         pct   = int(round(ratio * 100))
@@ -9766,13 +9776,7 @@ if system_mode == "HARMONIA":
                 c1.caption(_desc)
                 if _dest:
                     if c2.button(f"→ {_dest}", key="home_next_action_btn", use_container_width=True):
-                        _concert_page_options = [
-                            "🏠 ホーム", "練習管理", "楽曲・楽器管理",
-                            "奏者・出欠・持参楽器", "アサイン検討",
-                            "レンタル管理", "収支・振込管理", "🧪 テストデータ管理",
-                        ]
-                        if _dest in _concert_page_options:
-                            st.session_state["concert_page_index"] = _concert_page_options.index(_dest)
+                        _go_to_page(_dest)
                         st.rerun()
 
         st.markdown("---")
@@ -9844,6 +9848,7 @@ if system_mode == "HARMONIA":
                 ]
                 if page in _concert_page_options_local:
                     st.session_state["concert_page_index"] = _concert_page_options_local.index(page)
+                    st.session_state["concert_page_radio"] = page
                 st.rerun()
 
 
