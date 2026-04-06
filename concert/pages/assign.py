@@ -297,12 +297,20 @@ def _get_manual_assignments(concert_id: str, result_label: str, base_assignments
     key = _manual_assignment_state_key(concert_id, result_label)
     sig_key = f"{key}_sig"
     dirty_key = f"{key}_dirty"
+    gen_key = f"{key}_gen"
+    cur_gen = int(st.session_state.get(f"assign_generation_{concert_id}", 0) or 0)
     base_sig = _manual_assignment_sig(base_assignments)
     # dirtyフラグが無い旧セッション状態は破棄して初期化する
     if dirty_key not in st.session_state:
         st.session_state[key] = [dict(a) for a in base_assignments]
         st.session_state[sig_key] = base_sig
         st.session_state[dirty_key] = False
+        st.session_state[gen_key] = cur_gen
+    elif int(st.session_state.get(gen_key, -1)) != cur_gen:
+        st.session_state[key] = [dict(a) for a in base_assignments]
+        st.session_state[sig_key] = base_sig
+        st.session_state[dirty_key] = False
+        st.session_state[gen_key] = cur_gen
     elif (key not in st.session_state) or (st.session_state.get(sig_key) != base_sig):
         st.session_state[key] = [dict(a) for a in base_assignments]
         st.session_state[sig_key] = base_sig
@@ -1450,6 +1458,11 @@ def _render_solver_tab(ctx: dict):
                 if not e_results:
                     st.warning("⚠️ 厳密解の計算に失敗しました。ヒューリスティック解のみ表示します。")
                 st.session_state[f"assign_result_exact_{concert_id}"] = e_results
+
+                # 候補生成の世代を進め、手動編集状態をこの世代に同期させる
+                st.session_state[f"assign_generation_{concert_id}"] = int(
+                    st.session_state.get(f"assign_generation_{concert_id}", 0) or 0
+                ) + 1
 
                 # 表示用はヒューリスティックをデフォルトに
                 st.success("✅ 候補案を生成しました。")
