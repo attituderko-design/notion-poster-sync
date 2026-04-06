@@ -208,6 +208,13 @@ def _clear_assign_cache():
             st.session_state.pop(k, None)
 
 
+def _clear_manual_assignment_state(concert_id: str):
+    prefix = f"assign_manual_{concert_id}_"
+    for k in list(st.session_state.keys()):
+        if k.startswith(prefix):
+            st.session_state.pop(k, None)
+
+
 def _normalize_page_id(v: str) -> str:
     return (v or "").replace("-", "").strip().lower()
 
@@ -1295,6 +1302,8 @@ def _render_solver_tab(ctx: dict):
     st.caption("ヒューリスティック解（高速）と厳密解（整数計画法）を同時に生成します。")
 
     if st.button("▶ 候補案を生成", type="primary", key=f"run_solver_{concert_id}"):
+        # 再生成時は、候補タブでの手動変更状態を初期化する
+        _clear_manual_assignment_state(concert_id)
         with st.spinner("候補案を生成中...（厳密解を含むため数秒かかります）"):
             try:
                 from concert.services.assign_solver import (
