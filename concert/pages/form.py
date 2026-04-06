@@ -502,6 +502,29 @@ def _inject_form_styles() -> None:
         label[data-testid="stWidgetLabel"] { font-size: 13px !important; color: rgba(160,180,220,.65) !important; }
         .stAlert p { font-size: 14px !important; }
         </style>
+        <script>
+        (() => {
+          const cleanArrowText = () => {
+            const roots = document.querySelectorAll('[data-testid="stExpander"] summary');
+            roots.forEach((summary) => {
+              const walker = document.createTreeWalker(summary, NodeFilter.SHOW_TEXT);
+              const nodes = [];
+              while (walker.nextNode()) nodes.push(walker.currentNode);
+              nodes.forEach((n) => {
+                const t = n.nodeValue || "";
+                const cleaned = t
+                  .replace(/\.?_?arrow_(right|down)\b/gi, "")
+                  .replace(/\b(material_)?icon\b/gi, "")
+                  .replace(/\s{2,}/g, " ");
+                if (cleaned !== t) n.nodeValue = cleaned;
+              });
+            });
+          };
+          cleanArrowText();
+          const mo = new MutationObserver(() => cleanArrowText());
+          mo.observe(document.body, { childList: true, subtree: true, characterData: true });
+        })();
+        </script>
         """)
 
 
@@ -2551,7 +2574,7 @@ def render_form(ctx, concert_id: str = ""):
                 tab_att, tab_mem, tab_doc = st.tabs(["📋 出欠", "👥 メンバー", "📄 資料"])
                 with tab_att:
                     _att_label = "自パートの出欠一覧" if user_role == ROLE_LEADER else "全員の出欠一覧"
-                    with st.expander(f"📋 {_att_label}", expanded=True):
+                    with st.expander(f"📋 {_att_label}", expanded=False):
                         if practices:
                             _render_attendance_overview(
                                 ctx, concert_id, participant_rows, practices,
@@ -2561,7 +2584,7 @@ def render_form(ctx, concert_id: str = ""):
                             st.info("練習日が登録されていません。")
                 with tab_mem:
                     _mem_label = "自パートのメンバー一覧" if user_role == ROLE_LEADER else "全員のメンバー一覧（連絡先含む）"
-                    with st.expander(f"👥 {_mem_label}", expanded=True):
+                    with st.expander(f"👥 {_mem_label}", expanded=False):
                         _render_member_list(
                             ctx, concert_id, participant_rows,
                             my_part_master_id, user_role
@@ -2991,7 +3014,7 @@ def render_form(ctx, concert_id: str = ""):
         st.markdown(f"**氏名：** {player_name}　　**パート：** {part}")
 
         if att:
-            with st.expander("出欠", expanded=True):
+            with st.expander("出欠", expanded=False):
                 prac_map = {p.get("id",""): ext(p, PRACTICE_NAME_KEYS) or "" for p in practices}
                 for pr_id, status in att.items():
                     st.write(f"{prac_map.get(pr_id, pr_id)}：**{status}**")
@@ -3001,14 +3024,14 @@ def render_form(ctx, concert_id: str = ""):
                 st.caption("※ 本番当日は自動で○が登録されます。")
 
         if pref:
-            with st.expander("パート希望", expanded=True):
+            with st.expander("パート希望", expanded=False):
                 pd_map = {p.get("id",""): ext(p, PARTDEF_NAME_KEYS) or "" for p in partdefs}
                 for pd_id, priority in pref.items():
                     st.write(f"{pd_map.get(pd_id, pd_id)}：**{priority}**")
 
         owned = {iid: cnt for iid, cnt in own.items() if cnt > 0}
         if owned:
-            with st.expander("所有楽器", expanded=True):
+            with st.expander("所有楽器", expanded=False):
                 for iid, cnt in owned.items():
                     st.write(f"{inst_map.get(iid, iid)}：{cnt}台")
 
@@ -3156,7 +3179,7 @@ def render_form(ctx, concert_id: str = ""):
 
         # テスト用デバッグ情報（URLにdebug=1がある場合のみ表示）
         if st.query_params.get("debug") == "1" and debug:
-            with st.expander("🔧 デバッグ情報", expanded=True):
+            with st.expander("🔧 デバッグ情報", expanded=False):
                 for k, v in debug.items():
                     st.code(f"{k}: {v}")
 
