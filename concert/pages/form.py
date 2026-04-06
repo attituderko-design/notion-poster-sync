@@ -480,6 +480,9 @@ def _inject_form_styles() -> None:
             display: flex;
             align-items: center;
             gap: .45rem;
+            /* Material iconのリガチャ文字(_arrow_*)を確実に不可視化 */
+            font-size: 0 !important;
+            line-height: 0 !important;
         }
         [data-testid="stExpander"] summary::before {
             content: "▸";
@@ -490,6 +493,13 @@ def _inject_form_styles() -> None:
         }
         [data-testid="stExpander"] details[open] > summary::before {
             content: "▾";
+        }
+        /* 見出しテキスト本体だけ表示サイズを戻す */
+        [data-testid="stExpander"] summary p,
+        [data-testid="stExpander"] summary span,
+        [data-testid="stExpander"] summary div {
+            font-size: 1rem !important;
+            line-height: 1.45 !important;
         }
         [data-testid="stMetricValue"] { font-size: 16px !important; }
         [data-testid="stMetricLabel"] > div {
