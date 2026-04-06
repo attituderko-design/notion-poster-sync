@@ -10,6 +10,10 @@ from concert.services.keys import *  # noqa: F401,F403
 from collections import defaultdict
 import re
 import math
+try:
+    from streamlit_sortables import sort_items as _sort_items
+except Exception:
+    _sort_items = None
 
 
 # ============================================================
@@ -277,8 +281,39 @@ def _render_manual_assignment_editor(
             if not song_rows:
                 continue
             st.markdown(f"**{song_name_map.get(sid, sid)}**")
+            if _sort_items is not None and len(song_rows) >= 2:
+                st.caption("ドラッグで担当者の順番を並べ替えると、上から順にパートへ再割当します。")
+                part_labels = [edited[i].get("part_name", "—") for i in song_rows]
+                cur_pids = [edited[i].get("player_id", "") for i in song_rows]
+                cur_pnames = [edited[i].get("player_name", pid or "—") for i, pid in zip(song_rows, cur_pids)]
+                token_to_pid: dict[str, str] = {}
+                player_tokens: list[str] = []
+                for n, (pid, pname) in enumerate(zip(cur_pids, cur_pnames), start=1):
+                    token = f"{n}. {pname}"
+                    player_tokens.append(token)
+                    token_to_pid[token] = pid
+                d1, d2 = st.columns([5, 5])
+                with d1:
+                    st.caption("パート順（固定）")
+                    for p in part_labels:
+                        st.markdown(f"- {p}")
+                with d2:
+                    st.caption("担当者（ドラッグで並べ替え）")
+                    ordered_tokens = _sort_items(player_tokens, direction="vertical", key=f"manual_dnd_{key}_{sid}")
+                if isinstance(ordered_tokens, list) and len(ordered_tokens) == len(song_rows):
+                    for pos, row_idx in enumerate(song_rows):
+                        tok = ordered_tokens[pos]
+                        new_pid = token_to_pid.get(tok, edited[row_idx].get("player_id", ""))
+                        if new_pid != edited[row_idx].get("player_id", ""):
+                            edited[row_idx]["player_id"] = new_pid
+                            edited[row_idx]["player_name"] = player_label_map.get(new_pid, new_pid)
+                            st.session_state[open_key] = True
+                st.caption("現在の割当プレビュー")
+                for row_idx in song_rows:
+                    st.markdown(f"- {edited[row_idx].get('part_name', '—')} ← {edited[row_idx].get('player_name', '—')}")
+                st.markdown("---")
             if len(song_rows) >= 2:
-                st.caption("同じ曲の中で、選んだ2つのパートの担当者を入れ替えます。")
+                st.caption("タップ操作向け: 下の2選択でも入れ替えできます。")
                 sw1, sw2, swb = st.columns([4, 4, 2])
                 _swap_meta = {
                     i: {
