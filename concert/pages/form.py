@@ -121,8 +121,10 @@ def _inject_form_styles() -> None:
             --form-accent-2: #2b7fd8;
         }
         .stApp .block-container {
-            max-width: 1120px;
+            max-width: min(1000px, calc(100vw - 1.4rem));
             padding-top: 1.0rem;
+            padding-left: clamp(.6rem, 1.5vw, 1.1rem);
+            padding-right: clamp(.6rem, 1.5vw, 1.1rem);
         }
         .form-hero {
             background:
@@ -191,6 +193,31 @@ def _inject_form_styles() -> None:
         [data-testid="stMetricLabel"] > div {
             color: var(--form-text-muted);
             font-weight: 600;
+        }
+        /* Responsive: モバイルは操作優先で広く、PCは可読性優先で幅を絞る */
+        @media (max-width: 768px) {
+            .stApp .block-container {
+                max-width: calc(100vw - .5rem);
+                padding-left: .5rem;
+                padding-right: .5rem;
+            }
+            .form-hero {
+                border-radius: 12px;
+                padding: .85rem .8rem;
+                margin: .3rem 0 .8rem 0;
+            }
+            .form-hero-title {
+                font-size: 1.28rem;
+            }
+            .stButton > button,
+            .stDownloadButton > button {
+                min-height: 2.75rem;
+            }
+        }
+        @media (min-width: 1200px) {
+            .stApp .block-container {
+                max-width: 940px;
+            }
         }
         </style>
         """,
