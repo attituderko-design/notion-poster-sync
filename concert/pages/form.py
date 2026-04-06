@@ -100,6 +100,130 @@ def _resolve_part_type(part_master_id: str) -> str:
     return pm_map.get(part_master_id, {}).get("type", "")
 
 
+def _get_part_leader_recipients(
+    ctx: dict,
+    concert_id: str,
+    part_master_id: str,
+    exclude_player_id: str = "",
+) -> list[dict]:
+    """同一演奏会・同一パートのLeader宛先を返す。"""
+    if not concert_id or not part_master_id:
+        return []
+    try:
+        ext = ctx["extract_prop_text_any"]
+        participants = st.session_state.get("form_participant_rows_concert")
+        if participants is None:
+            participants = [
+                r for r in ctx["query_all"](ctx["CONCERT_DB_PARTICIPANT"], None)
+                if concert_id in ctx["extract_relation_ids_any"](r, PARTICIPANT_CONCERT_REL_KEYS)
+            ]
+        players = st.session_state.get("form_all_players")
+        if players is None:
+            players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+        player_map = {p.get("id", ""): p for p in players}
+
+        recipients: list[dict] = []
+        seen: set[str] = set()
+        for row in participants:
+            role_name = (ext(row, PARTICIPANT_SYSTEM_ROLE_KEYS) or "").strip()
+            if role_name != "Leader":
+                continue
+            row_part_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PART_REL_KEYS)
+            if part_master_id not in row_part_ids:
+                continue
+            row_player_ids = ctx["extract_relation_ids_any"](row, PARTICIPANT_PLAYER_REL_KEYS)
+            for pid in row_player_ids:
+                if pid == exclude_player_id:
+                    continue
+                pl = player_map.get(pid, {})
+                email = (ext(pl, PLAYER_EMAIL_KEYS) or "").strip()
+                if not email:
+                    continue
+                key = email.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                recipients.append({
+                    "name": (ext(pl, PLAYER_NAME_KEYS) or "パートリーダー").strip(),
+                    "email": email,
+                })
+        return recipients
+    except Exception:
+        return []
+
+
+def _render_next_practice_panel(ctx: dict, practices: list) -> None:
+    """直近の練習カード（PDF生成含む）を表示。"""
+    ext = ctx["extract_prop_text_any"]
+    from datetime import date as _date_cls
+
+    today = _date_cls.today()
+    next_practice = None
+    for pr in practices:
+        pr_date_str = ext(pr, PRACTICE_DATE_KEYS) or ""
+        if pr_date_str and len(pr_date_str) >= 10:
+            try:
+                pr_d = _date_cls.fromisoformat(pr_date_str[:10])
+                if pr_d >= today:
+                    if next_practice is None or pr_d < _date_cls.fromisoformat(ext(next_practice, PRACTICE_DATE_KEYS)[:10]):
+                        next_practice = pr
+            except Exception:
+                pass
+    if not next_practice:
+        return
+
+    pr_id_next    = next_practice.get("id", "")
+    pr_name_next  = ext(next_practice, PRACTICE_NAME_KEYS) or "練習"
+    pr_date_next  = ext(next_practice, PRACTICE_DATE_KEYS) or ""
+    pr_venue_next = ext(next_practice, PRACTICE_VENUE_KEYS) or ""
+    pr_addr_next  = ext(next_practice, ["会場住所", "住所", "Address"]) or ""
+    pr_date_disp  = pr_date_next[:10] if pr_date_next else ""
+    pr_time_disp  = pr_date_next[11:16] if len(pr_date_next) > 10 else ""
+    try:
+        _wd = _date_cls.fromisoformat(pr_date_disp)
+        pr_weekday = ["月", "火", "水", "木", "金", "土", "日"][_wd.weekday()]
+    except Exception:
+        pr_weekday = ""
+
+    with st.container(border=True):
+        st.caption("📅 直近の練習")
+        st.markdown(f"**{pr_name_next}**")
+        if pr_date_disp:
+            _label = f"{pr_date_disp}（{pr_weekday}）" if pr_weekday else pr_date_disp
+            if pr_time_disp:
+                _label += f" {pr_time_disp}"
+            st.caption(f"🗓 {_label}")
+        if pr_venue_next:
+            st.caption(f"📍 {pr_venue_next}")
+        if pr_addr_next:
+            import urllib.parse
+            _maps_url = "https://www.google.com/maps/search/?api=1&query=" + urllib.parse.quote(pr_addr_next)
+            st.markdown(f"[🗺 Google Mapsで開く]({_maps_url})")
+
+        _pdf_key = f"form_pdf_bytes_{pr_id_next}"
+        if _pdf_key not in st.session_state:
+            if st.button("📄 練習情報PDFを生成する", key=f"gen_pdf_{pr_id_next}", use_container_width=True):
+                with st.spinner("PDF生成中..."):
+                    try:
+                        from concert.services.practice_report import generate_practice_report
+                        _pdf_bytes = generate_practice_report(ctx, pr_id_next)
+                        st.session_state[_pdf_key] = _pdf_bytes
+                        st.rerun()
+                    except Exception as _e:
+                        st.error(f"PDF生成に失敗しました: {_e}")
+        else:
+            from concert.services.convert_utils import render_report_output
+            render_report_output(
+                st.session_state[_pdf_key],
+                filename=f"練習情報PDF_{pr_name_next.replace('/', '-')}",
+                label="練習情報PDF",
+                key_prefix=f"player_{pr_id_next}",
+            )
+            if st.button("🔄 PDFを再生成", key=f"regen_pdf_{pr_id_next}", use_container_width=True):
+                st.session_state.pop(_pdf_key, None)
+                st.rerun()
+
+
 def _render_brand_logo() -> None:
     """フォーム上部ロゴを安全に1枚だけ表示。"""
     logo_path = Path(__file__).resolve().parents[2] / "assets" / "logo.png"
@@ -1827,7 +1951,7 @@ def render_form(ctx, concert_id: str = ""):
         f"""
         <div class="form-hero">
             <h1 class="form-hero-title" style="margin-bottom:.2rem;">
-                <span style="font-size: 0.88em; opacity:.92;">🎵 {c_name} 奏者入力フォーム</span>
+                <span style="font-size: 0.88em; opacity:.92;">🎵 {c_name} My Page</span>
             </h1>
         </div>
         """,
@@ -2181,6 +2305,8 @@ def render_form(ctx, concert_id: str = ""):
                 c1.metric("出欠", att_status)
                 c2.metric("パート希望", pref_status)
 
+            # 直近練習はメニュー上部に表示（導線優先）
+            _render_next_practice_panel(ctx, practices)
             st.divider()
 
             # ── 基本メニュー（全ロール共通） ─────────────────
@@ -2222,7 +2348,7 @@ def render_form(ctx, concert_id: str = ""):
                     _assign_label = "自パートのアサイン状況（曲で絞り込み）"
                 else:
                     _assign_label = "自パートのアサイン状況"
-                with st.expander(f"🎯 {_assign_label}", expanded=True):
+                with st.expander(f"🎯 {_assign_label}", expanded=False):
                     _render_assignment_view(ctx, concert_id, my_part_master_id, user_role)
 
             if IS_PERC(my_part):
@@ -2239,184 +2365,82 @@ def render_form(ctx, concert_id: str = ""):
                 st.divider()
                 _section_label = "パートリーダーメニュー" if user_role == ROLE_LEADER else "Managerメニュー"
                 st.markdown(f"**🎖 {_section_label}**")
-
-                # 出欠一覧
-                _att_label = "自パートの出欠一覧" if user_role == ROLE_LEADER else "全員の出欠一覧"
-                with st.expander(f"📋 {_att_label}", expanded=False):
-                    if practices:
-                        _render_attendance_overview(
-                            ctx, concert_id, participant_rows, practices,
+                tab_att, tab_mem, tab_doc = st.tabs(["📋 出欠", "👥 メンバー", "📄 資料"])
+                with tab_att:
+                    _att_label = "自パートの出欠一覧" if user_role == ROLE_LEADER else "全員の出欠一覧"
+                    with st.expander(f"📋 {_att_label}", expanded=True):
+                        if practices:
+                            _render_attendance_overview(
+                                ctx, concert_id, participant_rows, practices,
+                                my_part_master_id, user_role
+                            )
+                        else:
+                            st.info("練習日が登録されていません。")
+                with tab_mem:
+                    _mem_label = "自パートのメンバー一覧" if user_role == ROLE_LEADER else "全員のメンバー一覧（連絡先含む）"
+                    with st.expander(f"👥 {_mem_label}", expanded=True):
+                        _render_member_list(
+                            ctx, concert_id, participant_rows,
                             my_part_master_id, user_role
                         )
-                    else:
-                        st.info("練習日が登録されていません。")
+                with tab_doc:
+                    if practices:
+                        with st.expander("📄 練習情報PDF（全練習回）", expanded=False):
+                            # スケジュール・レンタル・持参情報を事前取得してステータス判定
+                            _all_sched  = ctx["query_all"](ctx.get("CONCERT_DB_SCHEDULE","") or "", None) if ctx.get("CONCERT_DB_SCHEDULE") else []
+                            _all_rental = ctx["query_all"](ctx.get("CONCERT_DB_RENTAL","") or "", None) if ctx.get("CONCERT_DB_RENTAL") else []
+                            _all_pi     = ctx["query_all"](ctx.get("CONCERT_DB_PLAYER_INSTRUMENT","") or "", None) if ctx.get("CONCERT_DB_PLAYER_INSTRUMENT") else []
 
-                # メンバー一覧
-                _mem_label = "自パートのメンバー一覧" if user_role == ROLE_LEADER else "全員のメンバー一覧（連絡先含む）"
-                with st.expander(f"👥 {_mem_label}", expanded=False):
-                    _render_member_list(
-                        ctx, concert_id, participant_rows,
-                        my_part_master_id, user_role
-                    )
+                            for _pr in practices:
+                                _pr_id   = _pr.get("id","")
+                                _pr_name = ext(_pr, PRACTICE_NAME_KEYS) or "練習"
+                                _pr_date = (ext(_pr, PRACTICE_DATE_KEYS) or "")[:10]
+                                _pdf_key = f"form_pdf_bytes_{_pr_id}"
 
-                # 練習情報PDF（Leader以上）
-                if practices:
-                    st.markdown("**📄 練習情報PDF（全練習回）**")
+                                _venue_ok   = bool(ext(_pr, PRACTICE_VENUE_KEYS))
+                                _sched_ok   = any(
+                                    _pr_id in ctx["extract_relation_ids_any"](r, ["練習","FK練習","practice"])
+                                    for r in _all_sched
+                                )
+                                _rental_ok  = any(
+                                    _pr_id in ctx["extract_relation_ids_any"](r, ["練習","FK練習","practice"])
+                                    and ctx["extract_prop_text_any"](r, ["確定フラグ","確定","Confirmed"]) == "True"
+                                    for r in _all_rental
+                                )
+                                _bring_ok   = any(
+                                    _pr_id in ctx["extract_relation_ids_any"](r, ["練習","FK練習","practice"])
+                                    and ctx["extract_prop_text_any"](r, ["持参担当","持参担当フラグ"]) == "True"
+                                    for r in _all_pi
+                                )
+                                _inst_ok = _rental_ok or _bring_ok
 
-                    # スケジュール・レンタル・持参情報を事前取得してステータス判定
-                    _all_sched  = ctx["query_all"](ctx.get("CONCERT_DB_SCHEDULE","") or "", None) if ctx.get("CONCERT_DB_SCHEDULE") else []
-                    _all_rental = ctx["query_all"](ctx.get("CONCERT_DB_RENTAL","") or "", None) if ctx.get("CONCERT_DB_RENTAL") else []
-                    _all_pi     = ctx["query_all"](ctx.get("CONCERT_DB_PLAYER_INSTRUMENT","") or "", None) if ctx.get("CONCERT_DB_PLAYER_INSTRUMENT") else []
+                                def _badge(ok: bool, label: str) -> str:
+                                    return f"{'✅' if ok else '⚠️'} {label}"
 
-                    for _pr in practices:
-                        _pr_id   = _pr.get("id","")
-                        _pr_name = ext(_pr, PRACTICE_NAME_KEYS) or "練習"
-                        _pr_date = (ext(_pr, PRACTICE_DATE_KEYS) or "")[:10]
-                        _pdf_key = f"form_pdf_bytes_{_pr_id}"
-
-                        # ── ステータス判定 ──────────────────────
-                        _venue_ok   = bool(ext(_pr, PRACTICE_VENUE_KEYS))
-                        _sched_ok   = any(
-                            _pr_id in ctx["extract_relation_ids_any"](r, ["練習","FK練習","practice"])
-                            for r in _all_sched
-                        )
-                        _rental_ok  = any(
-                            _pr_id in ctx["extract_relation_ids_any"](r, ["練習","FK練習","practice"])
-                            and ctx["extract_prop_text_any"](r, ["確定フラグ","確定","Confirmed"]) == "True"
-                            for r in _all_rental
-                        )
-                        _bring_ok   = any(
-                            _pr_id in ctx["extract_relation_ids_any"](r, ["練習","FK練習","practice"])
-                            and ctx["extract_prop_text_any"](r, ["持参担当","持参担当フラグ"]) == "True"
-                            for r in _all_pi
-                        )
-                        _inst_ok = _rental_ok or _bring_ok
-
-                        def _badge(ok: bool, label: str) -> str:
-                            return f"{'✅' if ok else '⚠️'} {label}"
-
-                        _col_a, _col_b = st.columns([3, 2])
-                        _col_a.caption(f"**{_pr_date}　{_pr_name}**")
-                        _col_a.caption(
-                            f"{_badge(_venue_ok,'会場')}　"
-                            f"{_badge(_sched_ok,'スケジュール')}　"
-                            f"{_badge(_inst_ok,'レンタル/持参')}"
-                        )
-                        if _pdf_key not in st.session_state:
-                            if _col_b.button("生成", key=f"leader_gen_{_pr_id}", use_container_width=True):
-                                with st.spinner("生成中..."):
-                                    try:
-                                        from concert.services.practice_report import generate_practice_report
-                                        st.session_state[_pdf_key] = generate_practice_report(ctx, _pr_id)
-                                        st.rerun()
-                                    except Exception as _e:
-                                        st.error(f"失敗: {_e}")
-                        else:
-                            from concert.services.convert_utils import render_report_output
-                            render_report_output(
-                                st.session_state[_pdf_key],
-                                filename=f"練習情報_{_pr_name}",
-                                label=f"{_pr_name}",
-                                key_prefix=f"leader_{_pr_id}",
-                            )
-
-                # ── 楽譜URLリンク ──────────────────────────────
-                # 自分のパートに関連するパート定義の楽譜URL（パート別優先、なければ曲全体）を表示
-                _score_links: list[tuple[str,str]] = []  # (label, url)
-                for _pd in partdefs:
-                    # 自分のパートのパート定義のみ
-                    _pd_pm_ids = ctx["extract_relation_ids_any"](_pd, PARTDEF_PART_REL_KEYS)
-                    if _pd_pm_ids and _pd_pm_ids[0] == my_part_master_id:
-                        _pd_url = ctx["extract_prop_text_any"](_pd, ["楽譜URL","score_url","ScoreURL"]) or ""
-                        _pd_label = ctx["extract_prop_text_any"](_pd, PARTDEF_NAME_KEYS) or "楽譜"
-                        if _pd_url:
-                            _score_links.append((_pd_label, _pd_url))
-                        else:
-                            # パート別URLがなければ曲全体のURLを探す
-                            _pd_song_ids = ctx["extract_relation_ids_any"](_pd, PARTDEF_SONG_REL_KEYS)
-                            if _pd_song_ids:
-                                _song = next((s for s in songs if s.get("id") == _pd_song_ids[0]), None)
-                                if _song:
-                                    _song_url = ctx["extract_prop_text_any"](_song, ["楽譜URL","score_url","ScoreURL"]) or ""
-                                    _song_name_lbl = get_song_display_name(ctx, _song) or "楽譜"
-                                    if _song_url:
-                                        _score_links.append((f"{_song_name_lbl}（全体）", _song_url))
-
-                if _score_links:
-                    st.divider()
-                    st.markdown("**🎼 楽譜リンク**")
-                    for _lbl, _url in _score_links:
-                        st.markdown(f"[📄 {_lbl}]({_url})")
-
-            # ── 直近の練習情報（全ロール共通） ──────────────
-            st.divider()
-            from datetime import date as _date_cls
-            today = _date_cls.today()
-            next_practice = None
-            for pr in practices:
-                pr_date_str = ext(pr, PRACTICE_DATE_KEYS) or ""
-                if pr_date_str and len(pr_date_str) >= 10:
-                    try:
-                        pr_d = _date_cls.fromisoformat(pr_date_str[:10])
-                        if pr_d >= today:
-                            if next_practice is None or pr_d < _date_cls.fromisoformat(ext(next_practice, PRACTICE_DATE_KEYS)[:10]):
-                                next_practice = pr
-                    except Exception:
-                        pass
-
-            if next_practice:
-                pr_id_next   = next_practice.get("id", "")
-                pr_name_next = ext(next_practice, PRACTICE_NAME_KEYS) or "練習"
-                pr_date_next = ext(next_practice, PRACTICE_DATE_KEYS) or ""
-                pr_venue_next = ext(next_practice, PRACTICE_VENUE_KEYS) or ""
-                pr_addr_next  = ext(next_practice, ["会場住所", "住所", "Address"]) or ""
-                pr_date_disp  = pr_date_next[:10] if pr_date_next else ""
-                pr_time_disp  = pr_date_next[11:16] if len(pr_date_next) > 10 else ""
-                try:
-                    _wd = _date_cls.fromisoformat(pr_date_disp)
-                    pr_weekday = ["月","火","水","木","金","土","日"][_wd.weekday()]
-                except Exception:
-                    pr_weekday = ""
-
-                with st.container(border=True):
-                    st.caption("📅 直近の練習")
-                    st.markdown(f"**{pr_name_next}**")
-                    if pr_date_disp:
-                        _label = f"{pr_date_disp}（{pr_weekday}）" if pr_weekday else pr_date_disp
-                        if pr_time_disp:
-                            _label += f" {pr_time_disp}"
-                        st.caption(f"🗓 {_label}")
-                    if pr_venue_next:
-                        st.caption(f"📍 {pr_venue_next}")
-                    if pr_addr_next:
-                        # Google Maps URLを生成
-                        import urllib.parse
-                        _maps_url = "https://www.google.com/maps/search/?api=1&query=" + urllib.parse.quote(pr_addr_next)
-                        st.markdown(f"[🗺 Google Mapsで開く]({_maps_url})")
-
-                    # 練習情報PDFダウンロード
-                    _pdf_key = f"form_pdf_bytes_{pr_id_next}"
-                    if _pdf_key not in st.session_state:
-                        if st.button("📄 練習情報PDFを生成する", key=f"gen_pdf_{pr_id_next}", use_container_width=True):
-                            with st.spinner("PDF生成中..."):
-                                try:
-                                    from concert.services.practice_report import generate_practice_report
-                                    _pdf_bytes = generate_practice_report(ctx, pr_id_next)
-                                    st.session_state[_pdf_key] = _pdf_bytes
-                                    st.rerun()
-                                except Exception as _e:
-                                    st.error(f"PDF生成に失敗しました: {_e}")
-                    else:
-                        from concert.services.convert_utils import render_report_output
-                        render_report_output(
-                            st.session_state[_pdf_key],
-                            filename=f"練習情報PDF_{pr_name_next.replace('/', '-')}",
-                            label="練習情報PDF",
-                            key_prefix=f"player_{pr_id_next}",
-                        )
-                        if st.button("🔄 PDFを再生成", key=f"regen_pdf_{pr_id_next}", use_container_width=True):
-                            st.session_state.pop(_pdf_key, None)
-                            st.rerun()
+                                _col_a, _col_b = st.columns([3, 2])
+                                _col_a.caption(f"**{_pr_date}　{_pr_name}**")
+                                _col_a.caption(
+                                    f"{_badge(_venue_ok,'会場')}　"
+                                    f"{_badge(_sched_ok,'スケジュール')}　"
+                                    f"{_badge(_inst_ok,'レンタル/持参')}"
+                                )
+                                if _pdf_key not in st.session_state:
+                                    if _col_b.button("生成", key=f"leader_gen_{_pr_id}", use_container_width=True):
+                                        with st.spinner("生成中..."):
+                                            try:
+                                                from concert.services.practice_report import generate_practice_report
+                                                st.session_state[_pdf_key] = generate_practice_report(ctx, _pr_id)
+                                                st.rerun()
+                                            except Exception as _e:
+                                                st.error(f"失敗: {_e}")
+                                else:
+                                    from concert.services.convert_utils import render_report_output
+                                    render_report_output(
+                                        st.session_state[_pdf_key],
+                                        filename=f"練習情報_{_pr_name}",
+                                        label=f"{_pr_name}",
+                                        key_prefix=f"leader_{_pr_id}",
+                                    )
 
             # ── 楽譜リンク（全ロール共通：自パートのもの） ──────
             _player_score_links: list[tuple[str,str]] = []
@@ -2452,9 +2476,9 @@ def render_form(ctx, concert_id: str = ""):
                     _deduped_links.append((_lbl, _url))
             if _deduped_links:
                 st.divider()
-                st.markdown("**🎼 楽譜リンク**")
-                for _lbl, _url in _deduped_links:
-                    st.markdown(f"[📄 {_lbl}]({_url})")
+                with st.expander("🎼 楽譜リンク", expanded=False):
+                    for _lbl, _url in _deduped_links:
+                        st.markdown(f"[📄 {_lbl}]({_url})")
 
             st.divider()
             if st.button("🔓 ログアウト", use_container_width=True, key="menu_logout"):
@@ -2873,51 +2897,82 @@ def render_form(ctx, concert_id: str = ""):
             try:
                 from concert.services.mailer import send_text_to_all
                 admin_email = st.secrets.get("SMTP_USER", "")
+                is_new   = st.session_state.get("form_is_new", False)
+                action   = "新規登録" if is_new else "内容更新"
+                att_dict = att_dict_snapshot
+                pref_dict= pref_dict_snapshot
+                lines    = [
+                    f"[ArteMis HARMONIA] フォーム{action}通知",
+                    "",
+                    f"奏者: {player_name}",
+                    f"演奏会: {c_name}",
+                    f"操作: {action}（{ok_n}件登録）",
+                ]
+                if att_dict:
+                    lines.append("")
+                    lines.append("【出欠】")
+                    # 練習名をIDから逆引き
+                    pr_name_map = {
+                        pr.get("id",""): (
+                            ext(pr, PRACTICE_DATE_KEYS) or ext(pr, PRACTICE_NAME_KEYS) or "練習"
+                        )[:10]
+                        for pr in (st.session_state.get("form_practices") or [])
+                    }
+                    for pr_id, status in att_dict.items():
+                        pr_label = pr_name_map.get(pr_id, "練習")
+                        lines.append(f"  {pr_label} : {status}")
+                        cmt = (att_comment_snapshot.get(pr_id, "") or "").strip()
+                        if cmt:
+                            lines.append(f"    コメント: {cmt}")
+                if pref_dict:
+                    lines.append("")
+                    lines.append("【パート希望】")
+                    pd_name_map = {
+                        pd.get("id",""): ext(pd, PARTDEF_NAME_KEYS) or ""
+                        for pd in (st.session_state.get("form_partdefs") or [])
+                    }
+                    for pd_id, priority in pref_dict.items():
+                        if priority not in ("未回答", ""):
+                            lines.append(f"  {pd_name_map.get(pd_id, pd_id[:8])}: {priority}")
+
                 if admin_email:
-                    is_new   = st.session_state.get("form_is_new", False)
-                    action   = "新規登録" if is_new else "内容更新"
-                    att_dict = att_dict_snapshot
-                    pref_dict= pref_dict_snapshot
-                    lines    = [
-                        f"[ArteMis HARMONIA] フォーム{action}通知",
-                        "",
-                        f"奏者: {player_name}",
-                        f"演奏会: {c_name}",
-                        f"操作: {action}（{ok_n}件登録）",
-                    ]
-                    if att_dict:
-                        lines.append("")
-                        lines.append("【出欠】")
-                        # 練習名をIDから逆引き
-                        pr_name_map = {
-                            pr.get("id",""): (
-                                ext(pr, PRACTICE_DATE_KEYS) or ext(pr, PRACTICE_NAME_KEYS) or "練習"
-                            )[:10]
-                            for pr in (st.session_state.get("form_practices") or [])
-                        }
-                        for pr_id, status in att_dict.items():
-                            pr_label = pr_name_map.get(pr_id, "練習")
-                            lines.append(f"  {pr_label} : {status}")
-                            cmt = (att_comment_snapshot.get(pr_id, "") or "").strip()
-                            if cmt:
-                                lines.append(f"    コメント: {cmt}")
-                    if pref_dict:
-                        lines.append("")
-                        lines.append("【パート希望】")
-                        pd_name_map = {
-                            pd.get("id",""): ext(pd, PARTDEF_NAME_KEYS) or ""
-                            for pd in (st.session_state.get("form_partdefs") or [])
-                        }
-                        for pd_id, priority in pref_dict.items():
-                            if priority not in ("未回答", ""):
-                                lines.append(f"  {pd_name_map.get(pd_id, pd_id[:8])}: {priority}")
                     send_text_to_all(
                         ctx,
                         [{"name": "管理者", "email": admin_email}],
                         subject=f"[HARMONIA] {player_name} さんが{action}しました",
                         body="\n".join(lines),
                     )
-                    st.session_state["form_notified"] = True
+
+                # 同パートLeaderにも通知（出欠/希望の登録がある場合のみ）
+                has_member_update = bool(att_dict) or any(v not in ("未回答", "") for v in pref_dict.values())
+                if has_member_update:
+                    part_master_id = st.session_state.get("form_player_part_id", "")
+                    leader_targets = _get_part_leader_recipients(
+                        ctx,
+                        concert_id=concert_id,
+                        part_master_id=part_master_id,
+                        exclude_player_id=st.session_state.get("form_player_id", ""),
+                    )
+                    if leader_targets:
+                        part_name = st.session_state.get("form_player_part", "") or "（未設定）"
+                        leader_body = "\n".join([
+                            "[ArteMis HARMONIA] パートメンバー更新通知",
+                            "",
+                            f"奏者: {player_name}",
+                            f"演奏会: {c_name}",
+                            f"対象パート: {part_name}",
+                            "",
+                            "下記の入力が更新されました。",
+                            "",
+                            *lines[5:],  # 出欠/希望ブロックを再利用
+                        ])
+                        send_text_to_all(
+                            ctx,
+                            leader_targets,
+                            subject=f"[HARMONIA] {part_name}メンバーの出欠/希望が更新されました",
+                            body=leader_body,
+                        )
+                st.session_state["form_notified"] = True
             except Exception:
                 pass  # 通知失敗はサイレントに（ユーザー体験を壊さない）
 
