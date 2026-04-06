@@ -9262,10 +9262,13 @@ st.markdown(
       fab.style.display = "none";
       return;
     }
-    const expanded = sidebar.getAttribute("aria-expanded") === "true";
+    const expandedAttr = sidebar.getAttribute("aria-expanded") === "true";
+    const rect = sidebar.getBoundingClientRect();
+    const visiblyOpen = rect.width > 0 && rect.right > 40;
+    const expanded = expandedAttr || visiblyOpen;
     const desktop = window.innerWidth >= 901;
     ov.style.display = (expanded && desktop) ? "block" : "none";
-    fab.style.display = (expanded && desktop) ? "flex" : "none";
+    fab.style.display = expanded ? "flex" : "none";
   };
   const start = () => {
     sync();
