@@ -224,6 +224,19 @@ def _render_next_practice_panel(ctx: dict, practices: list) -> None:
                 st.rerun()
 
 
+def _collapsible_open(title: str, key: str, default_open: bool = False) -> bool:
+    """st.expander代替の折りたたみトグル。Materialアイコンを使わず文字化けを回避。"""
+    state_key = f"form_collapse_{key}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = bool(default_open)
+    is_open = bool(st.session_state.get(state_key, False))
+    icon = "▾" if is_open else "▸"
+    if st.button(f"{icon} {title}", key=f"{state_key}_btn", use_container_width=True):
+        st.session_state[state_key] = not is_open
+        st.rerun()
+    return bool(st.session_state.get(state_key, False))
+
+
 def _render_brand_logo() -> None:
     """フォーム上部ワードマークを表示。"""
     st.html("""
@@ -2565,7 +2578,7 @@ def render_form(ctx, concert_id: str = ""):
                     _assign_label = "自パートのアサイン状況（曲で絞り込み）"
                 else:
                     _assign_label = "自パートのアサイン状況"
-                with st.expander(f"🎯 {_assign_label}", expanded=False):
+                if _collapsible_open(f"🎯 {_assign_label}", "assign_view", default_open=False):
                     _render_assignment_view(ctx, concert_id, my_part_master_id, user_role)
 
             if IS_PERC(my_part):
@@ -2584,7 +2597,7 @@ def render_form(ctx, concert_id: str = ""):
                 tab_att, tab_mem, tab_doc = st.tabs(["📋 出欠", "👥 メンバー", "📄 資料"])
                 with tab_att:
                     _att_label = "自パートの出欠一覧" if user_role == ROLE_LEADER else "全員の出欠一覧"
-                    with st.expander(f"📋 {_att_label}", expanded=False):
+                    if _collapsible_open(f"📋 {_att_label}", "leader_att_overview", default_open=False):
                         if practices:
                             _render_attendance_overview(
                                 ctx, concert_id, participant_rows, practices,
@@ -2686,7 +2699,7 @@ def render_form(ctx, concert_id: str = ""):
                     _seen_urls.add(_url)
                     _deduped_links.append((_lbl, _url))
             if _deduped_links:
-                with st.expander("🎼 楽譜リンク", expanded=False):
+                if _collapsible_open("🎼 楽譜リンク", "player_score_links", default_open=False):
                     for _lbl, _url in _deduped_links:
                         st.markdown(f"[📄 {_lbl}]({_url})")
 
