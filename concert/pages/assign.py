@@ -9,6 +9,7 @@ import streamlit as st
 from concert.services.keys import *  # noqa: F401,F403
 from collections import defaultdict
 import re
+import math
 
 
 # ============================================================
@@ -317,6 +318,154 @@ def _partdef_matches_selected_part(ctx, partdef_row: dict, selected_part: str, p
     return _partdef_part_name(ctx, partdef_row, part_master_name_map) == selected_part
 
 
+def _state_token(text: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", str(text or "")).strip("_") or "all"
+
+
+def _partdef_label_for_song(ctx, part_row: dict, song_name: str, inst_name_map: dict[str, str]) -> str:
+    iids = ctx["extract_relation_ids_any"](part_row, PARTDEF_INST_REL_KEYS)
+    iid = iids[0] if iids else ""
+    iname = inst_name_map.get(iid, iid) if iid else ""
+    note = ctx["extract_prop_text_any"](part_row, PARTDEF_NOTE_KEYS) or ""
+    pname = ctx["extract_prop_text_any"](part_row, PARTDEF_NAME_KEYS) or iname or "Part"
+    pname = _strip_song_prefix(pname, song_name)
+    return f"{pname}（{note}）" if note else pname
+
+
+def _build_partdefs_by_song_for_selected_part(ctx, songs: list, selected_part: str) -> dict[str, list[dict]]:
+    part_master_name_map = _load_part_master_name_map(ctx)
+    out: dict[str, list[dict]] = {}
+    for song in songs:
+        sid = song.get("id", "")
+        rows = [
+            r for r in _load_song_instruments(ctx, sid)
+            if _partdef_matches_selected_part(ctx, r, selected_part, part_master_name_map)
+        ]
+        if rows:
+            out[sid] = rows
+    return out
+
+
+def _calc_counts_from_percentages(total_players: int, percentages: list[int]) -> list[int]:
+    if total_players <= 0 or not percentages:
+        return [0 for _ in percentages]
+    raws = [max(0.0, total_players * (p / 100.0)) for p in percentages]
+    bases = [int(math.floor(x)) for x in raws]
+    target_total = min(total_players, int(round(sum(raws))))
+    remain = max(target_total - sum(bases), 0)
+    fracs = sorted(
+        [(raws[i] - bases[i], i) for i in range(len(percentages))],
+        key=lambda x: x[0],
+        reverse=True,
+    )
+    counts = list(bases)
+    for _, i in fracs:
+        if remain <= 0:
+            break
+        counts[i] += 1
+        remain -= 1
+    return counts
+
+
+def _render_part_distribution_controls(
+    ctx,
+    concert_id: str,
+    songs: list,
+    selected_part: str,
+    selected_player_count: int,
+) -> tuple[dict[tuple[str, str], int], bool]:
+    """アルゴリズム実行タブ用のパート配分UIを描画し、required_count上書き値を返す。"""
+    if selected_part == ALL_PART_LABEL:
+        st.info("配分指定はパートを選択したときのみ利用できます。")
+        return {}, False
+
+    by_song = _build_partdefs_by_song_for_selected_part(ctx, songs, selected_part)
+    if not by_song:
+        st.warning(f"パート「{selected_part}」に一致する PART_DEFINITION がありません。")
+        return {}, True
+
+    token = _state_token(selected_part)
+    mode_key = f"assign_dist_mode_{concert_id}_{token}"
+    mode = st.radio(
+        "配分指定",
+        ["人数指定", "割合指定"],
+        horizontal=True,
+        key=mode_key,
+        help="この配分は今回の候補案計算にのみ使用します（Notion未保存）。",
+    )
+    st.caption(f"対象人数（{selected_part}）: {selected_player_count}人")
+
+    inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"])
+    inst_name_map = {r.get("id"): _instrument_name(r, ctx) for r in inst_rows}
+    overrides: dict[tuple[str, str], int] = {}
+    has_error = False
+
+    for song in sorted(songs, key=lambda x: _song_name(x, ctx)):
+        sid = song.get("id", "")
+        part_rows = by_song.get(sid, [])
+        if not part_rows:
+            continue
+        sname = _song_name(song, ctx)
+        with st.expander(f"配分設定: {sname}", expanded=False):
+            if mode == "人数指定":
+                used = 0
+                for idx, part in enumerate(part_rows):
+                    part_id = part.get("id", "")
+                    label = _partdef_label_for_song(ctx, part, sname, inst_name_map)
+                    key = f"assign_dist_abs_{concert_id}_{token}_{sid}_{part_id}"
+                    max_this = max(selected_player_count - used, 0)
+                    if key not in st.session_state:
+                        base_qty = ctx["extract_prop_text_any"](part, ["必要台数", "必要人数", "台数", "人数"]) or "0"
+                        try:
+                            st.session_state[key] = max(0, min(int(float(base_qty)), max_this))
+                        except Exception:
+                            st.session_state[key] = 0
+                    if st.session_state[key] > max_this:
+                        st.session_state[key] = max_this
+                    val = int(st.number_input(
+                        f"{label} の人数",
+                        min_value=0,
+                        max_value=max_this,
+                        step=1,
+                        key=key,
+                    ))
+                    used += val
+                    overrides[(sid, part_id)] = val
+                st.caption(f"降り番: {max(selected_player_count - used, 0)}人")
+            else:
+                percentages: list[int] = []
+                part_ids: list[str] = []
+                for part in part_rows:
+                    part_id = part.get("id", "")
+                    label = _partdef_label_for_song(ctx, part, sname, inst_name_map)
+                    key = f"assign_dist_pct_{concert_id}_{token}_{sid}_{part_id}"
+                    if key not in st.session_state:
+                        st.session_state[key] = 0
+                    pct = int(st.number_input(
+                        f"{label} の割合(%)",
+                        min_value=0,
+                        max_value=100,
+                        step=5,
+                        key=key,
+                    ))
+                    percentages.append(pct)
+                    part_ids.append(part_id)
+                total_pct = sum(percentages)
+                if total_pct > 100:
+                    st.error("割合の合計が100%を超えています。")
+                    has_error = True
+                    continue
+                counts = _calc_counts_from_percentages(selected_player_count, percentages)
+                for part_id, cnt in zip(part_ids, counts):
+                    overrides[(sid, part_id)] = cnt
+                st.caption(
+                    f"割合合計: {total_pct}% / "
+                    f"配分人数: {sum(counts)}人 / 降り番: {max(selected_player_count - sum(counts), 0)}人"
+                )
+
+    return overrides, has_error
+
+
 def _load_songs(ctx, concert_id: str) -> list[dict]:
     key = f"song_list_{concert_id}"
     if key not in st.session_state:
@@ -464,7 +613,14 @@ def _save_preference(ctx, player_id: str, player_name: str,
 # assign_solver用データ変換
 # ============================================================
 
-def _build_solver_input(ctx, concert_id: str, songs: list, players: list, selected_part: str = ALL_PART_LABEL):
+def _build_solver_input(
+    ctx,
+    concert_id: str,
+    songs: list,
+    players: list,
+    selected_part: str = ALL_PART_LABEL,
+    required_count_overrides: dict[tuple[str, str], int] | None = None,
+):
     """
     NotionのDBからsolve_all()に渡すPrefs/Requirementsを構築する。
     assign_solver.pyのPref/Requirementデータクラスを直接使わず、
@@ -494,6 +650,8 @@ def _build_solver_input(ctx, concert_id: str, songs: list, players: list, select
                 qty = max(int(float(qty_str)), 1) if qty_str else 1
             except ValueError:
                 qty = 1
+            if required_count_overrides and (sid, part.get("id", "")) in required_count_overrides:
+                qty = max(int(required_count_overrides[(sid, part.get("id", ""))]), 0)
             note = ctx["extract_prop_text_any"](part, PARTDEF_NOTE_KEYS) or ""
             part_id   = part.get("id", "")
             pnm = ctx["extract_prop_text_any"](part, PARTDEF_NAME_KEYS) or iname or "Part"
@@ -917,6 +1075,18 @@ def _render_solver_tab(ctx: dict):
         st.info(f"「{selected_part}」に該当する奏者がいません。")
         return
 
+    with st.expander("🎛 パート内配分（今回の計算のみ）", expanded=False):
+        required_count_overrides, has_dist_error = _render_part_distribution_controls(
+            ctx=ctx,
+            concert_id=concert_id,
+            songs=songs,
+            selected_part=selected_part,
+            selected_player_count=len(players),
+        )
+    if has_dist_error:
+        st.warning("配分指定にエラーがあるため、修正後に候補案生成を実行してください。")
+        return
+
     st.caption("ヒューリスティック解（高速）と厳密解（整数計画法）を同時に生成します。")
 
     if st.button("▶ 候補案を生成", type="primary", key=f"run_solver_{concert_id}"):
@@ -931,7 +1101,9 @@ def _render_solver_tab(ctx: dict):
                 )
                 absent   = _build_absent_set(ctx, concert_id)
                 prefs, requirements = _build_solver_input(
-                    ctx, concert_id, songs, players, selected_part=selected_part
+                    ctx, concert_id, songs, players,
+                    selected_part=selected_part,
+                    required_count_overrides=required_count_overrides,
                 )
                 if not prefs:
                     st.warning("希望データがありません。先に希望入力を行ってください。")

@@ -348,7 +348,7 @@ def greedy_solve(
     all_players = sorted(_pref_players.items(), key=lambda x: x[1])
 
     for req in requirements:
-        slots = max(req.required_count, 1)
+        slots = max(req.required_count, 0)
         cands = by_req_key.get((req.song_id, req.part_id), [])
         for pref in cands:
             if slots <= 0:
