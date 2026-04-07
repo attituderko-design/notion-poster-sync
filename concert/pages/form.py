@@ -227,9 +227,9 @@ def _render_next_practice_panel(ctx: dict, practices: list) -> None:
 def _render_brand_logo() -> None:
     """フォーム上部ワードマークを表示。"""
     st.html("""
-        <div class="h-f1" style="padding: 16px 0 14px; text-align: center;">
-            <div class="h-wordmark">ArtéMis HARMONIA</div>
-            <div class="h-wordmark-sub">Concert Management</div>
+        <div style="padding:16px 0 14px;text-align:center;animation:hFadeUp .35s ease both;">
+            <div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:600;color:#e8edf7;letter-spacing:.05em;">ArtéMis HARMONIA</div>
+            <div style="font-family:Outfit,sans-serif;font-size:11px;color:rgba(160,180,220,.4);letter-spacing:.13em;margin-top:3px;">Concert Management</div>
         </div>
         """)
 
@@ -465,50 +465,6 @@ def _inject_form_styles() -> None:
             text-align: center; margin-top: 20px;
             padding-top: 14px;
             border-top: .5px solid rgba(255,255,255,.05);
-        }
-
-        /* ── menu card buttons ── */
-        /* key="menu_att/pref/pref_disabled/own" のボタンをカードに見せる */
-        div[data-testid="stButton"]:has(button[key="menu_att"]) > button,
-        div[data-testid="stButton"]:has(button[key="menu_pref"]) > button,
-        div[data-testid="stButton"]:has(button[key="menu_own"]) > button,
-        div[data-testid="stButton"]:has(button[key="menu_pref_disabled"]) > button {
-            display: flex !important;
-            align-items: center !important;
-            text-align: left !important;
-            justify-content: flex-start !important;
-            padding: 0 14px !important;
-            background: rgba(255,255,255,.035) !important;
-            border: 0.5px solid rgba(255,255,255,.08) !important;
-            border-radius: 13px !important;
-            min-height: 60px !important;
-            gap: 0 !important;
-            font-family: 'Outfit', sans-serif !important;
-            font-size: 15px !important;
-            color: #c8d4ed !important;
-            width: 100% !important;
-            transition: border-color .15s ease, background .15s ease !important;
-        }
-        div[data-testid="stButton"]:has(button[key="menu_att"]) > button:hover,
-        div[data-testid="stButton"]:has(button[key="menu_pref"]) > button:hover,
-        div[data-testid="stButton"]:has(button[key="menu_own"]) > button:hover {
-            background: rgba(255,255,255,.06) !important;
-            border-color: rgba(74,158,255,.35) !important;
-            color: #e8edf7 !important;
-        }
-        div[data-testid="stButton"]:has(button[key="menu_pref_disabled"]) > button {
-            opacity: .45 !important;
-            cursor: not-allowed !important;
-        }
-        /* ボタン内のpタグ（Streamlitがlabelをmarkdownレンダリング）を左寄せ */
-        div[data-testid="stButton"]:has(button[key="menu_att"]) p,
-        div[data-testid="stButton"]:has(button[key="menu_pref"]) p,
-        div[data-testid="stButton"]:has(button[key="menu_own"]) p,
-        div[data-testid="stButton"]:has(button[key="menu_pref_disabled"]) p {
-            font-size: 15px !important;
-            color: inherit !important;
-            margin: 0 !important;
-            line-height: 1.4 !important;
         }
 
         /* ── streamlit overrides ── */
@@ -1617,7 +1573,7 @@ def _render_concert_selector(ctx):
 
     # ── モード未選択 ─────────────────────────────────────────
     if not selector_mode:
-        st.html('<div class="h-scr-title">ArtéMis HARMONIA ログイン</div>')
+        st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">ArtéMis HARMONIA ログイン</div>')
         col_l, col_i = st.columns(2)
         if col_l.button("🔑 ログイン", use_container_width=True, type="primary", key="sel_login"):
             st.session_state["selector_mode"] = "login"
@@ -1629,7 +1585,7 @@ def _render_concert_selector(ctx):
 
     # ── 招待コード入力モード ──────────────────────────────────
     if selector_mode == "invite":
-        st.html('<div class="h-scr-title">招待コードを入力してください</div>')
+        st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">招待コードを入力してください</div>')
         st.caption("管理者から受け取った招待コードを入力してください。")
         _invite_logged_in = bool(st.session_state.get("sel_pw_verified") and st.session_state.get("sel_player_id"))
         with st.form("invite_code_form"):
@@ -1687,7 +1643,7 @@ def _render_concert_selector(ctx):
     if selector_mode == "login":
         # メールアドレス未入力フェーズ
         if not st.session_state.get("sel_email_submitted"):
-            st.html('<div class="h-scr-title">ログイン</div>')
+            st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">ログイン</div>')
             with st.form("sel_email_form"):
                 sel_email = st.text_input("メールアドレス", placeholder="yamada@example.com")
                 submitted_e = st.form_submit_button("次へ", type="primary", use_container_width=True)
@@ -1729,7 +1685,7 @@ def _render_concert_selector(ctx):
 
         if not sel_pw_verified:
             if sel_has_pw:
-                st.html(f'<div class="h-scr-title">おかえりなさい、{sel_pname} さん</div>')
+                st.html(f'<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">おかえりなさい、{sel_pname} さん</div>')
                 with st.form("sel_pw_form"):
                     pw = st.text_input("パスワード", type="password")
                     submitted_pw = st.form_submit_button("ログイン", type="primary", use_container_width=True)
@@ -1744,7 +1700,7 @@ def _render_concert_selector(ctx):
                         st.error("パスワードが違います。")
             else:
                 # パスワード未設定 → selector内で確認コード認証
-                st.html(f'<div class="h-scr-title">おかえりなさい、{sel_pname} さん</div>')
+                st.html(f'<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">おかえりなさい、{sel_pname} さん</div>')
                 st.warning("パスワードが設定されていません。確認コードでログインしてパスワードを設定してください。")
                 st.caption(f"登録メールアドレス: {sel_email}")
                 if not st.session_state.get("sel_magic_sent"):
@@ -1824,7 +1780,7 @@ def _render_concert_selector(ctx):
 
         # パスワード未設定で認証成功した場合は、演奏会選択前に必ず設定させる
         if st.session_state.get("sel_need_set_password"):
-            st.html(f'<div class="h-scr-title">{sel_pname} さん、パスワードを設定してください</div>')
+            st.html(f'<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">{sel_pname} さん、パスワードを設定してください</div>')
             st.caption("次回からメールアドレスとパスワードでログインできます。")
             with st.form("sel_set_password_form"):
                 pw1 = st.text_input("パスワード（6文字以上）", type="password")
@@ -1850,7 +1806,7 @@ def _render_concert_selector(ctx):
             return
 
         # 認証済み → 参加演奏会を選択
-        st.html(f'<div class="h-scr-title">こんにちは、{sel_pname} さん</div>')
+        st.html(f'<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">こんにちは、{sel_pname} さん</div>')
         my_concerts = _get_my_concerts(ctx, sel_pid)
 
         def _go_selected_concert(selected_cid: str):
@@ -2205,19 +2161,19 @@ def render_form(ctx, concert_id: str = ""):
 
     # 演奏会情報カード
     _meta_rows = ""
-    if c_date:      _meta_rows += f'<div class="h-concert-row"><div class="h-concert-dot"></div>{c_date}</div>'
-    if c_venue:     _meta_rows += f'<div class="h-concert-row"><div class="h-concert-dot"></div>{c_venue}</div>'
-    if c_conductor: _meta_rows += f'<div class="h-concert-row"><div class="h-concert-dot"></div>指揮：{c_conductor}</div>'
-    if c_soloist:   _meta_rows += f'<div class="h-concert-row"><div class="h-concert-dot"></div>ソリスト：{c_soloist}</div>'
+    if c_date:      _meta_rows += f'<div style="display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(160,180,220,.6);margin-bottom:3px;"><div style="width:4px;height:4px;border-radius:50%;background:rgba(74,158,255,.55);flex-shrink:0;"></div>{c_date}</div>'
+    if c_venue:     _meta_rows += f'<div style="display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(160,180,220,.6);margin-bottom:3px;"><div style="width:4px;height:4px;border-radius:50%;background:rgba(74,158,255,.55);flex-shrink:0;"></div>{c_venue}</div>'
+    if c_conductor: _meta_rows += f'<div style="display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(160,180,220,.6);margin-bottom:3px;"><div style="width:4px;height:4px;border-radius:50%;background:rgba(74,158,255,.55);flex-shrink:0;"></div>指揮：{c_conductor}</div>'
+    if c_soloist:   _meta_rows += f'<div style="display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(160,180,220,.6);margin-bottom:3px;"><div style="width:4px;height:4px;border-radius:50%;background:rgba(74,158,255,.55);flex-shrink:0;"></div>ソリスト：{c_soloist}</div>'
     if songs:
         _song_txt = "　/　".join(
             f"{get_song_display_name(ctx, s)}" for s in songs
         )
-        _meta_rows += f'<div class="h-concert-row"><div class="h-concert-dot"></div>{_song_txt}</div>'
+        _meta_rows += f'<div style="display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(160,180,220,.6);margin-bottom:3px;"><div style="width:4px;height:4px;border-radius:50%;background:rgba(74,158,255,.55);flex-shrink:0;"></div>{_song_txt}</div>'
 
     st.html(f"""
-        <div class="h-f2 h-concert-card">
-            <div class="h-concert-name">{c_name}</div>
+        <div style="background:rgba(74,158,255,.07);border:0.5px solid rgba(74,158,255,.18);border-radius:14px;padding:14px 16px;margin-bottom:14px;animation:hFadeUp .35s .08s ease both;">
+            <div style="font-family:Outfit,sans-serif;font-size:18px;font-weight:500;color:#e8edf7;margin-bottom:8px;line-height:1.3;">{c_name}</div>
             {_meta_rows}
         </div>
         """)
@@ -2237,8 +2193,8 @@ def render_form(ctx, concert_id: str = ""):
 
     # ── STEP 0: 新規登録 / ログイン 選択 ─────────────────────
     if step == 1 and not st.session_state.get("form_auth_verified") and not st.session_state.get("form_auth_mode"):
-        st.html('<div class="h-f3 h-scr-title">はじめに</div>')
-        st.html('<div class="h-scr-sub">初めての方は新規登録、2回目以降はログインをお選びください</div>')
+        st.html('<div style="animation:hFadeUp .35s ease both;font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">はじめに</div>')
+        st.html('<div style="font-size:13px;color:rgba(160,180,220,.55);margin-bottom:16px;line-height:1.55;">初めての方は新規登録、2回目以降はログインをお選びください</div>')
         col_new, col_login = st.columns(2)
         if col_new.button("📝 新規登録", use_container_width=True, type="primary", key="mode_new"):
             st.session_state["form_auth_mode"] = "new"
@@ -2251,7 +2207,7 @@ def render_form(ctx, concert_id: str = ""):
     # ── STEP 0a: プライバシーポリシー同意（新規登録のみ） ─────
     auth_mode = st.session_state.get("form_auth_mode", "new")
     if step == 1 and not st.session_state.get("form_auth_verified") and auth_mode == "new" and not st.session_state.get("form_privacy_agreed"):
-        st.html('<div class="h-scr-title">プライバシーポリシー</div>')
+        st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">プライバシーポリシー</div>')
         st.markdown(_PRIVACY_POLICY)
         col_agree, col_back = st.columns(2)
         if col_agree.button("✅ 同意して進む", type="primary", use_container_width=True, key="privacy_agree"):
@@ -2268,11 +2224,11 @@ def render_form(ctx, concert_id: str = ""):
         # メールアドレス入力フェーズ
         if not st.session_state.get("auth_email_submitted"):
             if auth_mode == "login":
-                st.html('<div class="h-f3 h-scr-title">ログイン</div>')
-                st.html('<div class="h-scr-sub">登録済みのメールアドレスを入力してください</div>')
+                st.html('<div style="animation:hFadeUp .35s ease both;font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">ログイン</div>')
+                st.html('<div style="font-size:13px;color:rgba(160,180,220,.55);margin-bottom:16px;line-height:1.55;">登録済みのメールアドレスを入力してください</div>')
             else:
-                st.html('<div class="h-f3 h-scr-title">メールアドレスを入力</div>')
-                st.html('<div class="h-scr-sub">確認コードをお送りします</div>')
+                st.html('<div style="animation:hFadeUp .35s ease both;font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">メールアドレスを入力</div>')
+                st.html('<div style="font-size:13px;color:rgba(160,180,220,.55);margin-bottom:16px;line-height:1.55;">確認コードをお送りします</div>')
             with st.form("auth_email_form"):
                 auth_email = st.text_input("メールアドレス *", placeholder="yamada@example.com")
                 submitted_email = st.form_submit_button("次へ", type="primary",
@@ -2321,8 +2277,8 @@ def render_form(ctx, concert_id: str = ""):
             matched_player = next((p for p in players if p.get("id") == existing_pid), None)
             pname_display = ext(matched_player, PLAYER_NAME_KEYS) if matched_player else ""
             _greet = f"おかえりなさい、{pname_display} さん" if pname_display else "パスワードでログイン"
-            st.html(f'<div class="h-f3 h-scr-title">{_greet}</div>')
-            st.html(f'<div class="h-scr-sub">{auth_email}</div>')
+            st.html(f'<div style="animation:hFadeUp .35s ease both;font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">{_greet}</div>')
+            st.html(f'<div style="font-size:13px;color:rgba(160,180,220,.55);margin-bottom:16px;line-height:1.55;">{auth_email}</div>')
             with st.form("auth_password_form"):
                 entered_pw = st.text_input("パスワード", type="password")
                 col_ok, col_forgot = st.columns(2)
@@ -2351,13 +2307,13 @@ def render_form(ctx, concert_id: str = ""):
         # ── パスワードリセット or 新規 or パスワード未設定 → マジックコード ──
         is_reset = st.session_state.get("auth_reset_mode", False)
         if is_reset:
-            st.html('<div class="h-scr-title">パスワードをリセット</div>')
+            st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">パスワードをリセット</div>')
             st.caption("登録済みのメールアドレスに確認コードを送ります。")
         elif is_existing and not has_password:
-            st.html('<div class="h-scr-title">初回ログイン</div>')
+            st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">初回ログイン</div>')
             st.caption("確認コードを送りますので、ログイン後にパスワードを設定してください。")
         else:
-            st.html('<div class="h-scr-title">メールアドレスで本人確認</div>')
+            st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">メールアドレスで本人確認</div>')
             st.caption("確認コードを送ります。")
 
         if not st.session_state.get("auth_code_sent"):
@@ -2466,7 +2422,7 @@ def render_form(ctx, concert_id: str = ""):
         # ── パスワード設定が必要な場合（初回マジックコード認証後） ──
         if st.session_state.get("form_need_set_password") and st.session_state.get("form_is_existing_auth"):
             pname = st.session_state.get("form_player_name", "")
-            st.html(f'<div class="h-scr-title">{pname} さん、パスワードを設定してください</div>')
+            st.html(f'<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">{pname} さん、パスワードを設定してください</div>')
             st.caption("次回から、メールアドレスとパスワードでログインできます。")
             with st.form("set_password_form"):
                 pw1 = st.text_input("パスワード（6文字以上）", type="password")
@@ -2553,29 +2509,29 @@ def render_form(ctx, concert_id: str = ""):
 
             # ── グリーティング ──
             st.html(f"""
-                <div class="h-f3 h-greet">
+                <div style="animation:hFadeUp .35s ease both;font-size:15px;color:rgba(160,180,220,.7);margin-bottom:14px;line-height:1.6;">
                     こんにちは、<strong>{pname}</strong> さん
-                    {"" if not _part_disp else f'<span class="h-greet-part">{_part_disp}</span>'}
+                    {"" if not _part_disp else f'<span style="display:block;font-size:12px;color:rgba(160,180,220,.35);margin-top:1px;">{_part_disp}</span>'}
                 </div>
                 """)
 
             # ── メニューカード ──
             att_unanswered = att_total - att_answered
-            att_badge_html = (f'<div class="h-badge">{att_unanswered}件</div>' if att_unanswered > 0
-                              else '<div class="h-badge h-badge-ok">完了</div>')
+            att_badge_html = (f'<div style="font-family:Outfit,sans-serif;font-size:11px;background:rgba(74,158,255,.15);color:#4a9eff;border-radius:6px;padding:3px 8px;white-space:nowrap;">{att_unanswered}件</div>' if att_unanswered > 0
+                              else '<div style="font-family:Outfit,sans-serif;font-size:11px;background:rgba(100,200,130,.12);color:#64c882;border-radius:6px;padding:3px 8px;white-space:nowrap;">完了</div>')
             att_hint = f"未回答 {att_unanswered}件" if att_unanswered > 0 else f"{att_answered}/{att_total}回 回答済"
 
             pref_badge_html = ""
             pref_hint = ""
             if pref_total > 0:
                 if pref_answered == pref_total:
-                    pref_badge_html = '<div class="h-badge h-badge-ok">完了</div>'
+                    pref_badge_html = '<div style="font-family:Outfit,sans-serif;font-size:11px;background:rgba(100,200,130,.12);color:#64c882;border-radius:6px;padding:3px 8px;white-space:nowrap;">完了</div>'
                     pref_hint = "入力済み"
                 elif proposal_done:
-                    pref_badge_html = '<div class="h-badge" style="background:rgba(180,100,240,.15);color:#c070f0;">確定済</div>'
+                    pref_badge_html = '<div style="font-family:Outfit,sans-serif;font-size:11px;background:rgba(180,100,240,.15);color:#c070f0;border-radius:6px;padding:3px 8px;white-space:nowrap;">確定済</div>'
                     pref_hint = "アサイン案提示中"
                 else:
-                    pref_badge_html = f'<div class="h-badge">{pref_total - pref_answered}件未入力</div>'
+                    pref_badge_html = f'<div style="font-family:Outfit,sans-serif;font-size:11px;background:rgba(74,158,255,.15);color:#4a9eff;border-radius:6px;padding:3px 8px;white-space:nowrap;">{pref_total - pref_answered}件未入力</div>'
                     pref_hint = f"{pref_answered}/{pref_total}パート 回答済"
 
             _menu_action = (st.query_params.get("menu_action") or "").strip()
@@ -2611,68 +2567,78 @@ def render_form(ctx, concert_id: str = ""):
                 st.query_params.pop("menu_action", None)
                 st.rerun()
 
-            # ── メニューカード（st.htmlでカードUI、クリックでquery_params更新） ──
-            _pref_disabled_attr = 'data-disabled="true"' if (pref_total == 0 or proposal_done) else ""
-            _pref_href = "?menu_action=pref" if (pref_total > 0 and not proposal_done) else "#"
-            _own_card = ""
+            _pref_anchor_open = '<a href="?menu_action=pref">' if (pref_total > 0 and not proposal_done) else ""
+            _pref_anchor_close = "</a>" if (pref_total > 0 and not proposal_done) else ""
+
+            # インラインスタイル定数（st.htmlはiframeスコープなので外部CSSが当たらない）
+            _S_SECTION = "font-family:Outfit,sans-serif;font-size:11px;color:rgba(160,180,220,.4);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;margin-top:4px;"
+            _S_CARD = "display:flex;align-items:center;background:rgba(255,255,255,.035);border:0.5px solid rgba(255,255,255,.08);border-radius:13px;padding:13px 14px;margin-bottom:8px;min-height:56px;gap:12px;cursor:pointer;text-decoration:none;color:inherit;"
+            _S_ICON_A = "width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:rgba(74,158,255,.13);"
+            _S_ICON_B = "width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:rgba(100,200,130,.1);"
+            _S_ICON_D = "width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:rgba(180,100,240,.1);"
+            _S_BODY = "flex:1;min-width:0;"
+            _S_TTL = "font-family:Outfit,sans-serif;font-size:15px;color:#c8d4ed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+            _S_HINT = "font-size:12px;color:rgba(160,180,220,.4);margin-top:2px;"
+            _S_RIGHT = "display:flex;align-items:center;gap:6px;flex-shrink:0;"
+            _S_BADGE = "font-family:Outfit,sans-serif;font-size:11px;background:rgba(74,158,255,.15);color:#4a9eff;border-radius:6px;padding:3px 8px;white-space:nowrap;"
+            _S_BADGE_OK = "font-family:Outfit,sans-serif;font-size:11px;background:rgba(100,200,130,.12);color:#64c882;border-radius:6px;padding:3px 8px;white-space:nowrap;"
+            _S_BADGE_PU = "font-family:Outfit,sans-serif;font-size:11px;background:rgba(180,100,240,.15);color:#c070f0;border-radius:6px;padding:3px 8px;white-space:nowrap;"
+            _S_CHEV = "font-size:14px;color:rgba(160,180,220,.25);"
+
+            # バッジHTML（インライン版）
+            _att_badge_i = (f'<span style="{_S_BADGE}">{att_unanswered}件</span>' if att_unanswered > 0
+                            else f'<span style="{_S_BADGE_OK}">完了</span>')
+            _pref_badge_i = ""
+            if pref_total > 0:
+                if pref_answered == pref_total:
+                    _pref_badge_i = f'<span style="{_S_BADGE_OK}">完了</span>'
+                elif proposal_done:
+                    _pref_badge_i = f'<span style="{_S_BADGE_PU}">確定済</span>'
+                else:
+                    _pref_badge_i = f'<span style="{_S_BADGE}">{pref_total - pref_answered}件未入力</span>'
+
+            _own_card_html = ""
             if IS_PERC(my_part):
-                _own_card = """
-                  <div class="h-menu-item h-menu-clickable" data-action="own">
-                    <div class="h-mi-icon h-ic-d">🥁</div>
-                    <div class="h-mi-body">
-                      <div class="h-mi-ttl">所有楽器</div>
-                      <div class="h-mi-hint">入力・変更</div>
+                _own_card_html = f'''
+                  <a href="?menu_action=own" style="{_S_CARD}">
+                    <div style="{_S_ICON_D}">🥁</div>
+                    <div style="{_S_BODY}">
+                      <div style="{_S_TTL}">所有楽器</div>
+                      <div style="{_S_HINT}">入力・変更</div>
                     </div>
-                    <div class="h-mi-right"><div class="h-chev">›</div></div>
-                  </div>
-                """
+                    <div style="{_S_RIGHT}"><span style="{_S_CHEV}">›</span></div>
+                  </a>
+                '''
+
+            _pref_card_html = ""
+            if pref_total > 0:
+                _pref_href = "?menu_action=pref" if not proposal_done else "#"
+                _pref_cursor = "cursor:pointer;" if not proposal_done else "cursor:default;opacity:.5;"
+                _pref_card_html = f'''
+                  <a href="{_pref_href}" style="{_S_CARD}{_pref_cursor}">
+                    <div style="{_S_ICON_B}">🎵</div>
+                    <div style="{_S_BODY}">
+                      <div style="{_S_TTL}">楽器・パート希望</div>
+                      <div style="{_S_HINT}">{pref_hint}</div>
+                    </div>
+                    <div style="{_S_RIGHT}">{_pref_badge_i}<span style="{_S_CHEV}">›</span></div>
+                  </a>
+                '''
 
             st.html(f"""
-                <style>
-                .h-menu-clickable {{ cursor: pointer; }}
-                .h-menu-clickable:hover {{
-                    background: rgba(255,255,255,.06) !important;
-                    border-color: rgba(74,158,255,.35) !important;
-                }}
-                .h-menu-clickable[data-disabled="true"] {{
-                    opacity: .45; cursor: default;
-                }}
-                </style>
-                <div class="h-f4">
-                  <div class="h-section">メニュー</div>
-                  <div class="h-menu-item h-menu-clickable" data-action="att">
-                    <div class="h-mi-icon h-ic-a">📅</div>
-                    <div class="h-mi-body">
-                      <div class="h-mi-ttl">出欠入力</div>
-                      <div class="h-mi-hint">{att_hint}</div>
+                <div style="margin-bottom:4px;">
+                  <div style="{_S_SECTION}">メニュー</div>
+                  <a href="?menu_action=att" style="{_S_CARD}">
+                    <div style="{_S_ICON_A}">📅</div>
+                    <div style="{_S_BODY}">
+                      <div style="{_S_TTL}">出欠入力</div>
+                      <div style="{_S_HINT}">{att_hint}</div>
                     </div>
-                    <div class="h-mi-right">{att_badge_html}<div class="h-chev">›</div></div>
-                  </div>
-                  {"" if pref_total == 0 else f'''
-                  <div class="h-menu-item h-menu-clickable" data-action="pref" {_pref_disabled_attr}>
-                    <div class="h-mi-icon h-ic-b">🎵</div>
-                    <div class="h-mi-body">
-                      <div class="h-mi-ttl">楽器・パート希望</div>
-                      <div class="h-mi-hint">{pref_hint}</div>
-                    </div>
-                    <div class="h-mi-right">{pref_badge_html}<div class="h-chev">›</div></div>
-                  </div>
-                  '''}
-                  {_own_card}
+                    <div style="{_S_RIGHT}">{_att_badge_i}<span style="{_S_CHEV}">›</span></div>
+                  </a>
+                  {_pref_card_html}
+                  {_own_card_html}
                 </div>
-                <script>
-                document.querySelectorAll('.h-menu-clickable').forEach(function(el) {{
-                    el.addEventListener('click', function() {{
-                        if (el.dataset.disabled === 'true') return;
-                        var action = el.dataset.action;
-                        if (!action) return;
-                        // Streamlit Cloud では window.parent.location を変更する
-                        var url = new URL(window.parent.location.href);
-                        url.searchParams.set('menu_action', action);
-                        window.parent.location.href = url.toString();
-                    }});
-                }});
-                </script>
                 """)
 
             if partdefs:
@@ -2694,7 +2660,7 @@ def render_form(ctx, concert_id: str = ""):
             # ── Leader / Manager 専用メニュー ─────────────────
             if user_role >= ROLE_LEADER:
                 _section_label = "パートリーダーメニュー" if user_role == ROLE_LEADER else "Managerメニュー"
-                st.html(f'<div class="h-section" style="margin-top:18px;">🎖 {_section_label}</div>')
+                st.html(f'<div style="font-family:Outfit,sans-serif;font-size:11px;color:rgba(160,180,220,.4);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px;margin-top:4px;">🎖 {_section_label}</div>')
                 tab_att, tab_mem, tab_doc = st.tabs(["📋 出欠", "👥 メンバー", "📄 資料"])
                 with tab_att:
                     _att_label = "自パートの出欠一覧" if user_role == ROLE_LEADER else "全員の出欠一覧"
@@ -2808,10 +2774,10 @@ def render_form(ctx, concert_id: str = ""):
             st.html('<div style="height:16px;"></div>')
             if st.button("ログアウト", use_container_width=True, key="menu_logout"):
                 _logout_to_entry(_form_cookie_mgr)
-            st.html('<div class="h-footer">ArtéMis HARMONIA</div>')
+            st.html('<div style="font-family:Outfit,sans-serif;font-size:11px;color:rgba(160,180,220,.18);text-align:center;margin-top:20px;padding-top:14px;border-top:.5px solid rgba(255,255,255,.05);">ArtéMis HARMONIA</div>')
             return
         # 新規奏者の場合: 名前・パート入力
-        st.html('<div class="h-scr-title">Step 1 / 基本情報を入力してください</div>')
+        st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">Step 1 / 基本情報を入力してください</div>')
         _auth_email = st.session_state.get("form_auth_email", "")
 
         # ── 種別選択はフォーム外（変更即時反映のため） ──────────
@@ -2946,8 +2912,8 @@ def render_form(ctx, concert_id: str = ""):
         part   = st.session_state.get("form_player_part","")
         is_new = st.session_state.get("form_is_new", False)
 
-        st.html('<div class="h-scr-title">Step 2 / 練習出欠を入力してください</div>')
-        st.html(f'<div class="h-att-headline">出欠を入力してください</div><div class="h-att-subline">{pname} — {part}</div>')
+        st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">Step 2 / 練習出欠を入力してください</div>')
+        st.html(f'<div style="font-family:Outfit,sans-serif;font-size:14px;font-weight:500;color:#e8edf7;margin-bottom:2px;">出欠を入力してください</div><div style="font-size:12px;color:rgba(160,180,220,.48);margin-bottom:12px;">{pname} — {part}</div>')
         if is_new:
             st.success("✅ 新規奏者として登録しました。")
         st.caption("※ 本番当日の出席は自動で登録されます。")
@@ -2967,7 +2933,7 @@ def render_form(ctx, concert_id: str = ""):
         session_att = st.session_state.get("form_att") or {}
         session_att_comment = st.session_state.get("form_att_comment") or {}
 
-        st.html('<div class="h-att-sec">練習</div>')
+        st.html('<div style="font-family:Outfit,sans-serif;font-size:11px;color:rgba(160,180,220,.45);letter-spacing:.1em;text-transform:uppercase;margin:6px 0 8px;">練習</div>')
         with st.form("step2"):
             att: dict[str, str] = {}
             att_comment: dict[str, str] = {}
@@ -2993,9 +2959,9 @@ def render_form(ctx, concert_id: str = ""):
                 if pr_venue:
                     meta += f" ・ {pr_venue}"
                 st.html(
-                    f'<div class="h-att-card">'
-                    f'<div class="h-att-date">{meta}</div>'
-                    f'<div class="h-att-name">{pr_name}</div>'
+                    f'<div style="background:rgba(255,255,255,.025);border:.5px solid rgba(255,255,255,.06);border-radius:11px;padding:10px 11px 8px;margin-bottom:8px;">'
+                    f'<div style="font-family:Outfit,sans-serif;font-size:12px;color:rgba(160,180,220,.5);margin-bottom:2px;">{meta}</div>'
+                    f'<div style="font-size:15px;color:#d0daf0;margin-bottom:8px;line-height:1.4;">{pr_name}</div>'
                     f'</div>'
                 )
                 cur = existing_att.get(pr_id, {})
@@ -3029,7 +2995,7 @@ def render_form(ctx, concert_id: str = ""):
                     placeholder="必要な連絡事項があれば入力",
                 )
                 st.divider()
-            st.html('<div class="h-save-bar"></div>')
+            st.html('<div style="margin-top:10px;padding-top:10px;border-top:.5px solid rgba(255,255,255,.06);"></div>')
             submitted = st.form_submit_button("保存して次へ", type="primary", use_container_width=True)
         if submitted:
             st.session_state["form_att"]  = att
@@ -3063,7 +3029,7 @@ def render_form(ctx, concert_id: str = ""):
 
         visible_partdefs = [pd for pd in partdefs if _partdef_matches(pd)]
 
-        st.html('<div class="h-scr-title">Step 3 / パート希望を入力してください</div>')
+        st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">Step 3 / パート希望を入力してください</div>')
         st.caption("希望・NGのあるパートだけ入力してください。入力しないパートは「希望なし/降り番でも可」として扱われます。")
 
         if not visible_partdefs:
@@ -3123,7 +3089,7 @@ def render_form(ctx, concert_id: str = ""):
 
     # ── STEP 4: 所有楽器（Percのみ） ─────────────────────────
     elif step == 4:
-        st.html('<div class="h-scr-title">Step 4 / 所有楽器の台数を入力してください</div>')
+        st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">Step 4 / 所有楽器の台数を入力してください</div>')
         st.caption("所有していない楽器は 0 のままで構いません。")
 
         if not req_insts:
@@ -3161,7 +3127,7 @@ def render_form(ctx, concert_id: str = ""):
         own          = st.session_state.get("form_own",  {})
         concert_name = ext(concert, CONCERT_NAME_KEYS) or ""
 
-        st.html('<div class="h-scr-title">Step 5 / 内容を確認して送信してください</div>')
+        st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">Step 5 / 内容を確認して送信してください</div>')
         st.markdown(f"**氏名：** {player_name}　　**パート：** {part}")
 
         if att:
