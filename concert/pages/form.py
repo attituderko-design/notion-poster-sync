@@ -569,18 +569,36 @@ def _inject_form_styles() -> None:
             box-shadow: 0 0 0 3px rgba(74,158,255,.1) !important;
         }
         [data-testid="stExpander"] {
-            border: .5px solid rgba(255,255,255,.09) !important;
+            border: 0.5px solid rgba(255,255,255,.09) !important;
             border-radius: 13px !important;
-            overflow: hidden;
+            overflow: hidden !important;
             background: rgba(255,255,255,.025) !important;
+            margin-bottom: 8px !important;
         }
+        [data-testid="stExpander"] > details > summary,
         [data-testid="stExpander"] summary {
-            padding: 12px 16px !important;
+            padding: 13px 16px !important;
             font-size: 15px !important;
             font-family: Outfit, sans-serif !important;
+            color: #c8d4ed !important;
+            list-style: none !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 8px !important;
+            min-height: 52px !important;
+            cursor: pointer !important;
         }
         [data-testid="stExpander"] summary:hover {
             background: rgba(255,255,255,.04) !important;
+        }
+        [data-testid="stExpander"] summary svg {
+            color: rgba(160,180,220,.4) !important;
+            flex-shrink: 0 !important;
+        }
+        [data-testid="stExpander"] > details > div,
+        [data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+            padding: 0 16px 12px !important;
+            border-top: 0.5px solid rgba(255,255,255,.06) !important;
         }
         /* number_input */
         [data-testid="stNumberInput"] {
@@ -2272,24 +2290,21 @@ def render_form(ctx, concert_id: str = ""):
         if _cover_url:
             st.html(f"""
                 <style>
+                #h-lb-toggle{{display:none;}}
+                #h-lb-toggle:checked ~ .h-lb-overlay{{display:flex;}}
                 .h-lb-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;align-items:center;justify-content:center;cursor:zoom-out;}}
-                .h-lb-overlay.open{{display:flex;}}
                 .h-lb-overlay img{{max-width:95vw;max-height:90vh;object-fit:contain;border-radius:8px;}}
                 </style>
-                <div style="width:100%;max-width:480px;margin:0 auto 12px;position:relative;">
-                    <img id="h-cover-thumb" src="{_cover_url}"
-                         style="width:100%;height:160px;object-fit:cover;border-radius:12px;display:block;cursor:zoom-in;"
+                <input type="checkbox" id="h-lb-toggle">
+                <label for="h-lb-toggle" style="display:block;width:100%;max-width:480px;margin:0 auto 12px;position:relative;cursor:zoom-in;">
+                    <img src="{_cover_url}"
+                         style="width:100%;max-height:220px;object-fit:contain;object-position:center;border-radius:12px;display:block;"
                          loading="lazy">
-                    <div style="position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.55);border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;pointer-events:none;">🔍</div>
-                </div>
-                <div class="h-lb-overlay" id="h-lb-overlay" onclick="this.classList.remove('open')">
+                    <div style="position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.3);backdrop-filter:blur(4px);border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:13px;">🔍</div>
+                </label>
+                <label for="h-lb-toggle" class="h-lb-overlay">
                     <img src="{_cover_url}">
-                </div>
-                <script>
-                document.getElementById('h-cover-thumb').addEventListener('click',function(){{
-                    document.getElementById('h-lb-overlay').classList.add('open');
-                }});
-                </script>
+                </label>
             """)
 
     # 演奏会情報カード
@@ -3141,6 +3156,9 @@ def render_form(ctx, concert_id: str = ""):
         if submitted:
             st.session_state["form_att"]  = att
             st.session_state["form_att_comment"] = att_comment
+            # 保存後はキャッシュクリアして次回表示時に最新データを取得
+            st.cache_data.clear()
+            st.session_state.pop("form_attendance_rows", None)
             if st.session_state.get("form_menu_mode"):
                 st.session_state["form_step"] = 6
             else:
@@ -3235,6 +3253,10 @@ def render_form(ctx, concert_id: str = ""):
             else:
                 st.session_state["form_step"] = 4 if my_is_perc else 5
             st.rerun()
+        if st.session_state.get("form_menu_mode"):
+            if st.button("← メニューに戻る", key="back_to_menu_3b"):
+                st.session_state["form_step"] = 1
+                st.rerun()
 
     # ── STEP 4: 所有楽器（Percのみ） ─────────────────────────
     elif step == 4:
@@ -3254,11 +3276,15 @@ def render_form(ctx, concert_id: str = ""):
 
         with st.form("step4"):
             own: dict[str, int] = {}
-            for iid in req_insts:
-                iname = inst_map.get(iid, iid)
-                val = st.number_input(iname, min_value=0, max_value=10,
-                                      step=1, value=0, key=f"own_{iid}")
-                own[iid] = int(val)
+            # 2カラムグリッドで表示
+            iid_list = list(req_insts)
+            for i in range(0, len(iid_list), 2):
+                cols = st.columns(2)
+                for j, iid in enumerate(iid_list[i:i+2]):
+                    iname = inst_map.get(iid, iid)
+                    val = cols[j].number_input(iname, min_value=0, max_value=10,
+                                              step=1, value=0, key=f"own_{iid}")
+                    own[iid] = int(val)
             submitted = st.form_submit_button("次へ →", type="primary",
                                               use_container_width=True)
         if submitted:
@@ -3268,6 +3294,10 @@ def render_form(ctx, concert_id: str = ""):
             else:
                 st.session_state["form_step"] = 5
             st.rerun()
+        if st.session_state.get("form_menu_mode"):
+            if st.button("← メニューに戻る", key="back_to_menu_4b"):
+                st.session_state["form_step"] = 1
+                st.rerun()
 
     # ── STEP 5: 確認・送信 ───────────────────────────────────
     elif step == 5:
