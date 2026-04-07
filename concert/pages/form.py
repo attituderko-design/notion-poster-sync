@@ -3165,7 +3165,6 @@ def render_form(ctx, concert_id: str = ""):
                 pr_venue = ext(p, PRACTICE_VENUE_KEYS) or ""
                 date_disp = pr_date[:10] if pr_date else "日時未設定"
                 time_disp = pr_date[11:16] if len(pr_date) > 10 else ""
-                # 曜日を追加
                 weekday_jp = ""
                 if pr_date and len(pr_date) >= 10:
                     try:
@@ -3179,44 +3178,40 @@ def render_form(ctx, concert_id: str = ""):
                     meta += f" {time_disp}"
                 if pr_venue:
                     meta += f" ・ {pr_venue}"
-                st.html(
-                    f'<div style="background:rgba(255,255,255,.025);border:.5px solid rgba(255,255,255,.06);border-radius:11px;padding:10px 14px 10px;margin-bottom:6px;">'
-                    f'<div style="font-size:12px;color:rgba(160,180,220,.5);margin-bottom:3px;font-family:Outfit,sans-serif;">{meta}</div>'
-                    f'<div style="font-size:16px;color:#e8edf7;font-weight:500;line-height:1.35;">{pr_name}</div>'
-                    f'</div>'
-                )
-                cur = existing_att.get(pr_id, {})
-                cur_status = session_att.get(pr_id) or cur.get("status", "△")
-                idx = ATT_OPTS.index(cur_status) if cur_status in ATT_OPTS else 1
-                if hasattr(st, "segmented_control"):
-                    val = st.segmented_control(
-                        "出欠",
-                        ATT_OPTS,
-                        selection_mode="single",
-                        default=ATT_OPTS[idx],
-                        key=f"att_{pr_id}",
-                        label_visibility="collapsed",
+
+                with st.container(border=True):
+                    st.caption(meta)
+                    st.markdown(f"**{pr_name}**")
+                    cur = existing_att.get(pr_id, {})
+                    cur_status = session_att.get(pr_id) or cur.get("status", "△")
+                    idx = ATT_OPTS.index(cur_status) if cur_status in ATT_OPTS else 1
+                    if hasattr(st, "segmented_control"):
+                        val = st.segmented_control(
+                            "出欠",
+                            ATT_OPTS,
+                            selection_mode="single",
+                            default=ATT_OPTS[idx],
+                            key=f"att_{pr_id}",
+                            label_visibility="collapsed",
+                        )
+                        if not val:
+                            val = ATT_OPTS[idx]
+                    else:
+                        val = st.radio(
+                            "　",
+                            ATT_OPTS,
+                            index=idx,
+                            horizontal=True,
+                            key=f"att_{pr_id}",
+                            label_visibility="collapsed",
+                        )
+                    att[pr_id] = val
+                    att_comment[pr_id] = st.text_input(
+                        "コメント（任意）",
+                        value=session_att_comment.get(pr_id, cur.get("comment", "")),
+                        key=f"att_note_{pr_id}",
+                        placeholder="必要な連絡事項があれば入力",
                     )
-                    if not val:
-                        val = ATT_OPTS[idx]
-                else:
-                    val = st.radio(
-                        "　",
-                        ATT_OPTS,
-                        index=idx,
-                        horizontal=True,
-                        key=f"att_{pr_id}",
-                        label_visibility="collapsed",
-                    )
-                att[pr_id] = val
-                att_comment[pr_id] = st.text_input(
-                    "コメント（任意）",
-                    value=session_att_comment.get(pr_id, cur.get("comment", "")),
-                    key=f"att_note_{pr_id}",
-                    placeholder="必要な連絡事項があれば入力",
-                )
-                st.html('<div style="height:8px;"></div>')
-            st.html('<div style="height:8px;"></div>')
             submitted = st.form_submit_button("保存して次へ", type="primary", use_container_width=True)
         if submitted:
             st.session_state["form_att"]  = att
