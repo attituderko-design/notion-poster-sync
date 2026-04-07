@@ -483,6 +483,26 @@ def _inject_form_styles() -> None:
             border-top: .5px solid rgba(255,255,255,.05);
         }
 
+        /* ── menu card + button overlay ── */
+        /* カードHTMLの直後のボタンをカードに重ねて透明化 */
+        div[data-testid="stButton"]:has(> button[key="menu_att"]),
+        div[data-testid="stButton"]:has(> button[key="menu_pref"]),
+        div[data-testid="stButton"]:has(> button[key="menu_own"]),
+        div[data-testid="stButton"]:has(> button[key="menu_pref_disabled"]) {
+            margin-top: -64px !important;
+            position: relative !important;
+            z-index: 1 !important;
+            margin-bottom: 8px !important;
+        }
+        div[data-testid="stButton"]:has(> button[key="menu_att"]) > button,
+        div[data-testid="stButton"]:has(> button[key="menu_pref"]) > button,
+        div[data-testid="stButton"]:has(> button[key="menu_own"]) > button,
+        div[data-testid="stButton"]:has(> button[key="menu_pref_disabled"]) > button {
+            opacity: 0 !important;
+            min-height: 56px !important;
+            height: 56px !important;
+        }
+
         /* ── segmented_control (○△×) ── */
         [data-testid="stSegmentedControl"] > div,
         div[class*="segmentedControl"] > div {
@@ -689,18 +709,37 @@ def _inject_form_styles() -> None:
         [data-baseweb="button-group"] {
             width: 100%;
             display: grid !important;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 6px;
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+            gap: 6px !important;
+            padding: 0 !important;
+            background: transparent !important;
+            border: none !important;
         }
-        [data-baseweb="button-group"] button {
-            min-height: 38px !important;
-            border-radius: 8px !important;
-            border: .5px solid rgba(255,255,255,.08) !important;
+        [data-baseweb="button-group"] button,
+        [data-baseweb="button-group"] button.st-emotion-cache-1cuhnd6,
+        [data-baseweb="button-group"] [class*="st-emotion-cache"] {
+            min-height: 48px !important;
+            height: auto !important;
+            border-radius: 9px !important;
+            border: .5px solid rgba(255,255,255,.1) !important;
             background: rgba(255,255,255,.03) !important;
             color: rgba(180,200,240,.8) !important;
-            font-family: 'Outfit', sans-serif !important;
-            font-size: 16px !important;
+            font-family: Outfit, sans-serif !important;
+            font-size: 18px !important;
+            font-weight: 500 !important;
             justify-content: center !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            white-space: nowrap !important;
+        }
+        /* 選択中ボタン: aria-pressed="true" */
+        [data-baseweb="button-group"] button[aria-pressed="true"],
+        [data-baseweb="button-group"] button[aria-pressed="true"].st-emotion-cache-1cuhnd6,
+        [data-baseweb="button-group"] button[aria-checked="true"] {
+            background: rgba(74,158,255,.18) !important;
+            border-color: rgba(74,158,255,.5) !important;
+            color: #4a9eff !important;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -2717,25 +2756,21 @@ def render_form(ctx, concert_id: str = ""):
                 st.query_params.pop("menu_action", None)
                 st.rerun()
 
-            _pref_anchor_open = '<a href="?menu_action=pref">' if (pref_total > 0 and not proposal_done) else ""
-            _pref_anchor_close = "</a>" if (pref_total > 0 and not proposal_done) else ""
-
-            # インラインスタイル定数（st.htmlはiframeスコープなので外部CSSが当たらない）
+            # ── メニューカード ──────────────────────────────────
+            # st.htmlでカードを描画し、直後のStreamlitボタンで遷移
             _S_SECTION = "font-family:Outfit,sans-serif;font-size:11px;color:rgba(160,180,220,.4);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;margin-top:4px;"
-            _S_CARD = "display:flex;align-items:center;background:rgba(255,255,255,.035);border:0.5px solid rgba(255,255,255,.08);border-radius:13px;padding:13px 14px;margin-bottom:8px;min-height:56px;gap:12px;cursor:pointer;text-decoration:none;color:inherit;"
-            _S_ICON_A = "width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:rgba(74,158,255,.13);"
-            _S_ICON_B = "width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:rgba(100,200,130,.1);"
-            _S_ICON_D = "width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:rgba(180,100,240,.1);"
-            _S_BODY = "flex:1;min-width:0;"
-            _S_TTL = "font-family:Outfit,sans-serif;font-size:15px;color:#c8d4ed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-            _S_HINT = "font-size:12px;color:rgba(160,180,220,.4);margin-top:2px;"
-            _S_RIGHT = "display:flex;align-items:center;gap:6px;flex-shrink:0;"
-            _S_BADGE = "font-family:Outfit,sans-serif;font-size:11px;background:rgba(74,158,255,.15);color:#4a9eff;border-radius:6px;padding:3px 8px;white-space:nowrap;"
-            _S_BADGE_OK = "font-family:Outfit,sans-serif;font-size:11px;background:rgba(100,200,130,.12);color:#64c882;border-radius:6px;padding:3px 8px;white-space:nowrap;"
-            _S_BADGE_PU = "font-family:Outfit,sans-serif;font-size:11px;background:rgba(180,100,240,.15);color:#c070f0;border-radius:6px;padding:3px 8px;white-space:nowrap;"
-            _S_CHEV = "font-size:14px;color:rgba(160,180,220,.25);"
-
-            # バッジHTML（インライン版）
+            _S_CARD    = "display:flex;align-items:center;background:rgba(255,255,255,.035);border:0.5px solid rgba(255,255,255,.08);border-radius:13px;padding:13px 14px;margin-bottom:0;min-height:56px;gap:12px;"
+            _S_ICON_A  = "width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:rgba(74,158,255,.13);"
+            _S_ICON_B  = "width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:rgba(100,200,130,.1);"
+            _S_ICON_D  = "width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;background:rgba(180,100,240,.1);"
+            _S_BODY    = "flex:1;min-width:0;"
+            _S_TTL     = "font-family:Outfit,sans-serif;font-size:15px;color:#c8d4ed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+            _S_HINT    = "font-size:12px;color:rgba(160,180,220,.4);margin-top:2px;"
+            _S_RIGHT   = "display:flex;align-items:center;gap:6px;flex-shrink:0;"
+            _S_BADGE   = "font-family:Outfit,sans-serif;font-size:11px;background:rgba(74,158,255,.15);color:#4a9eff;border-radius:6px;padding:3px 8px;white-space:nowrap;"
+            _S_BADGE_OK= "font-family:Outfit,sans-serif;font-size:11px;background:rgba(100,200,130,.12);color:#64c882;border-radius:6px;padding:3px 8px;white-space:nowrap;"
+            _S_BADGE_PU= "font-family:Outfit,sans-serif;font-size:11px;background:rgba(180,100,240,.15);color:#c070f0;border-radius:6px;padding:3px 8px;white-space:nowrap;"
+            _S_CHEV    = "font-size:14px;color:rgba(160,180,220,.25);"
             _att_badge_i = (f'<span style="{_S_BADGE}">{att_unanswered}件</span>' if att_unanswered > 0
                             else f'<span style="{_S_BADGE_OK}">完了</span>')
             _pref_badge_i = ""
@@ -2747,49 +2782,79 @@ def render_form(ctx, concert_id: str = ""):
                 else:
                     _pref_badge_i = f'<span style="{_S_BADGE}">{pref_total - pref_answered}件未入力</span>'
 
-            _own_card_html = ""
-            if IS_PERC(my_part):
-                _own_card_html = f'''
-                  <a href="?menu_action=own" style="{_S_CARD}">
-                    <div style="{_S_ICON_D}">🥁</div>
-                    <div style="{_S_BODY}">
-                      <div style="{_S_TTL}">所有楽器</div>
-                      <div style="{_S_HINT}">入力・変更</div>
-                    </div>
-                    <div style="{_S_RIGHT}"><span style="{_S_CHEV}">›</span></div>
-                  </a>
-                '''
+            st.html(f'<div style="{_S_SECTION}">メニュー</div>')
 
-            _pref_card_html = ""
-            if pref_total > 0:
-                _pref_href = "?menu_action=pref" if not proposal_done else "#"
-                _pref_cursor = "cursor:pointer;" if not proposal_done else "cursor:default;opacity:.5;"
-                _pref_card_html = f'''
-                  <a href="{_pref_href}" style="{_S_CARD}{_pref_cursor}">
-                    <div style="{_S_ICON_B}">🎵</div>
-                    <div style="{_S_BODY}">
-                      <div style="{_S_TTL}">楽器・パート希望</div>
-                      <div style="{_S_HINT}">{pref_hint}</div>
-                    </div>
-                    <div style="{_S_RIGHT}">{_pref_badge_i}<span style="{_S_CHEV}">›</span></div>
-                  </a>
-                '''
-
+            # 出欠カード
             st.html(f"""
-                <div style="margin-bottom:4px;">
-                  <div style="{_S_SECTION}">メニュー</div>
-                  <a href="?menu_action=att" style="{_S_CARD}">
-                    <div style="{_S_ICON_A}">📅</div>
-                    <div style="{_S_BODY}">
-                      <div style="{_S_TTL}">出欠入力</div>
-                      <div style="{_S_HINT}">{att_hint}</div>
-                    </div>
-                    <div style="{_S_RIGHT}">{_att_badge_i}<span style="{_S_CHEV}">›</span></div>
-                  </a>
-                  {_pref_card_html}
-                  {_own_card_html}
+                <div style="{_S_CARD}pointer-events:none;margin-bottom:2px;">
+                  <div style="{_S_ICON_A}">📅</div>
+                  <div style="{_S_BODY}">
+                    <div style="{_S_TTL}">出欠入力</div>
+                    <div style="{_S_HINT}">{att_hint}</div>
+                  </div>
+                  <div style="{_S_RIGHT}">{_att_badge_i}<span style="{_S_CHEV}">›</span></div>
                 </div>
+            """)
+            if st.button("出欠入力", key="menu_att", use_container_width=True):
+                st.session_state.pop("form_attendance_rows", None)
+                st.cache_data.clear()
+                _, existing_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
+                preload_att: dict[str, str] = {}
+                preload_comment: dict[str, str] = {}
+                for _pr_id, _v in (existing_att_map or {}).items():
+                    preload_att[_pr_id] = (_v or {}).get("status", "")
+                    preload_comment[_pr_id] = (_v or {}).get("comment", "")
+                st.session_state.update({
+                    "form_att": preload_att,
+                    "form_att_comment": preload_comment,
+                    "form_step": 2,
+                    "form_menu_mode": True,
+                })
+                st.rerun()
+
+            # パート希望カード
+            if pref_total > 0:
+                st.html(f"""
+                    <div style="{_S_CARD}pointer-events:none;margin-bottom:2px;">
+                      <div style="{_S_ICON_B}">🎵</div>
+                      <div style="{_S_BODY}">
+                        <div style="{_S_TTL}">楽器・パート希望</div>
+                        <div style="{_S_HINT}">{pref_hint}</div>
+                      </div>
+                      <div style="{_S_RIGHT}">{_pref_badge_i}<span style="{_S_CHEV}">›</span></div>
+                    </div>
                 """)
+                if proposal_done:
+                    st.button("楽器・パート希望（変更不可）", key="menu_pref_disabled",
+                              use_container_width=True, disabled=True)
+                else:
+                    if st.button("楽器・パート希望", key="menu_pref", use_container_width=True):
+                        st.session_state.update({
+                            "form_pref": existing_pref,
+                            "form_step": 3,
+                            "form_menu_mode": True,
+                        })
+                        st.rerun()
+
+            # 所有楽器カード
+            if IS_PERC(my_part):
+                st.html(f"""
+                    <div style="{_S_CARD}pointer-events:none;margin-bottom:2px;">
+                      <div style="{_S_ICON_D}">🥁</div>
+                      <div style="{_S_BODY}">
+                        <div style="{_S_TTL}">所有楽器</div>
+                        <div style="{_S_HINT}">入力・変更</div>
+                      </div>
+                      <div style="{_S_RIGHT}"><span style="{_S_CHEV}">›</span></div>
+                    </div>
+                """)
+                if st.button("所有楽器", key="menu_own", use_container_width=True):
+                    st.session_state.update({
+                        "form_own": {},
+                        "form_step": 4,
+                        "form_menu_mode": True,
+                    })
+                    st.rerun()
 
             if partdefs:
                 if proposal_done:
