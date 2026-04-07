@@ -483,6 +483,60 @@ def _inject_form_styles() -> None:
             border-top: .5px solid rgba(255,255,255,.05);
         }
 
+        /* ── segmented_control (○△×) ── */
+        [data-testid="stSegmentedControl"] {
+            gap: 6px !important;
+            width: 100% !important;
+        }
+        [data-testid="stSegmentedControl"] > div {
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+            gap: 6px !important;
+            width: 100% !important;
+        }
+        [data-testid="stSegmentedControl"] button {
+            min-height: 44px !important;
+            border-radius: 9px !important;
+            border: .5px solid rgba(255,255,255,.1) !important;
+            background: rgba(255,255,255,.03) !important;
+            color: rgba(180,200,240,.8) !important;
+            font-family: Outfit, sans-serif !important;
+            font-size: 17px !important;
+            font-weight: 500 !important;
+            justify-content: center !important;
+            width: 100% !important;
+            transition: background .12s, border-color .12s;
+        }
+        [data-testid="stSegmentedControl"] button[aria-checked="true"],
+        [data-testid="stSegmentedControl"] button[data-active="true"] {
+            background: rgba(74,158,255,.18) !important;
+            border-color: rgba(74,158,255,.5) !important;
+            color: #4a9eff !important;
+        }
+        /* ── selectbox ── */
+        [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        [data-testid="stSelectbox"] div[data-baseweb="select"] > div > div,
+        .stSelectbox div[data-baseweb="select"] > div {
+            border-radius: 11px !important;
+            border: .5px solid rgba(255,255,255,.12) !important;
+            background: rgba(255,255,255,.05) !important;
+            min-height: 48px !important;
+        }
+        /* selectbox dropdown */
+        [data-baseweb="popover"] [data-baseweb="menu"] {
+            background: #131a2b !important;
+            border: .5px solid rgba(255,255,255,.12) !important;
+            border-radius: 11px !important;
+        }
+        [data-baseweb="popover"] [role="option"] {
+            background: transparent !important;
+            font-size: 15px !important;
+        }
+        [data-baseweb="popover"] [role="option"]:hover,
+        [data-baseweb="popover"] [aria-selected="true"] {
+            background: rgba(74,158,255,.15) !important;
+        }
+
         /* ── streamlit overrides ── */
         .stButton > button, .stDownloadButton > button {
             border-radius: 11px !important;
@@ -2166,8 +2220,13 @@ def render_form(ctx, concert_id: str = ""):
     c_conductor = ext(concert, CONCERT_CONDUCTOR_KEYS) or ""
     c_soloist   = ext(concert, CONCERT_SOLOIST_KEYS) or ""
 
-    # カバー画像（あれば表示）
-    if concert:
+    # カバー画像（メインメニュー画面のみ表示、サイズ制限付き）
+    _show_cover = (
+        st.session_state.get("form_is_existing_auth") and
+        st.session_state.get("form_step", 1) == 1 and
+        not st.session_state.get("form_auth_verified") == False
+    )
+    if concert and _show_cover:
         _cover = concert.get("cover") or {}
         _cover_type = _cover.get("type", "")
         _cover_url = ""
@@ -2176,7 +2235,13 @@ def render_form(ctx, concert_id: str = ""):
         elif _cover_type == "file":
             _cover_url = (_cover.get("file") or {}).get("url", "")
         if _cover_url:
-            st.image(_cover_url, use_container_width=True)
+            st.html(f"""
+                <div style="width:100%;max-width:480px;margin:0 auto 12px;">
+                    <img src="{_cover_url}"
+                         style="width:100%;height:160px;object-fit:cover;border-radius:12px;display:block;"
+                         loading="lazy">
+                </div>
+            """)
 
     # 演奏会情報カード
     _meta_rows = ""
@@ -2933,6 +2998,12 @@ def render_form(ctx, concert_id: str = ""):
         part   = st.session_state.get("form_player_part","")
         is_new = st.session_state.get("form_is_new", False)
 
+        # メニューモードの場合は戻るボタンを表示
+        if st.session_state.get("form_menu_mode"):
+            if st.button("← メニューに戻る", key="back_to_menu_2"):
+                st.session_state["form_step"] = 1
+                st.rerun()
+
         st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">Step 2 / 練習出欠を入力してください</div>')
         st.html(f'<div style="font-family:Outfit,sans-serif;font-size:14px;font-weight:500;color:#e8edf7;margin-bottom:2px;">出欠を入力してください</div><div style="font-size:12px;color:rgba(160,180,220,.48);margin-bottom:12px;">{pname} — {part}</div>')
         if is_new:
@@ -3050,6 +3121,10 @@ def render_form(ctx, concert_id: str = ""):
 
         visible_partdefs = [pd for pd in partdefs if _partdef_matches(pd)]
 
+        if st.session_state.get("form_menu_mode"):
+            if st.button("← メニューに戻る", key="back_to_menu_3"):
+                st.session_state["form_step"] = 1
+                st.rerun()
         st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">Step 3 / パート希望を入力してください</div>')
         st.caption("希望・NGのあるパートだけ入力してください。入力しないパートは「希望なし/降り番でも可」として扱われます。")
 
@@ -3110,6 +3185,10 @@ def render_form(ctx, concert_id: str = ""):
 
     # ── STEP 4: 所有楽器（Percのみ） ─────────────────────────
     elif step == 4:
+        if st.session_state.get("form_menu_mode"):
+            if st.button("← メニューに戻る", key="back_to_menu_4"):
+                st.session_state["form_step"] = 1
+                st.rerun()
         st.html('<div style="font-family:Outfit,sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;margin-top:0;">Step 4 / 所有楽器の台数を入力してください</div>')
         st.caption("所有していない楽器は 0 のままで構いません。")
 
