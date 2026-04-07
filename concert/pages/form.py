@@ -253,18 +253,34 @@ def _inject_form_styles() -> None:
             font-feature-settings: "liga" 1, "kern" 1;
             letter-spacing: normal !important;
         }
+        /* ── responsive layout & typography ── */
+        /* xs: ~359px */
         .stApp .block-container {
-            max-width: 480px !important;
-            padding-top: 1.2rem !important;
-            padding-left: clamp(.8rem, 4vw, 1.4rem) !important;
-            padding-right: clamp(.8rem, 4vw, 1.4rem) !important;
+            max-width: 100% !important;
+            padding-top: 1.0rem !important;
+            padding-left: .75rem !important;
+            padding-right: .75rem !important;
         }
-        @media (max-width: 520px) {
+        /* base: 360px~ */
+        @media (min-width: 360px) {
             .stApp .block-container {
-                max-width: 100vw !important;
-                padding-left: .75rem !important;
-                padding-right: .75rem !important;
+                max-width: 480px !important;
+                padding-left: clamp(.75rem, 4vw, 1.2rem) !important;
+                padding-right: clamp(.75rem, 4vw, 1.2rem) !important;
             }
+        }
+        /* md: 640px~ */
+        @media (min-width: 640px) {
+            .stApp .block-container { max-width: 680px !important; }
+            p, li, .stMarkdown p { font-size: 16px !important; }
+            .h-scr-title { font-size: 22px !important; }
+            .h-concert-name { font-size: 20px !important; }
+        }
+        /* lg: 1024px~ */
+        @media (min-width: 1024px) {
+            .stApp .block-container { max-width: 900px !important; }
+            p, li, .stMarkdown p { font-size: 16px !important; }
+            .h-scr-title { font-size: 26px !important; }
         }
 
         /* ── fade-in animations ── */
@@ -482,7 +498,10 @@ def _inject_form_styles() -> None:
         }
         .stTextInput input, .stTextArea textarea,
         .stSelectbox [data-baseweb="select"] > div,
-        .stMultiSelect [data-baseweb="select"] > div {
+        .stSelectbox [data-baseweb="select"] [data-baseweb="select"] > div,
+        .stMultiSelect [data-baseweb="select"] > div,
+        [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+        [data-testid="stSelectbox"] > div > div {
             border-radius: 11px !important;
             border: .5px solid rgba(255,255,255,.12) !important;
             background: rgba(255,255,255,.04) !important;
@@ -2536,6 +2555,8 @@ def render_form(ctx, concert_id: str = ""):
 
             _menu_action = (st.query_params.get("menu_action") or "").strip()
             if _menu_action == "att":
+                # キャッシュクリアして最新データを取得
+                st.session_state.pop("form_attendance_rows", None)
                 _, existing_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
                 preload_att: dict[str, str] = {}
                 preload_comment: dict[str, str] = {}
