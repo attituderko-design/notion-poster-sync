@@ -253,73 +253,18 @@ def _inject_form_styles() -> None:
             font-feature-settings: "liga" 1, "kern" 1;
             letter-spacing: normal !important;
         }
-        /* ── responsive layout ── */
-        /* xs: ~359px */
         .stApp .block-container {
-            max-width: 100% !important;
-            padding-top: 1.0rem !important;
-            padding-left: .75rem !important;
-            padding-right: .75rem !important;
+            max-width: 480px !important;
+            padding-top: 1.2rem !important;
+            padding-left: clamp(.8rem, 4vw, 1.4rem) !important;
+            padding-right: clamp(.8rem, 4vw, 1.4rem) !important;
         }
-        /* base: 360px~ */
-        @media (min-width: 360px) {
+        @media (max-width: 520px) {
             .stApp .block-container {
-                max-width: 480px !important;
-                padding-left: clamp(.75rem, 4vw, 1.2rem) !important;
-                padding-right: clamp(.75rem, 4vw, 1.2rem) !important;
+                max-width: 100vw !important;
+                padding-left: .75rem !important;
+                padding-right: .75rem !important;
             }
-        }
-        /* md: 640px~ */
-        @media (min-width: 640px) {
-            .stApp .block-container {
-                max-width: 680px !important;
-                padding-left: 1.5rem !important;
-                padding-right: 1.5rem !important;
-            }
-        }
-        /* lg: 1024px~ */
-        @media (min-width: 1024px) {
-            .stApp .block-container {
-                max-width: 900px !important;
-                padding-left: 2rem !important;
-                padding-right: 2rem !important;
-            }
-        }
-
-        /* ── responsive typography ── */
-        /* xs */
-        p, li, .stMarkdown p { font-size: 14px !important; line-height: 1.7 !important; }
-        label[data-testid="stWidgetLabel"] { font-size: 12px !important; color: rgba(160,180,220,.65) !important; }
-        .stButton > button, .stDownloadButton > button { font-size: 14px !important; }
-        .h-scr-title { font-size: 18px !important; }
-        .h-concert-name { font-size: 16px !important; }
-        .h-mi-ttl { font-size: 14px !important; }
-        /* base: 360px~ */
-        @media (min-width: 360px) {
-            p, li, .stMarkdown p { font-size: 15px !important; }
-            label[data-testid="stWidgetLabel"] { font-size: 13px !important; }
-            .stButton > button, .stDownloadButton > button { font-size: 15px !important; }
-            .h-scr-title { font-size: 20px !important; }
-            .h-concert-name { font-size: 18px !important; }
-            .h-mi-ttl { font-size: 15px !important; }
-        }
-        /* md: 640px~ */
-        @media (min-width: 640px) {
-            p, li, .stMarkdown p { font-size: 16px !important; }
-            label[data-testid="stWidgetLabel"] { font-size: 14px !important; }
-            .stButton > button, .stDownloadButton > button { font-size: 15px !important; }
-            .h-scr-title { font-size: 22px !important; }
-            .h-concert-name { font-size: 20px !important; }
-            .h-mi-ttl { font-size: 15px !important; }
-        }
-        /* lg: 1024px~ */
-        @media (min-width: 1024px) {
-            p, li, .stMarkdown p { font-size: 16px !important; }
-            label[data-testid="stWidgetLabel"] { font-size: 14px !important; }
-            .stButton > button, .stDownloadButton > button { font-size: 16px !important; }
-            .h-scr-title { font-size: 26px !important; }
-            .h-concert-name { font-size: 22px !important; }
-            .h-mi-ttl { font-size: 16px !important; }
         }
 
         /* ── fade-in animations ── */
@@ -513,31 +458,6 @@ def _inject_form_styles() -> None:
             margin-bottom: 16px; line-height: 1.55;
         }
 
-        /* ── menu card button overlay ── */
-        /* カードの直後のStreamlitボタンをカード上に透明で重ねる */
-        .h-menu-btn-wrap {
-            position: relative;
-            margin-bottom: 8px;
-        }
-        .h-menu-btn-wrap .h-menu-item {
-            margin-bottom: 0;
-        }
-        .h-menu-btn-wrap .stButton {
-            position: absolute !important;
-            inset: 0 !important;
-            z-index: 1 !important;
-        }
-        .h-menu-btn-wrap .stButton > button {
-            width: 100% !important;
-            height: 100% !important;
-            opacity: 0 !important;
-            border: none !important;
-            background: transparent !important;
-            min-height: unset !important;
-            padding: 0 !important;
-            cursor: pointer !important;
-        }
-
         /* ── footer ── */
         .h-footer {
             font-family: 'Outfit', sans-serif !important;
@@ -547,27 +467,48 @@ def _inject_form_styles() -> None:
             border-top: .5px solid rgba(255,255,255,.05);
         }
 
-        /* ── menu-card-btn: カードの直後に配置し高さ0で非表示 ── */
-        .h-menu-card-btn { margin-top: -8px; overflow: hidden; height: 0; }
-
-        /* ── メニューボタンをカードデザインに統一 ── */
-        /* key="menu_att/pref/own/pref_disabled" のボタン */
-        div[data-testid="stButton"]:has(> button[data-testid="baseButton-secondary"]) > button,
-        div[data-testid="stButton"]:has(> button[data-testid="baseButton-primary"]) > button {
+        /* ── menu card buttons ── */
+        /* key="menu_att/pref/pref_disabled/own" のボタンをカードに見せる */
+        div[data-testid="stButton"]:has(button[key="menu_att"]) > button,
+        div[data-testid="stButton"]:has(button[key="menu_pref"]) > button,
+        div[data-testid="stButton"]:has(button[key="menu_own"]) > button,
+        div[data-testid="stButton"]:has(button[key="menu_pref_disabled"]) > button {
+            display: flex !important;
+            align-items: center !important;
             text-align: left !important;
             justify-content: flex-start !important;
-            padding-left: 16px !important;
+            padding: 0 14px !important;
             background: rgba(255,255,255,.035) !important;
             border: 0.5px solid rgba(255,255,255,.08) !important;
             border-radius: 13px !important;
-            min-height: 56px !important;
+            min-height: 60px !important;
+            gap: 0 !important;
+            font-family: 'Outfit', sans-serif !important;
             font-size: 15px !important;
             color: #c8d4ed !important;
-            letter-spacing: .01em !important;
+            width: 100% !important;
+            transition: border-color .15s ease, background .15s ease !important;
         }
-        div[data-testid="stButton"]:has(> button[data-testid="baseButton-secondary"]) > button:hover {
-            background: rgba(255,255,255,.055) !important;
-            border-color: rgba(74,158,255,.3) !important;
+        div[data-testid="stButton"]:has(button[key="menu_att"]) > button:hover,
+        div[data-testid="stButton"]:has(button[key="menu_pref"]) > button:hover,
+        div[data-testid="stButton"]:has(button[key="menu_own"]) > button:hover {
+            background: rgba(255,255,255,.06) !important;
+            border-color: rgba(74,158,255,.35) !important;
+            color: #e8edf7 !important;
+        }
+        div[data-testid="stButton"]:has(button[key="menu_pref_disabled"]) > button {
+            opacity: .45 !important;
+            cursor: not-allowed !important;
+        }
+        /* ボタン内のpタグ（Streamlitがlabelをmarkdownレンダリング）を左寄せ */
+        div[data-testid="stButton"]:has(button[key="menu_att"]) p,
+        div[data-testid="stButton"]:has(button[key="menu_pref"]) p,
+        div[data-testid="stButton"]:has(button[key="menu_own"]) p,
+        div[data-testid="stButton"]:has(button[key="menu_pref_disabled"]) p {
+            font-size: 15px !important;
+            color: inherit !important;
+            margin: 0 !important;
+            line-height: 1.4 !important;
         }
 
         /* ── streamlit overrides ── */
@@ -606,8 +547,10 @@ def _inject_form_styles() -> None:
             font-size: 12px !important;
             color: rgba(160,180,220,.55) !important;
         }
-        .stRadio label { min-height: 28px; }
-        .stCheckbox label { min-height: 28px; }
+        .stRadio label { font-size: 15px !important; }
+        .stCheckbox label { font-size: 15px !important; min-height: 28px; }
+        p, li, .stMarkdown p { font-size: 15px !important; line-height: 1.7 !important; }
+        label[data-testid="stWidgetLabel"] { font-size: 13px !important; color: rgba(160,180,220,.65) !important; }
         .stAlert p { font-size: 14px !important; }
 
         /* Step2の○/△/×をカードデザインに寄せる（Streamlit/BaseWeb DOM直指定） */
@@ -2635,12 +2578,8 @@ def render_form(ctx, concert_id: str = ""):
                     pref_badge_html = f'<div class="h-badge">{pref_total - pref_answered}件未入力</div>'
                     pref_hint = f"{pref_answered}/{pref_total}パート 回答済"
 
-            # ── メニューカード（Streamlitボタンをカードデザインに揃える） ──
-            st.html('<div class="h-f4 h-section" style="margin-bottom:10px;">メニュー</div>')
-
-            # 出欠カード
-            _att_btn_label = f"📅　出欠入力　{'⚠ ' + str(att_unanswered) + '件未回答' if att_unanswered > 0 else '✓ ' + str(att_answered) + '/' + str(att_total) + '回済'}"
-            if st.button(_att_btn_label, key="menu_att", use_container_width=True):
+            _menu_action = (st.query_params.get("menu_action") or "").strip()
+            if _menu_action == "att":
                 _, existing_att_map = _get_form_cast_and_att_map(ctx, concert_id, pid)
                 preload_att: dict[str, str] = {}
                 preload_comment: dict[str, str] = {}
@@ -2653,34 +2592,88 @@ def render_form(ctx, concert_id: str = ""):
                     "form_step": 2,
                     "form_menu_mode": True,
                 })
+                st.query_params.pop("menu_action", None)
+                st.rerun()
+            if _menu_action == "pref" and partdefs and not proposal_done:
+                st.session_state.update({
+                    "form_pref": existing_pref,
+                    "form_step": 3,
+                    "form_menu_mode": True,
+                })
+                st.query_params.pop("menu_action", None)
+                st.rerun()
+            if _menu_action == "own" and IS_PERC(my_part):
+                st.session_state.update({
+                    "form_own": {},
+                    "form_step": 4,
+                    "form_menu_mode": True,
+                })
+                st.query_params.pop("menu_action", None)
                 st.rerun()
 
-            # パート希望カード
-            if pref_total > 0:
-                _pref_btn_label = (
-                    f"🎵　楽器・パート希望　{'確定済' if proposal_done else ('✓ 完了' if pref_answered == pref_total else str(pref_total - pref_answered) + '件未入力')}"
-                )
-                if proposal_done:
-                    st.button(_pref_btn_label, key="menu_pref_disabled",
-                              use_container_width=True, disabled=True)
-                else:
-                    if st.button(_pref_btn_label, key="menu_pref", use_container_width=True):
-                        st.session_state.update({
-                            "form_pref": existing_pref,
-                            "form_step": 3,
-                            "form_menu_mode": True,
-                        })
-                        st.rerun()
-
-            # 所有楽器カード
+            # ── メニューカード（st.htmlでカードUI、クリックでquery_params更新） ──
+            _pref_disabled_attr = 'data-disabled="true"' if (pref_total == 0 or proposal_done) else ""
+            _pref_href = "?menu_action=pref" if (pref_total > 0 and not proposal_done) else "#"
+            _own_card = ""
             if IS_PERC(my_part):
-                if st.button("🥁　所有楽器　入力・変更", key="menu_own", use_container_width=True):
-                    st.session_state.update({
-                        "form_own": {},
-                        "form_step": 4,
-                        "form_menu_mode": True,
-                    })
-                    st.rerun()
+                _own_card = """
+                  <div class="h-menu-item h-menu-clickable" data-action="own">
+                    <div class="h-mi-icon h-ic-d">🥁</div>
+                    <div class="h-mi-body">
+                      <div class="h-mi-ttl">所有楽器</div>
+                      <div class="h-mi-hint">入力・変更</div>
+                    </div>
+                    <div class="h-mi-right"><div class="h-chev">›</div></div>
+                  </div>
+                """
+
+            st.html(f"""
+                <style>
+                .h-menu-clickable {{ cursor: pointer; }}
+                .h-menu-clickable:hover {{
+                    background: rgba(255,255,255,.06) !important;
+                    border-color: rgba(74,158,255,.35) !important;
+                }}
+                .h-menu-clickable[data-disabled="true"] {{
+                    opacity: .45; cursor: default;
+                }}
+                </style>
+                <div class="h-f4">
+                  <div class="h-section">メニュー</div>
+                  <div class="h-menu-item h-menu-clickable" data-action="att">
+                    <div class="h-mi-icon h-ic-a">📅</div>
+                    <div class="h-mi-body">
+                      <div class="h-mi-ttl">出欠入力</div>
+                      <div class="h-mi-hint">{att_hint}</div>
+                    </div>
+                    <div class="h-mi-right">{att_badge_html}<div class="h-chev">›</div></div>
+                  </div>
+                  {"" if pref_total == 0 else f'''
+                  <div class="h-menu-item h-menu-clickable" data-action="pref" {_pref_disabled_attr}>
+                    <div class="h-mi-icon h-ic-b">🎵</div>
+                    <div class="h-mi-body">
+                      <div class="h-mi-ttl">楽器・パート希望</div>
+                      <div class="h-mi-hint">{pref_hint}</div>
+                    </div>
+                    <div class="h-mi-right">{pref_badge_html}<div class="h-chev">›</div></div>
+                  </div>
+                  '''}
+                  {_own_card}
+                </div>
+                <script>
+                document.querySelectorAll('.h-menu-clickable').forEach(function(el) {{
+                    el.addEventListener('click', function() {{
+                        if (el.dataset.disabled === 'true') return;
+                        var action = el.dataset.action;
+                        if (!action) return;
+                        // Streamlit Cloud では window.parent.location を変更する
+                        var url = new URL(window.parent.location.href);
+                        url.searchParams.set('menu_action', action);
+                        window.parent.location.href = url.toString();
+                    }});
+                }});
+                </script>
+                """)
 
             if partdefs:
                 if proposal_done:
