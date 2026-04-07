@@ -484,31 +484,34 @@ def _inject_form_styles() -> None:
         }
 
         /* ── segmented_control (○△×) ── */
-        [data-testid="stSegmentedControl"] {
-            gap: 6px !important;
-            width: 100% !important;
-        }
-        [data-testid="stSegmentedControl"] > div {
+        [data-testid="stSegmentedControl"] > div,
+        div[class*="segmentedControl"] > div {
             display: grid !important;
             grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
             gap: 6px !important;
             width: 100% !important;
+            background: transparent !important;
+            border: none !important;
+            padding: 0 !important;
         }
-        [data-testid="stSegmentedControl"] button {
+        [data-testid="stSegmentedControl"] button,
+        div[class*="segmentedControl"] button {
             min-height: 44px !important;
             border-radius: 9px !important;
             border: .5px solid rgba(255,255,255,.1) !important;
             background: rgba(255,255,255,.03) !important;
             color: rgba(180,200,240,.8) !important;
             font-family: Outfit, sans-serif !important;
-            font-size: 17px !important;
+            font-size: 18px !important;
             font-weight: 500 !important;
             justify-content: center !important;
             width: 100% !important;
-            transition: background .12s, border-color .12s;
+            transition: background .12s, border-color .12s !important;
         }
+        [data-testid="stSegmentedControl"] button[aria-pressed="true"],
         [data-testid="stSegmentedControl"] button[aria-checked="true"],
-        [data-testid="stSegmentedControl"] button[data-active="true"] {
+        [data-testid="stSegmentedControl"] button[data-active="true"],
+        div[class*="segmentedControl"] button[aria-pressed="true"] {
             background: rgba(74,158,255,.18) !important;
             border-color: rgba(74,158,255,.5) !important;
             color: #4a9eff !important;
@@ -570,6 +573,38 @@ def _inject_form_styles() -> None:
             border-radius: 13px !important;
             overflow: hidden;
             background: rgba(255,255,255,.025) !important;
+        }
+        [data-testid="stExpander"] summary {
+            padding: 12px 16px !important;
+            font-size: 15px !important;
+            font-family: Outfit, sans-serif !important;
+        }
+        [data-testid="stExpander"] summary:hover {
+            background: rgba(255,255,255,.04) !important;
+        }
+        /* number_input */
+        [data-testid="stNumberInput"] {
+            background: rgba(255,255,255,.03) !important;
+            border: .5px solid rgba(255,255,255,.09) !important;
+            border-radius: 11px !important;
+            overflow: hidden;
+        }
+        [data-testid="stNumberInput"] input {
+            font-size: 16px !important;
+            border: none !important;
+            background: transparent !important;
+        }
+        [data-testid="stNumberInput"] button {
+            min-height: 40px !important;
+            border: none !important;
+            border-radius: 0 !important;
+            background: rgba(255,255,255,.06) !important;
+            color: rgba(180,200,240,.8) !important;
+            font-size: 18px !important;
+        }
+        [data-testid="stNumberInput"] button:hover {
+            background: rgba(74,158,255,.15) !important;
+            color: #4a9eff !important;
         }
         [data-testid="stMetricValue"] { font-size: 16px !important; }
         [data-testid="stMetricLabel"] > div {
@@ -2236,11 +2271,25 @@ def render_form(ctx, concert_id: str = ""):
             _cover_url = (_cover.get("file") or {}).get("url", "")
         if _cover_url:
             st.html(f"""
-                <div style="width:100%;max-width:480px;margin:0 auto 12px;">
-                    <img src="{_cover_url}"
-                         style="width:100%;height:160px;object-fit:cover;border-radius:12px;display:block;"
+                <style>
+                .h-lb-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;align-items:center;justify-content:center;cursor:zoom-out;}}
+                .h-lb-overlay.open{{display:flex;}}
+                .h-lb-overlay img{{max-width:95vw;max-height:90vh;object-fit:contain;border-radius:8px;}}
+                </style>
+                <div style="width:100%;max-width:480px;margin:0 auto 12px;position:relative;">
+                    <img id="h-cover-thumb" src="{_cover_url}"
+                         style="width:100%;height:160px;object-fit:cover;border-radius:12px;display:block;cursor:zoom-in;"
                          loading="lazy">
+                    <div style="position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.55);border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;pointer-events:none;">🔍</div>
                 </div>
+                <div class="h-lb-overlay" id="h-lb-overlay" onclick="this.classList.remove('open')">
+                    <img src="{_cover_url}">
+                </div>
+                <script>
+                document.getElementById('h-cover-thumb').addEventListener('click',function(){{
+                    document.getElementById('h-lb-overlay').classList.add('open');
+                }});
+                </script>
             """)
 
     # 演奏会情報カード
@@ -3051,9 +3100,9 @@ def render_form(ctx, concert_id: str = ""):
                 if pr_venue:
                     meta += f" ・ {pr_venue}"
                 st.html(
-                    f'<div style="background:rgba(255,255,255,.025);border:.5px solid rgba(255,255,255,.06);border-radius:11px;padding:10px 11px 8px;margin-bottom:8px;">'
-                    f'<div style="font-family:Outfit,sans-serif;font-size:12px;color:rgba(160,180,220,.5);margin-bottom:2px;">{meta}</div>'
-                    f'<div style="font-size:15px;color:#d0daf0;margin-bottom:8px;line-height:1.4;">{pr_name}</div>'
+                    f'<div style="background:rgba(255,255,255,.025);border:.5px solid rgba(255,255,255,.06);border-radius:11px;padding:10px 14px 10px;margin-bottom:6px;">'
+                    f'<div style="font-size:12px;color:rgba(160,180,220,.5);margin-bottom:3px;font-family:Outfit,sans-serif;">{meta}</div>'
+                    f'<div style="font-size:16px;color:#e8edf7;font-weight:500;line-height:1.35;">{pr_name}</div>'
                     f'</div>'
                 )
                 cur = existing_att.get(pr_id, {})
@@ -3086,18 +3135,22 @@ def render_form(ctx, concert_id: str = ""):
                     key=f"att_note_{pr_id}",
                     placeholder="必要な連絡事項があれば入力",
                 )
-                st.divider()
-            st.html('<div style="margin-top:10px;padding-top:10px;border-top:.5px solid rgba(255,255,255,.06);"></div>')
+                st.html('<div style="height:8px;"></div>')
+            st.html('<div style="height:8px;"></div>')
             submitted = st.form_submit_button("保存して次へ", type="primary", use_container_width=True)
         if submitted:
             st.session_state["form_att"]  = att
             st.session_state["form_att_comment"] = att_comment
             if st.session_state.get("form_menu_mode"):
-                # メニューから来た場合は送信→完了→メニューに戻る
                 st.session_state["form_step"] = 6
             else:
                 st.session_state["form_step"] = 3 if partdefs else 5
             st.rerun()
+        # フォーム外の戻るボタン（ページ下部）
+        if st.session_state.get("form_menu_mode"):
+            if st.button("← メニューに戻る", key="back_to_menu_2b"):
+                st.session_state["form_step"] = 1
+                st.rerun()
 
     # ── STEP 3: パート希望（パート定義が存在する場合） ──────────
     elif step == 3:
