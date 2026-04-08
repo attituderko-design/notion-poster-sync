@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+import sys
 from typing import Annotated
 
 from fastapi import APIRouter, Form, Request
@@ -1007,8 +1008,9 @@ async def form_material_practice_pdf(request: Request, practice_id: str):
         return Response("practice not found", status_code=404, media_type="text/plain; charset=utf-8")
 
     try:
-        pdf_bytes = _generate_simple_practice_pdf_bytes(
+        pdf_bytes = _generate_practice_pdf_bytes(
             ctx=ctx,
+            practice_id=practice_id,
             concert_name=_atlas_concert_name(ctx, concert),
             practice=target,
             attendance_rows=data.get("attendance_rows", []) or [],
@@ -1355,6 +1357,35 @@ def _generate_simple_practice_pdf_bytes(ctx: dict, concert_name: str, practice: 
     c.showPage()
     c.save()
     return buf.getvalue()
+
+
+def _generate_practice_pdf_bytes(ctx: dict, practice_id: str, concert_name: str, practice: dict, attendance_rows: list[dict]) -> bytes:
+    """
+    まず Streamlit版の practice_report.generate_practice_report を利用し、
+    使えない環境のみ簡易PDFへフォールバックする。
+    """
+    # 1) そのままimportできる場合
+    try:
+        from concert.services.practice_report import generate_practice_report  # type: ignore
+        return generate_practice_report(ctx, practice_id)
+    except Exception:
+        pass
+
+    # 2) vps_patch運用時に親ディレクトリ(repo root)をsys.pathへ追加して再試行
+    try:
+        repo_root = Path(__file__).resolve().parents[3]
+        if str(repo_root) not in sys.path:
+            sys.path.append(str(repo_root))
+        from concert.services.practice_report import generate_practice_report  # type: ignore
+        return generate_practice_report(ctx, practice_id)
+    except Exception:
+        # 3) 最終フォールバック
+        return _generate_simple_practice_pdf_bytes(
+            ctx=ctx,
+            concert_name=concert_name,
+            practice=practice,
+            attendance_rows=attendance_rows,
+        )
 
 
 def _visible_partdefs(ctx: dict, partdefs: list, part_master_id: str) -> list:
