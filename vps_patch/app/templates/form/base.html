@@ -74,6 +74,29 @@
   // turbolinks等なしの場合はDOMContentLoadedでも隠す
   document.addEventListener("DOMContentLoaded", () => hide());
 })();
+
+(() => {
+  const iconNodes = document.querySelectorAll("i.bi-geo-alt");
+  if (!iconNodes.length) return;
+  iconNodes.forEach((icon) => {
+    const parent = icon.parentElement;
+    if (!parent) return;
+    if (parent.closest("a, button")) return;
+    if (parent.dataset.mapLinked === "1") return;
+    const text = (parent.textContent || "").replace(/\s+/g, " ").trim();
+    if (!text) return;
+    const addr = text.replace(/^📍\s*/, "").trim();
+    if (!addr) return;
+    const link = document.createElement("a");
+    link.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.className = "map-link";
+    link.innerHTML = parent.innerHTML;
+    parent.replaceWith(link);
+    link.dataset.mapLinked = "1";
+  });
+})();
 </script>
 </body>
 </html>
