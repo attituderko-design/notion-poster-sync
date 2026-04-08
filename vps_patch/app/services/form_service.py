@@ -676,6 +676,95 @@ def has_published_assignments(ctx: dict, concert_id: str) -> bool:
         return False
 
 
+def build_assignment_view_rows(ctx: dict, assignment_rows: list, songs: list, partdefs: list) -> list[dict]:
+    """自分向けアサイン行を表示用に整形する。"""
+    ext = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
+    song_name_map = {s.get("id", ""): (ext(s, SONG_NAME_KEYS) or "") for s in songs or []}
+    part_name_map = {
+        p.get("id", ""): (ext(p, PARTDEF_DISPLAY_NAME_KEYS) or ext(p, PARTDEF_NAME_KEYS) or "")
+        for p in partdefs or []
+    }
+    out = []
+    for row in assignment_rows or []:
+        sids = ext_rel(row, ASSIGNMENT_SONG_REL_KEYS)
+        pdids = ext_rel(row, ASSIGNMENT_PARTDEF_REL_KEYS)
+        out.append(
+            {
+                "song": song_name_map.get(sids[0], "未設定") if sids else "未設定",
+                "part": part_name_map.get(pdids[0], "-") if pdids else "-",
+            }
+        )
+    out.sort(key=lambda x: (x["song"], x["part"]))
+    return out
+
+
+def build_role_assignment_rows(
+    ctx: dict,
+    concert_id: str,
+    role: int,
+    my_part_id: str,
+    partdefs: list,
+    songs: list,
+    participant_rows: list,
+) -> list[dict]:
+    """Leader/Manager向けアサイン一覧を返す。"""
+    ext = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
+    cid_norm = (concert_id or "").replace("-", "")
+
+    partdef_song: dict[str, str] = {}
+    partdef_name: dict[str, str] = {}
+    partdef_pm: dict[str, str] = {}
+    for pd in partdefs or []:
+        pdid = pd.get("id", "")
+        if not pdid:
+            continue
+        song_ids = ext_rel(pd, PARTDEF_SONG_REL_KEYS)
+        pm_ids = ext_rel(pd, PARTDEF_PART_REL_KEYS)
+        partdef_song[pdid] = song_ids[0] if song_ids else ""
+        partdef_pm[pdid] = pm_ids[0] if pm_ids else ""
+        partdef_name[pdid] = ext(pd, PARTDEF_DISPLAY_NAME_KEYS) or ext(pd, PARTDEF_NAME_KEYS) or "-"
+
+    song_name_map = {s.get("id", ""): (ext(s, SONG_NAME_KEYS) or "") for s in songs or []}
+    player_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    player_name_map = {r.get("id", ""): (ext(r, PLAYER_NAME_KEYS) or "") for r in player_rows}
+    cast_to_player = {}
+    for cast in participant_rows or []:
+        pids = ext_rel(cast, PARTICIPANT_PLAYER_REL_KEYS)
+        if pids:
+            cast_to_player[cast.get("id", "")] = pids[0]
+
+    try:
+        all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+    except Exception:
+        return []
+
+    out = []
+    for row in all_assign:
+        if not any((rid or "").replace("-", "") == cid_norm for rid in ext_rel(row, ASSIGNMENT_CONCERT_REL_KEYS)):
+            continue
+        pdids = ext_rel(row, ASSIGNMENT_PARTDEF_REL_KEYS)
+        if not pdids:
+            continue
+        pdid = pdids[0]
+        if role == ROLE_LEADER and my_part_id and partdef_pm.get(pdid, "") != my_part_id:
+            continue
+        sids = ext_rel(row, ASSIGNMENT_SONG_REL_KEYS)
+        sid = sids[0] if sids else partdef_song.get(pdid, "")
+
+        rel_players = ext_rel(row, ASSIGNMENT_PLAYER_REL_KEYS)
+        performer = "-"
+        if rel_players:
+            rid = rel_players[0]
+            pid = cast_to_player.get(rid, rid)
+            performer = player_name_map.get(pid, "-")
+
+        out.append({"song": song_name_map.get(sid, "未設定"), "part": partdef_name.get(pdid, "-"), "player": performer})
+    out.sort(key=lambda x: (x["song"], x["part"], x["player"]))
+    return out
+
+
 # ── ロール解決 ────────────────────────────────────────────────
 
 def resolve_user_role(ctx: dict, player_id: str, concert_id: str,

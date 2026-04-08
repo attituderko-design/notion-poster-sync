@@ -63,6 +63,8 @@ from app.services.form_service import (
     get_cover_url,
     get_my_assign_rows,
     has_published_assignments,
+    build_assignment_view_rows,
+    build_role_assignment_rows,
     ASSIGNMENT_CONCERT_REL_KEYS,
     ASSIGNMENT_PLAYER_REL_KEYS,
     ASSIGNMENT_PARTDEF_REL_KEYS,
@@ -880,19 +882,16 @@ async def form_menu(request: Request):
     cover_url = get_cover_url(concert)
     can_show_assign = (role >= ROLE_LEADER) or proposal_done or has_published_assignments(ctx, cid)
     my_assign_rows = get_my_assign_rows(ctx, cid, pid, participant_rows) if can_show_assign else []
-    # アサイン結果を曲ごとにまとめる
-    assign_summary = []
-    if my_assign_rows:
-        song_name_map = {s.get("id",""):  ext(s, SONG_NAME_KEYS) or "" for s in data.get("songs", [])}
-        partdef_rows  = data.get("partdefs", [])
-        pd_name_map   = {p.get("id",""): (ext(p, PARTDEF_DISPLAY_NAME_KEYS) or ext(p, PARTDEF_NAME_KEYS) or "") for p in partdef_rows}
-        ext_rel_local = ctx["extract_relation_ids_any"]
-        for r in my_assign_rows:
-            sids  = ext_rel_local(r, ASSIGNMENT_SONG_REL_KEYS)
-            pdids = ext_rel_local(r, ASSIGNMENT_PARTDEF_REL_KEYS)
-            sname = song_name_map.get(sids[0], "?") if sids else "?"
-            pname = pd_name_map.get(pdids[0], "") if pdids else ""
-            assign_summary.append({"song": sname, "part": pname})
+    assign_summary = build_assignment_view_rows(ctx, my_assign_rows, data.get("songs", []), data.get("partdefs", []))
+    role_assignment_rows = build_role_assignment_rows(
+        ctx=ctx,
+        concert_id=cid,
+        role=role,
+        my_part_id=my_part_id,
+        partdefs=data.get("partdefs", []),
+        songs=data.get("songs", []),
+        participant_rows=participant_rows,
+    ) if role >= ROLE_LEADER else []
     if pref_total == 0:
         pref_hint = ""
     elif proposal_done:
@@ -930,6 +929,7 @@ async def form_menu(request: Request):
         "attendance_table_rows": _build_attendance_table(ctx, cid, participant_rows, data.get("practices", []), data.get("attendance_rows", []), data.get("part_master_map", {}), my_part_id, role),
         "member_table_rows": _build_member_table(ctx, participant_rows, data.get("part_master_map", {}), my_part_id, role),
         "material_rows": _build_material_rows(ctx, data.get("partdefs", []), data.get("songs", []), my_part_id, role) if role_mode else [],
+        "role_assignment_rows": role_assignment_rows,
     })
 
 

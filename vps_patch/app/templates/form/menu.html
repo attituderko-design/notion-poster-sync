@@ -110,6 +110,7 @@
 <div class="role-tabs f4">
   <button type="button" class="role-tab is-active" data-role-tab="att">📋 出欠</button>
   <button type="button" class="role-tab" data-role-tab="member">👥 メンバー</button>
+  <button type="button" class="role-tab" data-role-tab="assign">🎯 アサイン</button>
   <button type="button" class="role-tab" data-role-tab="material">📄 資料</button>
 </div>
 
@@ -148,6 +149,25 @@
         <tr>
           <td>{{ row.part }}</td><td>{{ row.name }}</td><td>{{ row.role_music }}</td>
           {% if is_manager %}<td>{{ row.role_ops }}</td>{% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="role-panel" data-role-panel="assign">
+  <div class="menu-item f4" style="padding:12px;overflow-x:auto;">
+    <table class="table-mini">
+      <thead>
+        <tr><th>曲</th><th>担当パート</th><th>担当者</th></tr>
+      </thead>
+      <tbody>
+        {% for row in role_assignment_rows %}
+        <tr>
+          <td>{{ row.song }}</td>
+          <td>{{ row.part }}</td>
+          <td>{{ row.player }}</td>
         </tr>
         {% endfor %}
       </tbody>
