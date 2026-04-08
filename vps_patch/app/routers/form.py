@@ -4,11 +4,12 @@ app/routers/form.py
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app.services.auth_service import (
@@ -980,8 +981,46 @@ async def form_menu(request: Request):
         "attendance_table_rows": _build_attendance_table(ctx, cid, participant_rows, data.get("practices", []), data.get("attendance_rows", []), data.get("part_master_map", {}), my_part_id, role),
         "member_table_rows": _build_member_table(ctx, participant_rows, data.get("part_master_map", {}), my_part_id, role),
         "material_rows": _build_material_rows(ctx, data.get("partdefs", []), data.get("songs", []), my_part_id, role) if role_mode else [],
+        "material_links": _build_material_links(ctx, data.get("partdefs", []), data.get("songs", []), my_part_id, role) if role_mode else [],
+        "material_practices": _build_material_practice_items(ctx, data.get("practices", [])) if role_mode else [],
         "role_assignment_rows": role_assignment_rows,
     })
+
+
+@router.get("/form/material/practice-pdf")
+async def form_material_practice_pdf(request: Request, practice_id: str):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return RedirectResponse("/login", status_code=302)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+    ctx = get_ctx()
+    concert = _find_concert(ctx, cid)
+    if not concert:
+        return RedirectResponse("/concert/select", status_code=302)
+
+    data = load_form_data(ctx, cid)
+    practices = data.get("practices", []) or []
+    target = next((p for p in practices if p.get("id", "") == (practice_id or "")), None)
+    if not target:
+        return Response("practice not found", status_code=404, media_type="text/plain; charset=utf-8")
+
+    try:
+        pdf_bytes = _generate_simple_practice_pdf_bytes(
+            ctx=ctx,
+            concert_name=_atlas_concert_name(ctx, concert),
+            practice=target,
+            attendance_rows=data.get("attendance_rows", []) or [],
+        )
+    except Exception as e:
+        return Response(f"PDF生成に失敗しました: {e}", status_code=500, media_type="text/plain; charset=utf-8")
+
+    ext = ctx["extract_prop_text_any"]
+    pr_name = (ext(target, PRACTICE_NAME_KEYS) or "practice").replace("/", "-")
+    filename = f"練習情報_{pr_name}.pdf"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
 @router.post("/form/menu-action")
@@ -1190,6 +1229,132 @@ def _build_material_rows(ctx, partdefs, songs, my_part_id, role) -> list:
         rows.append({"song": song_name, "part": pd_name, "url": score_url})
     rows.sort(key=lambda x: (x["song"], x["part"]))
     return rows
+
+
+def _build_material_links(ctx, partdefs, songs, my_part_id, role) -> list[dict]:
+    """資料タブ向けの楽譜リンク（Streamlit準拠: URL重複排除）。"""
+    ext = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
+    song_name_map = {s.get("id", ""): (ext(s, SONG_NAME_KEYS) or "") for s in songs}
+    song_score_map = {s.get("id", ""): (ext(s, SONG_SCORE_URL_KEYS) or "") for s in songs}
+    out: list[dict] = []
+    seen_urls: set[str] = set()
+    for pd in partdefs:
+        part_ids = ext_rel(pd, PARTDEF_PART_REL_KEYS)
+        if role < ROLE_MANAGER and my_part_id:
+            if not part_ids or part_ids[0] != my_part_id:
+                continue
+        pd_url = (ext(pd, PARTDEF_SCORE_URL_KEYS) or "").strip()
+        pd_lbl = (ext(pd, PARTDEF_NAME_KEYS) or "楽譜").strip()
+        if pd_url:
+            if pd_url not in seen_urls:
+                seen_urls.add(pd_url)
+                out.append({"label": pd_lbl, "url": pd_url})
+            continue
+
+        song_ids = ext_rel(pd, PARTDEF_SONG_REL_KEYS)
+        if not song_ids:
+            continue
+        song_id = song_ids[0]
+        song_url = (song_score_map.get(song_id, "") or "").strip()
+        if not song_url:
+            continue
+        song_lbl = (song_name_map.get(song_id, "楽譜") or "楽譜").strip()
+        if song_url not in seen_urls:
+            seen_urls.add(song_url)
+            out.append({"label": f"{song_lbl}（全体）", "url": song_url})
+    return out
+
+
+def _build_material_practice_items(ctx, practices: list[dict]) -> list[dict]:
+    ext = ctx["extract_prop_text_any"]
+    items: list[dict] = []
+    for p in practices or []:
+        pid = p.get("id", "")
+        if not pid:
+            continue
+        items.append({
+            "id": pid,
+            "name": (ext(p, PRACTICE_NAME_KEYS) or "練習").strip(),
+            "date": (ext(p, PRACTICE_DATE_KEYS) or "")[:10],
+            "venue": (ext(p, PRACTICE_VENUE_KEYS) or "").strip(),
+        })
+    return items
+
+
+def _generate_simple_practice_pdf_bytes(ctx: dict, concert_name: str, practice: dict, attendance_rows: list[dict]) -> bytes:
+    """VPS版の簡易練習情報PDF（1練習分）を生成。"""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+    except Exception as e:
+        raise RuntimeError(f"reportlab が利用できません: {e}") from e
+
+    ext = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
+    pid = practice.get("id", "")
+    p_name = (ext(practice, PRACTICE_NAME_KEYS) or "練習").strip()
+    p_date = (ext(practice, PRACTICE_DATE_KEYS) or "")[:16].replace("T", " ")
+    p_venue = (ext(practice, PRACTICE_VENUE_KEYS) or "").strip()
+
+    status_count = {"○": 0, "△": 0, "×": 0, "未回答": 0}
+    for att in attendance_rows or []:
+        pr_ids = ext_rel(att, ATT_PRACTICE_REL_KEYS)
+        if pid not in pr_ids:
+            continue
+        s = (ext(att, ATT_STATUS_KEYS) or "未回答").strip()
+        if s not in status_count:
+            s = "未回答"
+        status_count[s] += 1
+
+    font_name = "Helvetica"
+    try:
+        font_path = "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf"
+        pdfmetrics.registerFont(TTFont("IPAGothic", font_path))
+        font_name = "IPAGothic"
+    except Exception:
+        pass
+
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+    y = h - 48
+    c.setFont(font_name, 16)
+    c.drawString(40, y, "ArtéMis HARMONIA 練習情報PDF")
+    y -= 28
+    c.setFont(font_name, 12)
+    c.drawString(40, y, f"演奏会: {concert_name}")
+    y -= 20
+    c.drawString(40, y, f"練習: {p_name}")
+    y -= 18
+    if p_date:
+        c.drawString(40, y, f"日時: {p_date}")
+        y -= 18
+    if p_venue:
+        c.drawString(40, y, f"会場: {p_venue}")
+        y -= 26
+    else:
+        y -= 8
+
+    c.setFont(font_name, 13)
+    c.drawString(40, y, "出欠サマリー")
+    y -= 18
+    c.setFont(font_name, 11)
+    c.drawString(40, y, f"○ 参加: {status_count['○']}人")
+    y -= 16
+    c.drawString(40, y, f"△ 条件付き: {status_count['△']}人")
+    y -= 16
+    c.drawString(40, y, f"× 欠席: {status_count['×']}人")
+    y -= 16
+    c.drawString(40, y, f"未回答: {status_count['未回答']}人")
+    y -= 28
+    c.setFont(font_name, 9)
+    c.drawString(40, y, "※ 本PDFはVPS版の簡易出力です。")
+    c.showPage()
+    c.save()
+    return buf.getvalue()
 
 
 def _visible_partdefs(ctx: dict, partdefs: list, part_master_id: str) -> list:

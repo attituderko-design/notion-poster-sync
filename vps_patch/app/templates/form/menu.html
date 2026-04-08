@@ -206,27 +206,40 @@
 </div>
 
 <div class="role-panel" data-role-panel="material">
-  <div class="menu-item f4" style="padding:12px;overflow-x:auto;">
-    <table class="table-mini">
-      <thead>
-        <tr><th>曲</th><th>パート</th><th>楽譜リンク</th></tr>
-      </thead>
-      <tbody>
-        {% for row in material_rows %}
-        <tr>
-          <td>{{ row.song }}</td>
-          <td>{{ row.part }}</td>
-          <td>
-            {% if row.url %}
-              <a href="{{ row.url }}" target="_blank" rel="noopener noreferrer">開く</a>
-            {% else %}
-              -
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="menu-item f4 material-panel">
+    <details class="material-box">
+      <summary><i class="bi bi-file-earmark-pdf"></i> 練習情報PDF（全練習回）</summary>
+      <div class="material-inner">
+        {% if material_practices %}
+          {% for p in material_practices %}
+          <div class="material-practice-row">
+            <div class="material-practice-meta">
+              <div class="material-practice-title">{{ p.date }} {{ p.name }}</div>
+              {% if p.venue %}<div class="material-practice-sub">{{ p.venue }}</div>{% endif %}
+            </div>
+            <a class="material-action-btn" href="/form/material/practice-pdf?practice_id={{ p.id }}">PDF</a>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="menu-hint">練習日が登録されていません。</div>
+        {% endif %}
+      </div>
+    </details>
+
+    <details class="material-box" open>
+      <summary><i class="bi bi-music-note-list"></i> 楽譜リンク</summary>
+      <div class="material-inner">
+        {% if material_links %}
+          <ul class="material-link-list">
+            {% for item in material_links %}
+            <li><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.label }}</a></li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="menu-hint">リンクがまだ登録されていません。</div>
+        {% endif %}
+      </div>
+    </details>
   </div>
 </div>
 {% endif %}
@@ -268,6 +281,20 @@
   .att-status-chip.is-ng{color:#f08c8c;background:rgba(220,80,80,.13);border-color:rgba(220,80,80,.34)}
   .att-status-chip.is-none{color:#9aaed3;background:rgba(255,255,255,.03)}
   .att-status-chip.is-hidden{display:none}
+  .material-panel{display:block;padding:12px}
+  .material-box{border:1px solid rgba(255,255,255,.11);border-radius:10px;background:rgba(255,255,255,.02);margin-bottom:10px;overflow:hidden}
+  .material-box summary{list-style:none;cursor:pointer;padding:11px 12px;color:#d8e6ff;font-weight:600;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(255,255,255,.08)}
+  .material-box summary::-webkit-details-marker{display:none}
+  .material-inner{padding:10px 12px}
+  .material-link-list{margin:0;padding-left:18px}
+  .material-link-list li{margin:6px 0}
+  .material-link-list a{color:#66b1ff;text-decoration:underline}
+  .material-practice-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
+  .material-practice-row:last-child{border-bottom:none}
+  .material-practice-title{font-size:12px;color:#d8e4fb}
+  .material-practice-sub{font-size:11px;color:#8ea7d2}
+  .material-action-btn{display:inline-flex;align-items:center;justify-content:center;min-width:56px;height:28px;padding:0 10px;border-radius:999px;border:1px solid rgba(74,158,255,.45);background:rgba(74,158,255,.13);color:#9acbff;text-decoration:none;font-size:12px}
+  .material-action-btn:hover{background:rgba(74,158,255,.2)}
   .table-mini{width:100%;border-collapse:collapse;font-size:.92rem}
   .table-mini th,.table-mini td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;white-space:nowrap}
   .table-mini th{color:#9db1d6;font-weight:700}
