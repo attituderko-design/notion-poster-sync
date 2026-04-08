@@ -5,6 +5,8 @@ import os
 import requests
 from typing import Any
 import uuid as _uuid
+import time
+import json
 
 NOTION_VERSION = "2022-06-28"
 
@@ -17,6 +19,16 @@ DB_KEYS = [
     "CONCERT_DB_CONCERT_ASSIGNMENT","CONCERT_DB_CONCERT_SONG",
 ]
 
+_QUERY_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_TYPE_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+def _cache_ttl_seconds() -> int:
+    try:
+        return max(0, int(os.environ.get("NOTION_CACHE_TTL_SECONDS", "20")))
+    except Exception:
+        return 20
+
 
 def _headers(api_key: str) -> dict:
     return {
@@ -28,6 +40,14 @@ def _headers(api_key: str) -> dict:
 
 def _query_all_notion(db_id: str, api_key: str,
                        filter_payload: dict | None = None) -> list[dict]:
+    ttl = _cache_ttl_seconds()
+    fkey = json.dumps(filter_payload, sort_keys=True, ensure_ascii=False) if filter_payload else ""
+    cache_key = f"{db_id}::{fkey}"
+    if ttl > 0:
+        hit = _QUERY_CACHE.get(cache_key)
+        if hit and (time.time() - hit[0] <= ttl):
+            return [dict(x) for x in hit[1]]
+
     url = f"https://api.notion.com/v1/databases/{db_id}/query"
     results, cursor = [], None
     while True:
@@ -47,17 +67,28 @@ def _query_all_notion(db_id: str, api_key: str,
         if not data.get("has_more"):
             break
         cursor = data.get("next_cursor")
+    if ttl > 0:
+        _QUERY_CACHE[cache_key] = (time.time(), results)
     return results
 
 
 def _get_prop_types(db_id: str, api_key: str) -> dict:
+    ttl = _cache_ttl_seconds()
+    if ttl > 0:
+        hit = _TYPE_CACHE.get(db_id)
+        if hit and (time.time() - hit[0] <= ttl):
+            return dict(hit[1])
+
     resp = requests.get(
         f"https://api.notion.com/v1/databases/{db_id}",
         headers=_headers(api_key), timeout=15,
     )
     if resp.status_code != 200:
         return {}
-    return resp.json().get("properties", {})
+    props = resp.json().get("properties", {})
+    if ttl > 0:
+        _TYPE_CACHE[db_id] = (time.time(), props)
+    return props
 
 
 def _extract_prop_text_any(page: dict, keys: list[str]) -> str:

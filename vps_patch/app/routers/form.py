@@ -1061,6 +1061,8 @@ def _build_attendance_table(ctx, concert_id, participant_rows, practices, attend
     """出欠テーブル行を構築。LeaderはPART_MASTERが同一のメンバーのみ、Managerは全員。"""
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
+    players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    player_map = {p.get("id", ""): p for p in players}
     rows = []
     for cast in participant_rows:
         pm_ids = ext_rel(cast, PARTICIPANT_PART_REL_KEYS)
@@ -1071,8 +1073,7 @@ def _build_attendance_table(ctx, concert_id, participant_rows, practices, attend
         part    = pm_info.get("name", "")
         pids    = ext_rel(cast, PARTICIPANT_PLAYER_REL_KEYS)
         pid     = pids[0] if pids else ""
-        players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
-        player  = next((p for p in players if p.get("id","") == pid), {})
+        player  = player_map.get(pid, {})
         name    = ext_txt(player, PLAYER_NAME_KEYS) or "—"
         targets = {pid, cast.get("id", "")}
         cells: dict[str, str] = {}
@@ -1095,6 +1096,8 @@ def _build_member_table(ctx, participant_rows, part_master_map, my_part_id, role
     """メンバーテーブル行を構築。"""
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
+    players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    player_map = {p.get("id", ""): p for p in players}
     rows = []
     for cast in participant_rows:
         pm_ids = ext_rel(cast, PARTICIPANT_PART_REL_KEYS)
@@ -1105,8 +1108,7 @@ def _build_member_table(ctx, participant_rows, part_master_map, my_part_id, role
         part    = pm_info.get("name", "")
         pids    = ext_rel(cast, PARTICIPANT_PLAYER_REL_KEYS)
         pid     = pids[0] if pids else ""
-        players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
-        player  = next((p for p in players if p.get("id","") == pid), {})
+        player  = player_map.get(pid, {})
         name       = ext_txt(player, PLAYER_NAME_KEYS) or "—"
         role_music = ext_txt(cast, PARTICIPANT_ROLE_KEYS) or ""
         role_ops   = ext_txt(cast, PARTICIPANT_ROLE_OPS_KEYS) or ""
