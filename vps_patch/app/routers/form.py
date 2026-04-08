@@ -3,6 +3,7 @@ app/routers/form.py
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timedelta
 import os
 import sys
@@ -339,6 +340,250 @@ def _role_label(role: int) -> str:
     if role >= ROLE_LEADER:
         return "Leader"
     return "Player"
+
+
+def _is_unanswered_status(v: str) -> bool:
+    t = (v or "").strip()
+    return t in {"", "未回答", "—", "-"}
+
+
+def _is_maybe_status(v: str) -> bool:
+    return (v or "").strip() == "△"
+
+
+def _short_name_list(names: list[str], limit: int = 4) -> str:
+    clean = [n for n in names if (n or "").strip()]
+    if not clean:
+        return ""
+    if len(clean) <= limit:
+        return " / ".join(clean)
+    return f"{' / '.join(clean[:limit])} ほか{len(clean) - limit}名"
+
+
+def _build_role_todo_items(
+    ctx: dict,
+    *,
+    role: int,
+    concert_id: str,
+    my_part_id: str,
+    participant_rows: list[dict],
+    part_master_map: dict,
+    player_map: dict,
+    practices: list[dict],
+    attendance_rows: list[dict],
+    upcoming_practice_id: str,
+    partdefs: list[dict],
+    preference_rows: list[dict],
+) -> list[dict[str, str]]:
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+
+    people: list[dict] = []
+    for cast in participant_rows or []:
+        cast_id = cast.get("id", "")
+        pm_ids = ext_rel(cast, PARTICIPANT_PART_REL_KEYS)
+        player_ids = ext_rel(cast, PARTICIPANT_PLAYER_REL_KEYS)
+        if not cast_id or not pm_ids or not player_ids:
+            continue
+        part_id = pm_ids[0]
+        player_id = player_ids[0]
+        part_info = (part_master_map or {}).get(part_id, {}) or {}
+        part_name = (part_info.get("name", "") or "").strip()
+        part_type = (part_info.get("type", "") or "").strip()
+        name = (ext_txt((player_map or {}).get(player_id, {}), PLAYER_NAME_KEYS) or "").strip() or "—"
+        people.append({
+            "cast_id": cast_id,
+            "player_id": player_id,
+            "part_id": part_id,
+            "part_name": part_name,
+            "name": name,
+            "is_perc": is_perc(part_name) or is_perc(part_type),
+        })
+
+    if role >= ROLE_MANAGER:
+        scoped_people = people
+    elif role >= ROLE_LEADER:
+        scoped_people = [p for p in people if p["part_id"] == my_part_id]
+    else:
+        scoped_people = []
+    if not scoped_people:
+        return []
+
+    status_map: dict[tuple[str, str], str] = {}
+    for row in attendance_rows or []:
+        targets = ext_rel(row, ATT_PLAYER_REL_KEYS)
+        pr_ids = ext_rel(row, ATT_PRACTICE_REL_KEYS)
+        if not targets or not pr_ids:
+            continue
+        status = (ext_txt(row, ATT_STATUS_KEYS) or "").strip() or "未回答"
+        for tid in targets:
+            for pr_id in pr_ids:
+                status_map.setdefault((tid, pr_id), status)
+
+    def status_for(person: dict, practice_id: str) -> str:
+        if not practice_id:
+            return "未回答"
+        return (
+            status_map.get((person["cast_id"], practice_id))
+            or status_map.get((person["player_id"], practice_id))
+            or "未回答"
+        )
+
+    has_unanswered_by_person: dict[str, bool] = {}
+    has_maybe_by_person: dict[str, bool] = {}
+    practice_ids = [p.get("id", "") for p in (practices or []) if p.get("id", "")]
+    for person in scoped_people:
+        has_unanswered_by_person[person["player_id"]] = any(
+            _is_unanswered_status(status_for(person, pr_id)) for pr_id in practice_ids
+        )
+        has_maybe_by_person[person["player_id"]] = _is_maybe_status(status_for(person, upcoming_practice_id))
+
+    # 所有楽器は Percussion 所属のみ対象（行が1件でもあれば入力済み扱い）
+    own_done_player_ids: set[str] = set()
+    try:
+        pi_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"], None)
+    except Exception:
+        pi_rows = []
+    cid_norm = (concert_id or "").replace("-", "")
+    for row in pi_rows:
+        rel_cids = [x.replace("-", "") for x in ext_rel(row, _K.PI_CONCERT_REL_KEYS)]
+        if cid_norm not in rel_cids:
+            continue
+        for pid in ext_rel(row, _K.PI_PLAYER_REL_KEYS):
+            if pid:
+                own_done_player_ids.add(pid)
+    own_missing_by_person = {
+        p["player_id"]: (p["is_perc"] and p["player_id"] not in own_done_player_ids)
+        for p in scoped_people
+    }
+
+    # パート希望: 自パートに紐づく partdef のうち未回答が1つでもあれば未回答扱い
+    partdef_ids_by_part: dict[str, set[str]] = defaultdict(set)
+    for pd in partdefs or []:
+        pd_id = pd.get("id", "")
+        if not pd_id:
+            continue
+        for pm_id in ext_rel(pd, PARTDEF_PART_REL_KEYS):
+            if pm_id:
+                partdef_ids_by_part[pm_id].add(pd_id)
+    pref_answered: dict[tuple[str, str], bool] = {}
+    for row in preference_rows or []:
+        targets = ext_rel(row, PREF_PLAYER_REL_KEYS)
+        pd_ids = ext_rel(row, PREF_PART_REL_KEYS)
+        prio = (ext_txt(row, PREF_PRIORITY_KEYS) or "").strip()
+        answered = prio not in {"", "未回答"}
+        if not answered:
+            continue
+        for t in targets:
+            for pd_id in pd_ids:
+                pref_answered[(t, pd_id)] = True
+    pref_missing_by_person: dict[str, bool] = {}
+    for p in scoped_people:
+        pd_ids = partdef_ids_by_part.get(p["part_id"], set())
+        if not pd_ids:
+            pref_missing_by_person[p["player_id"]] = False
+            continue
+        missing = False
+        for pd_id in pd_ids:
+            if pref_answered.get((p["cast_id"], pd_id)) or pref_answered.get((p["player_id"], pd_id)):
+                continue
+            missing = True
+            break
+        pref_missing_by_person[p["player_id"]] = missing
+
+    todo_items: list[dict[str, str]] = []
+    if role >= ROLE_MANAGER:
+        by_part: dict[str, list[dict]] = defaultdict(list)
+        for p in scoped_people:
+            by_part[p["part_name"] or "（未設定）"].append(p)
+
+        def part_labels(pred) -> list[str]:
+            labels: list[str] = []
+            for part_name, members in sorted(by_part.items(), key=lambda x: x[0].lower()):
+                cnt = sum(1 for m in members if pred(m))
+                if cnt > 0:
+                    labels.append(f"{part_name}（{cnt}名）")
+            return labels
+
+        labels_unanswered = part_labels(lambda m: has_unanswered_by_person.get(m["player_id"], False))
+        if labels_unanswered:
+            todo_items.append({
+                "title": "出欠未回答のあるパートへ催促",
+                "desc": " / ".join(labels_unanswered[:4]) + (f" ほか{len(labels_unanswered)-4}パート" if len(labels_unanswered) > 4 else ""),
+                "href": "#role-menu-panels",
+                "icon": "clipboard-data",
+            })
+
+        if upcoming_practice_id:
+            labels_maybe = part_labels(lambda m: has_maybe_by_person.get(m["player_id"], False))
+            if labels_maybe:
+                todo_items.append({
+                    "title": "直近練習で△回答のあるパートへ催促",
+                    "desc": " / ".join(labels_maybe[:4]) + (f" ほか{len(labels_maybe)-4}パート" if len(labels_maybe) > 4 else ""),
+                    "href": "#role-menu-panels",
+                    "icon": "calendar2-week",
+                })
+
+        labels_own = part_labels(lambda m: own_missing_by_person.get(m["player_id"], False))
+        if labels_own:
+            todo_items.append({
+                "title": "所有楽器未入力のあるパートへ催促",
+                "desc": " / ".join(labels_own[:4]) + (f" ほか{len(labels_own)-4}パート" if len(labels_own) > 4 else ""),
+                "href": "#role-menu-panels",
+                "icon": "collection",
+            })
+
+        labels_pref = part_labels(lambda m: pref_missing_by_person.get(m["player_id"], False))
+        if labels_pref:
+            todo_items.append({
+                "title": "パート希望未入力のあるパートへ催促",
+                "desc": " / ".join(labels_pref[:4]) + (f" ほか{len(labels_pref)-4}パート" if len(labels_pref) > 4 else ""),
+                "href": "/form/pref",
+                "icon": "music-note-list",
+            })
+        return todo_items
+
+    # Leader: 人単位
+    def names_by(pred) -> list[str]:
+        return sorted([p["name"] for p in scoped_people if pred(p)], key=lambda x: x.lower())
+
+    names_unanswered = names_by(lambda p: has_unanswered_by_person.get(p["player_id"], False))
+    if names_unanswered:
+        todo_items.append({
+            "title": "出欠未回答メンバーへ催促",
+            "desc": _short_name_list(names_unanswered),
+            "href": "#role-menu-panels",
+            "icon": "clipboard-data",
+        })
+
+    if upcoming_practice_id:
+        names_maybe = names_by(lambda p: has_maybe_by_person.get(p["player_id"], False))
+        if names_maybe:
+            todo_items.append({
+                "title": "直近練習で△回答メンバーへ催促",
+                "desc": _short_name_list(names_maybe),
+                "href": "#role-menu-panels",
+                "icon": "calendar2-week",
+            })
+
+    names_own = names_by(lambda p: own_missing_by_person.get(p["player_id"], False))
+    if names_own:
+        todo_items.append({
+            "title": "所有楽器未入力メンバーへ催促",
+            "desc": _short_name_list(names_own),
+            "href": "/form/own",
+            "icon": "collection",
+        })
+
+    names_pref = names_by(lambda p: pref_missing_by_person.get(p["player_id"], False))
+    if names_pref:
+        todo_items.append({
+            "title": "パート希望未入力メンバーへ催促",
+            "desc": _short_name_list(names_pref),
+            "href": "/form/pref",
+            "icon": "music-note-list",
+        })
+    return todo_items
 
 
 def _format_hhmm(v: str) -> str:
@@ -1433,42 +1678,67 @@ async def form_menu(request: Request):
     show_pref = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER)
     show_own = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER) and is_perc_role
     role_mode = role >= ROLE_LEADER
-    todo_items: list[dict[str, str]] = []
-    if att_unanswered > 0:
-        todo_items.append({
-            "title": "出欠入力を完了",
-            "desc": f"未回答 {att_unanswered}件",
-            "href": "/form/att",
-            "icon": "calendar-check",
-        })
-    if show_pref and pref_total > 0 and pref_answered < pref_total:
-        todo_items.append({
-            "title": "パート希望を入力",
-            "desc": f"{pref_total - pref_answered}件 未入力",
-            "href": "/form/pref",
-            "icon": "music-note-list",
-        })
-    if role >= ROLE_LEADER and not proposal_done:
-        todo_items.append({
-            "title": "アサイン案を提示",
-            "desc": "アサインタブで厳密解を生成",
-            "href": "#role-menu-panels",
-            "icon": "bullseye",
-        })
-    elif role >= ROLE_LEADER and proposal_done and not published_assign:
-        todo_items.append({
-            "title": "アサインを確定",
-            "desc": "提示中の案を確定して公開",
-            "href": "#role-menu-panels",
-            "icon": "check2-square",
-        })
-    if role >= ROLE_LEADER and upcoming_practice and not upcoming_schedule_rows:
-        todo_items.append({
-            "title": "直近練習の進行表を確認",
-            "desc": "この練習日のスケジュールが未登録",
-            "href": "",
-            "icon": "clock-history",
-        })
+    upcoming_practice_id = (upcoming_practice or {}).get("id", "") if upcoming_practice else ""
+    if role >= ROLE_LEADER:
+        todo_items = _build_role_todo_items(
+            ctx,
+            role=role,
+            concert_id=cid,
+            my_part_id=my_part_id,
+            participant_rows=participant_rows,
+            part_master_map=data.get("part_master_map", {}) or {},
+            player_map=player_map,
+            practices=practices,
+            attendance_rows=attendance_rows,
+            upcoming_practice_id=upcoming_practice_id,
+            partdefs=partdefs,
+            preference_rows=preference_rows,
+        )
+        if not proposal_done:
+            todo_items.append({
+                "title": "アサイン案を提示",
+                "desc": "アサインタブで厳密解を生成",
+                "href": "#role-menu-panels",
+                "icon": "bullseye",
+            })
+        elif not published_assign:
+            todo_items.append({
+                "title": "アサインを確定",
+                "desc": "提示中の案を確定して公開",
+                "href": "#role-menu-panels",
+                "icon": "check2-square",
+            })
+        if upcoming_practice and not upcoming_schedule_rows:
+            todo_items.append({
+                "title": "直近練習の進行表を確認",
+                "desc": "この練習日のスケジュールが未登録",
+                "href": "",
+                "icon": "clock-history",
+            })
+    else:
+        todo_items: list[dict[str, str]] = []
+        if att_unanswered > 0:
+            todo_items.append({
+                "title": "出欠入力を完了",
+                "desc": f"未回答 {att_unanswered}件",
+                "href": "/form/att",
+                "icon": "calendar-check",
+            })
+        if show_pref and pref_total > 0 and pref_answered < pref_total:
+            todo_items.append({
+                "title": "パート希望を入力",
+                "desc": f"{pref_total - pref_answered}件 未入力",
+                "href": "/form/pref",
+                "icon": "music-note-list",
+            })
+        if show_own:
+            # 所有楽器入力画面へ導線を常時表示（Percussionのみ）
+            todo_items.append({
+                "title": "所有楽器を確認",
+                "desc": "入力・更新",
+                "href": "/form/own",
+                "icon": "collection",
+            })
     song_names = []
     for s in (data.get("songs", []) or []):
         n = (ext(s, SONG_NAME_KEYS) or "").strip()
