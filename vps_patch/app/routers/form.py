@@ -957,6 +957,29 @@ async def form_menu(request: Request):
     else:
         pref_hint = f"{pref_answered}/{pref_total}パート 回答済"
 
+    # 直近練習（現在以降を優先、なければ最初の練習）
+    now_dt = datetime.now()
+    def _parse_practice_dt(v: str) -> datetime | None:
+        txt = (v or "").strip()
+        if not txt:
+            return None
+        base = txt.replace("Z", "")
+        try:
+            return datetime.fromisoformat(base[:19])
+        except Exception:
+            return None
+    upcoming_practice = None
+    for p in practices:
+        dtxt = (ext(p, PRACTICE_DATE_KEYS) or "").strip()
+        pd = _parse_practice_dt(dtxt)
+        if pd is None:
+            continue
+        if pd >= now_dt:
+            upcoming_practice = p
+            break
+    if upcoming_practice is None and practices:
+        upcoming_practice = practices[0]
+
     show_pref = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER)
     show_own = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER) and is_perc_role
     role_mode = role >= ROLE_LEADER
@@ -981,6 +1004,11 @@ async def form_menu(request: Request):
         "my_music_role": my_music_role,
         "my_ops_role": my_ops_role,
         "my_system_role": my_system_role,
+        "upcoming_practice": {
+            "name": (ext(upcoming_practice, PRACTICE_NAME_KEYS) or "").strip(),
+            "date": (ext(upcoming_practice, PRACTICE_DATE_KEYS) or "").strip()[:16].replace("T", " "),
+            "venue": (ext(upcoming_practice, PRACTICE_VENUE_KEYS) or "").strip(),
+        } if upcoming_practice else None,
         "att_unanswered": att_unanswered,
         "att_hint": att_hint,
         "pref_total": pref_total if show_pref else 0,

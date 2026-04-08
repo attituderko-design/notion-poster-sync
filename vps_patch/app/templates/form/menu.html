@@ -57,6 +57,20 @@
   {% endif %}
 </div>
 
+{% if upcoming_practice %}
+<div class="menu-item f3 next-practice-card">
+  <div class="next-practice-icon"><i class="bi bi-clock-history"></i></div>
+  <div class="next-practice-body">
+    <div class="next-practice-title">直近練習情報</div>
+    <div class="next-practice-name">{{ upcoming_practice.name or "（名称未設定）" }}</div>
+    <div class="next-practice-meta">
+      {% if upcoming_practice.date %}<span><i class="bi bi-calendar-event"></i>{{ upcoming_practice.date }}</span>{% endif %}
+      {% if upcoming_practice.venue %}<span><i class="bi bi-geo-alt"></i>{{ upcoming_practice.venue }}</span>{% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div class="section-label f4">メニュー</div>
 
 <form method="post" action="/form/menu-action" style="margin-bottom:8px;">
@@ -139,6 +153,14 @@
 <div class="role-panel is-active" data-role-panel="att">
   <div class="menu-item f4 att-modern-panel">
     {% if practice_cols and attendance_table_rows %}
+    <div class="panel-filters">
+      <div class="panel-filter-item">
+        <label for="att-part-filter">パート</label>
+        <select id="att-part-filter" class="panel-filter-select" data-filter-target="att" data-filter-kind="part">
+          <option value="">全パート</option>
+        </select>
+      </div>
+    </div>
     <div class="att-date-tabs">
       {% for pc in practice_cols %}
       <button type="button" class="att-date-tab{% if loop.first %} is-active{% endif %}" data-practice-id="{{ pc.id }}">
@@ -146,9 +168,9 @@
       </button>
       {% endfor %}
     </div>
-    <div class="att-member-list">
+    <div class="att-member-list" data-role-list="att">
       {% for row in attendance_table_rows %}
-      <div class="att-member-card">
+      <div class="att-member-card" data-part="{{ row.part }}">
         <div class="att-member-head">
           <div class="att-member-name">{{ row.name }}</div>
           <span class="att-member-part">{{ row.part }}</span>
@@ -167,6 +189,7 @@
       </div>
       {% endfor %}
     </div>
+    <div class="panel-empty is-hidden" data-empty-for="att">該当するメンバーがいません。</div>
     {% else %}
     <div class="menu-hint">出欠データがまだありません。</div>
     {% endif %}
@@ -176,9 +199,17 @@
 <div class="role-panel" data-role-panel="member">
   <div class="menu-item f4 member-panel">
     {% if member_table_rows %}
-    <div class="member-list js-member-list">
+    <div class="panel-filters">
+      <div class="panel-filter-item">
+        <label for="member-part-filter">パート</label>
+        <select id="member-part-filter" class="panel-filter-select" data-filter-target="member" data-filter-kind="part">
+          <option value="">全パート</option>
+        </select>
+      </div>
+    </div>
+    <div class="member-list js-member-list" data-role-list="member">
       {% for row in member_table_rows %}
-      <article class="member-card js-member-card" data-member-card>
+      <article class="member-card js-member-card" data-member-card data-part="{{ row.part }}">
         <button type="button" class="member-card-head js-member-toggle" aria-expanded="false">
           <div class="member-card-title-wrap">
             <div class="member-card-title">{{ row.name }}</div>
@@ -205,6 +236,7 @@
       </article>
       {% endfor %}
     </div>
+    <div class="panel-empty is-hidden" data-empty-for="member">該当するメンバーがいません。</div>
     {% else %}
     <div class="menu-hint">メンバー情報がまだありません。</div>
     {% endif %}
@@ -214,9 +246,23 @@
 <div class="role-panel" data-role-panel="assign">
   <div class="menu-item f4 assign-role-panel">
     {% if role_assignment_rows %}
-    <div class="assign-role-list">
+    <div class="panel-filters">
+      <div class="panel-filter-item">
+        <label for="assign-song-filter">曲</label>
+        <select id="assign-song-filter" class="panel-filter-select" data-filter-target="assign" data-filter-kind="song">
+          <option value="">全曲</option>
+        </select>
+      </div>
+      <div class="panel-filter-item">
+        <label for="assign-part-filter">パート</label>
+        <select id="assign-part-filter" class="panel-filter-select" data-filter-target="assign" data-filter-kind="part">
+          <option value="">全パート</option>
+        </select>
+      </div>
+    </div>
+    <div class="assign-role-list" data-role-list="assign">
       {% for row in role_assignment_rows %}
-      <div class="assign-role-card">
+      <div class="assign-role-card" data-song="{{ row.song }}" data-part="{{ row.part }}">
         <div class="assign-role-song">{{ row.song }}</div>
         <div class="assign-role-bottom">
           <span class="assign-chip">{{ row.part }}</span>
@@ -225,6 +271,7 @@
       </div>
       {% endfor %}
     </div>
+    <div class="panel-empty is-hidden" data-empty-for="assign">該当するアサインがありません。</div>
     {% else %}
     <div class="menu-hint">アサイン情報はまだありません。</div>
     {% endif %}
@@ -285,6 +332,20 @@
   .greeting-part{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
   .greeting-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#c0d1ee}
   .greeting-pill-label{font-size:11px;color:#8fa6ce}
+  .next-practice-card{display:flex;align-items:flex-start;gap:11px;padding:12px 14px;margin-bottom:10px}
+  .next-practice-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:rgba(74,158,255,.14);color:#8bc0ff;font-size:16px;flex-shrink:0}
+  .next-practice-title{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#86a3d4;font-family:'Outfit',sans-serif}
+  .next-practice-name{font-size:14px;color:#e1edff;font-weight:600;line-height:1.45;margin-top:1px}
+  .next-practice-meta{margin-top:4px;display:flex;flex-wrap:wrap;gap:8px 12px}
+  .next-practice-meta span{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#a8bfe4}
+  .next-practice-meta .bi{font-size:11px;color:#7fb8ff}
+  .panel-filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .panel-filter-item{display:flex;align-items:center;gap:6px}
+  .panel-filter-item label{font-size:11px;color:#8ea8d3}
+  .panel-filter-select{height:28px;padding:0 10px;border-radius:999px;background:rgba(17,28,44,.85);border:1px solid rgba(255,255,255,.16);color:#d7e7ff;font-size:12px;min-width:122px;outline:none}
+  .panel-filter-select:focus{border-color:#6ca8ff;box-shadow:0 0 0 2px rgba(108,168,255,.17)}
+  .panel-empty{margin-top:8px;font-size:12px;color:#8ca8d5}
+  .panel-empty.is-hidden{display:none}
   .badge-warn{background:rgba(228,180,89,.15);color:#e8c16b}
   .assign-panel{display:block}
   .assign-list{display:flex;flex-direction:column;gap:8px}
@@ -452,6 +513,92 @@
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && modal.classList.contains("is-open")) close();
+    });
+  })();
+
+  (() => {
+    const collator = new Intl.Collator("ja");
+    const listByType = {
+      att: document.querySelector('[data-role-list="att"]'),
+      member: document.querySelector('[data-role-list="member"]'),
+      assign: document.querySelector('[data-role-list="assign"]'),
+    };
+    const getCards = (type) => {
+      const root = listByType[type];
+      if (!root) return [];
+      if (type === "att") return Array.from(root.querySelectorAll(".att-member-card"));
+      if (type === "member") return Array.from(root.querySelectorAll(".member-card"));
+      return Array.from(root.querySelectorAll(".assign-role-card"));
+    };
+    const normalized = (v) => (v || "").trim();
+    const collectValues = (type, kind) => {
+      const attr = kind === "song" ? "data-song" : "data-part";
+      const vals = new Set();
+      getCards(type).forEach((el) => {
+        const v = normalized(el.getAttribute(attr));
+        if (v) vals.add(v);
+      });
+      return Array.from(vals).sort((a, b) => collator.compare(a, b));
+    };
+    const fillOptions = (select, values, allLabel) => {
+      const current = select.value;
+      select.innerHTML = "";
+      const base = document.createElement("option");
+      base.value = "";
+      base.textContent = allLabel;
+      select.appendChild(base);
+      values.forEach((v) => {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = v;
+        select.appendChild(o);
+      });
+      if (current && values.includes(current)) select.value = current;
+    };
+    const applyFilters = (type) => {
+      const cards = getCards(type);
+      if (!cards.length) return;
+      const partSel = document.querySelector(`[data-filter-target="${type}"][data-filter-kind="part"]`);
+      const songSel = document.querySelector(`[data-filter-target="${type}"][data-filter-kind="song"]`);
+      const wantPart = normalized(partSel ? partSel.value : "");
+      const wantSong = normalized(songSel ? songSel.value : "");
+      let shown = 0;
+      cards.forEach((el) => {
+        const part = normalized(el.getAttribute("data-part"));
+        const song = normalized(el.getAttribute("data-song"));
+        const okPart = !wantPart || part === wantPart;
+        const okSong = !wantSong || song === wantSong;
+        const show = okPart && okSong;
+        el.style.display = show ? "" : "none";
+        if (show) shown += 1;
+      });
+      const empty = document.querySelector(`[data-empty-for="${type}"]`);
+      if (empty) empty.classList.toggle("is-hidden", shown > 0);
+    };
+
+    const allSelects = Array.from(document.querySelectorAll(".panel-filter-select"));
+    if (!allSelects.length) return;
+
+    ["att", "member", "assign"].forEach((type) => {
+      const partSel = document.querySelector(`[data-filter-target="${type}"][data-filter-kind="part"]`);
+      if (partSel) {
+        const partValues = collectValues(type, "part");
+        fillOptions(partSel, partValues, "全パート");
+      }
+      const songSel = document.querySelector(`[data-filter-target="${type}"][data-filter-kind="song"]`);
+      if (songSel) {
+        const songValues = collectValues(type, "song");
+        fillOptions(songSel, songValues, "全曲");
+      }
+      applyFilters(type);
+    });
+
+    allSelects.forEach((sel) => {
+      sel.addEventListener("change", () => {
+        const type = sel.getAttribute("data-filter-target");
+        if (!type) return;
+        applyFilters(type);
+      });
     });
   })();
 </script>
