@@ -1,0 +1,212 @@
+{% extends "form/base.html" %}
+{% block content %}
+
+<div class="wordmark f1">
+  <div class="wordmark-title">ArtéMis HARMONIA</div>
+  <div class="wordmark-sub">Concert Management</div>
+</div>
+
+<a href="/concert/select" class="back-btn f2">← 演奏会選択に戻る</a>
+
+{% if cover_url %}
+<div class="f2">
+  <input type="checkbox" id="lb-toggle">
+  <label for="lb-toggle" class="cover-wrap" style="display:block;cursor:zoom-in;">
+    <img src="{{ cover_url }}" class="cover-img" alt="演奏会カバー">
+    <div class="cover-zoom">🔍</div>
+  </label>
+  <label for="lb-toggle" class="lb-overlay">
+    <img src="{{ cover_url }}" alt="">
+  </label>
+</div>
+{% endif %}
+
+{% if concert %}
+<div class="concert-card f2">
+  <div class="concert-card-name">{{ concert_name }}</div>
+  {% if concert_date %}<div class="concert-card-row"><div class="concert-card-dot"></div><span>{{ concert_date }}</span></div>{% endif %}
+  {% if concert_venue %}<div class="concert-card-row"><div class="concert-card-dot"></div><span>{{ concert_venue }}</span></div>{% endif %}
+  {% if concert_conductor %}<div class="concert-card-row"><div class="concert-card-dot"></div><span>指揮：{{ concert_conductor }}</span></div>{% endif %}
+</div>
+{% endif %}
+
+<div class="greeting f3">
+  こんにちは、<strong>{{ player_name }}</strong> さん
+  {% if my_part %}<span class="greeting-part">{{ my_part }}</span>{% endif %}
+</div>
+
+<div class="section-label f4">メニュー</div>
+
+<form method="post" action="/form/menu-action" style="margin-bottom:8px;">
+  <input type="hidden" name="action" value="att">
+  <div class="menu-item f4" onclick="this.closest('form').submit()" style="cursor:pointer;">
+    <div class="menu-icon icon-a">📅</div>
+    <div class="menu-body">
+      <div class="menu-title">出欠入力</div>
+      <div class="menu-hint">{{ att_hint }}</div>
+    </div>
+    <div class="menu-right">
+      {% if att_unanswered > 0 %}<span class="badge">{{ att_unanswered }}件</span>
+      {% else %}<span class="badge badge-ok">完了</span>{% endif %}
+      <span class="chev">›</span>
+    </div>
+  </div>
+</form>
+
+{% if pref_total > 0 %}
+<form method="post" action="/form/menu-action" style="margin-bottom:8px;">
+  <input type="hidden" name="action" value="pref">
+  <div class="menu-item f4" {% if not proposal_done %}onclick="this.closest('form').submit()"{% endif %}
+       style="{% if proposal_done %}opacity:.5;cursor:default;{% else %}cursor:pointer;{% endif %}">
+    <div class="menu-icon icon-b">🎵</div>
+    <div class="menu-body">
+      <div class="menu-title">楽器・パート希望</div>
+      <div class="menu-hint">{{ pref_hint }}</div>
+    </div>
+    <div class="menu-right">
+      {% if proposal_done %}<span class="badge badge-done">確定済</span>
+      {% elif pref_answered == pref_total %}<span class="badge badge-ok">完了</span>
+      {% else %}<span class="badge">{{ pref_total - pref_answered }}件未入力</span>{% endif %}
+      <span class="chev">›</span>
+    </div>
+  </div>
+</form>
+{% endif %}
+
+{% if is_perc %}
+<form method="post" action="/form/menu-action" style="margin-bottom:8px;">
+  <input type="hidden" name="action" value="own">
+  <div class="menu-item f4" onclick="this.closest('form').submit()" style="cursor:pointer;">
+    <div class="menu-icon icon-d">🥁</div>
+    <div class="menu-body">
+      <div class="menu-title">所有楽器</div>
+      <div class="menu-hint">入力・変更</div>
+    </div>
+    <div class="menu-right"><span class="chev">›</span></div>
+  </div>
+</form>
+{% endif %}
+
+{% if can_show_assign %}
+<div class="section-label f4" style="margin-top:18px;">アサイン状況</div>
+<div class="menu-item f4" style="padding:14px 16px;">
+  {% if assign_summary %}
+  <table class="table-mini">
+    <thead><tr><th>曲</th><th>担当パート</th></tr></thead>
+    <tbody>
+      {% for r in assign_summary %}
+      <tr><td>{{ r.song }}</td><td>{{ r.part }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="menu-hint">まだ担当が確定していません。</div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if show_role_panel %}
+<div class="section-label f4" style="margin-top:18px;">{% if is_manager %}Managerメニュー{% else %}パートリーダーメニュー{% endif %}</div>
+<div class="role-tabs f4">
+  <button type="button" class="role-tab is-active" data-role-tab="att">📋 出欠</button>
+  <button type="button" class="role-tab" data-role-tab="member">👥 メンバー</button>
+  <button type="button" class="role-tab" data-role-tab="material">📄 資料</button>
+</div>
+
+<div class="role-panel is-active" data-role-panel="att">
+  <div class="menu-item f4" style="padding:12px;overflow-x:auto;">
+    <table class="table-mini">
+      <thead>
+        <tr>
+          <th>パート</th><th>氏名</th>
+          {% for pc in practice_cols %}<th>{{ pc.label }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in attendance_table_rows %}
+        <tr>
+          <td>{{ row.part }}</td><td>{{ row.name }}</td>
+          {% for pc in practice_cols %}<td>{{ row.cells[pc.id] }}</td>{% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="role-panel" data-role-panel="member">
+  <div class="menu-item f4" style="padding:12px;overflow-x:auto;">
+    <table class="table-mini">
+      <thead>
+        <tr>
+          <th>パート</th><th>氏名</th><th>音楽役職</th>
+          {% if is_manager %}<th>運営役職</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in member_table_rows %}
+        <tr>
+          <td>{{ row.part }}</td><td>{{ row.name }}</td><td>{{ row.role_music }}</td>
+          {% if is_manager %}<td>{{ row.role_ops }}</td>{% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="role-panel" data-role-panel="material">
+  <div class="menu-item f4" style="padding:12px;overflow-x:auto;">
+    <table class="table-mini">
+      <thead>
+        <tr><th>曲</th><th>パート</th><th>楽譜リンク</th></tr>
+      </thead>
+      <tbody>
+        {% for row in material_rows %}
+        <tr>
+          <td>{{ row.song }}</td>
+          <td>{{ row.part }}</td>
+          <td>
+            {% if row.url %}
+              <a href="{{ row.url }}" target="_blank" rel="noopener noreferrer">開く</a>
+            {% else %}
+              -
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div style="margin-top:24px;" class="f6">
+  <a href="/logout" class="btn btn-secondary">ログアウト</a>
+</div>
+
+<style>
+  .table-mini{width:100%;border-collapse:collapse;font-size:.92rem}
+  .table-mini th,.table-mini td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;white-space:nowrap}
+  .table-mini th{color:#9db1d6;font-weight:700}
+  .role-tabs{display:flex;gap:10px;margin:8px 0 10px}
+  .role-tab{border:1px solid rgba(255,255,255,.16);background:rgba(18,26,42,.7);color:#c9d6f3;border-radius:10px;padding:8px 12px;cursor:pointer}
+  .role-tab.is-active{border-color:#6ca8ff;color:#fff}
+  .role-panel{display:none}
+  .role-panel.is-active{display:block}
+</style>
+<script>
+  (() => {
+    const tabs = document.querySelectorAll('[data-role-tab]');
+    const panels = document.querySelectorAll('[data-role-panel]');
+    if (!tabs.length || !panels.length) return;
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const name = tab.getAttribute('data-role-tab');
+        tabs.forEach(x => x.classList.toggle('is-active', x === tab));
+        panels.forEach(p => p.classList.toggle('is-active', p.getAttribute('data-role-panel') === name));
+      });
+    });
+  })();
+</script>
+{% endblock %}
