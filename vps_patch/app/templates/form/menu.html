@@ -8,26 +8,32 @@
 
 <a href="/concert/select" class="back-btn f2"><i class="bi bi-arrow-left"></i> 演奏会選択に戻る</a>
 
-{% if cover_url %}
-<div class="f2">
-  <button type="button" class="cover-wrap js-cover-open" aria-label="カバー画像を拡大表示">
-    <img src="{{ cover_url }}" class="cover-img" alt="演奏会カバー">
-    <div class="cover-zoom"><i class="bi bi-zoom-in"></i></div>
-  </button>
+{% if concert %}
+<div class="hero-shell f2">
+  {% if cover_url %}
+  <div class="hero-poster-wrap">
+    <button type="button" class="cover-wrap js-cover-open" aria-label="カバー画像を拡大表示">
+      <img src="{{ cover_url }}" class="cover-img" alt="演奏会カバー">
+      <div class="cover-zoom"><i class="bi bi-zoom-in"></i></div>
+    </button>
+  </div>
   <div class="lb-overlay js-cover-modal" aria-hidden="true">
     <button type="button" class="lb-close js-cover-close" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
     <img src="{{ cover_url }}" alt="演奏会カバー拡大画像">
   </div>
-</div>
-{% endif %}
+  {% endif %}
 
-{% if concert %}
-<div class="concert-card f2">
-  <div class="concert-card-name">{{ concert_name }}</div>
-  {% if concert_date %}<div class="concert-card-row"><div class="concert-card-dot"></div><span>{{ concert_date }}</span></div>{% endif %}
-  {% if concert_venue %}<div class="concert-card-row"><div class="concert-card-dot"></div><span>{{ concert_venue }}</span></div>{% endif %}
-  {% if concert_conductor %}<div class="concert-card-row"><div class="concert-card-dot"></div><span>指揮：{{ concert_conductor }}</span></div>{% endif %}
-  {% if concert_songs_line %}<div class="concert-card-row"><div class="concert-card-dot"></div><span>{{ concert_songs_line }}</span></div>{% endif %}
+  <div class="concert-card hero-card">
+    <div class="concert-card-name">{{ concert_name }}</div>
+    <div class="hero-meta">
+      {% if concert_date %}<span class="hero-chip"><i class="bi bi-calendar-event"></i>{{ concert_date }}</span>{% endif %}
+      {% if concert_conductor %}<span class="hero-chip"><i class="bi bi-person-badge"></i>指揮：{{ concert_conductor }}</span>{% endif %}
+      {% if concert_venue %}<span class="hero-chip"><i class="bi bi-geo-alt"></i>{{ concert_venue }}</span>{% endif %}
+    </div>
+    {% if concert_songs_line %}
+    <div class="hero-songline">{{ concert_songs_line }}</div>
+    {% endif %}
+  </div>
 </div>
 {% endif %}
 
@@ -35,9 +41,8 @@
   こんにちは、<strong>{{ player_name }}</strong> さん
   {% if my_part or my_music_role %}
   <span class="greeting-part">
-    {% if my_part %}{{ my_part }}{% endif %}
-    {% if my_part and my_music_role %}&nbsp;&nbsp;{% endif %}
-    {% if my_music_role %}{{ my_music_role }}{% endif %}
+    {% if my_part %}<span class="greeting-pill">{{ my_part }}</span>{% endif %}
+    {% if my_music_role %}<span class="greeting-pill">{{ my_music_role }}</span>{% endif %}
   </span>
   {% endif %}
 </div>
@@ -53,7 +58,7 @@
       <div class="menu-hint">{{ att_hint }}</div>
     </div>
     <div class="menu-right">
-      {% if att_unanswered > 0 %}<span class="badge">{{ att_unanswered }}件</span>
+      {% if att_unanswered > 0 %}<span class="badge badge-warn">{{ att_unanswered }}件</span>
       {% else %}<span class="badge badge-ok">完了</span>{% endif %}
       <span class="chev">›</span>
     </div>
@@ -73,7 +78,7 @@
     <div class="menu-right">
       {% if proposal_done %}<span class="badge badge-done">確定済</span>
       {% elif pref_answered == pref_total %}<span class="badge badge-ok">完了</span>
-      {% else %}<span class="badge">{{ pref_total - pref_answered }}件未入力</span>{% endif %}
+      {% else %}<span class="badge badge-warn">{{ pref_total - pref_answered }}件未入力</span>{% endif %}
       <span class="chev">›</span>
     </div>
   </div>
@@ -96,16 +101,16 @@
 
 {% if can_show_assign %}
 <div class="section-label f4" style="margin-top:18px;">アサイン状況</div>
-<div class="menu-item f4" style="padding:14px 16px;">
+<div class="menu-item f4 assign-panel" style="padding:14px 16px;">
   {% if assign_summary %}
-  <table class="table-mini">
-    <thead><tr><th>曲</th><th>担当パート</th></tr></thead>
-    <tbody>
-      {% for r in assign_summary %}
-      <tr><td>{{ r.song }}</td><td>{{ r.part }}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="assign-list">
+    {% for r in assign_summary %}
+    <div class="assign-row">
+      <div class="assign-song">{{ r.song }}</div>
+      <div class="assign-part"><span class="assign-chip">{{ r.part }}</span></div>
+    </div>
+    {% endfor %}
+  </div>
   {% else %}
   <div class="menu-hint">まだ担当が確定していません。</div>
   {% endif %}
@@ -213,6 +218,22 @@
 </div>
 
 <style>
+  .hero-shell{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:12px}
+  .hero-poster-wrap{display:flex;justify-content:center}
+  .hero-card{margin-bottom:0}
+  .hero-meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:2px}
+  .hero-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;font-size:11px;color:#b8c9ea;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
+  .hero-chip .bi{font-size:11px;opacity:.8}
+  .hero-songline{margin-top:10px;color:#9fb3d8;font-size:12px;line-height:1.6}
+  .greeting-pill{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);margin-right:6px}
+  .badge-warn{background:rgba(228,180,89,.15);color:#e8c16b}
+  .assign-panel{display:block}
+  .assign-list{display:flex;flex-direction:column;gap:8px}
+  .assign-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
+  .assign-row:last-child{border-bottom:none}
+  .assign-song{font-size:.92rem;color:#d8e2f5;line-height:1.45}
+  .assign-part{flex-shrink:0}
+  .assign-chip{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;color:#7eb8ff;background:rgba(74,158,255,.13);border:1px solid rgba(74,158,255,.35)}
   .table-mini{width:100%;border-collapse:collapse;font-size:.92rem}
   .table-mini th,.table-mini td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;white-space:nowrap}
   .table-mini th{color:#9db1d6;font-weight:700}
@@ -222,6 +243,10 @@
   .role-tab.is-active{border-color:#6ca8ff;color:#fff}
   .role-panel{display:none}
   .role-panel.is-active{display:block}
+  @media (min-width:900px){
+    .hero-shell{grid-template-columns:220px 1fr;align-items:center}
+    .hero-poster-wrap{justify-content:flex-start}
+  }
 </style>
 <script>
   (() => {
