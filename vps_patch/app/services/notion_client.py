@@ -7,6 +7,7 @@ from typing import Any
 import uuid as _uuid
 import time
 import json
+from contextvars import ContextVar
 
 NOTION_VERSION = "2022-06-28"
 
@@ -21,13 +22,31 @@ DB_KEYS = [
 
 _QUERY_CACHE: dict[str, tuple[float, list[dict]]] = {}
 _TYPE_CACHE: dict[str, tuple[float, dict]] = {}
+_METRICS: ContextVar[list[dict]] = ContextVar("notion_metrics", default=[])
 
 
 def _cache_ttl_seconds() -> int:
     try:
-        return max(0, int(os.environ.get("NOTION_CACHE_TTL_SECONDS", "20")))
+        return max(0, int(os.environ.get("NOTION_CACHE_TTL_SECONDS", "120")))
     except Exception:
-        return 20
+        return 120
+
+
+def _metric_add(kind: str, db_id: str, ms: float, cache_hit: bool = False, extra: dict | None = None) -> None:
+    arr = list(_METRICS.get())
+    row = {"kind": kind, "db": (db_id or "")[:8], "ms": round(ms, 2), "cache": cache_hit}
+    if extra:
+        row.update(extra)
+    arr.append(row)
+    _METRICS.set(arr)
+
+
+def _metric_clear() -> None:
+    _METRICS.set([])
+
+
+def _metric_collect() -> list[dict]:
+    return list(_METRICS.get())
 
 
 def _headers(api_key: str) -> dict:
@@ -40,12 +59,14 @@ def _headers(api_key: str) -> dict:
 
 def _query_all_notion(db_id: str, api_key: str,
                        filter_payload: dict | None = None) -> list[dict]:
+    t0 = time.perf_counter()
     ttl = _cache_ttl_seconds()
     fkey = json.dumps(filter_payload, sort_keys=True, ensure_ascii=False) if filter_payload else ""
     cache_key = f"{db_id}::{fkey}"
     if ttl > 0:
         hit = _QUERY_CACHE.get(cache_key)
         if hit and (time.time() - hit[0] <= ttl):
+            _metric_add("query_all", db_id, (time.perf_counter() - t0) * 1000, cache_hit=True, extra={"rows": len(hit[1])})
             return [dict(x) for x in hit[1]]
 
     url = f"https://api.notion.com/v1/databases/{db_id}/query"
@@ -69,14 +90,17 @@ def _query_all_notion(db_id: str, api_key: str,
         cursor = data.get("next_cursor")
     if ttl > 0:
         _QUERY_CACHE[cache_key] = (time.time(), results)
+    _metric_add("query_all", db_id, (time.perf_counter() - t0) * 1000, cache_hit=False, extra={"rows": len(results)})
     return results
 
 
 def _get_prop_types(db_id: str, api_key: str) -> dict:
+    t0 = time.perf_counter()
     ttl = _cache_ttl_seconds()
     if ttl > 0:
         hit = _TYPE_CACHE.get(db_id)
         if hit and (time.time() - hit[0] <= ttl):
+            _metric_add("get_prop_types", db_id, (time.perf_counter() - t0) * 1000, cache_hit=True)
             return dict(hit[1])
 
     resp = requests.get(
@@ -84,10 +108,12 @@ def _get_prop_types(db_id: str, api_key: str) -> dict:
         headers=_headers(api_key), timeout=15,
     )
     if resp.status_code != 200:
+        _metric_add("get_prop_types", db_id, (time.perf_counter() - t0) * 1000, cache_hit=False, extra={"status": resp.status_code})
         return {}
     props = resp.json().get("properties", {})
     if ttl > 0:
         _TYPE_CACHE[db_id] = (time.time(), props)
+    _metric_add("get_prop_types", db_id, (time.perf_counter() - t0) * 1000, cache_hit=False, extra={"keys": len(props)})
     return props
 
 
@@ -180,9 +206,18 @@ def _put_key_any(props, type_map, candidates, *parts, prefix=""):
 
 
 def _api_request(method, url, api_key, **kwargs):
+    t0 = time.perf_counter()
+    db = ""
+    if "databases/" in url:
+        db = url.split("databases/")[-1].split("/")[0]
+    elif "pages/" in url:
+        db = "pages"
     try:
-        return requests.request(method, url, headers=_headers(api_key), timeout=30, **kwargs)
+        resp = requests.request(method, url, headers=_headers(api_key), timeout=30, **kwargs)
+        _metric_add("api_request", db or method.upper(), (time.perf_counter() - t0) * 1000, extra={"method": method.upper(), "status": resp.status_code})
+        return resp
     except Exception:
+        _metric_add("api_request", db or method.upper(), (time.perf_counter() - t0) * 1000, extra={"method": method.upper(), "status": "error"})
         return None
 
 
@@ -199,6 +234,8 @@ def build_concert_ctx() -> dict:
         "put_prop":                 _put_prop,
         "put_prop_any":             _put_prop_any,
         "put_key_any":              _put_key_any,
+        "clear_metrics":            _metric_clear,
+        "collect_metrics":          _metric_collect,
     }
     for key in DB_KEYS:
         ctx[key] = os.environ.get(key, "")

@@ -2,12 +2,14 @@
 /home/ubuntu/harmonia_form/main.py
 """
 import os
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi import Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -33,6 +35,17 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="s
 
 # ルーター
 app.include_router(form_router.router)
+
+
+@app.middleware("http")
+async def request_timing_middleware(request: Request, call_next):
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    ms = int((time.perf_counter() - t0) * 1000)
+    response.headers["X-Server-Time-Ms"] = str(ms)
+    if os.environ.get("FORM_PERF_LOG", "").strip().lower() in ("1", "true", "yes", "on"):
+        print(f"[perf] {request.method} {request.url.path} -> {response.status_code} {ms}ms")
+    return response
 
 
 @app.get("/health")

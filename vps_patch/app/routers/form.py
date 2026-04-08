@@ -4,6 +4,8 @@ app/routers/form.py
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import os
+import time
 from io import BytesIO
 from pathlib import Path
 from typing import Annotated
@@ -82,6 +84,10 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 def get_ctx():
     from app.services.notion_client import build_concert_ctx
     return build_concert_ctx()
+
+
+def _perf_enabled() -> bool:
+    return (os.environ.get("FORM_PERF_LOG", "").strip().lower() in ("1", "true", "yes", "on"))
 
 
 def _flash_set(request: Request, key: str, val: str) -> None:
@@ -887,6 +893,9 @@ async def form_menu(request: Request):
     if not concert:
         return RedirectResponse("/concert/select", status_code=302)
 
+    t0 = time.perf_counter()
+    if "clear_metrics" in ctx:
+        ctx["clear_metrics"]()
     data = load_form_data(ctx, cid)
     participant_rows = data.get("participant_rows_concert", [])
     practices = data.get("practices", [])
@@ -913,18 +922,20 @@ async def form_menu(request: Request):
     my_system_role = _my_system_role(ctx, pid, cid, participant_rows)
     is_perc_role = False
     if my_part_id:
-        pm_rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
-        target_pm = next((r for r in pm_rows if r.get("id") == my_part_id), None)
-        if target_pm:
-            pm_name = ext(target_pm, PARTMASTER_NAME_KEYS) or ""
-            pm_type = ext(target_pm, ["種別", "type", "Type", "パート種別"]) or ""
-            is_perc_role = is_perc(pm_name) or is_perc(pm_type)
+        pm_info = (data.get("part_master_map", {}) or {}).get(my_part_id, {})
+        pm_name = (pm_info.get("name", "") or "").strip()
+        pm_type = (pm_info.get("type", "") or "").strip()
+        is_perc_role = is_perc(pm_name) or is_perc(pm_type)
 
     flags = _harmonia_flags(ctx, cid)
     proposal_done = bool(flags.get("plan_done"))
     cover_url = get_cover_url(concert)
-    can_show_assign = (role >= ROLE_LEADER) or proposal_done or has_published_assignments(ctx, cid)
-    my_assign_rows = get_my_assign_rows(ctx, cid, pid, participant_rows) if can_show_assign else []
+    all_assign_rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+    published_assign = has_published_assignments(ctx, cid, assignment_rows=all_assign_rows)
+    can_show_assign = (role >= ROLE_LEADER) or proposal_done or published_assign
+    my_assign_rows = get_my_assign_rows(
+        ctx, cid, pid, participant_rows, assignment_rows=all_assign_rows
+    ) if can_show_assign else []
     assign_summary = build_assignment_view_rows(ctx, my_assign_rows, data.get("songs", []), data.get("partdefs", []))
     role_assignment_rows = build_role_assignment_rows(
         ctx=ctx,
@@ -934,6 +945,8 @@ async def form_menu(request: Request):
         partdefs=data.get("partdefs", []),
         songs=data.get("songs", []),
         participant_rows=participant_rows,
+        assignment_rows=all_assign_rows,
+        player_rows=players,
     ) if role >= ROLE_LEADER else []
     if pref_total == 0:
         pref_hint = ""
@@ -955,7 +968,7 @@ async def form_menu(request: Request):
     # 同名重複を除去しつつ順序は維持
     seen = set()
     song_names = [x for x in song_names if not (x in seen or seen.add(x))]
-    return templates.TemplateResponse("form/menu.html", {
+    resp = templates.TemplateResponse("form/menu.html", {
         "request": request,
         "concert": concert,
         "concert_name": _atlas_concert_name(ctx, concert),
@@ -993,6 +1006,12 @@ async def form_menu(request: Request):
         "material_practices": _build_material_practice_items(ctx, data.get("practices", [])) if role_mode else [],
         "role_assignment_rows": role_assignment_rows,
     })
+    if _perf_enabled():
+        total_ms = int((time.perf_counter() - t0) * 1000)
+        m = ctx["collect_metrics"]() if "collect_metrics" in ctx else []
+        top = sorted(m, key=lambda x: x.get("ms", 0), reverse=True)[:8]
+        print(f"[perf] form_menu total={total_ms}ms cid={cid[:8]} pid={pid[:8]} calls={len(m)} top={top}")
+    return resp
 
 
 @router.get("/form/material/practice-pdf")

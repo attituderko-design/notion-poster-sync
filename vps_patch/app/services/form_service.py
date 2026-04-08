@@ -384,9 +384,9 @@ _FORM_DATA_CACHE: dict[str, tuple[float, dict]] = {}
 
 def _form_data_cache_ttl_seconds() -> int:
     try:
-        return max(0, int(os.environ.get("FORM_DATA_CACHE_TTL_SECONDS", "25")))
+        return max(0, int(os.environ.get("FORM_DATA_CACHE_TTL_SECONDS", "180")))
     except Exception:
-        return 25
+        return 180
 
 
 def _is_true(v: str | None) -> bool:
@@ -699,8 +699,13 @@ def get_cover_url(concert: dict) -> str:
 
 # ── アサイン取得 ──────────────────────────────────────────────
 
-def get_my_assign_rows(ctx: dict, concert_id: str, player_id: str,
-                        participant_rows: list) -> list[dict]:
+def get_my_assign_rows(
+    ctx: dict,
+    concert_id: str,
+    player_id: str,
+    participant_rows: list,
+    assignment_rows: list | None = None,
+) -> list[dict]:
     """自分（または自パート）のアサイン結果行を返す。担当フラグTrueのみ。"""
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
@@ -714,10 +719,13 @@ def get_my_assign_rows(ctx: dict, concert_id: str, player_id: str,
     if cast_id:
         targets.add(cast_id)
 
-    try:
-        all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
-    except Exception:
-        return []
+    if assignment_rows is None:
+        try:
+            all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+        except Exception:
+            return []
+    else:
+        all_assign = assignment_rows
 
     cid_norm = concert_id.replace("-", "")
     result = []
@@ -733,20 +741,23 @@ def get_my_assign_rows(ctx: dict, concert_id: str, player_id: str,
     return result
 
 
-def has_published_assignments(ctx: dict, concert_id: str) -> bool:
+def has_published_assignments(ctx: dict, concert_id: str, assignment_rows: list | None = None) -> bool:
     """担当フラグTrueのアサイン行がこの演奏会に1件でもあるか。"""
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
     cid_norm = concert_id.replace("-", "")
-    try:
-        all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
-        return any(
-            any(rid.replace("-","") == cid_norm for rid in ext_rel(r, ASSIGNMENT_CONCERT_REL_KEYS))
-            and ext_txt(r, ASSIGNMENT_FLAG_KEYS).strip().lower() in ("true", "1", "yes")
-            for r in all_assign
-        )
-    except Exception:
-        return False
+    if assignment_rows is None:
+        try:
+            all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+        except Exception:
+            return False
+    else:
+        all_assign = assignment_rows
+    return any(
+        any(rid.replace("-","") == cid_norm for rid in ext_rel(r, ASSIGNMENT_CONCERT_REL_KEYS))
+        and ext_txt(r, ASSIGNMENT_FLAG_KEYS).strip().lower() in ("true", "1", "yes")
+        for r in all_assign
+    )
 
 
 def build_assignment_view_rows(ctx: dict, assignment_rows: list, songs: list, partdefs: list) -> list[dict]:
@@ -780,6 +791,8 @@ def build_role_assignment_rows(
     partdefs: list,
     songs: list,
     participant_rows: list,
+    assignment_rows: list | None = None,
+    player_rows: list | None = None,
 ) -> list[dict]:
     """Leader/Manager向けアサイン一覧を返す。"""
     ext = ctx["extract_prop_text_any"]
@@ -800,7 +813,8 @@ def build_role_assignment_rows(
         partdef_name[pdid] = ext(pd, PARTDEF_DISPLAY_NAME_KEYS) or ext(pd, PARTDEF_NAME_KEYS) or "-"
 
     song_name_map = {s.get("id", ""): (ext(s, SONG_NAME_KEYS) or "") for s in songs or []}
-    player_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    if player_rows is None:
+        player_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
     player_name_map = {r.get("id", ""): (ext(r, PLAYER_NAME_KEYS) or "") for r in player_rows}
     cast_to_player = {}
     for cast in participant_rows or []:
@@ -808,10 +822,13 @@ def build_role_assignment_rows(
         if pids:
             cast_to_player[cast.get("id", "")] = pids[0]
 
-    try:
-        all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
-    except Exception:
-        return []
+    if assignment_rows is None:
+        try:
+            all_assign = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+        except Exception:
+            return []
+    else:
+        all_assign = assignment_rows
 
     out = []
     for row in all_assign:
