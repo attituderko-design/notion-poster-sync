@@ -1,0 +1,141 @@
+{% extends "form/base.html" %}
+{% block content %}
+
+<div class="wordmark f1">
+  <div class="wordmark-title">ArtéMis HARMONIA</div>
+  <div class="wordmark-sub">Concert Management</div>
+</div>
+
+{% if back_href %}
+<a href="{{ back_href }}" class="back-btn f2">← 戻る</a>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-error f2">{{ error }}</div>
+{% endif %}
+{% if info %}
+<div class="alert alert-info f2">{{ info }}</div>
+{% endif %}
+
+{% if view == "entry" %}
+<div class="f2">
+  <div class="scr-title">ログイン</div>
+  <div class="scr-sub">ログイン、または招待コードで参加を選択してください</div>
+</div>
+<form method="post" action="/entry/mode" class="f3" style="margin-bottom:12px;">
+  <input type="hidden" name="mode" value="login">
+  <button class="btn btn-primary" type="submit">🔑 ログイン</button>
+</form>
+<form method="post" action="/entry/mode" class="f4">
+  <input type="hidden" name="mode" value="invite">
+  <button class="btn btn-secondary" type="submit">🎟 招待コードで参加</button>
+</form>
+{% endif %}
+
+{% if view == "login_email" %}
+<div class="f2">
+  <div class="scr-title">ログイン</div>
+  <div class="scr-sub">登録済みのメールアドレスを入力してください</div>
+</div>
+<form method="post" action="/login/email" class="f3">
+  <div class="form-group">
+    <label class="form-label" for="email">メールアドレス</label>
+    <input class="form-input" type="email" id="email" name="email"
+           placeholder="your@email.com" required autocomplete="email">
+  </div>
+  <button class="btn btn-primary" type="submit">次へ</button>
+</form>
+{% endif %}
+
+{% if view == "login_password" %}
+<div class="f2">
+  <div class="scr-title">パスワードでログイン</div>
+  <div class="scr-sub">{{ email }}</div>
+</div>
+<form method="post" action="/login/password" class="f3">
+  <div class="form-group">
+    <label class="form-label" for="password">パスワード</label>
+    <input class="form-input" type="password" id="password" name="password"
+           placeholder="パスワード" required autocomplete="current-password">
+  </div>
+  <button class="btn btn-primary" type="submit">ログイン</button>
+</form>
+{% endif %}
+
+{% if view == "invite" %}
+<div class="f2">
+  <div class="scr-title">招待コードを入力してください</div>
+  <div class="scr-sub">
+    {% if invite_target == "register" %}
+    コードが有効なら確認コード送信へ進みます
+    {% else %}
+    コードが有効ならログイン画面へ進みます
+    {% endif %}
+  </div>
+</div>
+<form method="post" action="/invite/resolve" class="f3">
+  <div class="form-group">
+    <label class="form-label" for="invite_code">招待コード</label>
+    <input class="form-input" type="text" id="invite_code" name="invite_code"
+           placeholder="例: K7X2MN9A" required maxlength="20">
+  </div>
+  <button class="btn btn-primary" type="submit">次へ</button>
+</form>
+{% endif %}
+
+{% if view == "invite_error" %}
+<div class="f2">
+  <div class="scr-title">招待コードを確認してください</div>
+  <div class="scr-sub">管理者にお問い合わせください</div>
+</div>
+<div class="f3">
+  <a href="/invite" class="btn btn-secondary">招待コードを再入力</a>
+</div>
+<div class="f4">
+  <a href="/login" class="btn btn-secondary">ログインへ戻る</a>
+</div>
+{% endif %}
+
+{% if view == "register_profile" %}
+<div class="f2">
+  <div class="scr-title">新規登録</div>
+  <div class="scr-sub">認証済み: {{ email }}</div>
+</div>
+<form method="post" action="/register/profile" class="f3">
+  <div class="form-group">
+    <label class="form-label" for="name">氏名</label>
+    <input class="form-input" type="text" id="name" name="name" required placeholder="山田太郎">
+  </div>
+  <div class="form-group">
+    <label class="form-label" for="part_id">担当パート</label>
+    <select class="form-input" id="part_id" name="part_id" required>
+      <option value="">（選択してください）</option>
+      {% for pid, pname in part_options %}
+      <option value="{{ pid }}">{{ pname }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn btn-primary" type="submit">登録して進む</button>
+</form>
+{% endif %}
+
+{% if view == "concert_add_part" %}
+<div class="f2">
+  <div class="scr-title">今回の演奏会で担当するパートを入力してください</div>
+  <div class="scr-sub">PART_MASTER から選択して参加登録します</div>
+</div>
+<form method="post" action="/concert/add-part" class="f3">
+  <div class="form-group">
+    <label class="form-label" for="part_id">担当パート</label>
+    <select class="form-input" id="part_id" name="part_id" required>
+      <option value="">（選択してください）</option>
+      {% for pid, pname in part_options %}
+      <option value="{{ pid }}">{{ pname }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn btn-primary" type="submit">参加登録して進む</button>
+</form>
+{% endif %}
+
+{% endblock %}

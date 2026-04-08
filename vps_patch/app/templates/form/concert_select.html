@@ -1,0 +1,56 @@
+{% extends "form/base.html" %}
+{% block content %}
+
+<div class="wordmark f1">
+  <div class="wordmark-title">ArtéMis HARMONIA</div>
+  <div class="wordmark-sub">Concert Management</div>
+</div>
+
+{% if back_href %}
+<a href="{{ back_href }}" class="back-btn f2">← 戻る</a>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-error f2">{{ error }}</div>
+{% endif %}
+{% if info %}
+<div class="alert alert-info f2">{{ info }}</div>
+{% endif %}
+
+<div class="f2">
+  <div class="scr-title">ようこそ{% if player_name %} {{ player_name }}さん{% endif %}</div>
+  <div class="scr-sub">演奏会を選択、または招待コードで追加してください</div>
+</div>
+
+<form method="post" action="/concert/select" class="f3">
+  <div class="form-group">
+    <label class="form-label" for="concert_id">既に参加している演奏会</label>
+    <select class="form-input" id="concert_id" name="concert_id" required>
+      <option value="">（演奏会を選択してください）</option>
+      {% for c in concert_options %}
+      <option value="{{ c.id }}">{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn btn-primary" type="submit">この演奏会で進む</button>
+</form>
+{% if not concert_options %}
+<div class="alert alert-info f3">参加中の演奏会が見つかりません。</div>
+{% endif %}
+
+<div class="divider f4"></div>
+<div class="section-label f4">招待コードで演奏会に参加</div>
+<form method="post" action="/concert/add-by-invite" class="f5">
+  <div class="form-group">
+    <label class="form-label" for="invite_code">招待コード</label>
+    <input class="form-input" type="text" id="invite_code" name="invite_code"
+           placeholder="例: K7X2MN9A" required maxlength="20">
+  </div>
+  <button class="btn btn-primary" type="submit">招待コードを確認する</button>
+</form>
+
+<div style="margin-top:24px;" class="f6">
+  <a href="/logout" class="btn btn-secondary">ログアウト</a>
+</div>
+
+{% endblock %}

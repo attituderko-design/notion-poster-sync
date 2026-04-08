@@ -1,0 +1,48 @@
+{% extends "form/base.html" %}
+{% block content %}
+
+<div class="wordmark f1">
+  <div class="wordmark-title">ArtéMis HARMONIA</div>
+  <div class="wordmark-sub">Concert Management</div>
+</div>
+
+{% if back_href %}
+<a href="{{ back_href }}" class="back-btn f2">← 戻る</a>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-error f2">{{ error }}</div>
+{% endif %}
+{% if info %}
+<div class="alert alert-info f2">{{ info }}</div>
+{% endif %}
+
+<div class="f2">
+  <div class="scr-title">出欠入力</div>
+  <div class="scr-sub">{{ concert_name }} / {{ player_name }}</div>
+</div>
+
+<form method="post" action="/form/att/save" class="f3">
+  {% for r in rows %}
+  <div class="practice-card" style="margin-bottom:14px;">
+    <div class="practice-name">{{ r.name }}</div>
+    <div class="practice-meta">{{ r.date }}{% if r.venue %} / {{ r.venue }}{% endif %}</div>
+    <div class="form-group" style="margin-top:8px;">
+      <label class="form-label">出欠</label>
+      <select class="form-input" name="status_{{ r.id }}">
+        <option value="未回答" {% if r.status == "未回答" %}selected{% endif %}>未回答</option>
+        <option value="○" {% if r.status == "○" %}selected{% endif %}>○</option>
+        <option value="△" {% if r.status == "△" %}selected{% endif %}>△</option>
+        <option value="×" {% if r.status == "×" %}selected{% endif %}>×</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">コメント</label>
+      <input class="form-input" type="text" name="comment_{{ r.id }}" value="{{ r.comment or '' }}" placeholder="任意">
+    </div>
+  </div>
+  {% endfor %}
+  <button class="btn btn-primary" type="submit">保存する</button>
+</form>
+
+{% endblock %}

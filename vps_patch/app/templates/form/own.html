@@ -1,0 +1,42 @@
+{% extends "form/base.html" %}
+{% block title %}所有楽器 — ArtéMis HARMONIA{% endblock %}
+{% block content %}
+<a href="{{ back_href }}" class="back-btn f1">← 戻る</a>
+<div class="f2">
+  <div class="scr-title">所有楽器</div>
+  <div class="scr-sub">所有していない楽器は 0 のままで構いません。</div>
+</div>
+{% if error %}<div class="alert alert-error f2">{{ error }}</div>{% endif %}
+{% if info %}<div class="alert alert-info f2">{{ info }}</div>{% endif %}
+{% if not instruments %}
+<div class="f3" style="background:var(--surface);border:.5px solid var(--border);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--text-hint);text-align:center;">必要楽器の情報がありません。</div>
+<div style="margin-top:16px;"><a href="{{ back_href }}" class="btn btn-secondary">← メニューに戻る</a></div>
+{% else %}
+<form method="post" action="/form/own/save" id="own-form">
+  <div class="num-row f3">
+    {% for inst in instruments %}
+    <div class="num-item">
+      <div class="num-label">{{ inst.name }}</div>
+      <div class="num-ctrl">
+        <input type="number" name="own_{{ inst.id }}" id="own_{{ inst.id }}" value="{{ inst.current }}" min="0" max="10" inputmode="numeric">
+        <button type="button" class="num-btn" onclick="adj('own_{{ inst.id }}', -1)">−</button>
+        <button type="button" class="num-btn" onclick="adj('own_{{ inst.id }}', 1)">＋</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px;">
+    <button type="submit" class="btn btn-primary f4">保存する</button>
+    <a href="{{ back_href }}" class="btn btn-secondary f4">← メニューに戻る</a>
+  </div>
+</form>
+{% endif %}
+<script>
+function adj(id, delta) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const v = parseInt(el.value || "0", 10);
+  el.value = Math.max(0, Math.min(10, v + delta));
+}
+</script>
+{% endblock %}

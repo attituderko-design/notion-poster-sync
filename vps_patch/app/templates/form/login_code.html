@@ -1,0 +1,40 @@
+{% extends "form/base.html" %}
+{% block content %}
+
+<div class="wordmark f1">
+  <div class="wordmark-title">ArtéMis HARMONIA</div>
+  <div class="wordmark-sub">Concert Management</div>
+</div>
+
+{% if back_href %}
+<a href="{{ back_href }}" class="back-btn f2">← 戻る</a>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-error f2">{{ error }}</div>
+{% endif %}
+{% if info %}
+<div class="alert alert-info f2">{{ info }}</div>
+{% endif %}
+
+<div class="f2">
+  <div class="scr-title">確認コードを入力</div>
+  <div class="scr-sub">{{ email }} に送信しました</div>
+</div>
+
+<form method="post" action="{{ verify_action or '/login/verify' }}" class="f3">
+  <div class="form-group">
+    <label class="form-label" for="code">6桁の確認コード</label>
+    <input class="form-input" type="text" id="code" name="code"
+           placeholder="000000" required inputmode="numeric"
+           maxlength="6" autocomplete="one-time-code"
+           style="font-size:22px;letter-spacing:.2em;text-align:center;">
+  </div>
+  <button class="btn btn-primary" type="submit">確認</button>
+</form>
+
+<div class="f4" style="margin-top:16px;">
+  <a href="{{ back_href or '/login' }}" class="btn btn-secondary">メールアドレスを変更</a>
+</div>
+
+{% endblock %}

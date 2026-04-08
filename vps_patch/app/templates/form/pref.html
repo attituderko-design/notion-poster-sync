@@ -1,0 +1,226 @@
+{% extends "form/base.html" %}
+{% block title %}パート希望 — ArtéMis HARMONIA{% endblock %}
+
+{% block content %}
+<style>
+/* ── pref 固有スタイル ── */
+.pref-song-header {
+  font-family: 'Outfit', sans-serif;
+  font-size: 11px;
+  color: rgba(160,180,220,0.45);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin: 14px 0 8px;
+}
+.pref-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255,255,255,0.025);
+  border: 0.5px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+}
+.pref-name {
+  flex: 1;
+  font-size: 13px;
+  color: #c8d4ed;
+  min-width: 0;
+}
+.pref-select {
+  flex-shrink: 0;
+  width: 160px;
+  background: rgba(255,255,255,0.04);
+  border: 0.5px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 12px;
+  color: #c8d4ed;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='rgba(160,180,220,0.4)' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+  cursor: pointer;
+}
+.pref-select:focus {
+  outline: none;
+  border-color: rgba(74,158,255,0.4);
+  box-shadow: 0 0 0 3px rgba(74,158,255,0.08);
+}
+.pref-select option {
+  background: #131a2b;
+  color: #c8d4ed;
+}
+/* 希望値に応じた色 */
+.pref-select[data-val="第1希望"] { border-color: rgba(74,158,255,0.45); color: #4a9eff; }
+.pref-select[data-val="第2希望"] { border-color: rgba(74,158,255,0.3);  color: #7ab8ff; }
+.pref-select[data-val="第3希望"] { border-color: rgba(74,158,255,0.2);  color: #a0caff; }
+.pref-select[data-val="NG"]      { border-color: rgba(220,80,80,0.4);   color: #dc6060; }
+.pref-select[data-val="希望なし/降り番でも可"] { border-color: rgba(255,255,255,0.08); color: rgba(160,180,220,0.45); }
+.pref-select[data-val="未回答"]  { border-color: rgba(255,255,255,0.08); color: rgba(160,180,220,0.3); }
+
+/* サマリバッジ */
+.pref-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+  margin-bottom: 14px;
+}
+.pref-badge {
+  font-size: 10px;
+  font-family: 'Outfit', sans-serif;
+  border-radius: 5px;
+  padding: 2px 8px;
+  background: rgba(74,158,255,0.12);
+  color: #4a9eff;
+}
+.pref-badge.ng  { background: rgba(220,80,80,0.12); color: #dc6060; }
+.pref-badge.non { background: rgba(255,255,255,0.05); color: rgba(160,180,220,0.4); }
+.pref-divider {
+  height: 0.5px;
+  background: rgba(255,255,255,0.05);
+  margin: 12px 0;
+}
+</style>
+
+<div class="fade-1" style="margin-bottom:14px;">
+  <div style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:500;color:#e8edf7;margin-bottom:4px;">
+    楽器・パート希望
+  </div>
+  <div style="font-size:12px;color:rgba(160,180,220,0.5);line-height:1.6;">
+    希望・NGのあるパートだけ選択してください。<br>
+    未選択のパートは未入力扱いです。
+  </div>
+</div>
+
+{% if error %}
+<div class="fade-2" style="background:rgba(220,80,80,0.1);border:0.5px solid rgba(220,80,80,0.3);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#dc8080;">
+  {{ error }}
+</div>
+{% endif %}
+
+{% if info %}
+<div class="fade-2" style="background:rgba(100,200,130,0.08);border:0.5px solid rgba(100,200,130,0.25);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#64c882;">
+  {{ info }}
+</div>
+{% endif %}
+
+{% if proposal_done %}
+{# アサイン案提示済み → 読み取り専用表示 #}
+<div class="fade-2" style="background:rgba(180,100,240,0.08);border:0.5px solid rgba(180,100,240,0.25);border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#c070f0;">
+  アサイン案が提示されています。希望の変更はできません。
+</div>
+
+{% for group in song_groups %}
+<div class="pref-song-header fade-3">🎵 {{ group.song_name }}</div>
+{% for row in group.rows %}
+<div class="pref-row fade-3">
+  <div class="pref-name">{{ row.display_name }}</div>
+  <div style="font-size:12px;font-family:'Outfit',sans-serif;color:
+    {% if row.priority in ('第1希望','第2希望','第3希望') %}#4a9eff
+    {% elif row.priority == 'NG' %}#dc6060
+    {% else %}rgba(160,180,220,0.4){% endif %};
+    white-space:nowrap;">
+    {{ row.priority or '未回答' }}
+  </div>
+</div>
+{% endfor %}
+{% endfor %}
+
+<div style="margin-top:20px;">
+  <a href="{{ back_href }}" class="btn-s" style="display:block;text-align:center;text-decoration:none;padding:11px;border-radius:9px;font-family:'Outfit',sans-serif;font-size:13px;color:rgba(180,200,240,0.7);background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.1);">
+    ← メニューに戻る
+  </a>
+</div>
+
+{% elif not song_groups %}
+{# パート定義なし #}
+<div class="fade-2" style="background:rgba(255,255,255,0.03);border:0.5px solid rgba(255,255,255,0.07);border-radius:10px;padding:14px;font-size:13px;color:rgba(160,180,220,0.6);text-align:center;">
+  パート定義がまだ登録されていません。
+</div>
+<div style="margin-top:16px;">
+  <a href="{{ back_href }}" class="btn-s" style="display:block;text-align:center;text-decoration:none;padding:11px;border-radius:9px;font-family:'Outfit',sans-serif;font-size:13px;color:rgba(180,200,240,0.7);background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.1);">
+    ← メニューに戻る
+  </a>
+</div>
+
+{% else %}
+{# 通常入力フォーム #}
+<form method="post" action="/form/pref/save" id="pref-form">
+
+  <div id="pref-summary" class="pref-summary fade-2"></div>
+
+  {% for group in song_groups %}
+  <div class="pref-song-header fade-3">🎵 {{ group.song_name }}</div>
+  {% for row in group.rows %}
+  <div class="pref-row fade-3">
+    <div class="pref-name">{{ row.display_name }}</div>
+    <select
+      name="pref_{{ row.pd_id }}"
+      class="pref-select"
+      data-pdid="{{ row.pd_id }}"
+      data-val="{{ row.priority or '未回答' }}"
+      onchange="onPrefChange(this)"
+    >
+      {% set opts = ['未回答','第1希望','第2希望','第3希望','希望なし/降り番でも可','NG'] %}
+      {% for opt in opts %}
+      <option value="{{ opt }}" {% if (row.priority or '未回答') == opt %}selected{% endif %}>{{ opt }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endfor %}
+  {% if not loop.last %}<div class="pref-divider"></div>{% endif %}
+  {% endfor %}
+
+  <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px;">
+    <button type="submit" class="btn-p" style="width:100%;background:#4a9eff;border:none;border-radius:9px;padding:13px;font-family:'Outfit',sans-serif;font-size:13px;font-weight:500;color:#0d1117;cursor:pointer;">
+      保存する
+    </button>
+    <a href="{{ back_href }}" style="display:block;text-align:center;text-decoration:none;padding:11px;border-radius:9px;font-family:'Outfit',sans-serif;font-size:13px;color:rgba(180,200,240,0.6);background:rgba(255,255,255,0.03);border:0.5px solid rgba(255,255,255,0.08);">
+      ← メニューに戻る
+    </a>
+  </div>
+
+</form>
+{% endif %}
+
+<script>
+const PRIORITY_COLORS = {
+  '第1希望': 'rgba(74,158,255,0.45)',
+  '第2希望': 'rgba(74,158,255,0.3)',
+  '第3希望': 'rgba(74,158,255,0.2)',
+  'NG':      'rgba(220,80,80,0.4)',
+};
+
+function onPrefChange(sel) {
+  sel.dataset.val = sel.value;
+  updateSummary();
+}
+
+function updateSummary() {
+  const selects = document.querySelectorAll('.pref-select');
+  const counts = {};
+  selects.forEach(s => {
+    const v = s.value;
+    if (v && v !== '未回答' && v !== '希望なし/降り番でも可') {
+      counts[v] = (counts[v] || 0) + 1;
+    }
+  });
+  const el = document.getElementById('pref-summary');
+  if (!el) return;
+  const order = ['第1希望','第2希望','第3希望','NG'];
+  const parts = order.filter(k => counts[k]).map(k => {
+    const cls = k === 'NG' ? 'pref-badge ng' : 'pref-badge';
+    return `<span class="${cls}">${k} ${counts[k]}件</span>`;
+  });
+  el.innerHTML = parts.join('');
+}
+
+document.addEventListener('DOMContentLoaded', updateSummary);
+</script>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "form/base.html" %}
+{% block content %}
+
+<div class="wordmark f1">
+  <div class="wordmark-title">ArtéMis HARMONIA</div>
+  <div class="wordmark-sub">Concert Management</div>
+</div>
+
+{% if back_href %}
+<a href="{{ back_href }}" class="back-btn f2">← 戻る</a>
+{% endif %}
+
+<div class="f2">
+  <div class="scr-title">{{ title }}</div>
+  <div class="scr-sub">{{ message }}</div>
+</div>
+
+{% endblock %}
