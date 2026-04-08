@@ -305,6 +305,7 @@
     <div class="assign-role-list" data-role-list="assign">
       {% for row in role_assignment_rows %}
       <div class="assign-role-card" data-song="{{ row.song }}" data-part="{{ row.part_master }}">
+        <div class="assign-role-song">{{ row.song }}</div>
         <div class="assign-role-bottom">
           <span class="assign-chip">{{ row.part }}</span>
           <span class="assign-role-player">{{ row.player }}</span>
@@ -408,6 +409,8 @@
   .assign-role-list{display:flex;flex-direction:column;gap:8px;width:100%}
   .assign-role-card{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.025);border-radius:10px;padding:10px 11px;transition:transform .18s ease,border-color .18s ease,background-color .18s ease}
   .assign-role-card:hover{transform:translateY(-1px);border-color:rgba(74,158,255,.28);background:rgba(255,255,255,.04)}
+  .assign-role-song{font-size:13px;font-weight:600;color:#d9e7ff;line-height:1.5;margin-bottom:7px}
+  .assign-role-card.song-fixed .assign-role-song{display:none}
   .assign-role-bottom{display:flex;justify-content:space-between;align-items:center;gap:10px}
   .assign-role-player{font-size:12px;color:#b4c7e8}
   .member-panel{display:block;padding:12px}
@@ -619,6 +622,9 @@
         const okSong = !wantSong || song === wantSong;
         const show = okPart && okSong;
         el.style.display = show ? "" : "none";
+        if (type === "assign") {
+          el.classList.toggle("song-fixed", !!wantSong);
+        }
         if (show) shown += 1;
       });
       const empty = document.querySelector(`[data-empty-for="${type}"]`);
