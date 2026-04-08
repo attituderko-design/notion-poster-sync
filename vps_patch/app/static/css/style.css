@@ -96,6 +96,9 @@ body {
 .map-link {
   color: inherit;
   text-decoration: none;
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: inherit;
 }
 
 .map-link:hover {

@@ -85,7 +85,7 @@
 {% endif %}
 
 {% if upcoming_practice %}
-<div class="menu-item f3 next-practice-card">
+<button type="button" class="menu-item f3 next-practice-card js-open-schedule"{% if not upcoming_schedule_rows %} disabled{% endif %}>
   <div class="next-practice-icon"><i class="bi bi-clock-history"></i></div>
   <div class="next-practice-body">
     <div class="next-practice-title">直近練習情報</div>
@@ -95,7 +95,40 @@
       {% if upcoming_practice.venue %}<span><i class="bi bi-geo-alt"></i>{{ upcoming_practice.venue }}</span>{% endif %}
     </div>
   </div>
+  <span class="next-practice-chevron"><i class="bi bi-chevron-right"></i></span>
+</button>
+{% if upcoming_schedule_rows %}
+<div class="schedule-modal-backdrop js-schedule-modal" aria-hidden="true">
+  <div class="schedule-modal" role="dialog" aria-modal="true" aria-label="直近練習のスケジュール">
+    <div class="schedule-modal-head">
+      <div class="schedule-modal-title">{{ upcoming_practice.name or "直近練習" }} のスケジュール</div>
+      <button type="button" class="schedule-close js-close-schedule" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="schedule-meta">
+      {% if upcoming_practice.date %}<span><i class="bi bi-calendar-event"></i>{{ upcoming_practice.date }}</span>{% endif %}
+      {% if upcoming_practice.venue %}<span><i class="bi bi-geo-alt"></i>{{ upcoming_practice.venue }}</span>{% endif %}
+    </div>
+    <div class="schedule-list">
+      {% for r in upcoming_schedule_rows %}
+      <div class="schedule-item">
+        <div class="schedule-time">
+          {% if r.start or r.end %}
+            {{ r.start or "?" }}{% if r.end %} - {{ r.end }}{% endif %}
+          {% else %}
+            時刻未設定
+          {% endif %}
+        </div>
+        <div class="schedule-main">
+          {% if r.type %}<span class="schedule-type">{{ r.type }}</span>{% endif %}
+          {% if r.song %}<span class="schedule-song">{{ r.song }}</span>{% endif %}
+          {% if r.content %}<div class="schedule-content">{{ r.content }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
 </div>
+{% endif %}
 {% endif %}
 
 <div class="section-label f4">メニュー</div>
@@ -168,15 +201,20 @@
 </div>
 {% endif %}
 
-{% if show_role_panel %}
-<div class="section-label f4" style="margin-top:18px;">{% if is_manager %}Managerメニュー{% else %}パートリーダーメニュー{% endif %}</div>
+{% if show_role_panel or show_material_tab %}
+<div class="section-label f4" style="margin-top:18px;">{% if show_role_panel %}{% if is_manager %}Managerメニュー{% else %}パートリーダーメニュー{% endif %}{% else %}資料{% endif %}</div>
 <div class="role-tabs f4">
+  {% if show_role_panel %}
   <button type="button" class="role-tab is-active" data-role-tab="att"><i class="bi bi-clipboard-data"></i>出欠</button>
   <button type="button" class="role-tab" data-role-tab="member"><i class="bi bi-people"></i>メンバー</button>
   <button type="button" class="role-tab" data-role-tab="assign"><i class="bi bi-bullseye"></i>アサイン</button>
   <button type="button" class="role-tab" data-role-tab="material"><i class="bi bi-file-earmark-text"></i>資料</button>
+  {% else %}
+  <button type="button" class="role-tab is-active" data-role-tab="material"><i class="bi bi-file-earmark-text"></i>資料</button>
+  {% endif %}
 </div>
 
+{% if show_role_panel %}
 <div class="role-panel is-active" data-role-panel="att">
   <div class="menu-item f4 att-modern-panel">
     {% if practice_cols and attendance_table_rows %}
@@ -319,8 +357,9 @@
     {% endif %}
   </div>
 </div>
+{% endif %}
 
-<div class="role-panel" data-role-panel="material">
+<div class="role-panel{% if not show_role_panel %} is-active{% endif %}" data-role-panel="material">
   <div class="menu-item f4 material-panel">
     <details class="material-box">
       <summary><i class="bi bi-file-earmark-pdf"></i> 練習情報PDF（全練習回）</summary>
@@ -375,12 +414,31 @@
   .greeting-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#c0d1ee}
   .greeting-pill-label{font-size:11px;color:#8fa6ce}
   .next-practice-card{display:flex;align-items:flex-start;gap:11px;padding:12px 14px;margin-bottom:10px}
+  .next-practice-card{width:100%;text-align:left}
+  .next-practice-card:disabled{opacity:.75;cursor:default}
   .next-practice-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:rgba(74,158,255,.14);color:#8bc0ff;font-size:16px;flex-shrink:0}
+  .next-practice-body{flex:1;min-width:0}
   .next-practice-title{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#86a3d4;font-family:'Outfit',sans-serif}
   .next-practice-name{font-size:14px;color:#e1edff;font-weight:600;line-height:1.45;margin-top:1px}
   .next-practice-meta{margin-top:4px;display:flex;flex-wrap:wrap;gap:8px 12px}
   .next-practice-meta span{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#a8bfe4}
   .next-practice-meta .bi{font-size:11px;color:#7fb8ff}
+  .next-practice-chevron{color:#8eb4e8;font-size:14px;align-self:center}
+  .schedule-modal-backdrop{position:fixed;inset:0;background:rgba(5,10,18,.72);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:10050;padding:16px}
+  .schedule-modal-backdrop.is-open{display:flex}
+  .schedule-modal{width:min(760px,96vw);max-height:88vh;overflow:auto;border-radius:14px;border:1px solid rgba(255,255,255,.15);background:rgba(12,20,33,.96);box-shadow:0 20px 55px rgba(0,0,0,.5);padding:14px}
+  .schedule-modal-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .schedule-modal-title{font-size:16px;font-weight:700;color:#e5efff}
+  .schedule-close{width:32px;height:32px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04);color:#d2e5ff;cursor:pointer}
+  .schedule-meta{display:flex;flex-wrap:wrap;gap:10px 12px;margin-top:8px;color:#9eb7de;font-size:12px}
+  .schedule-meta span{display:inline-flex;align-items:center;gap:5px}
+  .schedule-list{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+  .schedule-item{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.02);border-radius:10px;padding:9px 10px}
+  .schedule-time{font-size:12px;color:#9db8e2}
+  .schedule-main{margin-top:4px}
+  .schedule-type{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid rgba(74,158,255,.4);background:rgba(74,158,255,.12);color:#9dc6ff;font-size:11px}
+  .schedule-song{margin-left:8px;font-size:12px;color:#d7e6ff}
+  .schedule-content{margin-top:4px;font-size:13px;color:#c9daf7;line-height:1.5}
   .panel-filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
   .panel-filter-item{display:flex;align-items:center;gap:6px}
   .panel-filter-item label{font-size:11px;color:#8ea8d3}
@@ -560,6 +618,34 @@
     };
 
     openBtn.addEventListener("click", open);
+    if (closeBtn) closeBtn.addEventListener("click", close);
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) close();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && modal.classList.contains("is-open")) close();
+    });
+  })();
+
+  (() => {
+    const openBtn = document.querySelector(".js-open-schedule");
+    const modal = document.querySelector(".js-schedule-modal");
+    const closeBtn = document.querySelector(".js-close-schedule");
+    if (!openBtn || !modal) return;
+    const open = () => {
+      modal.classList.add("is-open");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.style.overflow = "hidden";
+    };
+    const close = () => {
+      modal.classList.remove("is-open");
+      modal.setAttribute("aria-hidden", "true");
+      document.body.style.overflow = "";
+    };
+    openBtn.addEventListener("click", () => {
+      if (openBtn.hasAttribute("disabled")) return;
+      open();
+    });
     if (closeBtn) closeBtn.addEventListener("click", close);
     modal.addEventListener("click", (e) => {
       if (e.target === modal) close();

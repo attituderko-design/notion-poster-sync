@@ -76,10 +76,18 @@ from app.services.form_service import (
     ASSIGNMENT_FLAG_KEYS,
 )
 from app.services.mailer import send_text
+from app.services import keys as _K
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 DEBUG_ROLE_OVERRIDE_SESSION_KEY = "debug_role_override"
+SCHEDULE_PRACTICE_REL_KEYS = _K.SCHEDULE_PRACTICE_REL_KEYS
+SCHEDULE_START_KEYS = _K.SCHEDULE_START_KEYS
+SCHEDULE_END_KEYS = _K.SCHEDULE_END_KEYS
+SCHEDULE_TYPE_KEYS = _K.SCHEDULE_TYPE_KEYS
+SCHEDULE_CONTENT_KEYS = _K.SCHEDULE_CONTENT_KEYS
+SCHEDULE_SONG_REL_KEYS = _K.SCHEDULE_SONG_REL_KEYS
+SCHEDULE_ORDER_KEYS = _K.SCHEDULE_ORDER_KEYS
 
 
 def get_ctx():
@@ -1026,6 +1034,35 @@ async def form_menu(request: Request):
     if upcoming_practice is None and practices:
         upcoming_practice = practices[0]
 
+    upcoming_schedule_rows: list[dict] = []
+    if upcoming_practice:
+        up_practice_id = upcoming_practice.get("id", "")
+        if up_practice_id:
+            ext_rel = ctx["extract_relation_ids_any"]
+            song_map = {s.get("id", ""): (ext(s, SONG_NAME_KEYS) or "").strip() for s in (data.get("songs", []) or [])}
+            all_sched = ctx["query_all"](ctx["CONCERT_DB_SCHEDULE"], None)
+            for row in all_sched:
+                if up_practice_id not in ext_rel(row, SCHEDULE_PRACTICE_REL_KEYS):
+                    continue
+                sids = ext_rel(row, SCHEDULE_SONG_REL_KEYS)
+                upcoming_schedule_rows.append({
+                    "start": (ext(row, SCHEDULE_START_KEYS) or "").strip(),
+                    "end": (ext(row, SCHEDULE_END_KEYS) or "").strip(),
+                    "type": (ext(row, SCHEDULE_TYPE_KEYS) or "").strip(),
+                    "content": (ext(row, SCHEDULE_CONTENT_KEYS) or "").strip(),
+                    "song": (song_map.get(sids[0], "") if sids else ""),
+                    "order": (ext(row, SCHEDULE_ORDER_KEYS) or "").strip(),
+                })
+            def _sort_key(r: dict):
+                order_v = (r.get("order", "") or "").strip()
+                try:
+                    o = int(float(order_v))
+                except Exception:
+                    o = 999999
+                st = (r.get("start", "") or "")
+                return (o, st)
+            upcoming_schedule_rows.sort(key=_sort_key)
+
     show_pref = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER)
     show_own = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER) and is_perc_role
     role_mode = role >= ROLE_LEADER
@@ -1070,6 +1107,7 @@ async def form_menu(request: Request):
         "can_show_assign": can_show_assign,
         "assign_summary": assign_summary,
         "show_role_panel": role_mode,
+        "show_material_tab": True,
         "is_manager": role >= ROLE_MANAGER,
         "manager_part_options": manager_part_options,
         "practice_cols": _build_practice_cols(data.get("practices", [])),
@@ -1081,9 +1119,10 @@ async def form_menu(request: Request):
             ctx, participant_rows, data.get("part_master_map", {}), my_part_id, role, player_map=player_map
         ),
         "material_rows": _build_material_rows(ctx, data.get("partdefs", []), data.get("songs", []), my_part_id, role) if role_mode else [],
-        "material_links": _build_material_links(ctx, data.get("partdefs", []), data.get("songs", []), my_part_id, role) if role_mode else [],
-        "material_practices": _build_material_practice_items(ctx, data.get("practices", [])) if role_mode else [],
+        "material_links": _build_material_links(ctx, data.get("partdefs", []), data.get("songs", []), my_part_id, role),
+        "material_practices": _build_material_practice_items(ctx, data.get("practices", [])),
         "role_assignment_rows": role_assignment_rows,
+        "upcoming_schedule_rows": upcoming_schedule_rows,
     })
     if _perf_enabled():
         total_ms = int((time.perf_counter() - t0) * 1000)

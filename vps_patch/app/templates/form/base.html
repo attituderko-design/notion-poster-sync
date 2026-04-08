@@ -93,8 +93,9 @@
     link.rel = "noopener noreferrer";
     link.className = "map-link";
     link.innerHTML = parent.innerHTML;
-    parent.replaceWith(link);
-    link.dataset.mapLinked = "1";
+    parent.innerHTML = "";
+    parent.appendChild(link);
+    parent.dataset.mapLinked = "1";
   });
 })();
 </script>
