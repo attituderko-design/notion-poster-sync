@@ -316,13 +316,13 @@
 <div class="section-label f4" style="margin-top:18px;">{% if show_role_panel %}{% if is_manager %}Managerメニュー{% else %}パートリーダーメニュー{% endif %}{% else %}資料{% endif %}</div>
 <div class="role-tabs f4" id="role-menu-panels">
   {% if show_role_panel %}
-  <button type="button" class="role-tab is-active" data-role-tab="att"><i class="bi bi-clipboard-data"></i>出欠</button>
-  <button type="button" class="role-tab" data-role-tab="member"><i class="bi bi-people"></i>メンバー</button>
-  <button type="button" class="role-tab" data-role-tab="ownmap"><i class="bi bi-box-seam"></i>所有楽器</button>
-  <button type="button" class="role-tab" data-role-tab="assign"><i class="bi bi-bullseye"></i>アサイン</button>
-  <button type="button" class="role-tab" data-role-tab="material"><i class="bi bi-file-earmark-text"></i>資料</button>
+  <button type="button" class="role-tab is-active" data-role-tab="att" data-hold-label="出欠"><i class="bi bi-clipboard-data"></i>出欠</button>
+  <button type="button" class="role-tab" data-role-tab="member" data-hold-label="メンバー"><i class="bi bi-people"></i>メンバー</button>
+  <button type="button" class="role-tab" data-role-tab="ownmap" data-hold-label="所有楽器"><i class="bi bi-box-seam"></i>所有楽器</button>
+  <button type="button" class="role-tab" data-role-tab="assign" data-hold-label="アサイン"><i class="bi bi-bullseye"></i>アサイン</button>
+  <button type="button" class="role-tab" data-role-tab="material" data-hold-label="資料"><i class="bi bi-file-earmark-text"></i>資料</button>
   {% else %}
-  <button type="button" class="role-tab is-active" data-role-tab="material"><i class="bi bi-file-earmark-text"></i>資料</button>
+  <button type="button" class="role-tab is-active" data-role-tab="material" data-hold-label="資料"><i class="bi bi-file-earmark-text"></i>資料</button>
   {% endif %}
 </div>
 
@@ -913,6 +913,7 @@
   @media (max-width: 640px){
     .role-tabs{gap:8px}
     .role-tab{
+      position:relative;
       width:46px;
       min-width:46px;
       height:42px;
@@ -928,6 +929,24 @@
       font-size:16px;
       line-height:1;
     }
+    .role-tab.is-hold-hint::after{
+      content:attr(data-hold-label);
+      position:absolute;
+      left:50%;
+      bottom:calc(100% + 8px);
+      transform:translateX(-50%);
+      padding:4px 8px;
+      border-radius:7px;
+      border:1px solid rgba(255,255,255,.2);
+      background:rgba(11,18,30,.96);
+      color:#d8e8ff;
+      font-size:11px;
+      line-height:1.2;
+      white-space:nowrap;
+      box-shadow:0 8px 20px rgba(0,0,0,.35);
+      pointer-events:none;
+      z-index:20;
+    }
   }
   @media (min-width:900px){
     .hero-shell{grid-template-columns:220px 1fr;align-items:center}
@@ -940,9 +959,21 @@
     const panels = document.querySelectorAll('[data-role-panel]');
     if (!tabs.length || !panels.length) return;
     const initialTab = "{{ initial_role_tab or '' }}";
+    const isMobileTouch = window.matchMedia("(max-width: 640px) and (hover: none), (max-width: 640px) and (pointer: coarse)").matches;
+    const longPressMs = 420;
+    let holdTimer = null;
     const activate = (name) => {
       tabs.forEach(x => x.classList.toggle('is-active', x.getAttribute('data-role-tab') === name));
       panels.forEach(p => p.classList.toggle('is-active', p.getAttribute('data-role-panel') === name));
+    };
+    const clearHoldHint = () => {
+      tabs.forEach((t) => t.classList.remove("is-hold-hint"));
+    };
+    const cancelHoldTimer = () => {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
     };
     const restored = sessionStorage.getItem("form_menu_role_panel");
     if (restored) {
@@ -952,11 +983,42 @@
       activate(initialTab);
     }
     tabs.forEach(tab => {
+      tab.addEventListener("click", (e) => {
+        if (tab.dataset.holdTriggered === "1") {
+          e.preventDefault();
+          e.stopPropagation();
+          tab.dataset.holdTriggered = "0";
+          return;
+        }
+      }, true);
       tab.addEventListener('click', () => {
         const name = tab.getAttribute('data-role-tab');
         activate(name);
       });
+      if (!isMobileTouch) return;
+      tab.addEventListener("pointerdown", () => {
+        tab.dataset.holdTriggered = "0";
+        cancelHoldTimer();
+        holdTimer = setTimeout(() => {
+          clearHoldHint();
+          tab.classList.add("is-hold-hint");
+          tab.dataset.holdTriggered = "1";
+        }, longPressMs);
+      });
+      const closeHint = () => {
+        cancelHoldTimer();
+        clearHoldHint();
+      };
+      tab.addEventListener("pointerup", closeHint);
+      tab.addEventListener("pointerleave", closeHint);
+      tab.addEventListener("pointercancel", closeHint);
     });
+    if (isMobileTouch) {
+      document.addEventListener("scroll", () => {
+        cancelHoldTimer();
+        clearHoldHint();
+      }, { passive: true });
+    }
   })();
 
   (() => {
