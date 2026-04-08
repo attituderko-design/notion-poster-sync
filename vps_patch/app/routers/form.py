@@ -519,7 +519,7 @@ def _build_role_todo_items(
             todo_items.append({
                 "title": "出欠未回答のあるパートへ催促",
                 "desc": " / ".join(labels_unanswered[:4]) + (f" ほか{len(labels_unanswered)-4}パート" if len(labels_unanswered) > 4 else ""),
-                "href": "#role-menu-panels",
+                "href": "/form?tab=att#role-menu-panels",
                 "icon": "clipboard-data",
             })
 
@@ -529,7 +529,7 @@ def _build_role_todo_items(
                 todo_items.append({
                     "title": "直近練習で△回答のあるパートへ催促",
                     "desc": " / ".join(labels_maybe[:4]) + (f" ほか{len(labels_maybe)-4}パート" if len(labels_maybe) > 4 else ""),
-                    "href": "#role-menu-panels",
+                    "href": "/form?tab=att#role-menu-panels",
                     "icon": "calendar2-week",
                 })
 
@@ -538,7 +538,7 @@ def _build_role_todo_items(
             todo_items.append({
                 "title": "所有楽器未入力のあるパートへ催促",
                 "desc": " / ".join(labels_own[:4]) + (f" ほか{len(labels_own)-4}パート" if len(labels_own) > 4 else ""),
-                "href": "#role-menu-panels",
+                "href": "/form?tab=ownmap#role-menu-panels",
                 "icon": "collection",
             })
 
@@ -561,7 +561,7 @@ def _build_role_todo_items(
         todo_items.append({
             "title": "出欠未回答メンバーへ催促",
             "desc": _short_name_list(names_unanswered),
-            "href": "#role-menu-panels",
+            "href": "/form?tab=att#role-menu-panels",
             "icon": "clipboard-data",
         })
 
@@ -571,7 +571,7 @@ def _build_role_todo_items(
             todo_items.append({
                 "title": "直近練習で△回答メンバーへ催促",
                 "desc": _short_name_list(names_maybe),
-                "href": "#role-menu-panels",
+                "href": "/form?tab=att#role-menu-panels",
                 "icon": "calendar2-week",
             })
 
@@ -580,7 +580,7 @@ def _build_role_todo_items(
         todo_items.append({
             "title": "所有楽器未入力メンバーへ催促",
             "desc": _short_name_list(names_own),
-            "href": "/form/own",
+            "href": "/form?tab=ownmap#role-menu-panels",
             "icon": "collection",
         })
 
@@ -1801,7 +1801,7 @@ async def concert_add_part_submit(request: Request, part_id: Annotated[str, Form
 
 
 @router.get("/form", response_class=HTMLResponse)
-async def form_menu(request: Request):
+async def form_menu(request: Request, tab: str = Query(default="")):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
@@ -2003,6 +2003,12 @@ async def form_menu(request: Request):
     show_pref = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER)
     show_own = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER) and is_perc_role
     role_mode = role >= ROLE_LEADER
+    allowed_tabs = {"att", "member", "assign", "material", "ownmap"}
+    initial_role_tab = (tab or "").strip().lower()
+    if initial_role_tab not in allowed_tabs:
+        initial_role_tab = ""
+    if initial_role_tab == "ownmap" and role < ROLE_LEADER:
+        initial_role_tab = ""
     upcoming_practice_id = (upcoming_practice or {}).get("id", "") if upcoming_practice else ""
     my_cast_row = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
     my_cast_id = (my_cast_row or {}).get("id", "")
@@ -2032,14 +2038,14 @@ async def form_menu(request: Request):
             todo_items.append({
                 "title": "アサイン案を提示",
                 "desc": "アサインタブで厳密解を生成",
-                "href": "#role-menu-panels",
+                "href": "/form?tab=assign#role-menu-panels",
                 "icon": "bullseye",
             })
         elif not published_assign:
             todo_items.append({
                 "title": "アサインを確定",
                 "desc": "提示中の案を確定して公開",
-                "href": "#role-menu-panels",
+                "href": "/form?tab=assign#role-menu-panels",
                 "icon": "check2-square",
             })
         if upcoming_practice and not upcoming_schedule_rows:
@@ -2081,6 +2087,19 @@ async def form_menu(request: Request):
     # 同名重複を除去しつつ順序は維持
     seen = set()
     song_names = [x for x in song_names if not (x in seen or seen.add(x))]
+    own_role_rows: list[dict] = []
+    own_role_song_options: list[dict] = []
+    if role >= ROLE_LEADER:
+        own_role_rows, own_role_song_options = _build_role_own_rows(
+            ctx,
+            concert_id=cid,
+            role=role,
+            my_part_id=my_part_id,
+            participant_rows=participant_rows,
+            partdefs=data.get("partdefs", []) or [],
+            songs=data.get("songs", []) or [],
+            player_rows=players,
+        )
     resp = templates.TemplateResponse("form/menu.html", {
         "request": request,
         "concert": concert,
@@ -2115,6 +2134,7 @@ async def form_menu(request: Request):
         "assign_summary": assign_summary,
         "show_role_panel": role_mode,
         "show_material_tab": True,
+        "initial_role_tab": initial_role_tab,
         "todo_items": todo_items,
         "poke_inbox_items": poke_panels.get("inbox", []),
         "poke_sent_items": poke_panels.get("sent", []),
@@ -2133,6 +2153,8 @@ async def form_menu(request: Request):
         "material_links": _build_material_links(ctx, data.get("partdefs", []), data.get("songs", []), my_part_id, role),
         "material_practices": _build_material_practice_items(ctx, data.get("practices", [])),
         "role_assignment_rows": role_assignment_rows,
+        "own_role_rows": own_role_rows,
+        "own_role_song_options": own_role_song_options,
         "upcoming_schedule_rows": upcoming_schedule_rows,
         "assign_solver_candidates": candidate_results,
         "assign_solver_selected_idx": selected_idx,
@@ -2875,6 +2897,109 @@ def _build_member_table(ctx, participant_rows, part_master_map, my_part_id, role
         })
     rows.sort(key=lambda r: (r["part"], r["name"]))
     return rows
+
+
+def _build_role_own_rows(
+    ctx: dict,
+    *,
+    concert_id: str,
+    role: int,
+    my_part_id: str,
+    participant_rows: list[dict],
+    partdefs: list[dict],
+    songs: list[dict],
+    player_rows: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Leader/Manager向け: 曲×必要楽器ごとの所有楽器状況を構築。"""
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+
+    song_name_map = {s.get("id", ""): (ext_txt(s, SONG_NAME_KEYS) or "未設定").strip() for s in songs}
+    inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"], None)
+    inst_name_map = {r.get("id", ""): (ext_txt(r, INSTRUMENT_NAME_KEYS) or "").strip() for r in inst_rows}
+    player_name_map = {p.get("id", ""): (ext_txt(p, PLAYER_NAME_KEYS) or "不明").strip() for p in (player_rows or [])}
+
+    scope_cast_ids: set[str] = set()
+    scope_player_ids: set[str] = set()
+    for cast in participant_rows or []:
+        pm_ids = ext_rel(cast, PARTICIPANT_PART_REL_KEYS)
+        if role < ROLE_MANAGER:
+            if not pm_ids or pm_ids[0] != my_part_id:
+                continue
+        cast_id = cast.get("id", "")
+        pids = ext_rel(cast, PARTICIPANT_PLAYER_REL_KEYS)
+        if cast_id:
+            scope_cast_ids.add(cast_id)
+        if pids:
+            scope_player_ids.add(pids[0])
+
+    owner_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    pi_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"], None)
+    cid_norm = _norm_id(concert_id)
+    for r in pi_rows:
+        rel_cids = {_norm_id(x) for x in ext_rel(r, _K.PI_CONCERT_REL_KEYS)}
+        if cid_norm not in rel_cids:
+            continue
+        rel_targets = set(ext_rel(r, _K.PI_PLAYER_REL_KEYS))
+        target_pid = ""
+        if rel_targets.intersection(scope_player_ids):
+            target_pid = next(iter(rel_targets.intersection(scope_player_ids)))
+        elif rel_targets.intersection(scope_cast_ids):
+            cast_id = next(iter(rel_targets.intersection(scope_cast_ids)))
+            cast_row = next((c for c in participant_rows if c.get("id", "") == cast_id), {})
+            pids = ext_rel(cast_row, PARTICIPANT_PLAYER_REL_KEYS)
+            target_pid = pids[0] if pids else ""
+        if not target_pid:
+            continue
+        inst_ids = ext_rel(r, _K.PI_INST_REL_KEYS)
+        if not inst_ids:
+            continue
+        inst_id = inst_ids[0]
+        raw = (ext_txt(r, _K.PI_OWN_COUNT_KEYS) or "0").strip()
+        try:
+            qty = max(0, int(float(raw or "0")))
+        except Exception:
+            qty = 0
+        if qty <= 0:
+            continue
+        owner_counts[inst_id][target_pid] += qty
+
+    rows: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    song_option_map: dict[str, str] = {}
+    for pd in partdefs or []:
+        song_ids = ext_rel(pd, PARTDEF_SONG_REL_KEYS)
+        part_ids = ext_rel(pd, PARTDEF_PART_REL_KEYS)
+        if role < ROLE_MANAGER and my_part_id:
+            if not part_ids or part_ids[0] != my_part_id:
+                continue
+        song_id = song_ids[0] if song_ids else ""
+        if song_id:
+            song_option_map[song_id] = song_name_map.get(song_id, "未設定")
+        inst_ids = ext_rel(pd, PARTDEF_INST_REL_KEYS)
+        for inst_id in inst_ids:
+            key = (song_id, inst_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            owners = owner_counts.get(inst_id, {})
+            owner_badges = [
+                {"player_id": pid, "name": player_name_map.get(pid, "不明"), "qty": qty}
+                for pid, qty in owners.items()
+            ]
+            owner_badges.sort(key=lambda x: x["name"].lower())
+            rows.append({
+                "song_id": song_id,
+                "song_name": song_name_map.get(song_id, "未設定"),
+                "instrument_id": inst_id,
+                "instrument_name": inst_name_map.get(inst_id, inst_id or "—"),
+                "owner_badges": owner_badges,
+                "owner_count": len(owner_badges),
+            })
+    rows.sort(key=lambda x: (x["song_name"].lower(), x["instrument_name"].lower()))
+    song_options = [{"id": sid, "name": name} for sid, name in song_option_map.items()]
+    song_options.sort(key=lambda x: x["name"].lower())
+    return rows, song_options
 
 
 def _build_material_rows(ctx, partdefs, songs, my_part_id, role) -> list:

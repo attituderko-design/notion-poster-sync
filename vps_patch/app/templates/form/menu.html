@@ -318,6 +318,7 @@
   {% if show_role_panel %}
   <button type="button" class="role-tab is-active" data-role-tab="att"><i class="bi bi-clipboard-data"></i>出欠</button>
   <button type="button" class="role-tab" data-role-tab="member"><i class="bi bi-people"></i>メンバー</button>
+  <button type="button" class="role-tab" data-role-tab="ownmap"><i class="bi bi-box-seam"></i>所有楽器</button>
   <button type="button" class="role-tab" data-role-tab="assign"><i class="bi bi-bullseye"></i>アサイン</button>
   <button type="button" class="role-tab" data-role-tab="material"><i class="bi bi-file-earmark-text"></i>資料</button>
   {% else %}
@@ -442,6 +443,46 @@
     <div class="panel-empty is-hidden" data-empty-for="member">該当するメンバーがいません。</div>
     {% else %}
     <div class="menu-hint">メンバー情報がまだありません。</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="role-panel" data-role-panel="ownmap">
+  <div class="menu-item f4 own-role-panel">
+    {% if own_role_rows %}
+    <div class="panel-filters">
+      <div class="panel-filter-item">
+        <label for="own-song-filter">曲</label>
+        <select id="own-song-filter" class="panel-filter-select" data-filter-target="ownmap" data-filter-kind="song" data-static-options="1">
+          <option value="">全曲</option>
+          {% for s in own_role_song_options %}
+          <option value="{{ s.name }}" data-filter-value="{{ s.name }}">{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="own-role-list" data-role-list="ownmap">
+      {% for row in own_role_rows %}
+      <div class="own-role-card" data-song="{{ row.song_name }}">
+        <div class="own-role-head">
+          <div class="own-role-song">{{ row.song_name }}</div>
+          <div class="own-role-inst">{{ row.instrument_name }}</div>
+        </div>
+        <div class="own-role-badges">
+          {% if row.owner_badges %}
+            {% for b in row.owner_badges %}
+            <span class="own-owner-chip">{{ b.name }} ×{{ b.qty }}</span>
+            {% endfor %}
+          {% else %}
+            <span class="own-owner-empty">未登録</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="panel-empty is-hidden" data-empty-for="ownmap">該当する楽器がありません。</div>
+    {% else %}
+    <div class="menu-hint">所有楽器データがまだありません。</div>
     {% endif %}
   </div>
 </div>
@@ -685,6 +726,16 @@
   .debug-role-btn.is-active{border-color:#74b6ff;background:rgba(74,158,255,.18);color:#e8f2ff}
   .badge-warn{background:rgba(228,180,89,.15);color:#e8c16b}
   .assign-panel{display:block}
+  .own-role-panel{display:block;padding:12px}
+  .own-role-list{display:flex;flex-direction:column;gap:8px}
+  .own-role-card{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:10px;padding:10px 11px;transition:transform .18s ease,border-color .18s ease,background-color .18s ease}
+  .own-role-card:hover{transform:translateY(-1px);border-color:rgba(74,158,255,.28);background:rgba(255,255,255,.04)}
+  .own-role-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .own-role-song{font-size:12px;color:#9db8e2}
+  .own-role-inst{font-size:13px;font-weight:600;color:#dbe8ff}
+  .own-role-badges{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .own-owner-chip{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;color:#a8d2ff;background:rgba(74,158,255,.14);border:1px solid rgba(74,158,255,.35)}
+  .own-owner-empty{font-size:11px;color:#93add6}
   .assign-list{display:flex;flex-direction:column;gap:8px}
   .assign-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
   .assign-row:last-child{border-bottom:none}
@@ -869,6 +920,7 @@
     const tabs = document.querySelectorAll('[data-role-tab]');
     const panels = document.querySelectorAll('[data-role-panel]');
     if (!tabs.length || !panels.length) return;
+    const initialTab = "{{ initial_role_tab or '' }}";
     const activate = (name) => {
       tabs.forEach(x => x.classList.toggle('is-active', x.getAttribute('data-role-tab') === name));
       panels.forEach(p => p.classList.toggle('is-active', p.getAttribute('data-role-panel') === name));
@@ -877,6 +929,8 @@
     if (restored) {
       activate(restored);
       sessionStorage.removeItem("form_menu_role_panel");
+    } else if (initialTab) {
+      activate(initialTab);
     }
     tabs.forEach(tab => {
       tab.addEventListener('click', () => {
@@ -1185,6 +1239,7 @@
       att: document.querySelector('[data-role-list="att"]'),
       member: document.querySelector('[data-role-list="member"]'),
       assign: document.querySelector('[data-role-list="assign"]'),
+      ownmap: document.querySelector('[data-role-list="ownmap"]'),
       assignCandidate: document,
     };
     const getCards = (type) => {
@@ -1192,6 +1247,7 @@
       if (!root) return [];
       if (type === "att") return Array.from(root.querySelectorAll(".att-member-card"));
       if (type === "member") return Array.from(root.querySelectorAll(".member-card"));
+      if (type === "ownmap") return Array.from(root.querySelectorAll(".own-role-card"));
       if (type === "assignCandidate") return Array.from(document.querySelectorAll(".assign-candidate-list .assign-role-card"));
       return Array.from(root.querySelectorAll(".assign-role-card"));
     };
@@ -1265,7 +1321,7 @@
     const allSelects = Array.from(document.querySelectorAll(".panel-filter-select"));
     if (!allSelects.length) return;
 
-    ["att", "member", "assign"].forEach((type) => {
+    ["att", "member", "assign", "ownmap"].forEach((type) => {
       const partSel = document.querySelector(`[data-filter-target="${type}"][data-filter-kind="part"]`);
       if (partSel) {
         const hasStatic = partSel.getAttribute("data-static-options") === "1";
