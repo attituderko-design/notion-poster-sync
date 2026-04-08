@@ -763,7 +763,8 @@ body {
 }
 
 .loader-card {
-  min-width: 220px;
+  width: min(420px, calc(100vw - 28px));
+  min-height: 300px;
   padding: 18px 20px 14px;
   border-radius: 16px;
   border: 0.5px solid rgba(255, 255, 255, 0.14);
@@ -833,19 +834,31 @@ body {
 
 .loader-fact {
   margin: 8px auto 0;
-  max-width: 330px;
-  min-height: 2.8em;
+  width: 100%;
+  max-width: 360px;
+  min-height: 4.4em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   font-size: 12px;
   line-height: 1.45;
   color: rgba(210, 226, 250, 0.9);
   opacity: 1;
-  transition: opacity 0.35s ease;
+  transform: translateY(0);
+  transition: opacity 0.7s ease-out, transform 0.7s ease-out;
   white-space: normal;
 }
 
-.loader-fact.is-changing {
+.loader-fact.is-hidden {
   opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.45s ease-in, transform 0.45s ease-in;
+}
+
+.loader-fact.is-enter {
+  opacity: 0;
+  transform: translateY(4px);
 }
 
 .loader-progress-track {
