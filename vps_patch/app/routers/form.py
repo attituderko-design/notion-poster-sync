@@ -265,6 +265,30 @@ def _my_music_role(ctx: dict, player_id: str, concert_id: str, participant_rows:
     return ""
 
 
+def _my_ops_role(ctx: dict, player_id: str, concert_id: str, participant_rows: list[dict]) -> str:
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+    for row in participant_rows:
+        if player_id not in ext_rel(row, PARTICIPANT_PLAYER_REL_KEYS):
+            continue
+        if concert_id not in ext_rel(row, PARTICIPANT_CONCERT_REL_KEYS):
+            continue
+        return (ext_txt(row, PARTICIPANT_ROLE_OPS_KEYS) or "").strip()
+    return ""
+
+
+def _my_system_role(ctx: dict, player_id: str, concert_id: str, participant_rows: list[dict]) -> str:
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+    for row in participant_rows:
+        if player_id not in ext_rel(row, PARTICIPANT_PLAYER_REL_KEYS):
+            continue
+        if concert_id not in ext_rel(row, PARTICIPANT_CONCERT_REL_KEYS):
+            continue
+        return (ext_txt(row, ["システムロール", "system_role", "SystemRole"]) or "").strip()
+    return ""
+
+
 def _harmonia_flags(ctx: dict, concert_id: str) -> dict:
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
@@ -881,6 +905,8 @@ async def form_menu(request: Request):
     pref_answered = sum(1 for pd in partdefs if (pref_map.get(pd.get("id", ""), "未回答") != "未回答"))
     my_part_name, my_part_id = _my_part_info(ctx, pid, cid, participant_rows)
     my_music_role = _my_music_role(ctx, pid, cid, participant_rows)
+    my_ops_role = _my_ops_role(ctx, pid, cid, participant_rows)
+    my_system_role = _my_system_role(ctx, pid, cid, participant_rows)
     is_perc_role = False
     if my_part_id:
         pm_rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
@@ -936,6 +962,8 @@ async def form_menu(request: Request):
         "player_name": request.session.get("player_name", ""),
         "my_part": my_part_name,
         "my_music_role": my_music_role,
+        "my_ops_role": my_ops_role,
+        "my_system_role": my_system_role,
         "att_unanswered": att_unanswered,
         "att_hint": att_hint,
         "pref_total": pref_total if show_pref else 0,
