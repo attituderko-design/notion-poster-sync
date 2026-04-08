@@ -88,13 +88,6 @@ SCHEDULE_TYPE_KEYS = _K.SCHEDULE_TYPE_KEYS
 SCHEDULE_CONTENT_KEYS = _K.SCHEDULE_CONTENT_KEYS
 SCHEDULE_SONG_REL_KEYS = _K.SCHEDULE_SONG_REL_KEYS
 SCHEDULE_ORDER_KEYS = _K.SCHEDULE_ORDER_KEYS
-SCHEDULE_PRACTICE_REL_KEYS_FALLBACK = list(dict.fromkeys((SCHEDULE_PRACTICE_REL_KEYS or []) + ["練習日", "practice", "Practice"]))
-SCHEDULE_START_KEYS_FALLBACK = list(dict.fromkeys((SCHEDULE_START_KEYS or []) + ["開始", "開始時刻", "start", "Start"]))
-SCHEDULE_END_KEYS_FALLBACK = list(dict.fromkeys((SCHEDULE_END_KEYS or []) + ["終了", "終了時刻", "end", "End"]))
-SCHEDULE_TYPE_KEYS_FALLBACK = list(dict.fromkeys((SCHEDULE_TYPE_KEYS or []) + ["区分", "種別", "type", "Type"]))
-SCHEDULE_CONTENT_KEYS_FALLBACK = list(dict.fromkeys((SCHEDULE_CONTENT_KEYS or []) + ["内容", "メモ", "content", "Content"]))
-SCHEDULE_SONG_REL_KEYS_FALLBACK = list(dict.fromkeys((SCHEDULE_SONG_REL_KEYS or []) + ["楽曲", "演奏曲", "song", "Song"]))
-SCHEDULE_ORDER_KEYS_FALLBACK = list(dict.fromkeys((SCHEDULE_ORDER_KEYS or []) + ["表示順", "順番", "order", "Order"]))
 
 
 def get_ctx():
@@ -1050,16 +1043,16 @@ async def form_menu(request: Request):
             song_map = {s.get("id", ""): (ext(s, SONG_NAME_KEYS) or "").strip() for s in (data.get("songs", []) or [])}
             all_sched = ctx["query_all"](schedule_db_id, None)
             for row in all_sched:
-                if up_practice_id not in ext_rel(row, SCHEDULE_PRACTICE_REL_KEYS_FALLBACK):
+                if up_practice_id not in ext_rel(row, SCHEDULE_PRACTICE_REL_KEYS):
                     continue
-                sids = ext_rel(row, SCHEDULE_SONG_REL_KEYS_FALLBACK)
+                sids = ext_rel(row, SCHEDULE_SONG_REL_KEYS)
                 upcoming_schedule_rows.append({
-                    "start": (ext(row, SCHEDULE_START_KEYS_FALLBACK) or "").strip(),
-                    "end": (ext(row, SCHEDULE_END_KEYS_FALLBACK) or "").strip(),
-                    "type": (ext(row, SCHEDULE_TYPE_KEYS_FALLBACK) or "").strip(),
-                    "content": (ext(row, SCHEDULE_CONTENT_KEYS_FALLBACK) or "").strip(),
+                    "start": (ext(row, SCHEDULE_START_KEYS) or "").strip(),
+                    "end": (ext(row, SCHEDULE_END_KEYS) or "").strip(),
+                    "type": (ext(row, SCHEDULE_TYPE_KEYS) or "").strip(),
+                    "content": (ext(row, SCHEDULE_CONTENT_KEYS) or "").strip(),
                     "song": (song_map.get(sids[0], "") if sids else ""),
-                    "order": (ext(row, SCHEDULE_ORDER_KEYS_FALLBACK) or "").strip(),
+                    "order": (ext(row, SCHEDULE_ORDER_KEYS) or "").strip(),
                 })
             def _sort_key(r: dict):
                 order_v = (r.get("order", "") or "").strip()
