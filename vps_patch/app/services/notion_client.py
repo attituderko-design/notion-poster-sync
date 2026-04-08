@@ -8,6 +8,7 @@ import uuid as _uuid
 import time
 import json
 from contextvars import ContextVar
+from requests import exceptions as _req_exc
 
 NOTION_VERSION = "2022-06-28"
 
@@ -24,6 +25,10 @@ DB_KEYS = [
 _QUERY_CACHE: dict[str, tuple[float, list[dict]]] = {}
 _TYPE_CACHE: dict[str, tuple[float, dict]] = {}
 _METRICS: ContextVar[list[dict]] = ContextVar("notion_metrics", default=[])
+
+REQ_CONNECT_TIMEOUT = 6
+REQ_READ_TIMEOUT = 30
+REQ_MAX_RETRIES = 2
 
 
 def _cache_ttl_seconds() -> int:
@@ -58,6 +63,27 @@ def _headers(api_key: str) -> dict:
     }
 
 
+def _request_with_retry(method: str, url: str, api_key: str, **kwargs):
+    timeout = kwargs.pop("timeout", (REQ_CONNECT_TIMEOUT, REQ_READ_TIMEOUT))
+    backoff = 0.35
+    for attempt in range(REQ_MAX_RETRIES + 1):
+        try:
+            resp = requests.request(method, url, headers=_headers(api_key), timeout=timeout, **kwargs)
+            if resp.status_code in (429, 500, 502, 503, 504) and attempt < REQ_MAX_RETRIES:
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            return resp
+        except (_req_exc.ReadTimeout, _req_exc.ConnectTimeout, _req_exc.ConnectionError):
+            if attempt >= REQ_MAX_RETRIES:
+                return None
+            time.sleep(backoff)
+            backoff *= 2
+        except Exception:
+            return None
+    return None
+
+
 def _query_all_notion(db_id: str, api_key: str,
                        filter_payload: dict | None = None) -> list[dict]:
     t0 = time.perf_counter()
@@ -78,8 +104,8 @@ def _query_all_notion(db_id: str, api_key: str,
             body["filter"] = filter_payload
         if cursor:
             body["start_cursor"] = cursor
-        resp = requests.post(url, headers=_headers(api_key), json=body, timeout=30)
-        if resp.status_code != 200:
+        resp = _request_with_retry("POST", url, api_key, json=body)
+        if not resp or resp.status_code != 200:
             break
         data = resp.json()
         for row in (data.get("results") or []):
@@ -104,12 +130,15 @@ def _get_prop_types(db_id: str, api_key: str) -> dict:
             _metric_add("get_prop_types", db_id, (time.perf_counter() - t0) * 1000, cache_hit=True)
             return dict(hit[1])
 
-    resp = requests.get(
-        f"https://api.notion.com/v1/databases/{db_id}",
-        headers=_headers(api_key), timeout=15,
-    )
-    if resp.status_code != 200:
-        _metric_add("get_prop_types", db_id, (time.perf_counter() - t0) * 1000, cache_hit=False, extra={"status": resp.status_code})
+    resp = _request_with_retry("GET", f"https://api.notion.com/v1/databases/{db_id}", api_key, timeout=(REQ_CONNECT_TIMEOUT, 20))
+    if not resp or resp.status_code != 200:
+        _metric_add(
+            "get_prop_types",
+            db_id,
+            (time.perf_counter() - t0) * 1000,
+            cache_hit=False,
+            extra={"status": (resp.status_code if resp else "error")},
+        )
         return {}
     props = resp.json().get("properties", {})
     if ttl > 0:
@@ -214,8 +243,13 @@ def _api_request(method, url, api_key, **kwargs):
     elif "pages/" in url:
         db = "pages"
     try:
-        resp = requests.request(method, url, headers=_headers(api_key), timeout=30, **kwargs)
-        _metric_add("api_request", db or method.upper(), (time.perf_counter() - t0) * 1000, extra={"method": method.upper(), "status": resp.status_code})
+        resp = _request_with_retry(method, url, api_key, **kwargs)
+        _metric_add(
+            "api_request",
+            db or method.upper(),
+            (time.perf_counter() - t0) * 1000,
+            extra={"method": method.upper(), "status": (resp.status_code if resp else "error")},
+        )
         return resp
     except Exception:
         _metric_add("api_request", db or method.upper(), (time.perf_counter() - t0) * 1000, extra={"method": method.upper(), "status": "error"})
