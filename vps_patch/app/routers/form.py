@@ -1037,10 +1037,11 @@ async def form_menu(request: Request):
     upcoming_schedule_rows: list[dict] = []
     if upcoming_practice:
         up_practice_id = upcoming_practice.get("id", "")
-        if up_practice_id:
+        schedule_db_id = (ctx.get("CONCERT_DB_SCHEDULE", "") or "").strip()
+        if up_practice_id and schedule_db_id:
             ext_rel = ctx["extract_relation_ids_any"]
             song_map = {s.get("id", ""): (ext(s, SONG_NAME_KEYS) or "").strip() for s in (data.get("songs", []) or [])}
-            all_sched = ctx["query_all"](ctx["CONCERT_DB_SCHEDULE"], None)
+            all_sched = ctx["query_all"](schedule_db_id, None)
             for row in all_sched:
                 if up_practice_id not in ext_rel(row, SCHEDULE_PRACTICE_REL_KEYS):
                     continue
