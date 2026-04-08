@@ -57,6 +57,33 @@
   {% endif %}
 </div>
 
+{% if debug_role_switch_enabled %}
+<div class="debug-role-switch f3">
+  <div class="debug-role-head">
+    <span class="debug-role-title">表示権限（デバッグ）</span>
+    <span class="debug-role-note">現在: {{ debug_role_current_label }}{% if debug_role_override %} / 元権限: {{ debug_role_base_label }}{% endif %}</span>
+  </div>
+  <div class="debug-role-actions">
+    <form method="post" action="/form/debug/role">
+      <input type="hidden" name="role_mode" value="auto">
+      <button type="submit" class="debug-role-btn{% if not debug_role_override %} is-active{% endif %}">Auto</button>
+    </form>
+    <form method="post" action="/form/debug/role">
+      <input type="hidden" name="role_mode" value="player">
+      <button type="submit" class="debug-role-btn{% if debug_role_override == 'player' %} is-active{% endif %}">Player</button>
+    </form>
+    <form method="post" action="/form/debug/role">
+      <input type="hidden" name="role_mode" value="leader">
+      <button type="submit" class="debug-role-btn{% if debug_role_override == 'leader' %} is-active{% endif %}">Leader</button>
+    </form>
+    <form method="post" action="/form/debug/role">
+      <input type="hidden" name="role_mode" value="manager">
+      <button type="submit" class="debug-role-btn{% if debug_role_override == 'manager' %} is-active{% endif %}">Manager</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
 {% if upcoming_practice %}
 <div class="menu-item f3 next-practice-card">
   <div class="next-practice-icon"><i class="bi bi-clock-history"></i></div>
@@ -346,6 +373,15 @@
   .panel-filter-select:focus{border-color:#6ca8ff;box-shadow:0 0 0 2px rgba(108,168,255,.17)}
   .panel-empty{margin-top:8px;font-size:12px;color:#8ca8d5}
   .panel-empty.is-hidden{display:none}
+  .debug-role-switch{border:1px dashed rgba(122,169,244,.35);border-radius:10px;padding:8px 10px;margin-bottom:10px;background:rgba(74,158,255,.06)}
+  .debug-role-head{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+  .debug-role-title{font-size:11px;letter-spacing:.08em;color:#8db6f3;text-transform:uppercase;font-family:'Outfit',sans-serif}
+  .debug-role-note{font-size:12px;color:#c7daf8}
+  .debug-role-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .debug-role-actions form{margin:0}
+  .debug-role-btn{height:28px;padding:0 10px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(19,32,52,.8);color:#cfe2ff;font-size:12px;cursor:pointer}
+  .debug-role-btn:hover{border-color:rgba(122,169,244,.5)}
+  .debug-role-btn.is-active{border-color:#74b6ff;background:rgba(74,158,255,.18);color:#e8f2ff}
   .badge-warn{background:rgba(228,180,89,.15);color:#e8c16b}
   .assign-panel{display:block}
   .assign-list{display:flex;flex-direction:column;gap:8px}

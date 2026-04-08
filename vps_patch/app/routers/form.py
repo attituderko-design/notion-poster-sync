@@ -79,6 +79,7 @@ from app.services.mailer import send_text
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
+DEBUG_ROLE_OVERRIDE_SESSION_KEY = "debug_role_override"
 
 
 def get_ctx():
@@ -295,6 +296,30 @@ def _my_system_role(ctx: dict, player_id: str, concert_id: str, participant_rows
             continue
         return (ext_txt(row, ["システムロール", "system_role", "SystemRole"]) or "").strip()
     return ""
+
+
+def _is_administrator_role(system_role: str) -> bool:
+    v = (system_role or "").strip().lower()
+    return v in {"administrator", "admin"}
+
+
+def _role_from_override(override: str | None) -> int | None:
+    v = (override or "").strip().lower()
+    if v == "player":
+        return ROLE_PLAYER
+    if v == "leader":
+        return ROLE_LEADER
+    if v == "manager":
+        return ROLE_MANAGER
+    return None
+
+
+def _role_label(role: int) -> str:
+    if role >= ROLE_MANAGER:
+        return "Manager"
+    if role >= ROLE_LEADER:
+        return "Leader"
+    return "Player"
 
 
 def _harmonia_flags(ctx: dict, concert_id: str) -> dict:
@@ -906,7 +931,7 @@ async def form_menu(request: Request):
     players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
     player_map = {p.get("id", ""): p for p in players}
 
-    role = resolve_user_role(ctx, pid, cid, participant_rows)
+    base_role = resolve_user_role(ctx, pid, cid, participant_rows)
     cast_id, att_map = _attendance_map_robust(ctx, pid, cid, participant_rows, attendance_rows, practices)
     att_total = len(practices)
     att_answered = sum(1 for p in practices if (att_map.get(p.get("id", ""), {}).get("status", "未回答") != "未回答"))
@@ -920,6 +945,12 @@ async def form_menu(request: Request):
     my_music_role = _my_music_role(ctx, pid, cid, participant_rows)
     my_ops_role = _my_ops_role(ctx, pid, cid, participant_rows)
     my_system_role = _my_system_role(ctx, pid, cid, participant_rows)
+    is_admin_debug = _is_administrator_role(my_system_role)
+    override_raw = request.session.get(DEBUG_ROLE_OVERRIDE_SESSION_KEY, "")
+    override_role = _role_from_override(override_raw) if is_admin_debug else None
+    role = override_role if override_role is not None else base_role
+    if not is_admin_debug and DEBUG_ROLE_OVERRIDE_SESSION_KEY in request.session:
+        request.session.pop(DEBUG_ROLE_OVERRIDE_SESSION_KEY, None)
     is_perc_role = False
     if my_part_id:
         pm_info = (data.get("part_master_map", {}) or {}).get(my_part_id, {})
@@ -1004,6 +1035,10 @@ async def form_menu(request: Request):
         "my_music_role": my_music_role,
         "my_ops_role": my_ops_role,
         "my_system_role": my_system_role,
+        "debug_role_switch_enabled": is_admin_debug,
+        "debug_role_current_label": _role_label(role),
+        "debug_role_base_label": _role_label(base_role),
+        "debug_role_override": (override_raw if override_role is not None else ""),
         "upcoming_practice": {
             "name": (ext(upcoming_practice, PRACTICE_NAME_KEYS) or "").strip(),
             "date": (ext(upcoming_practice, PRACTICE_DATE_KEYS) or "").strip()[:16].replace("T", " "),
@@ -1077,6 +1112,29 @@ async def form_material_practice_pdf(request: Request, practice_id: str):
     filename = f"練習情報_{pr_name}.pdf"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
+@router.post("/form/debug/role")
+async def form_debug_role_switch(request: Request, role_mode: Annotated[str, Form()]):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return RedirectResponse("/login", status_code=302)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    participant_rows = data.get("participant_rows_concert", [])
+    my_system_role = _my_system_role(ctx, pid, cid, participant_rows)
+    if not _is_administrator_role(my_system_role):
+        return RedirectResponse("/form", status_code=302)
+
+    mode = (role_mode or "").strip().lower()
+    if mode in {"player", "leader", "manager"}:
+        request.session[DEBUG_ROLE_OVERRIDE_SESSION_KEY] = mode
+    else:
+        request.session.pop(DEBUG_ROLE_OVERRIDE_SESSION_KEY, None)
+    return RedirectResponse("/form", status_code=302)
 
 
 @router.post("/form/menu-action")
