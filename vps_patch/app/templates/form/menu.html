@@ -53,7 +53,7 @@
 
 <form method="post" action="/form/menu-action" style="margin-bottom:8px;">
   <input type="hidden" name="action" value="att">
-  <div class="menu-item f4" onclick="this.closest('form').submit()" style="cursor:pointer;">
+  <div class="menu-item menu-card f4" onclick="this.closest('form').submit()" style="cursor:pointer;">
     <div class="menu-icon icon-a"><i class="bi bi-calendar-week"></i></div>
     <div class="menu-body">
       <div class="menu-title">出欠入力</div>
@@ -70,7 +70,7 @@
 {% if pref_total > 0 %}
 <form method="post" action="/form/menu-action" style="margin-bottom:8px;">
   <input type="hidden" name="action" value="pref">
-  <div class="menu-item f4" {% if not proposal_done %}onclick="this.closest('form').submit()"{% endif %}
+  <div class="menu-item menu-card f4" {% if not proposal_done %}onclick="this.closest('form').submit()"{% endif %}
        style="{% if proposal_done %}opacity:.5;cursor:default;{% else %}cursor:pointer;{% endif %}">
     <div class="menu-icon icon-b"><i class="bi bi-music-note-beamed"></i></div>
     <div class="menu-body">
@@ -90,7 +90,7 @@
 {% if is_perc %}
 <form method="post" action="/form/menu-action" style="margin-bottom:8px;">
   <input type="hidden" name="action" value="own">
-  <div class="menu-item f4" onclick="this.closest('form').submit()" style="cursor:pointer;">
+  <div class="menu-item menu-card f4" onclick="this.closest('form').submit()" style="cursor:pointer;">
     <div class="menu-icon icon-d"><i class="bi bi-vinyl"></i></div>
     <div class="menu-body">
       <div class="menu-title">所有楽器</div>
@@ -166,23 +166,38 @@
 </div>
 
 <div class="role-panel" data-role-panel="member">
-  <div class="menu-item f4" style="padding:12px;overflow-x:auto;">
-    <table class="table-mini">
-      <thead>
-        <tr>
-          <th>パート</th><th>氏名</th><th>音楽役職</th>
-          {% if is_manager %}<th>運営役職</th>{% endif %}
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in member_table_rows %}
-        <tr>
-          <td>{{ row.part }}</td><td>{{ row.name }}</td><td>{{ row.role_music }}</td>
-          {% if is_manager %}<td>{{ row.role_ops }}</td>{% endif %}
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="menu-item f4 member-panel">
+    {% if member_table_rows %}
+    <div class="member-list js-member-list">
+      {% for row in member_table_rows %}
+      <article class="member-card js-member-card" data-member-card>
+        <button type="button" class="member-card-head js-member-toggle" aria-expanded="false">
+          <div class="member-card-title-wrap">
+            <div class="member-card-title">{{ row.name }}</div>
+            <div class="member-card-sub">{{ row.part }}</div>
+          </div>
+          <span class="member-card-chevron"><i class="bi bi-chevron-down"></i></span>
+        </button>
+        <div class="member-card-detail">
+          <div class="member-detail-grid">
+            <div class="member-detail-item">
+              <span class="member-detail-label">音楽役職</span>
+              <span class="member-detail-value">{{ row.role_music or "—" }}</span>
+            </div>
+            {% if is_manager %}
+            <div class="member-detail-item">
+              <span class="member-detail-label">運営役職</span>
+              <span class="member-detail-value">{{ row.role_ops or "—" }}</span>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="menu-hint">メンバー情報がまだありません。</div>
+    {% endif %}
   </div>
 </div>
 
@@ -265,12 +280,30 @@
   .assign-song{font-size:.92rem;color:#d8e2f5;line-height:1.45}
   .assign-part{flex-shrink:0}
   .assign-chip{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;color:#7eb8ff;background:rgba(74,158,255,.13);border:1px solid rgba(74,158,255,.35)}
+  .member-panel{display:block;padding:12px}
+  .member-list{display:flex;flex-direction:column;gap:8px;transition:opacity .18s ease, transform .18s ease}
+  .member-list.is-switching{opacity:.45;transform:translateY(2px)}
+  .member-card{border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.02);border-radius:10px;overflow:hidden;transition:transform .18s ease,border-color .18s ease,background-color .18s ease}
+  .member-card:hover{transform:translateY(-1px);border-color:rgba(74,158,255,.28);background:rgba(255,255,255,.04)}
+  .member-card-head{width:100%;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 11px;background:transparent;border:0;color:inherit;text-align:left;cursor:pointer}
+  .member-card-title{font-size:13px;font-weight:600;color:#deebff}
+  .member-card-sub{font-size:11px;color:#92aad4}
+  .member-card-chevron{color:#9cb1d8;transition:transform .2s ease}
+  .member-card.is-open .member-card-chevron{transform:rotate(180deg)}
+  .member-card-detail{max-height:0;overflow:hidden;opacity:0;transition:max-height .24s ease,opacity .18s ease}
+  .member-card.is-open .member-card-detail{max-height:260px;opacity:1}
+  .member-detail-grid{padding:0 11px 11px;display:grid;grid-template-columns:1fr;gap:8px}
+  .member-detail-item{border-top:1px dashed rgba(255,255,255,.08);padding-top:8px}
+  .member-detail-label{display:block;font-size:11px;color:#8ea6d1}
+  .member-detail-value{display:block;font-size:12px;color:#d5e4ff}
   .att-modern-panel{display:block;padding:12px}
   .att-date-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
   .att-date-tab{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.03);color:#9fb3d8;border-radius:999px;padding:5px 11px;font-size:11px;cursor:pointer}
   .att-date-tab.is-active{border-color:rgba(74,158,255,.55);background:rgba(74,158,255,.12);color:#dce9ff}
-  .att-member-list{display:flex;flex-direction:column;gap:8px}
-  .att-member-card{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:10px;padding:9px 11px}
+  .att-member-list{display:flex;flex-direction:column;gap:8px;transition:opacity .18s ease,transform .18s ease}
+  .att-member-list.is-switching{opacity:.45;transform:translateY(2px)}
+  .att-member-card{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:10px;padding:9px 11px;transition:transform .18s ease,border-color .18s ease,background-color .18s ease,box-shadow .18s ease}
+  .att-member-card:hover{transform:translateY(-1px);border-color:rgba(74,158,255,.28);background:rgba(255,255,255,.04);box-shadow:0 6px 14px rgba(0,0,0,.14)}
   .att-member-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
   .att-member-name{font-size:13px;color:#d8e4fb;font-weight:600}
   .att-member-part{font-size:11px;color:#9ab1d9;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:2px 8px}
@@ -281,6 +314,12 @@
   .att-status-chip.is-ng{color:#f08c8c;background:rgba(220,80,80,.13);border-color:rgba(220,80,80,.34)}
   .att-status-chip.is-none{color:#9aaed3;background:rgba(255,255,255,.03)}
   .att-status-chip.is-hidden{display:none}
+  .att-status-chip.is-updated{animation:chipPop .22s ease}
+  @keyframes chipPop{
+    0%{transform:scale(.94)}
+    70%{transform:scale(1.04)}
+    100%{transform:scale(1)}
+  }
   .material-panel{display:block;padding:12px}
   .material-box{border:1px solid rgba(255,255,255,.11);border-radius:10px;background:rgba(255,255,255,.02);margin-bottom:10px;overflow:hidden}
   .material-box summary{list-style:none;cursor:pointer;padding:11px 12px;color:#d8e6ff;font-weight:600;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(255,255,255,.08)}
@@ -326,12 +365,47 @@
   (() => {
     const tabs = Array.from(document.querySelectorAll('.att-date-tab'));
     const chips = Array.from(document.querySelectorAll('.att-status-chip[data-practice-id]'));
+    const list = document.querySelector('.att-member-list');
     if (!tabs.length || !chips.length) return;
-    const setPractice = (pid) => {
+    const setPractice = async (pid) => {
+      if (list) {
+        list.classList.add('is-switching');
+        await new Promise(r => setTimeout(r, 120));
+      }
       tabs.forEach(t => t.classList.toggle('is-active', t.getAttribute('data-practice-id') === pid));
-      chips.forEach(c => c.classList.toggle('is-hidden', c.getAttribute('data-practice-id') !== pid));
+      chips.forEach(c => {
+        const show = c.getAttribute('data-practice-id') === pid;
+        c.classList.toggle('is-hidden', !show);
+        c.classList.remove('is-updated');
+        if (show) {
+          c.classList.add('is-updated');
+          setTimeout(() => c.classList.remove('is-updated'), 240);
+        }
+      });
+      if (list) list.classList.remove('is-switching');
     };
     tabs.forEach(t => t.addEventListener('click', () => setPractice(t.getAttribute('data-practice-id'))));
+  })();
+
+  (() => {
+    const cards = Array.from(document.querySelectorAll('.js-member-card'));
+    if (!cards.length) return;
+    cards.forEach(card => {
+      const btn = card.querySelector('.js-member-toggle');
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        const open = !card.classList.contains('is-open');
+        cards.forEach(c => {
+          c.classList.remove('is-open');
+          const b = c.querySelector('.js-member-toggle');
+          if (b) b.setAttribute('aria-expanded', 'false');
+        });
+        if (open) {
+          card.classList.add('is-open');
+          btn.setAttribute('aria-expanded', 'true');
+        }
+      });
+    });
   })();
 
   (() => {
