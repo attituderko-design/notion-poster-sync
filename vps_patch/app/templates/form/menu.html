@@ -111,15 +111,9 @@
       {% if upcoming_schedule_rows %}
       {% for r in upcoming_schedule_rows %}
       <div class="schedule-item">
-        <div class="schedule-time">
-          {% if r.start or r.end %}
-            {{ r.start or "?" }}{% if r.end %} - {{ r.end }}{% endif %}
-          {% else %}
-            時刻未設定
-          {% endif %}
-        </div>
+        <div class="schedule-time">{{ r.time_label }}</div>
         <div class="schedule-main">
-          {% if r.type %}<span class="schedule-type">{{ r.type }}</span>{% endif %}
+          {% if r.type %}<span class="schedule-type {{ r.type_class }}">{{ r.type }}</span>{% endif %}
           {% if r.song %}<span class="schedule-song">{{ r.song }}</span>{% endif %}
           {% if r.content %}<div class="schedule-content">{{ r.content }}</div>{% endif %}
         </div>
@@ -431,19 +425,25 @@
   .next-practice-chevron{color:#8eb4e8;font-size:14px;align-self:center}
   .schedule-modal-backdrop{position:fixed;inset:0;background:rgba(5,10,18,.72);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:10050;padding:16px}
   .schedule-modal-backdrop.is-open{display:flex}
-  .schedule-modal{width:min(760px,96vw);max-height:88vh;overflow:auto;border-radius:14px;border:1px solid rgba(255,255,255,.15);background:rgba(12,20,33,.96);box-shadow:0 20px 55px rgba(0,0,0,.5);padding:14px}
+  .schedule-modal{width:min(760px,96vw);max-height:88vh;overflow:auto;border-radius:14px;border:1px solid rgba(255,255,255,.15);background:linear-gradient(180deg,rgba(13,21,35,.98),rgba(10,17,29,.96));box-shadow:0 20px 55px rgba(0,0,0,.5);padding:14px}
   .schedule-modal-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
   .schedule-modal-title{font-size:16px;font-weight:700;color:#e5efff}
   .schedule-close{width:32px;height:32px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04);color:#d2e5ff;cursor:pointer}
   .schedule-meta{display:flex;flex-wrap:wrap;gap:10px 12px;margin-top:8px;color:#9eb7de;font-size:12px}
   .schedule-meta span{display:inline-flex;align-items:center;gap:5px}
   .schedule-list{margin-top:12px;display:flex;flex-direction:column;gap:8px}
-  .schedule-item{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.02);border-radius:10px;padding:9px 10px}
-  .schedule-time{font-size:12px;color:#9db8e2}
+  .schedule-item{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.02);border-radius:10px;padding:10px 11px}
+  .schedule-item:hover{border-color:rgba(74,158,255,.32);background:rgba(255,255,255,.04)}
+  .schedule-time{font-size:12px;color:#9db8e2;font-family:'Outfit',sans-serif;letter-spacing:.02em}
   .schedule-main{margin-top:4px}
   .schedule-type{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid rgba(74,158,255,.4);background:rgba(74,158,255,.12);color:#9dc6ff;font-size:11px}
+  .schedule-type.is-practice{border-color:rgba(90,186,255,.45);background:rgba(74,158,255,.18);color:#b6dcff}
+  .schedule-type.is-open{border-color:rgba(110,225,170,.45);background:rgba(100,200,130,.16);color:#baf2d0}
+  .schedule-type.is-break{border-color:rgba(239,196,107,.5);background:rgba(228,180,89,.2);color:#ffe2a6}
+  .schedule-type.is-move{border-color:rgba(218,155,255,.45);background:rgba(180,100,240,.16);color:#e9c9ff}
+  .schedule-type.is-other{border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.09);color:#d7e6ff}
   .schedule-song{margin-left:8px;font-size:12px;color:#d7e6ff}
-  .schedule-content{margin-top:4px;font-size:13px;color:#c9daf7;line-height:1.5}
+  .schedule-content{margin-top:5px;font-size:13px;color:#c9daf7;line-height:1.55}
   .panel-filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
   .panel-filter-item{display:flex;align-items:center;gap:6px}
   .panel-filter-item label{font-size:11px;color:#8ea8d3}

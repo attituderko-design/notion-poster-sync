@@ -330,6 +330,38 @@ def _role_label(role: int) -> str:
     return "Player"
 
 
+def _format_hhmm(v: str) -> str:
+    txt = (v or "").strip()
+    if not txt:
+        return ""
+    if len(txt) == 4 and txt.isdigit():
+        return f"{txt[:2]}:{txt[2:]}"
+    if len(txt) == 3 and txt.isdigit():
+        return f"0{txt[0]}:{txt[1:]}"
+    if len(txt) == 5 and txt[2] == ":":
+        return txt
+    if "T" in txt:
+        t = txt.split("T", 1)[1][:5]
+        if len(t) == 5 and t[2] == ":":
+            return t
+    return txt
+
+
+def _schedule_type_class(type_name: str) -> str:
+    v = (type_name or "").strip()
+    if v == "練習":
+        return "is-practice"
+    if v == "開場":
+        return "is-open"
+    if v in ("休憩",):
+        return "is-break"
+    if v in ("搬入", "搬出", "退館"):
+        return "is-move"
+    if v in ("その他",):
+        return "is-other"
+    return "is-default"
+
+
 def _harmonia_flags(ctx: dict, concert_id: str) -> dict:
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
@@ -1046,10 +1078,23 @@ async def form_menu(request: Request):
                 if up_practice_id not in ext_rel(row, SCHEDULE_PRACTICE_REL_KEYS):
                     continue
                 sids = ext_rel(row, SCHEDULE_SONG_REL_KEYS)
+                st_raw = (ext(row, SCHEDULE_START_KEYS) or "").strip()
+                ed_raw = (ext(row, SCHEDULE_END_KEYS) or "").strip()
+                st = _format_hhmm(st_raw)
+                ed = _format_hhmm(ed_raw)
+                if st and ed:
+                    time_label = st if st == ed else f"{st} - {ed}"
+                elif st or ed:
+                    time_label = st or ed
+                else:
+                    time_label = "時刻未設定"
+                type_name = (ext(row, SCHEDULE_TYPE_KEYS) or "").strip()
                 upcoming_schedule_rows.append({
-                    "start": (ext(row, SCHEDULE_START_KEYS) or "").strip(),
-                    "end": (ext(row, SCHEDULE_END_KEYS) or "").strip(),
-                    "type": (ext(row, SCHEDULE_TYPE_KEYS) or "").strip(),
+                    "start": st,
+                    "end": ed,
+                    "time_label": time_label,
+                    "type": type_name,
+                    "type_class": _schedule_type_class(type_name),
                     "content": (ext(row, SCHEDULE_CONTENT_KEYS) or "").strip(),
                     "song": (song_map.get(sids[0], "") if sids else ""),
                     "order": (ext(row, SCHEDULE_ORDER_KEYS) or "").strip(),
