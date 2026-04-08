@@ -112,6 +112,13 @@
         <span>現在時刻</span>
         <span class="js-schedule-now">--:--</span>
       </div>
+      {% if debug_role_switch_enabled %}
+      <div class="schedule-debug-time">
+        <label class="schedule-debug-label" for="schedule-debug-slider">時刻シミュレーター</label>
+        <input id="schedule-debug-slider" class="schedule-debug-slider js-schedule-debug-slider" type="range" min="0" max="1439" step="1" value="0">
+        <button type="button" class="schedule-debug-reset js-schedule-debug-reset">現在時刻に戻す</button>
+      </div>
+      {% endif %}
       <div class="schedule-progress-track">
         <div class="schedule-progress-bar js-schedule-progress"></div>
       </div>
@@ -444,6 +451,11 @@
   .schedule-meta span{display:inline-flex;align-items:center;gap:5px}
   .schedule-progress-wrap{margin-top:10px}
   .schedule-progress-label{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#8fa9d5;margin-bottom:4px}
+  .schedule-debug-time{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .schedule-debug-label{font-size:11px;color:#88a4d0}
+  .schedule-debug-slider{flex:1;accent-color:#66b4ff}
+  .schedule-debug-reset{height:26px;padding:0 9px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04);color:#cfe2ff;font-size:11px;cursor:pointer}
+  .schedule-debug-reset:hover{border-color:rgba(102,180,255,.5)}
   .schedule-progress-track{height:7px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;border:1px solid rgba(255,255,255,.12)}
   .schedule-progress-bar{height:100%;width:0;background:linear-gradient(90deg,#5faeff,#7bc8ff);transition:width .35s ease}
   .schedule-list{margin-top:12px;display:flex;flex-direction:column;gap:8px}
@@ -695,6 +707,8 @@
     const items = Array.from(modal.querySelectorAll(".schedule-item[data-start][data-end]"));
     const nowLabel = modal.querySelector(".js-schedule-now");
     const progressBar = modal.querySelector(".js-schedule-progress");
+    const debugSlider = modal.querySelector(".js-schedule-debug-slider");
+    const debugReset = modal.querySelector(".js-schedule-debug-reset");
     if (!items.length || !nowLabel || !progressBar) return;
 
     const toMin = (hhmm) => {
@@ -719,12 +733,14 @@
     const endBase = Math.max(...rows.map((r) => r.end ?? r.start));
     const span = Math.max(1, endBase - startBase);
 
-    const fmtNow = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
+    let useRealNow = true;
     const update = () => {
       const now = new Date();
-      const nowMin = now.getHours() * 60 + now.getMinutes();
-      nowLabel.textContent = fmtNow(now);
+      const realNowMin = now.getHours() * 60 + now.getMinutes();
+      const nowMin = (useRealNow || !debugSlider) ? realNowMin : Number(debugSlider.value || realNowMin);
+      nowLabel.textContent = fmtMin(nowMin);
 
       const pctRaw = ((nowMin - startBase) / span) * 100;
       const pct = Math.max(0, Math.min(100, pctRaw));
@@ -741,6 +757,21 @@
         r.el.classList.toggle("is-upcoming", isUpcoming);
       });
     };
+
+    if (debugSlider) {
+      debugSlider.value = String(new Date().getHours() * 60 + new Date().getMinutes());
+      debugSlider.addEventListener("input", () => {
+        useRealNow = false;
+        update();
+      });
+    }
+    if (debugReset) {
+      debugReset.addEventListener("click", () => {
+        useRealNow = true;
+        if (debugSlider) debugSlider.value = String(new Date().getHours() * 60 + new Date().getMinutes());
+        update();
+      });
+    }
 
     update();
     setInterval(update, 30000);
