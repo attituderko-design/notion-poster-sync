@@ -330,7 +330,7 @@
           <div class="material-practice-row">
             <div class="material-practice-meta">
               <div class="material-practice-title">{{ p.date }} {{ p.name }}</div>
-              {% if p.venue %}<div class="material-practice-sub">{{ p.venue }}</div>{% endif %}
+              {% if p.venue %}<div class="material-practice-sub"><i class="bi bi-geo-alt"></i>{{ p.venue }}</div>{% endif %}
             </div>
             <a class="material-action-btn" href="/form/material/practice-pdf?practice_id={{ p.id }}">PDF</a>
           </div>
@@ -464,7 +464,8 @@
   .material-practice-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
   .material-practice-row:last-child{border-bottom:none}
   .material-practice-title{font-size:12px;color:#d8e4fb}
-  .material-practice-sub{font-size:11px;color:#8ea7d2}
+  .material-practice-sub{font-size:11px;color:#8ea7d2;display:inline-flex;align-items:center;gap:5px}
+  .material-practice-sub .bi{font-size:11px;color:#7fb8ff}
   .material-action-btn{display:inline-flex;align-items:center;justify-content:center;min-width:56px;height:28px;padding:0 10px;border-radius:999px;border:1px solid rgba(74,158,255,.45);background:rgba(74,158,255,.13);color:#9acbff;text-decoration:none;font-size:12px}
   .material-action-btn:hover{background:rgba(74,158,255,.2)}
   .table-mini{width:100%;border-collapse:collapse;font-size:.92rem}
