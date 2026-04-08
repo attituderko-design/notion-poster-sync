@@ -824,6 +824,49 @@ body {
   color: var(--text-sub);
 }
 
+.loader-fact {
+  margin: 8px auto 0;
+  max-width: 330px;
+  min-height: 2.8em;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(210, 226, 250, 0.9);
+  opacity: 1;
+  transition: opacity 0.35s ease;
+  white-space: normal;
+}
+
+.loader-fact.is-changing {
+  opacity: 1;
+}
+
+.loader-progress-track {
+  margin: 10px auto 0;
+  height: 7px;
+  width: min(320px, 86vw);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+
+.loader-progress-bar {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(92, 172, 255, 0.95), rgba(146, 216, 255, 0.95));
+  transition: width 0.2s ease;
+}
+
+.loader-progress-label {
+  margin-top: 5px;
+  font-family: "Outfit", sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: rgba(190, 212, 246, 0.9);
+}
+
 @keyframes loader-spin {
   to {
     transform: rotate(360deg);

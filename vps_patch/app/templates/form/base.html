@@ -18,6 +18,11 @@
     <div class="loader-orbit"><div class="loader-core"></div></div>
     <div class="loader-title">Loading</div>
     <div class="loader-sub">画面を準備しています...</div>
+    <div class="loader-fact js-loader-fact" aria-live="polite"></div>
+    <div class="loader-progress-track" aria-hidden="true">
+      <div class="loader-progress-bar js-loader-progress"></div>
+    </div>
+    <div class="loader-progress-label"><span class="js-loader-percent">0%</span></div>
   </div>
 </div>
 <div class="container">
@@ -29,9 +34,95 @@
 (() => {
   const loader = document.getElementById("global-loader");
   if (!loader) return;
+  const progressBar = loader.querySelector(".js-loader-progress");
+  const percentLabel = loader.querySelector(".js-loader-percent");
+  const factNode = loader.querySelector(".js-loader-fact");
   const bootAt = performance.now();
   const MIN_VISIBLE_MS = 400;
+  const FACT_INTERVAL_MS = 3800;
   let hideTimer = null;
+  let progressTimer = null;
+  let factTimer = null;
+  let progress = 0;
+  const facts = [
+    "ベートーヴェンは難聴が進んだあとも作曲を続けました。",
+    "モーツァルトは幼い頃から各地で演奏旅行をしていました。",
+    "バッハ一族には音楽家が非常に多くいました。",
+    "ハイドンは「交響曲の父」と呼ばれることがあります。",
+    "シューベルトの歌曲は、詩と旋律の結びつきの強さで有名です。",
+    "ショパンの主要作品はピアノ中心です。",
+    "リストは指揮者・教育者としても大きな影響を残しました。",
+    "ワーグナー作品ではライトモティーフが有名です。",
+    "マーラーの交響曲は、大編成になることがよくあります。",
+    "ブルックナーは交響曲を何度も改訂したことで知られています。",
+    "ラヴェルは精密なオーケストレーションで有名です。",
+    "ストラヴィンスキーは時期ごとに作風がかなり変わる作曲家です。",
+    "協奏曲は、独奏とオーケストラのやり取りが大きな聴きどころです。",
+    "弦楽四重奏は、室内楽の王道のひとつとされます。",
+    "レクイエムは死者のためのミサに由来する作品群です。",
+    "変奏曲は、ひとつの主題が少しずつ姿を変えていく面白さがあります。",
+    "フーガは、主題を追いかけるように各声部が入ってくる書法です。",
+    "昔の楽器と現代の楽器では、同じ曲でも音の性格がかなり変わります。",
+    "クラシックの正解はひとつとは限らず、解釈の幅も魅力です。",
+    "ラヴェルの《ボレロ》は同じリズムが続くのに最後まで聴かせ切る曲です。",
+    "ストラヴィンスキー《春の祭典》初演は衝撃的な出来事として語られます。",
+    "ティンパニの1発で空気が変わる瞬間、結構あります。",
+    "目立たないけど大事な音ほど、合奏ではよく効きます。",
+    "演奏会は、始まる前の静けさからもう半分始まっています。",
+    "出欠の未回答は、運営を静かに止めます。",
+    "パート希望は早めに入るほど、アサインの精度が上がります。",
+    "所有楽器の入力は、未来の自分を助けます。",
+    "予定が怪しい時ほど、先に△を入れておくと運営が助かります。"
+  ];
+  const shuffled = facts
+    .map((v) => ({ v, r: Math.random() }))
+    .sort((a, b) => a.r - b.r)
+    .map((x) => x.v);
+  let factIdx = 0;
+
+  const setProgress = (v) => {
+    progress = Math.max(0, Math.min(100, v));
+    if (progressBar) progressBar.style.width = `${progress.toFixed(1)}%`;
+    if (percentLabel) percentLabel.textContent = `${Math.round(progress)}%`;
+  };
+  const startProgress = () => {
+    if (progressTimer) return;
+    progressTimer = setInterval(() => {
+      const remain = Math.max(0, 95 - progress);
+      const step = Math.max(0.3, remain * 0.08);
+      setProgress(progress + step);
+      if (progress >= 95 && progressTimer) {
+        clearInterval(progressTimer);
+        progressTimer = null;
+      }
+    }, 180);
+  };
+  const stopProgress = () => {
+    if (progressTimer) {
+      clearInterval(progressTimer);
+      progressTimer = null;
+    }
+  };
+  const showFact = () => {
+    if (!factNode || !shuffled.length) return;
+    factNode.classList.remove("is-changing");
+    // force reflow for transition restart
+    void factNode.offsetWidth;
+    factNode.classList.add("is-changing");
+    factNode.textContent = shuffled[factIdx % shuffled.length];
+    factIdx += 1;
+  };
+  const startFacts = () => {
+    if (!factNode || factTimer) return;
+    showFact();
+    factTimer = setInterval(showFact, FACT_INTERVAL_MS);
+  };
+  const stopFacts = () => {
+    if (factTimer) {
+      clearInterval(factTimer);
+      factTimer = null;
+    }
+  };
 
   const show = () => {
     if (hideTimer) {
@@ -40,12 +131,18 @@
     }
     loader.classList.remove("hidden");
     loader.setAttribute("aria-hidden", "false");
+    setProgress(Math.max(progress, 4));
+    startProgress();
+    startFacts();
   };
   const hide = () => {
     const elapsed = performance.now() - bootAt;
     const wait = Math.max(0, MIN_VISIBLE_MS - elapsed);
     if (hideTimer) clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
+      setProgress(100);
+      stopProgress();
+      stopFacts();
       loader.classList.add("hidden");
       loader.setAttribute("aria-hidden", "true");
       hideTimer = null;

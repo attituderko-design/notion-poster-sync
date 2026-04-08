@@ -392,7 +392,10 @@
         {% if "候補B" in assign_solver_selected.label %}{% set hint_text = "総スコアを最大化" %}{% endif %}
         {% if "候補C" in assign_solver_selected.label %}{% set hint_text = "公平性（低スコア奏者の底上げ）重視" %}{% endif %}
         {% if "候補D" in assign_solver_selected.label %}{% set hint_text = "降り番の偏りを最小化" %}{% endif %}
-        <span class="hint-icon" title="{{ hint_text }}" aria-label="{{ hint_text }}" tabindex="0">?</span>
+        <span class="hint-wrap">
+          <button type="button" class="hint-icon js-hint-toggle" aria-expanded="false" aria-label="ヒントを表示">?</button>
+          <span class="hint-popover" role="tooltip">{{ hint_text }}</span>
+        </span>
       </div>
       <div class="assign-candidate-stats">
         {% if assign_solver_selected.stats %}
@@ -587,8 +590,11 @@
   .assign-candidate-tab{height:28px;padding:0 11px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(18,26,42,.7);color:#c9d6f3;font-size:12px;cursor:pointer}
   .assign-candidate-tab.is-active{border-color:#6ca8ff;background:rgba(74,158,255,.18);color:#e8f2ff}
   .assign-candidate-hint{margin-top:8px;font-size:12px;color:#a6bee5}
-  .hint-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:999px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.05);color:#bcd4f7;font-weight:700;font-size:11px;cursor:help;margin-left:6px}
+  .hint-wrap{position:relative;display:inline-flex;align-items:center;margin-left:6px}
+  .hint-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:999px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.05);color:#bcd4f7;font-weight:700;font-size:11px;cursor:pointer;padding:0}
   .hint-icon:focus{outline:none;border-color:#7eb8ff;box-shadow:0 0 0 2px rgba(74,158,255,.2)}
+  .hint-popover{position:absolute;left:50%;top:130%;transform:translateX(-50%);min-width:180px;max-width:min(320px,76vw);padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.18);background:rgba(11,18,30,.97);color:#d7e8ff;font-size:12px;line-height:1.5;box-shadow:0 10px 24px rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:opacity .16s ease}
+  .hint-wrap.is-open .hint-popover{opacity:1;pointer-events:auto}
   .assign-candidate-stats{margin-top:7px;display:flex;flex-wrap:wrap;gap:7px}
   .assign-candidate-stats span{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#c3d6f6;font-size:11px}
   .assign-candidate-list{margin-top:8px}
@@ -867,6 +873,38 @@
 
     update();
     setInterval(update, 30000);
+  })();
+
+  (() => {
+    const wraps = Array.from(document.querySelectorAll(".hint-wrap"));
+    if (!wraps.length) return;
+    const closeAll = () => {
+      wraps.forEach((w) => {
+        w.classList.remove("is-open");
+        const btn = w.querySelector(".js-hint-toggle");
+        if (btn) btn.setAttribute("aria-expanded", "false");
+      });
+    };
+    wraps.forEach((w) => {
+      const btn = w.querySelector(".js-hint-toggle");
+      if (!btn) return;
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        const open = !w.classList.contains("is-open");
+        closeAll();
+        if (open) {
+          w.classList.add("is-open");
+          btn.setAttribute("aria-expanded", "true");
+        }
+      });
+    });
+    document.addEventListener("click", (e) => {
+      if (e.target.closest(".hint-wrap")) return;
+      closeAll();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeAll();
+    });
   })();
 
   (() => {
