@@ -127,23 +127,39 @@
 </div>
 
 <div class="role-panel is-active" data-role-panel="att">
-  <div class="menu-item f4" style="padding:12px;overflow-x:auto;">
-    <table class="table-mini">
-      <thead>
-        <tr>
-          <th>パート</th><th>氏名</th>
-          {% for pc in practice_cols %}<th>{{ pc.label }}</th>{% endfor %}
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in attendance_table_rows %}
-        <tr>
-          <td>{{ row.part }}</td><td>{{ row.name }}</td>
-          {% for pc in practice_cols %}<td>{{ row.cells[pc.id] }}</td>{% endfor %}
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="menu-item f4 att-modern-panel">
+    {% if practice_cols and attendance_table_rows %}
+    <div class="att-date-tabs">
+      {% for pc in practice_cols %}
+      <button type="button" class="att-date-tab{% if loop.first %} is-active{% endif %}" data-practice-id="{{ pc.id }}">
+        {{ pc.label }}
+      </button>
+      {% endfor %}
+    </div>
+    <div class="att-member-list">
+      {% for row in attendance_table_rows %}
+      <div class="att-member-card">
+        <div class="att-member-head">
+          <div class="att-member-name">{{ row.name }}</div>
+          <span class="att-member-part">{{ row.part }}</span>
+        </div>
+        <div class="att-member-statuses">
+          {% for pc in practice_cols %}
+          {% set s = row.cells[pc.id] %}
+          <span
+            class="att-status-chip{% if s == '○' %} is-ok{% elif s == '△' %} is-maybe{% elif s == '×' %} is-ng{% else %} is-none{% endif %}{% if not loop.first %} is-hidden{% endif %}"
+            data-practice-id="{{ pc.id }}"
+          >
+            {{ s }}
+          </span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="menu-hint">出欠データがまだありません。</div>
+    {% endif %}
   </div>
 </div>
 
@@ -234,6 +250,22 @@
   .assign-song{font-size:.92rem;color:#d8e2f5;line-height:1.45}
   .assign-part{flex-shrink:0}
   .assign-chip{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;color:#7eb8ff;background:rgba(74,158,255,.13);border:1px solid rgba(74,158,255,.35)}
+  .att-modern-panel{display:block;padding:12px}
+  .att-date-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .att-date-tab{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.03);color:#9fb3d8;border-radius:999px;padding:5px 11px;font-size:11px;cursor:pointer}
+  .att-date-tab.is-active{border-color:rgba(74,158,255,.55);background:rgba(74,158,255,.12);color:#dce9ff}
+  .att-member-list{display:flex;flex-direction:column;gap:8px}
+  .att-member-card{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:10px;padding:9px 11px}
+  .att-member-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .att-member-name{font-size:13px;color:#d8e4fb;font-weight:600}
+  .att-member-part{font-size:11px;color:#9ab1d9;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:2px 8px}
+  .att-member-statuses{margin-top:6px}
+  .att-status-chip{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:24px;border-radius:999px;font-size:13px;font-weight:700;border:1px solid rgba(255,255,255,.16);color:#c2d3f3;background:rgba(255,255,255,.04)}
+  .att-status-chip.is-ok{color:#78d69e;background:rgba(100,200,130,.13);border-color:rgba(100,200,130,.35)}
+  .att-status-chip.is-maybe{color:#e7c168;background:rgba(228,180,89,.13);border-color:rgba(228,180,89,.34)}
+  .att-status-chip.is-ng{color:#f08c8c;background:rgba(220,80,80,.13);border-color:rgba(220,80,80,.34)}
+  .att-status-chip.is-none{color:#9aaed3;background:rgba(255,255,255,.03)}
+  .att-status-chip.is-hidden{display:none}
   .table-mini{width:100%;border-collapse:collapse;font-size:.92rem}
   .table-mini th,.table-mini td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;white-space:nowrap}
   .table-mini th{color:#9db1d6;font-weight:700}
@@ -260,6 +292,17 @@
         panels.forEach(p => p.classList.toggle('is-active', p.getAttribute('data-role-panel') === name));
       });
     });
+  })();
+
+  (() => {
+    const tabs = Array.from(document.querySelectorAll('.att-date-tab'));
+    const chips = Array.from(document.querySelectorAll('.att-status-chip[data-practice-id]'));
+    if (!tabs.length || !chips.length) return;
+    const setPractice = (pid) => {
+      tabs.forEach(t => t.classList.toggle('is-active', t.getAttribute('data-practice-id') === pid));
+      chips.forEach(c => c.classList.toggle('is-hidden', c.getAttribute('data-practice-id') !== pid));
+    };
+    tabs.forEach(t => t.addEventListener('click', () => setPractice(t.getAttribute('data-practice-id'))));
   })();
 
   (() => {
