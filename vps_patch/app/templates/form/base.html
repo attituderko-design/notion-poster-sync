@@ -134,12 +134,13 @@
   };
   const showFact = () => {
     if (!factNode || !shuffled.length) return;
-    factNode.classList.remove("is-changing");
-    // force reflow for transition restart
-    void factNode.offsetWidth;
     factNode.classList.add("is-changing");
-    factNode.textContent = shuffled[factIdx % shuffled.length];
+    const nextText = shuffled[factIdx % shuffled.length];
     factIdx += 1;
+    setTimeout(() => {
+      factNode.textContent = nextText;
+      factNode.classList.remove("is-changing");
+    }, 150);
   };
   const startFacts = () => {
     if (!factNode || factTimer) return;

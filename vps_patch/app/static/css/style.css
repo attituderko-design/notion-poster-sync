@@ -845,7 +845,7 @@ body {
 }
 
 .loader-fact.is-changing {
-  opacity: 1;
+  opacity: 0;
 }
 
 .loader-progress-track {
