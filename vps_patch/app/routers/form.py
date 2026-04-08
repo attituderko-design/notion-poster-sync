@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import os
+import sys
 import time
 from io import BytesIO
 from pathlib import Path
@@ -44,6 +45,9 @@ from app.services.form_service import (
     ATT_PLAYER_REL_KEYS,
     ATT_PRACTICE_REL_KEYS,
     ATT_STATUS_KEYS,
+    PREF_PLAYER_REL_KEYS,
+    PREF_PART_REL_KEYS,
+    PREF_PRIORITY_KEYS,
     PARTMASTER_NAME_KEYS,
     PARTDEF_PART_REL_KEYS,
     PARTDEF_NAME_KEYS,
@@ -77,6 +81,11 @@ from app.services.form_service import (
 )
 from app.services.mailer import send_text
 from app.services import keys as _K
+from app.services.form_service import PARTDEF_INST_REL_KEYS
+
+_ROOT_DIR = Path(__file__).resolve().parents[3]
+if str(_ROOT_DIR) not in sys.path:
+    sys.path.append(str(_ROOT_DIR))
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -373,9 +382,276 @@ def _harmonia_flags(ctx: dict, concert_id: str) -> dict:
             target = r
             break
     if not target:
-        return {"plan_done": False}
+        return {"plan_done": False, "assign_done": False}
     v = (ext_txt(target, HARMONIA_CONCERT_PLAN_KEYS) or "").strip().lower()
-    return {"plan_done": v in ("true", "1", "yes", "on", "済", "完了")}
+    a = (ext_txt(target, HARMONIA_CONCERT_ASSIGN_KEYS) or "").strip().lower()
+    return {
+        "plan_done": v in ("true", "1", "yes", "on", "済", "完了"),
+        "assign_done": a in ("true", "1", "yes", "on", "済", "完了"),
+    }
+
+
+def _harmonia_row(ctx: dict, concert_id: str) -> dict | None:
+    ext_rel = ctx["extract_relation_ids_any"]
+    rows = ctx["query_all"](ctx["CONCERT_DB_HARMONIA_CONCERT"], None)
+    for r in rows:
+        rel = ext_rel(r, ["演奏会", "FK演奏会", "concert"])
+        if concert_id in rel:
+            return r
+    return None
+
+
+def _set_harmonia_checkbox(ctx: dict, concert_id: str, key_candidates: list[str], checked: bool, concert_name: str = "") -> bool:
+    row = _harmonia_row(ctx, concert_id)
+    db_id = ctx["CONCERT_DB_HARMONIA_CONCERT"]
+    t = ctx["get_prop_types"](db_id) or {}
+    if not row:
+        props: dict = {}
+        ctx["put_key_any"](props, t, ["harmonia_key", "タイトル"], concert_id, concert_name or concert_id, prefix="harmonia")
+        ctx["put_prop_any"](props, t, ["演奏会", "FK演奏会", "concert"], concert_id)
+        res = ctx["api_request"](
+            "post",
+            "https://api.notion.com/v1/pages",
+            json={"parent": {"database_id": db_id}, "properties": props},
+        )
+        if not (res and res.status_code == 200):
+            return False
+        row = res.json() or {}
+    key = ctx["find_prop_name"](t, key_candidates)
+    if not key:
+        return False
+    res = ctx["api_request"](
+        "patch",
+        f"https://api.notion.com/v1/pages/{row.get('id','')}",
+        json={"properties": {key: {"checkbox": bool(checked)}}},
+    )
+    return bool(res and res.status_code == 200)
+
+
+def _priority_to_int(v: str) -> int | None:
+    m = {
+        "第1希望": 1,
+        "第2希望": 2,
+        "第3希望": 3,
+        "希望なし/降り番でも可": 0,
+        "降り番希望": 0,
+        "NG": -1,
+        "絶対NG": -1,
+    }
+    return m.get((v or "").strip())
+
+
+def _build_exact_solver_results(
+    ctx: dict,
+    concert_id: str,
+    selected_song_id: str,
+    selected_part_master_id: str,
+    role: int,
+    my_part_id: str,
+    data: dict,
+) -> tuple[list[dict], str]:
+    try:
+        from concert.services.assign_solver import Pref, Requirement, solve_exact
+    except Exception as e:
+        return [], f"assign_solverの読み込みに失敗しました: {e}"
+
+    ext = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
+    songs = data.get("songs", []) or []
+    partdefs = data.get("partdefs", []) or []
+    participant_rows = data.get("participant_rows_concert", []) or []
+    preference_rows = data.get("preference_rows", []) or []
+
+    scoped_part_master_id = selected_part_master_id if role >= ROLE_MANAGER else (my_part_id or "")
+    song_ids = {s.get("id", "") for s in songs if s.get("id", "")}
+    partdef_rows = []
+    for pd in partdefs:
+        pdid = pd.get("id", "")
+        if not pdid:
+            continue
+        sids = ext_rel(pd, PARTDEF_SONG_REL_KEYS)
+        pmids = ext_rel(pd, PARTDEF_PART_REL_KEYS)
+        sid = sids[0] if sids else ""
+        pmid = pmids[0] if pmids else ""
+        if selected_song_id and sid != selected_song_id:
+            continue
+        if scoped_part_master_id and pmid != scoped_part_master_id:
+            continue
+        if sid and sid not in song_ids:
+            continue
+        partdef_rows.append(pd)
+    if not partdef_rows:
+        return [], "対象範囲のパート定義が見つかりません。"
+
+    cast_to_player: dict[str, str] = {}
+    scope_player_ids: set[str] = set()
+    for cast in participant_rows:
+        pids = ext_rel(cast, PARTICIPANT_PLAYER_REL_KEYS)
+        pmids = ext_rel(cast, PARTICIPANT_PART_REL_KEYS)
+        if not pids:
+            continue
+        pid = pids[0]
+        pmid = pmids[0] if pmids else ""
+        if scoped_part_master_id and pmid != scoped_part_master_id:
+            continue
+        cast_id = cast.get("id", "")
+        if cast_id:
+            cast_to_player[cast_id] = pid
+        scope_player_ids.add(pid)
+    if not scope_player_ids:
+        return [], "対象範囲の奏者が見つかりません。"
+
+    inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"], None)
+    inst_name_map = {r.get("id", ""): (ext(r, ["楽器名", "タイトル", "PK楽器名"]) or "") for r in inst_rows}
+    song_name_map = {s.get("id", ""): (ext(s, SONG_NAME_KEYS) or "未設定") for s in songs}
+    part_name_map = {
+        pd.get("id", ""): (ext(pd, PARTDEF_DISPLAY_NAME_KEYS) or ext(pd, PARTDEF_NAME_KEYS) or "-")
+        for pd in partdef_rows
+    }
+
+    requirements: list[Requirement] = []
+    for pd in partdef_rows:
+        pdid = pd.get("id", "")
+        sids = ext_rel(pd, PARTDEF_SONG_REL_KEYS)
+        iids = ext_rel(pd, PARTDEF_INST_REL_KEYS)
+        sid = sids[0] if sids else ""
+        iid = iids[0] if iids else ""
+        qty_txt = ext(pd, ["必要台数", "必要人数", "台数", "人数"]) or ""
+        try:
+            qty = max(int(float(qty_txt)), 1) if qty_txt else 1
+        except Exception:
+            qty = 1
+        requirements.append(
+            Requirement(
+                song_id=sid,
+                song_name=song_name_map.get(sid, "未設定"),
+                part_id=pdid,
+                part_name=part_name_map.get(pdid, "-"),
+                instrument_id=iid,
+                instrument_name=inst_name_map.get(iid, ""),
+                required_count=qty,
+            )
+        )
+
+    player_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    player_name_map = {p.get("id", ""): (ext(p, PLAYER_NAME_KEYS) or "") for p in player_rows}
+
+    pref_map_keys: set[tuple[str, str, str]] = set()
+    prefs: list[Pref] = []
+    partdef_id_set = {pd.get("id", "") for pd in partdef_rows}
+    for r in preference_rows:
+        rel_players = ext_rel(r, PREF_PLAYER_REL_KEYS)
+        rel_parts = ext_rel(r, PREF_PART_REL_KEYS)
+        if not rel_players or not rel_parts:
+            continue
+        raw_pid = rel_players[0]
+        pdid = rel_parts[0]
+        if pdid not in partdef_id_set:
+            continue
+        pid = cast_to_player.get(raw_pid, raw_pid)
+        if pid not in scope_player_ids:
+            continue
+        prio_txt = ext(r, PREF_PRIORITY_KEYS) or ""
+        prio = _priority_to_int(prio_txt)
+        if prio is None:
+            continue
+        sid = next((req.song_id for req in requirements if req.part_id == pdid), "")
+        iid = next((req.instrument_id for req in requirements if req.part_id == pdid), "")
+        key = (pid, sid, pdid)
+        pref_map_keys.add(key)
+        prefs.append(
+            Pref(
+                player_id=pid,
+                player_name=player_name_map.get(pid, pid),
+                song_id=sid,
+                song_name=song_name_map.get(sid, "未設定"),
+                part_id=pdid,
+                part_name=part_name_map.get(pdid, "-"),
+                instrument_id=iid,
+                instrument_name=inst_name_map.get(iid, ""),
+                priority=prio,
+                can_bring=False,
+            )
+        )
+
+    for req in requirements:
+        for pid in sorted(scope_player_ids):
+            key = (pid, req.song_id, req.part_id)
+            if key in pref_map_keys:
+                continue
+            prefs.append(
+                Pref(
+                    player_id=pid,
+                    player_name=player_name_map.get(pid, pid),
+                    song_id=req.song_id,
+                    song_name=req.song_name,
+                    part_id=req.part_id,
+                    part_name=req.part_name,
+                    instrument_id=req.instrument_id,
+                    instrument_name=req.instrument_name,
+                    priority=0,
+                    can_bring=False,
+                )
+            )
+
+    if not prefs or not requirements:
+        return [], "希望データまたはパート定義が不足しています。"
+    results = solve_exact(
+        prefs=prefs,
+        requirements=requirements,
+        absent_players=set(),
+        all_player_ids=sorted(scope_player_ids),
+        time_limit_sec=30.0,
+    )
+    if not results:
+        return [], "厳密解を算出できませんでした。制約条件を見直してください。"
+    return results, ""
+
+
+def _write_assignment_rows(ctx: dict, concert_id: str, assignments: list[dict]) -> tuple[int, int]:
+    db_id = ctx.get("CONCERT_DB_CONCERT_ASSIGNMENT", "")
+    if not db_id:
+        return 0, len(assignments)
+    type_map = ctx["get_prop_types"](db_id)
+    if not type_map:
+        return 0, len(assignments)
+
+    existing = ctx["query_all"](db_id, None)
+    ext_rel = ctx["extract_relation_ids_any"]
+    for r in existing:
+        c_ids = ext_rel(r, ASSIGNMENT_CONCERT_REL_KEYS)
+        if concert_id not in (c_ids or []):
+            continue
+        ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{r.get('id','')}", json={"archived": True})
+
+    ok = 0
+    fail = 0
+    for a in assignments:
+        player_id = a.get("player_id", "")
+        song_id = a.get("song_id", "")
+        part_id = a.get("part_id", "")
+        if not (player_id and song_id and part_id):
+            fail += 1
+            continue
+        props: dict = {}
+        ctx["put_key_any"](props, type_map, ["assign_key", "レコード名", "タイトル"], concert_id, player_id, part_id, prefix="assign")
+        ctx["put_prop_any"](props, type_map, ASSIGNMENT_CONCERT_REL_KEYS, concert_id)
+        ctx["put_prop_any"](props, type_map, ASSIGNMENT_PLAYER_REL_KEYS, player_id)
+        ctx["put_prop_any"](props, type_map, ASSIGNMENT_PARTDEF_REL_KEYS, part_id)
+        ctx["put_prop_any"](props, type_map, ASSIGNMENT_SONG_REL_KEYS, song_id)
+        ctx["put_prop_any"](props, type_map, ASSIGNMENT_FLAG_KEYS, True)
+        note = f"{a.get('song_name','')} / {a.get('part_name','')} / {a.get('player_name','')}"
+        ctx["put_prop_any"](props, type_map, ["備考", "note", "メモ"], note)
+        res = ctx["api_request"](
+            "post",
+            "https://api.notion.com/v1/pages",
+            json={"parent": {"database_id": db_id}, "properties": props},
+        )
+        if res and res.status_code == 200:
+            ok += 1
+        else:
+            fail += 1
+    return ok, fail
 
 
 def _all_relation_ids_from_row(row: dict) -> dict[str, list[str]]:
@@ -1019,6 +1295,34 @@ async def form_menu(request: Request):
         assignment_rows=all_assign_rows,
         player_rows=players,
     ) if role >= ROLE_LEADER else []
+    assign_song_options = [
+        {"id": s.get("id", ""), "name": (ext(s, SONG_NAME_KEYS) or "未設定")}
+        for s in (data.get("songs", []) or [])
+        if s.get("id", "")
+    ]
+    assign_part_options = []
+    if role >= ROLE_MANAGER:
+        pm_rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
+        for pm in pm_rows:
+            pmid = pm.get("id", "")
+            pmname = (ext(pm, PARTMASTER_NAME_KEYS) or "").strip()
+            if pmid and pmname:
+                assign_part_options.append({"id": pmid, "name": pmname})
+        assign_part_options.sort(key=lambda x: x["name"].lower())
+
+    assign_state_all = request.session.get("assign_solver_state") or {}
+    assign_state = assign_state_all.get(cid, {}) if isinstance(assign_state_all, dict) else {}
+    candidate_results = assign_state.get("results", []) if isinstance(assign_state, dict) else []
+    selected_idx = 0
+    try:
+        selected_idx = int(assign_state.get("selected", 0) or 0)
+    except Exception:
+        selected_idx = 0
+    if selected_idx < 0:
+        selected_idx = 0
+    if selected_idx >= len(candidate_results):
+        selected_idx = 0
+    selected_candidate = candidate_results[selected_idx] if candidate_results else None
     manager_part_options: list[str] = []
     if role >= ROLE_MANAGER:
         ext_rel = ctx["extract_relation_ids_any"]
@@ -1169,6 +1473,12 @@ async def form_menu(request: Request):
         "material_practices": _build_material_practice_items(ctx, data.get("practices", [])),
         "role_assignment_rows": role_assignment_rows,
         "upcoming_schedule_rows": upcoming_schedule_rows,
+        "assign_solver_candidates": candidate_results,
+        "assign_solver_selected_idx": selected_idx,
+        "assign_solver_selected": selected_candidate,
+        "assign_song_options": assign_song_options,
+        "assign_part_options": assign_part_options,
+        "assign_flags": flags,
     })
     if _perf_enabled():
         total_ms = int((time.perf_counter() - t0) * 1000)
@@ -1235,6 +1545,169 @@ async def form_debug_role_switch(request: Request, role_mode: Annotated[str, For
         request.session[DEBUG_ROLE_OVERRIDE_SESSION_KEY] = mode
     else:
         request.session.pop(DEBUG_ROLE_OVERRIDE_SESSION_KEY, None)
+    return RedirectResponse("/form", status_code=302)
+
+
+@router.post("/form/assign/run")
+async def form_assign_run(
+    request: Request,
+    target_song_id: Annotated[str, Form()] = "",
+    target_part_id: Annotated[str, Form()] = "",
+):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return RedirectResponse("/login", status_code=302)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    participant_rows = data.get("participant_rows_concert", [])
+    base_role = resolve_user_role(ctx, pid, cid, participant_rows)
+    my_system_role = _my_system_role(ctx, pid, cid, participant_rows)
+    override_raw = request.session.get(DEBUG_ROLE_OVERRIDE_SESSION_KEY, "")
+    override_role = _role_from_override(override_raw) if _is_administrator_role(my_system_role) else None
+    role = override_role if override_role is not None else base_role
+    if role < ROLE_LEADER:
+        _flash_set(request, "error", "アサイン案の生成はLeader以上のみ実行できます。")
+        return RedirectResponse("/form", status_code=302)
+
+    _, my_part_id = _my_part_info(ctx, pid, cid, participant_rows)
+    song_id = (target_song_id or "").strip()
+    part_id = (target_part_id or "").strip()
+    results, err = _build_exact_solver_results(
+        ctx=ctx,
+        concert_id=cid,
+        selected_song_id=song_id,
+        selected_part_master_id=part_id,
+        role=role,
+        my_part_id=my_part_id,
+        data=data,
+    )
+    if err:
+        _flash_set(request, "error", err)
+        return RedirectResponse("/form", status_code=302)
+
+    state_all = request.session.get("assign_solver_state") or {}
+    if not isinstance(state_all, dict):
+        state_all = {}
+    state_all[cid] = {
+        "results": results,
+        "selected": 0,
+        "scope_song_id": song_id,
+        "scope_part_id": part_id if role >= ROLE_MANAGER else my_part_id,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    request.session["assign_solver_state"] = state_all
+    _flash_set(request, "info", "厳密解A〜Dを生成しました。")
+    return RedirectResponse("/form", status_code=302)
+
+
+@router.post("/form/assign/select")
+async def form_assign_select(request: Request, candidate_index: Annotated[int, Form()]):
+    cid = request.session.get("concert_id", "")
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+    state_all = request.session.get("assign_solver_state") or {}
+    if not isinstance(state_all, dict):
+        return RedirectResponse("/form", status_code=302)
+    state = state_all.get(cid, {})
+    results = state.get("results", []) if isinstance(state, dict) else []
+    if results:
+        idx = max(0, min(int(candidate_index), len(results) - 1))
+        state["selected"] = idx
+        state_all[cid] = state
+        request.session["assign_solver_state"] = state_all
+    return RedirectResponse("/form", status_code=302)
+
+
+@router.post("/form/assign/propose")
+async def form_assign_propose(request: Request):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return RedirectResponse("/login", status_code=302)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    participant_rows = data.get("participant_rows_concert", [])
+    base_role = resolve_user_role(ctx, pid, cid, participant_rows)
+    my_system_role = _my_system_role(ctx, pid, cid, participant_rows)
+    override_raw = request.session.get(DEBUG_ROLE_OVERRIDE_SESSION_KEY, "")
+    override_role = _role_from_override(override_raw) if _is_administrator_role(my_system_role) else None
+    role = override_role if override_role is not None else base_role
+    if role < ROLE_LEADER:
+        _flash_set(request, "error", "案提示はLeader以上のみ実行できます。")
+        return RedirectResponse("/form", status_code=302)
+
+    state_all = request.session.get("assign_solver_state") or {}
+    state = state_all.get(cid, {}) if isinstance(state_all, dict) else {}
+    results = state.get("results", []) if isinstance(state, dict) else []
+    selected = int(state.get("selected", 0) or 0) if results else 0
+    if not results:
+        _flash_set(request, "error", "提示する候補がありません。先にA〜Dを生成してください。")
+        return RedirectResponse("/form", status_code=302)
+    selected = max(0, min(selected, len(results) - 1))
+    selected_label = (results[selected].get("label", "") or f"候補{chr(ord('A') + selected)}").strip()
+    if isinstance(state, dict):
+        state["proposed_selected"] = selected
+        state["proposed_label"] = selected_label
+        state["proposed_at"] = datetime.now().isoformat(timespec="seconds")
+        state_all[cid] = state
+        request.session["assign_solver_state"] = state_all
+    concert = _find_concert(ctx, cid) or {}
+    c_name = _atlas_concert_name(ctx, concert) if concert else cid
+    _set_harmonia_checkbox(ctx, cid, HARMONIA_CONCERT_PLAN_KEYS, True, c_name)
+    _set_harmonia_checkbox(ctx, cid, HARMONIA_CONCERT_ASSIGN_KEYS, False, c_name)
+    _flash_set(request, "info", f"{selected_label} を案提示しました。PDF出力が可能になりました。")
+    return RedirectResponse("/form", status_code=302)
+
+
+@router.post("/form/assign/confirm")
+async def form_assign_confirm(request: Request):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return RedirectResponse("/login", status_code=302)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    participant_rows = data.get("participant_rows_concert", [])
+    base_role = resolve_user_role(ctx, pid, cid, participant_rows)
+    my_system_role = _my_system_role(ctx, pid, cid, participant_rows)
+    override_raw = request.session.get(DEBUG_ROLE_OVERRIDE_SESSION_KEY, "")
+    override_role = _role_from_override(override_raw) if _is_administrator_role(my_system_role) else None
+    role = override_role if override_role is not None else base_role
+    if role < ROLE_LEADER:
+        _flash_set(request, "error", "確定はLeader以上のみ実行できます。")
+        return RedirectResponse("/form", status_code=302)
+    flags = _harmonia_flags(ctx, cid)
+    if not bool(flags.get("plan_done")):
+        _flash_set(request, "error", "先に『案提示する』を実行してください。")
+        return RedirectResponse("/form", status_code=302)
+
+    state_all = request.session.get("assign_solver_state") or {}
+    state = state_all.get(cid, {}) if isinstance(state_all, dict) else {}
+    results = state.get("results", []) if isinstance(state, dict) else []
+    if not results:
+        _flash_set(request, "error", "確定できる候補がありません。先に厳密解A〜Dを生成してください。")
+        return RedirectResponse("/form", status_code=302)
+    selected = max(0, min(int(state.get("selected", 0) or 0), len(results) - 1))
+    assignments = results[selected].get("assignments", [])
+    ok, fail = _write_assignment_rows(ctx, cid, assignments)
+    if fail > 0 or ok == 0:
+        _flash_set(request, "error", f"確定時の書き込みに失敗しました（成功{ok} / 失敗{fail}）。")
+        return RedirectResponse("/form", status_code=302)
+    concert = _find_concert(ctx, cid) or {}
+    c_name = _atlas_concert_name(ctx, concert) if concert else cid
+    _set_harmonia_checkbox(ctx, cid, HARMONIA_CONCERT_PLAN_KEYS, True, c_name)
+    _set_harmonia_checkbox(ctx, cid, HARMONIA_CONCERT_ASSIGN_KEYS, True, c_name)
+    _flash_set(request, "info", f"アサインを確定しました（{ok}件）。")
     return RedirectResponse("/form", status_code=302)
 
 

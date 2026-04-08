@@ -8,6 +8,13 @@
 
 <a href="/concert/select" class="back-btn f2"><i class="bi bi-arrow-left"></i> 演奏会選択に戻る</a>
 
+{% if error %}
+<div class="alert alert-error f2">{{ error }}</div>
+{% endif %}
+{% if info %}
+<div class="alert alert-info f2">{{ info }}</div>
+{% endif %}
+
 {% if concert %}
 <div class="hero-shell f2">
   {% if cover_url %}
@@ -338,6 +345,89 @@
 
 <div class="role-panel" data-role-panel="assign">
   <div class="menu-item f4 assign-role-panel">
+    <div class="assign-solver-box">
+      <div class="assign-solver-head">
+        <div class="assign-solver-title">厳密解アサイン（A〜D）</div>
+        <div class="assign-solver-note">ヒューリスティックは使用しません</div>
+      </div>
+      <form method="post" action="/form/assign/run" class="assign-solver-form">
+        <div class="panel-filter-item">
+          <label for="solver-song-select">曲</label>
+          <select id="solver-song-select" name="target_song_id" class="panel-filter-select">
+            <option value="">全曲</option>
+            {% for s in assign_song_options %}
+            <option value="{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% if is_manager %}
+        <div class="panel-filter-item">
+          <label for="solver-part-select">パート</label>
+          <select id="solver-part-select" name="target_part_id" class="panel-filter-select">
+            <option value="">全パート</option>
+            {% for p in assign_part_options %}
+            <option value="{{ p.id }}">{{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+        <button type="submit" class="assign-action-btn">厳密解を生成</button>
+      </form>
+
+      {% if assign_solver_candidates %}
+      <div class="assign-candidate-tabs">
+        {% for c in assign_solver_candidates %}
+        <form method="post" action="/form/assign/select" class="assign-candidate-tab-form">
+          <input type="hidden" name="candidate_index" value="{{ loop.index0 }}">
+          <button type="submit" class="assign-candidate-tab{% if loop.index0 == assign_solver_selected_idx %} is-active{% endif %}">
+            案{{ "ABCD"[loop.index0] if loop.index0 < 4 else loop.index }}
+          </button>
+        </form>
+        {% endfor %}
+      </div>
+      {% if assign_solver_selected %}
+      <div class="assign-candidate-hint">
+        <strong>Hint:</strong>
+        {% if "候補A" in assign_solver_selected.label %}第1希望率を最大化（同率時は総スコア優先）
+        {% elif "候補B" in assign_solver_selected.label %}総スコアを最大化
+        {% elif "候補C" in assign_solver_selected.label %}公平性（低スコア奏者の底上げ）重視
+        {% elif "候補D" in assign_solver_selected.label %}降り番の偏りを最小化
+        {% else %}評価関数に基づく厳密解
+        {% endif %}
+      </div>
+      <div class="assign-candidate-stats">
+        {% if assign_solver_selected.stats %}
+        <span>第1希望率: {{ "%.1f"|format((assign_solver_selected.stats.first_choice_rate or 0) * 100) }}%</span>
+        <span>総スコア: {{ "%.2f"|format(assign_solver_selected.stats.total_score or 0) }}</span>
+        <span>降り番率: {{ "%.1f"|format((assign_solver_selected.stats.no_assign_rate or 0) * 100) }}%</span>
+        {% endif %}
+      </div>
+      <div class="assign-role-list assign-candidate-list">
+        {% for row in assign_solver_selected.assignments %}
+        <div class="assign-role-card">
+          <div class="assign-role-song">{{ row.song_name }}</div>
+          <div class="assign-role-bottom">
+            <span class="assign-chip">{{ row.part_name }}</span>
+            <span class="assign-role-player">{{ row.player_name }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="assign-candidate-actions">
+        <form method="post" action="/form/assign/propose">
+          <button type="submit" class="assign-action-btn"{% if assign_flags.assign_done %} disabled{% endif %}>案提示する（この案）</button>
+        </form>
+        <form method="post" action="/form/assign/confirm">
+          <button type="submit" class="assign-action-btn is-primary"{% if (not assign_flags.plan_done) or assign_flags.assign_done %} disabled{% endif %}>確定する</button>
+        </form>
+      </div>
+      {% endif %}
+      {% else %}
+      <div class="menu-hint">厳密解を生成すると、案A〜Dをここに表示します。</div>
+      {% endif %}
+    </div>
+
+    <div class="assign-current-head">現在反映中のアサイン</div>
     {% if role_assignment_rows %}
     <div class="panel-filters">
       <div class="panel-filter-item">
@@ -503,6 +593,26 @@
   .assign-part{flex-shrink:0}
   .assign-chip{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;color:#7eb8ff;background:rgba(74,158,255,.13);border:1px solid rgba(74,158,255,.35)}
   .assign-role-panel{display:block;padding:12px}
+  .assign-solver-box{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(255,255,255,.02);padding:10px 11px;margin-bottom:10px}
+  .assign-solver-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+  .assign-solver-title{font-size:13px;font-weight:700;color:#dceaff}
+  .assign-solver-note{font-size:11px;color:#88a8d6}
+  .assign-solver-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+  .assign-action-btn{height:30px;padding:0 12px;border-radius:999px;border:1px solid rgba(74,158,255,.45);background:rgba(74,158,255,.12);color:#b4d7ff;font-size:12px;cursor:pointer}
+  .assign-action-btn:hover{background:rgba(74,158,255,.2)}
+  .assign-action-btn:disabled{opacity:.45;cursor:not-allowed}
+  .assign-action-btn.is-primary{border-color:rgba(100,200,130,.45);background:rgba(100,200,130,.14);color:#bff0d1}
+  .assign-candidate-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .assign-candidate-tab-form{margin:0}
+  .assign-candidate-tab{height:28px;padding:0 11px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(18,26,42,.7);color:#c9d6f3;font-size:12px;cursor:pointer}
+  .assign-candidate-tab.is-active{border-color:#6ca8ff;background:rgba(74,158,255,.18);color:#e8f2ff}
+  .assign-candidate-hint{margin-top:8px;font-size:12px;color:#a6bee5}
+  .assign-candidate-stats{margin-top:7px;display:flex;flex-wrap:wrap;gap:7px}
+  .assign-candidate-stats span{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#c3d6f6;font-size:11px}
+  .assign-candidate-list{margin-top:8px}
+  .assign-candidate-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
+  .assign-candidate-actions form{margin:0}
+  .assign-current-head{margin:10px 0 8px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#88a4d0}
   .assign-role-list{display:flex;flex-direction:column;gap:8px;width:100%}
   .assign-role-card{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.025);border-radius:10px;padding:10px 11px;transition:transform .18s ease,border-color .18s ease,background-color .18s ease}
   .assign-role-card:hover{transform:translateY(-1px);border-color:rgba(74,158,255,.28);background:rgba(255,255,255,.04)}
