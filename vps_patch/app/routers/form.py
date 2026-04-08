@@ -1338,6 +1338,8 @@ async def form_menu(request: Request):
     if selected_idx >= len(candidate_results):
         selected_idx = 0
     selected_candidate = candidate_results[selected_idx] if candidate_results else None
+    assign_scope_song_id = (assign_state.get("scope_song_id", "") if isinstance(assign_state, dict) else "") or ""
+    assign_scope_part_id = (assign_state.get("scope_part_id", "") if isinstance(assign_state, dict) else "") or ""
     manager_part_options: list[str] = []
     if role >= ROLE_MANAGER:
         ext_rel = ctx["extract_relation_ids_any"]
@@ -1493,6 +1495,8 @@ async def form_menu(request: Request):
         "assign_solver_selected": selected_candidate,
         "assign_song_options": assign_song_options,
         "assign_part_options": assign_part_options,
+        "assign_scope_song_id": assign_scope_song_id,
+        "assign_scope_part_id": assign_scope_part_id,
         "assign_flags": flags,
         "error": _flash_pop(request, "error"),
         "info": _flash_pop(request, "info"),

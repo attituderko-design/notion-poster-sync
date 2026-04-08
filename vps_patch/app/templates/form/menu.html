@@ -352,20 +352,20 @@
       <form method="post" action="/form/assign/run" class="assign-solver-form">
         <div class="panel-filter-item">
           <label for="solver-song-select">曲</label>
-          <select id="solver-song-select" name="target_song_id" class="panel-filter-select">
+          <select id="solver-song-select" name="target_song_id" class="panel-filter-select" data-filter-target="assign" data-filter-kind="song" data-static-options="1">
             <option value="">全曲</option>
             {% for s in assign_song_options %}
-            <option value="{{ s.id }}">{{ s.name }}</option>
+            <option value="{{ s.id }}" data-filter-value="{{ s.name }}" {% if assign_scope_song_id == s.id %}selected{% endif %}>{{ s.name }}</option>
             {% endfor %}
           </select>
         </div>
         {% if is_manager %}
         <div class="panel-filter-item">
           <label for="solver-part-select">パート</label>
-          <select id="solver-part-select" name="target_part_id" class="panel-filter-select">
+          <select id="solver-part-select" name="target_part_id" class="panel-filter-select" data-filter-target="assign" data-filter-kind="part" data-static-options="1">
             <option value="">全パート</option>
             {% for p in assign_part_options %}
-            <option value="{{ p.id }}">{{ p.name }}</option>
+            <option value="{{ p.id }}" data-filter-value="{{ p.name }}" {% if assign_scope_part_id == p.id %}selected{% endif %}>{{ p.name }}</option>
             {% endfor %}
           </select>
         </div>
@@ -386,13 +386,13 @@
       </div>
       {% if assign_solver_selected %}
       <div class="assign-candidate-hint">
-        <strong>Hint:</strong>
-        {% if "候補A" in assign_solver_selected.label %}第1希望率を最大化（同率時は総スコア優先）
-        {% elif "候補B" in assign_solver_selected.label %}総スコアを最大化
-        {% elif "候補C" in assign_solver_selected.label %}公平性（低スコア奏者の底上げ）重視
-        {% elif "候補D" in assign_solver_selected.label %}降り番の偏りを最小化
-        {% else %}評価関数に基づく厳密解
-        {% endif %}
+        <strong>Hint</strong>
+        {% set hint_text = "評価関数に基づく厳密解" %}
+        {% if "候補A" in assign_solver_selected.label %}{% set hint_text = "第1希望率を最大化（同率時は総スコア優先）" %}{% endif %}
+        {% if "候補B" in assign_solver_selected.label %}{% set hint_text = "総スコアを最大化" %}{% endif %}
+        {% if "候補C" in assign_solver_selected.label %}{% set hint_text = "公平性（低スコア奏者の底上げ）重視" %}{% endif %}
+        {% if "候補D" in assign_solver_selected.label %}{% set hint_text = "降り番の偏りを最小化" %}{% endif %}
+        <span class="hint-icon" title="{{ hint_text }}" aria-label="{{ hint_text }}" tabindex="0">?</span>
       </div>
       <div class="assign-candidate-stats">
         {% if assign_solver_selected.stats %}
@@ -401,9 +401,9 @@
         <span>降り番率: {{ "%.1f"|format((assign_solver_selected.stats.no_assign_rate or 0) * 100) }}%</span>
         {% endif %}
       </div>
-      <div class="assign-role-list assign-candidate-list">
+      <div class="assign-role-list assign-candidate-list" data-role-list="assign-candidate">
         {% for row in assign_solver_selected.assignments %}
-        <div class="assign-role-card">
+        <div class="assign-role-card" data-song="{{ row.song_name }}" data-part="{{ row.part_master_name or row.part_name }}">
           <div class="assign-role-song">{{ row.song_name }}</div>
           <div class="assign-role-bottom">
             <span class="assign-chip">{{ row.part_name }}</span>
@@ -428,25 +428,6 @@
 
     <div class="assign-current-head">現在反映中のアサイン</div>
     {% if role_assignment_rows %}
-    <div class="panel-filters">
-      <div class="panel-filter-item">
-        <label for="assign-song-filter">曲</label>
-        <select id="assign-song-filter" class="panel-filter-select" data-filter-target="assign" data-filter-kind="song">
-          <option value="">全曲</option>
-        </select>
-      </div>
-      {% if is_manager %}
-      <div class="panel-filter-item">
-        <label for="assign-part-filter">パート</label>
-        <select id="assign-part-filter" class="panel-filter-select" data-filter-target="assign" data-filter-kind="part" data-static-options="1">
-          <option value="">全パート</option>
-          {% for part_name in manager_part_options %}
-          <option value="{{ part_name }}">{{ part_name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      {% endif %}
-    </div>
     <div class="assign-role-list" data-role-list="assign">
       {% for row in role_assignment_rows %}
       <div class="assign-role-card" data-song="{{ row.song }}" data-part="{{ row.part_master }}">
@@ -606,6 +587,8 @@
   .assign-candidate-tab{height:28px;padding:0 11px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(18,26,42,.7);color:#c9d6f3;font-size:12px;cursor:pointer}
   .assign-candidate-tab.is-active{border-color:#6ca8ff;background:rgba(74,158,255,.18);color:#e8f2ff}
   .assign-candidate-hint{margin-top:8px;font-size:12px;color:#a6bee5}
+  .hint-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:999px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.05);color:#bcd4f7;font-weight:700;font-size:11px;cursor:help;margin-left:6px}
+  .hint-icon:focus{outline:none;border-color:#7eb8ff;box-shadow:0 0 0 2px rgba(74,158,255,.2)}
   .assign-candidate-stats{margin-top:7px;display:flex;flex-wrap:wrap;gap:7px}
   .assign-candidate-stats span{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#c3d6f6;font-size:11px}
   .assign-candidate-list{margin-top:8px}
@@ -892,6 +875,7 @@
       att: document.querySelector('[data-role-list="att"]'),
       member: document.querySelector('[data-role-list="member"]'),
       assign: document.querySelector('[data-role-list="assign"]'),
+      assignCandidate: document.querySelector('[data-role-list="assign-candidate"]'),
     };
     const getCards = (type) => {
       const root = listByType[type];
@@ -901,6 +885,12 @@
       return Array.from(root.querySelectorAll(".assign-role-card"));
     };
     const normalized = (v) => (v || "").trim();
+    const selectedFilterValue = (sel) => {
+      if (!sel) return "";
+      const opt = sel.options && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;
+      if (opt && opt.dataset && opt.dataset.filterValue) return normalized(opt.dataset.filterValue);
+      return normalized(sel.value || "");
+    };
     const collectValues = (type, kind) => {
       const attr = kind === "song" ? "data-song" : "data-part";
       const vals = new Set();
@@ -930,8 +920,8 @@
       if (!cards.length) return;
       const partSel = document.querySelector(`[data-filter-target="${type}"][data-filter-kind="part"]`);
       const songSel = document.querySelector(`[data-filter-target="${type}"][data-filter-kind="song"]`);
-      const wantPart = normalized(partSel ? partSel.value : "");
-      const wantSong = normalized(songSel ? songSel.value : "");
+      const wantPart = selectedFilterValue(partSel);
+      const wantSong = selectedFilterValue(songSel);
       let shown = 0;
       cards.forEach((el) => {
         const part = normalized(el.getAttribute("data-part"));
@@ -945,6 +935,18 @@
         }
         if (show) shown += 1;
       });
+      if (type === "assign") {
+        const candidateCards = getCards("assignCandidate");
+        candidateCards.forEach((el) => {
+          const part = normalized(el.getAttribute("data-part"));
+          const song = normalized(el.getAttribute("data-song"));
+          const okPart = !wantPart || !part || part === wantPart;
+          const okSong = !wantSong || song === wantSong;
+          const show = okPart && okSong;
+          el.style.display = show ? "" : "none";
+          el.classList.toggle("song-fixed", !!wantSong);
+        });
+      }
       const empty = document.querySelector(`[data-empty-for="${type}"]`);
       if (empty) empty.classList.toggle("is-hidden", shown > 0);
     };
@@ -963,8 +965,11 @@
       }
       const songSel = document.querySelector(`[data-filter-target="${type}"][data-filter-kind="song"]`);
       if (songSel) {
-        const songValues = collectValues(type, "song");
-        fillOptions(songSel, songValues, "全曲");
+        const hasStatic = songSel.getAttribute("data-static-options") === "1";
+        if (!hasStatic) {
+          const songValues = collectValues(type, "song");
+          fillOptions(songSel, songValues, "全曲");
+        }
       }
       applyFilters(type);
     });
