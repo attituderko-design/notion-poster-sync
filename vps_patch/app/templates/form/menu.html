@@ -10,14 +10,14 @@
 
 {% if cover_url %}
 <div class="f2">
-  <input type="checkbox" id="lb-toggle">
-  <label for="lb-toggle" class="cover-wrap" style="display:block;cursor:zoom-in;">
+  <button type="button" class="cover-wrap js-cover-open" aria-label="カバー画像を拡大表示">
     <img src="{{ cover_url }}" class="cover-img" alt="演奏会カバー">
     <div class="cover-zoom">🔍</div>
-  </label>
-  <label for="lb-toggle" class="lb-overlay">
-    <img src="{{ cover_url }}" alt="">
-  </label>
+  </button>
+  <div class="lb-overlay js-cover-modal" aria-hidden="true">
+    <button type="button" class="lb-close js-cover-close" aria-label="閉じる">×</button>
+    <img src="{{ cover_url }}" alt="演奏会カバー拡大画像">
+  </div>
 </div>
 {% endif %}
 
@@ -226,6 +226,33 @@
         tabs.forEach(x => x.classList.toggle('is-active', x === tab));
         panels.forEach(p => p.classList.toggle('is-active', p.getAttribute('data-role-panel') === name));
       });
+    });
+  })();
+
+  (() => {
+    const openBtn = document.querySelector(".js-cover-open");
+    const modal = document.querySelector(".js-cover-modal");
+    const closeBtn = document.querySelector(".js-cover-close");
+    if (!openBtn || !modal) return;
+
+    const open = () => {
+      modal.classList.add("is-open");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.style.overflow = "hidden";
+    };
+    const close = () => {
+      modal.classList.remove("is-open");
+      modal.setAttribute("aria-hidden", "true");
+      document.body.style.overflow = "";
+    };
+
+    openBtn.addEventListener("click", open);
+    if (closeBtn) closeBtn.addEventListener("click", close);
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) close();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && modal.classList.contains("is-open")) close();
     });
   })();
 </script>
