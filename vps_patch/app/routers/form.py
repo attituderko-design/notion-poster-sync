@@ -91,6 +91,7 @@ if str(_ROOT_DIR) not in sys.path:
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 DEBUG_ROLE_OVERRIDE_SESSION_KEY = "debug_role_override"
+_ASSIGN_SOLVER_CACHE: dict[tuple[str, str], dict] = {}
 SCHEDULE_PRACTICE_REL_KEYS = _K.SCHEDULE_PRACTICE_REL_KEYS
 SCHEDULE_START_KEYS = _K.SCHEDULE_START_KEYS
 SCHEDULE_END_KEYS = _K.SCHEDULE_END_KEYS
@@ -653,6 +654,14 @@ def _write_assignment_rows(ctx: dict, concert_id: str, assignments: list[dict]) 
         else:
             fail += 1
     return ok, fail
+
+
+def _solver_cache_get(player_id: str, concert_id: str) -> dict:
+    return _ASSIGN_SOLVER_CACHE.get((player_id or "", concert_id or ""), {}) or {}
+
+
+def _solver_cache_set(player_id: str, concert_id: str, payload: dict) -> None:
+    _ASSIGN_SOLVER_CACHE[(player_id or "", concert_id or "")] = payload or {}
 
 
 def _all_relation_ids_from_row(row: dict) -> dict[str, list[str]]:
@@ -1313,7 +1322,12 @@ async def form_menu(request: Request):
 
     assign_state_all = request.session.get("assign_solver_state") or {}
     assign_state = assign_state_all.get(cid, {}) if isinstance(assign_state_all, dict) else {}
-    candidate_results = assign_state.get("results", []) if isinstance(assign_state, dict) else []
+    if isinstance(assign_state, dict) and "results" in assign_state:
+        assign_state.pop("results", None)
+        assign_state_all[cid] = assign_state
+        request.session["assign_solver_state"] = assign_state_all
+    solver_cache = _solver_cache_get(pid, cid)
+    candidate_results = solver_cache.get("results", []) if isinstance(solver_cache, dict) else []
     selected_idx = 0
     try:
         selected_idx = int(assign_state.get("selected", 0) or 0)
@@ -1579,15 +1593,19 @@ async def form_assign_run(
     _, my_part_id = _my_part_info(ctx, pid, cid, participant_rows)
     song_id = (target_song_id or "").strip()
     part_id = (target_part_id or "").strip()
-    results, err = _build_exact_solver_results(
-        ctx=ctx,
-        concert_id=cid,
-        selected_song_id=song_id,
-        selected_part_master_id=part_id,
-        role=role,
-        my_part_id=my_part_id,
-        data=data,
-    )
+    try:
+        results, err = _build_exact_solver_results(
+            ctx=ctx,
+            concert_id=cid,
+            selected_song_id=song_id,
+            selected_part_master_id=part_id,
+            role=role,
+            my_part_id=my_part_id,
+            data=data,
+        )
+    except Exception as e:
+        _flash_set(request, "error", f"厳密解の生成に失敗しました: {e}")
+        return RedirectResponse("/form", status_code=302)
     if err:
         _flash_set(request, "error", err)
         return RedirectResponse("/form", status_code=302)
@@ -1595,12 +1613,16 @@ async def form_assign_run(
     state_all = request.session.get("assign_solver_state") or {}
     if not isinstance(state_all, dict):
         state_all = {}
-    state_all[cid] = {
+    generated_at = datetime.now().isoformat(timespec="seconds")
+    _solver_cache_set(pid, cid, {
         "results": results,
+        "generated_at": generated_at,
+    })
+    state_all[cid] = {
         "selected": 0,
         "scope_song_id": song_id,
         "scope_part_id": part_id if role >= ROLE_MANAGER else my_part_id,
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "generated_at": generated_at,
     }
     request.session["assign_solver_state"] = state_all
     _flash_set(request, "info", "厳密解A〜Dを生成しました。")
@@ -1609,14 +1631,18 @@ async def form_assign_run(
 
 @router.post("/form/assign/select")
 async def form_assign_select(request: Request, candidate_index: Annotated[int, Form()]):
+    pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
+    if not pid:
+        return RedirectResponse("/login", status_code=302)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     state_all = request.session.get("assign_solver_state") or {}
     if not isinstance(state_all, dict):
         return RedirectResponse("/form", status_code=302)
     state = state_all.get(cid, {})
-    results = state.get("results", []) if isinstance(state, dict) else []
+    solver_cache = _solver_cache_get(pid, cid)
+    results = solver_cache.get("results", []) if isinstance(solver_cache, dict) else []
     if results:
         idx = max(0, min(int(candidate_index), len(results) - 1))
         state["selected"] = idx
@@ -1648,7 +1674,8 @@ async def form_assign_propose(request: Request):
 
     state_all = request.session.get("assign_solver_state") or {}
     state = state_all.get(cid, {}) if isinstance(state_all, dict) else {}
-    results = state.get("results", []) if isinstance(state, dict) else []
+    solver_cache = _solver_cache_get(pid, cid)
+    results = solver_cache.get("results", []) if isinstance(solver_cache, dict) else []
     selected = int(state.get("selected", 0) or 0) if results else 0
     if not results:
         _flash_set(request, "error", "提示する候補がありません。先にA〜Dを生成してください。")
@@ -1696,7 +1723,8 @@ async def form_assign_confirm(request: Request):
 
     state_all = request.session.get("assign_solver_state") or {}
     state = state_all.get(cid, {}) if isinstance(state_all, dict) else {}
-    results = state.get("results", []) if isinstance(state, dict) else []
+    solver_cache = _solver_cache_get(pid, cid)
+    results = solver_cache.get("results", []) if isinstance(solver_cache, dict) else []
     if not results:
         _flash_set(request, "error", "確定できる候補がありません。先に厳密解A〜Dを生成してください。")
         return RedirectResponse("/form", status_code=302)
