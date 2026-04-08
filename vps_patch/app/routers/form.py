@@ -6,7 +6,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-import sys
 from typing import Annotated
 
 from fastapi import APIRouter, Form, Request
@@ -1361,31 +1360,30 @@ def _generate_simple_practice_pdf_bytes(ctx: dict, concert_name: str, practice: 
 
 def _generate_practice_pdf_bytes(ctx: dict, practice_id: str, concert_name: str, practice: dict, attendance_rows: list[dict]) -> bytes:
     """
-    まず Streamlit版の practice_report.generate_practice_report を利用し、
+    まず app.services.practice_report.generate_practice_report を利用し、
     使えない環境のみ簡易PDFへフォールバックする。
     """
-    # 1) そのままimportできる場合
+    # 1) VPS配置の app.services.practice_report を最優先
+    try:
+        from app.services.practice_report import generate_practice_report  # type: ignore
+        return generate_practice_report(ctx, practice_id)
+    except Exception:
+        pass
+
+    # 2) 互換: concert/services に置いた場合
     try:
         from concert.services.practice_report import generate_practice_report  # type: ignore
         return generate_practice_report(ctx, practice_id)
     except Exception:
         pass
 
-    # 2) vps_patch運用時に親ディレクトリ(repo root)をsys.pathへ追加して再試行
-    try:
-        repo_root = Path(__file__).resolve().parents[3]
-        if str(repo_root) not in sys.path:
-            sys.path.append(str(repo_root))
-        from concert.services.practice_report import generate_practice_report  # type: ignore
-        return generate_practice_report(ctx, practice_id)
-    except Exception:
-        # 3) 最終フォールバック
-        return _generate_simple_practice_pdf_bytes(
-            ctx=ctx,
-            concert_name=concert_name,
-            practice=practice,
-            attendance_rows=attendance_rows,
-        )
+    # 3) 最終フォールバック
+    return _generate_simple_practice_pdf_bytes(
+        ctx=ctx,
+        concert_name=concert_name,
+        practice=practice,
+        attendance_rows=attendance_rows,
+    )
 
 
 def _visible_partdefs(ctx: dict, partdefs: list, part_master_id: str) -> list:
