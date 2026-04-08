@@ -107,10 +107,21 @@
       {% if upcoming_practice.date %}<span><i class="bi bi-calendar-event"></i>{{ upcoming_practice.date }}</span>{% endif %}
       {% if upcoming_practice.venue %}<span><i class="bi bi-geo-alt"></i>{{ upcoming_practice.venue }}</span>{% endif %}
     </div>
+    <div class="schedule-progress-wrap">
+      <div class="schedule-progress-label">
+        <span>現在時刻</span>
+        <span class="js-schedule-now">--:--</span>
+      </div>
+      <div class="schedule-progress-track">
+        <div class="schedule-progress-bar js-schedule-progress"></div>
+      </div>
+    </div>
     <div class="schedule-list">
       {% if upcoming_schedule_rows %}
       {% for r in upcoming_schedule_rows %}
-      <div class="schedule-item">
+      <div class="schedule-item"
+           data-start="{{ r.start }}"
+           data-end="{{ r.end }}">
         <div class="schedule-time">{{ r.time_label }}</div>
         <div class="schedule-main">
           {% if r.type %}<span class="schedule-type {{ r.type_class }}">{{ r.type }}</span>{% endif %}
@@ -431,9 +442,20 @@
   .schedule-close{width:32px;height:32px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04);color:#d2e5ff;cursor:pointer}
   .schedule-meta{display:flex;flex-wrap:wrap;gap:10px 12px;margin-top:8px;color:#9eb7de;font-size:12px}
   .schedule-meta span{display:inline-flex;align-items:center;gap:5px}
+  .schedule-progress-wrap{margin-top:10px}
+  .schedule-progress-label{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#8fa9d5;margin-bottom:4px}
+  .schedule-progress-track{height:7px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;border:1px solid rgba(255,255,255,.12)}
+  .schedule-progress-bar{height:100%;width:0;background:linear-gradient(90deg,#5faeff,#7bc8ff);transition:width .35s ease}
   .schedule-list{margin-top:12px;display:flex;flex-direction:column;gap:8px}
-  .schedule-item{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.02);border-radius:10px;padding:10px 11px}
+  .schedule-item{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.02);border-radius:10px;padding:10px 11px;position:relative;padding-left:16px}
+  .schedule-item::before{content:"";position:absolute;left:7px;top:10px;bottom:10px;width:2px;border-radius:2px;background:rgba(95,174,255,.18)}
+  .schedule-item::after{content:"";position:absolute;left:4px;top:14px;width:8px;height:8px;border-radius:50%;background:rgba(95,174,255,.4);box-shadow:0 0 0 2px rgba(95,174,255,.16)}
   .schedule-item:hover{border-color:rgba(74,158,255,.32);background:rgba(255,255,255,.04)}
+  .schedule-item.is-past{opacity:.72}
+  .schedule-item.is-now{border-color:rgba(98,184,255,.62);background:rgba(74,158,255,.14);box-shadow:0 0 0 1px rgba(95,174,255,.18) inset}
+  .schedule-item.is-now::before{background:linear-gradient(180deg,rgba(119,203,255,.9),rgba(95,174,255,.4))}
+  .schedule-item.is-now::after{background:#8ad7ff;box-shadow:0 0 0 3px rgba(95,174,255,.22),0 0 10px rgba(95,174,255,.5)}
+  .schedule-item.is-upcoming::after{background:rgba(95,174,255,.55)}
   .schedule-time{font-size:12px;color:#9db8e2;font-family:'Outfit',sans-serif;letter-spacing:.02em}
   .schedule-main{margin-top:4px}
   .schedule-type{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid rgba(74,158,255,.4);background:rgba(74,158,255,.12);color:#9dc6ff;font-size:11px}
@@ -665,6 +687,63 @@
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && modal.classList.contains("is-open")) close();
     });
+  })();
+
+  (() => {
+    const modal = document.querySelector(".js-schedule-modal");
+    if (!modal) return;
+    const items = Array.from(modal.querySelectorAll(".schedule-item[data-start][data-end]"));
+    const nowLabel = modal.querySelector(".js-schedule-now");
+    const progressBar = modal.querySelector(".js-schedule-progress");
+    if (!items.length || !nowLabel || !progressBar) return;
+
+    const toMin = (hhmm) => {
+      const s = (hhmm || "").trim();
+      if (!s) return null;
+      const m = s.match(/^(\d{1,2}):(\d{2})$/);
+      if (!m) return null;
+      const h = Number(m[1]);
+      const mm = Number(m[2]);
+      if (Number.isNaN(h) || Number.isNaN(mm)) return null;
+      return h * 60 + mm;
+    };
+
+    const rows = items.map((el) => {
+      const s = toMin(el.getAttribute("data-start"));
+      const e = toMin(el.getAttribute("data-end"));
+      return { el, start: s, end: e };
+    }).filter((r) => r.start !== null || r.end !== null);
+    if (!rows.length) return;
+
+    const startBase = Math.min(...rows.map((r) => r.start ?? r.end));
+    const endBase = Math.max(...rows.map((r) => r.end ?? r.start));
+    const span = Math.max(1, endBase - startBase);
+
+    const fmtNow = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+
+    const update = () => {
+      const now = new Date();
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      nowLabel.textContent = fmtNow(now);
+
+      const pctRaw = ((nowMin - startBase) / span) * 100;
+      const pct = Math.max(0, Math.min(100, pctRaw));
+      progressBar.style.width = `${pct.toFixed(1)}%`;
+
+      rows.forEach((r) => {
+        const s = r.start ?? r.end;
+        const e = r.end ?? r.start;
+        const isNow = nowMin >= s && nowMin <= e;
+        const isPast = nowMin > e;
+        const isUpcoming = nowMin < s;
+        r.el.classList.toggle("is-now", isNow);
+        r.el.classList.toggle("is-past", isPast);
+        r.el.classList.toggle("is-upcoming", isUpcoming);
+      });
+    };
+
+    update();
+    setInterval(update, 30000);
   })();
 
   (() => {
