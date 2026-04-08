@@ -1433,6 +1433,42 @@ async def form_menu(request: Request):
     show_pref = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER)
     show_own = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER) and is_perc_role
     role_mode = role >= ROLE_LEADER
+    todo_items: list[dict[str, str]] = []
+    if att_unanswered > 0:
+        todo_items.append({
+            "title": "出欠入力を完了",
+            "desc": f"未回答 {att_unanswered}件",
+            "href": "/form/att",
+            "icon": "calendar-check",
+        })
+    if show_pref and pref_total > 0 and pref_answered < pref_total:
+        todo_items.append({
+            "title": "パート希望を入力",
+            "desc": f"{pref_total - pref_answered}件 未入力",
+            "href": "/form/pref",
+            "icon": "music-note-list",
+        })
+    if role >= ROLE_LEADER and not proposal_done:
+        todo_items.append({
+            "title": "アサイン案を提示",
+            "desc": "アサインタブで厳密解を生成",
+            "href": "#role-menu-panels",
+            "icon": "bullseye",
+        })
+    elif role >= ROLE_LEADER and proposal_done and not published_assign:
+        todo_items.append({
+            "title": "アサインを確定",
+            "desc": "提示中の案を確定して公開",
+            "href": "#role-menu-panels",
+            "icon": "check2-square",
+        })
+    if role >= ROLE_LEADER and upcoming_practice and not upcoming_schedule_rows:
+        todo_items.append({
+            "title": "直近練習の進行表を確認",
+            "desc": "この練習日のスケジュールが未登録",
+            "href": "",
+            "icon": "clock-history",
+        })
     song_names = []
     for s in (data.get("songs", []) or []):
         n = (ext(s, SONG_NAME_KEYS) or "").strip()
@@ -1475,6 +1511,7 @@ async def form_menu(request: Request):
         "assign_summary": assign_summary,
         "show_role_panel": role_mode,
         "show_material_tab": True,
+        "todo_items": todo_items,
         "is_manager": role >= ROLE_MANAGER,
         "manager_part_options": manager_part_options,
         "practice_cols": _build_practice_cols(data.get("practices", [])),

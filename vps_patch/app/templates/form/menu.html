@@ -156,6 +156,39 @@
 </div>
 {% endif %}
 
+<div class="todo-board f3">
+  <div class="todo-head">
+    <div class="todo-title"><i class="bi bi-list-check"></i>あなたのToDo</div>
+    {% if todo_items %}<div class="todo-count">{{ todo_items|length }}件</div>{% endif %}
+  </div>
+  {% if todo_items %}
+  <div class="todo-list">
+    {% for t in todo_items %}
+      {% if t.href %}
+      <a class="todo-item" href="{{ t.href }}">
+        <span class="todo-item-icon"><i class="bi bi-{{ t.icon }}"></i></span>
+        <span class="todo-item-main">
+          <span class="todo-item-title">{{ t.title }}</span>
+          <span class="todo-item-desc">{{ t.desc }}</span>
+        </span>
+        <span class="todo-item-arrow"><i class="bi bi-chevron-right"></i></span>
+      </a>
+      {% else %}
+      <div class="todo-item is-static">
+        <span class="todo-item-icon"><i class="bi bi-{{ t.icon }}"></i></span>
+        <span class="todo-item-main">
+          <span class="todo-item-title">{{ t.title }}</span>
+          <span class="todo-item-desc">{{ t.desc }}</span>
+        </span>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="todo-empty">現在のToDoはありません。</div>
+  {% endif %}
+</div>
+
 <div class="section-label f4">メニュー</div>
 
 <form method="post" action="/form/menu-action" style="margin-bottom:8px;">
@@ -228,7 +261,7 @@
 
 {% if show_role_panel or show_material_tab %}
 <div class="section-label f4" style="margin-top:18px;">{% if show_role_panel %}{% if is_manager %}Managerメニュー{% else %}パートリーダーメニュー{% endif %}{% else %}資料{% endif %}</div>
-<div class="role-tabs f4">
+<div class="role-tabs f4" id="role-menu-panels">
   {% if show_role_panel %}
   <button type="button" class="role-tab is-active" data-role-tab="att"><i class="bi bi-clipboard-data"></i>出欠</button>
   <button type="button" class="role-tab" data-role-tab="member"><i class="bi bi-people"></i>メンバー</button>
@@ -268,18 +301,20 @@
       <div class="att-member-card" data-part="{{ row.part }}">
         <div class="att-member-head">
           <div class="att-member-name">{{ row.name }}</div>
-          <span class="att-member-part">{{ row.part }}</span>
-        </div>
-        <div class="att-member-statuses">
-          {% for pc in practice_cols %}
-          {% set s = row.cells[pc.id] %}
-          <span
-            class="att-status-chip{% if s == '○' %} is-ok{% elif s == '△' %} is-maybe{% elif s == '×' %} is-ng{% else %} is-none{% endif %}{% if not loop.first %} is-hidden{% endif %}"
-            data-practice-id="{{ pc.id }}"
-          >
-            {{ s }}
-          </span>
-          {% endfor %}
+          <div class="att-member-side">
+            <div class="att-member-statuses">
+              {% for pc in practice_cols %}
+              {% set s = row.cells[pc.id] %}
+              <span
+                class="att-status-chip{% if s == '○' %} is-ok{% elif s == '△' %} is-maybe{% elif s == '×' %} is-ng{% else %} is-none{% endif %}{% if not loop.first %} is-hidden{% endif %}"
+                data-practice-id="{{ pc.id }}"
+              >
+                {{ s }}
+              </span>
+              {% endfor %}
+            </div>
+            <span class="att-member-part">{{ row.part }}</span>
+          </div>
         </div>
         <div class="att-member-comments">
           {% for pc in practice_cols %}
@@ -655,6 +690,21 @@
   .member-detail-item{border-top:1px dashed rgba(255,255,255,.08);padding-top:8px}
   .member-detail-label{display:block;font-size:11px;color:#8ea6d1}
   .member-detail-value{display:block;font-size:12px;color:#d5e4ff}
+  .todo-board{margin:0 0 8px;border:1px solid rgba(74,158,255,.2);background:linear-gradient(180deg,rgba(16,26,41,.64),rgba(13,21,34,.55));border-radius:12px;padding:12px}
+  .todo-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+  .todo-title{display:flex;align-items:center;gap:7px;font-size:13px;color:#dce9ff;font-weight:600}
+  .todo-title .bi{color:#7cb7ff}
+  .todo-count{font-size:11px;color:#8fb2de}
+  .todo-list{display:flex;flex-direction:column;gap:7px}
+  .todo-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid rgba(255,255,255,.09);border-radius:10px;background:rgba(255,255,255,.03);text-decoration:none;transition:border-color .18s ease,background-color .18s ease,transform .18s ease}
+  .todo-item:hover{border-color:rgba(74,158,255,.34);background:rgba(74,158,255,.09);transform:translateY(-1px)}
+  .todo-item.is-static{cursor:default}
+  .todo-item-icon{width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:rgba(74,158,255,.14);border:1px solid rgba(74,158,255,.32);color:#8fc1ff;font-size:12px;flex-shrink:0}
+  .todo-item-main{display:flex;flex-direction:column;min-width:0}
+  .todo-item-title{font-size:12px;color:#d8e8ff;font-weight:600;line-height:1.3}
+  .todo-item-desc{font-size:11px;color:#91acd2;line-height:1.35;margin-top:2px}
+  .todo-item-arrow{margin-left:auto;color:#84a9d8;font-size:12px}
+  .todo-empty{font-size:12px;color:#97b3dc;padding:8px 2px}
   .att-modern-panel{display:block;padding:12px}
   .att-date-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
   .att-date-tab{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.03);color:#9fb3d8;border-radius:999px;padding:5px 11px;font-size:11px;cursor:pointer}
@@ -665,9 +715,10 @@
   .att-member-card:hover{transform:translateY(-1px);border-color:rgba(74,158,255,.28);background:rgba(255,255,255,.04);box-shadow:0 6px 14px rgba(0,0,0,.14)}
   .att-member-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
   .att-member-name{font-size:13px;color:#d8e4fb;font-weight:600}
+  .att-member-side{display:flex;align-items:center;gap:8px}
   .att-member-part{font-size:11px;color:#9ab1d9;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:2px 8px}
-  .att-member-statuses{margin-top:6px}
-  .att-member-comments{margin-top:8px}
+  .att-member-statuses{display:flex;align-items:center}
+  .att-member-comments{margin-top:6px}
   .att-comment-snippet{width:100%;display:block;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.035);color:#dce8ff;border-radius:8px;padding:7px 10px;font-size:12px;line-height:1.45;text-align:left;cursor:pointer;transition:border-color .18s ease,background-color .18s ease}
   .att-comment-snippet:hover{border-color:rgba(74,158,255,.35);background:rgba(74,158,255,.08)}
   .att-comment-snippet.is-empty{cursor:default;color:#8ea6d1}
@@ -689,7 +740,11 @@
   .att-comment-close{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05);color:#dce8ff;border-radius:999px;width:30px;height:30px;cursor:pointer}
   .att-comment-body{padding:14px;font-size:13px;line-height:1.7;color:#d5e4ff;white-space:pre-wrap;word-break:break-word}
   @media (max-width: 640px){
+    .todo-item{padding:8px 9px}
     .att-comment-snippet{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .att-member-head{align-items:flex-start}
+    .att-member-side{gap:6px}
+    .att-member-part{font-size:10px;padding:2px 7px}
   }
   @keyframes chipPop{
     0%{transform:scale(.94)}
