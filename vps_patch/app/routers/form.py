@@ -1480,6 +1480,8 @@ async def form_menu(request: Request):
         "assign_song_options": assign_song_options,
         "assign_part_options": assign_part_options,
         "assign_flags": flags,
+        "error": _flash_pop(request, "error"),
+        "info": _flash_pop(request, "info"),
     })
     if _perf_enabled():
         total_ms = int((time.perf_counter() - t0) * 1000)
