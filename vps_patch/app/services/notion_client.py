@@ -19,7 +19,7 @@ DB_KEYS = [
     "CONCERT_DB_PART_DEFINITION","CONCERT_DB_PREFERENCE",
     "CONCERT_DB_PART_MASTER","CONCERT_DB_HARMONIA_CONCERT",
     "CONCERT_DB_CONCERT_ASSIGNMENT","CONCERT_DB_CONCERT_SONG",
-    "CONCERT_DB_SCHEDULE",
+    "CONCERT_DB_SCHEDULE","CONCERT_DB_POKE_REQUESTS",
 ]
 
 _QUERY_CACHE: dict[str, tuple[float, list[dict]]] = {}
@@ -213,6 +213,13 @@ def _put_prop(props: dict, type_map: dict, key: str, value: Any) -> None:
         props[key] = {"number": float(value) if value is not None else None}
     elif ptype in ("email","phone_number","url"):
         props[key] = {ptype: str(value)}
+    elif ptype == "date":
+        if isinstance(value, dict):
+            start = value.get("start")
+            end = value.get("end")
+            props[key] = {"date": {"start": start, "end": end}}
+        else:
+            props[key] = {"date": {"start": str(value)}}
     elif ptype == "relation":
         if isinstance(value, list):
             props[key] = {"relation": [{"id": v} for v in value]}

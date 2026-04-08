@@ -100,6 +100,15 @@ SCHEDULE_TYPE_KEYS = _K.SCHEDULE_TYPE_KEYS
 SCHEDULE_CONTENT_KEYS = _K.SCHEDULE_CONTENT_KEYS
 SCHEDULE_SONG_REL_KEYS = _K.SCHEDULE_SONG_REL_KEYS
 SCHEDULE_ORDER_KEYS = _K.SCHEDULE_ORDER_KEYS
+POKE_KEY_KEYS = _K.POKE_KEY_KEYS
+POKE_SENDER_CAST_REL_KEYS = _K.POKE_SENDER_CAST_REL_KEYS
+POKE_TARGET_CAST_REL_KEYS = _K.POKE_TARGET_CAST_REL_KEYS
+POKE_CONCERT_REL_KEYS = _K.POKE_CONCERT_REL_KEYS
+POKE_PRACTICE_REL_KEYS = _K.POKE_PRACTICE_REL_KEYS
+POKE_TYPE_KEYS = _K.POKE_TYPE_KEYS
+POKE_MESSAGE_KEYS = _K.POKE_MESSAGE_KEYS
+POKE_STATUS_KEYS = _K.POKE_STATUS_KEYS
+POKE_EXPIRES_AT_KEYS = _K.POKE_EXPIRES_AT_KEYS
 
 
 def get_ctx():
@@ -673,6 +682,179 @@ def _set_harmonia_checkbox(ctx: dict, concert_id: str, key_candidates: list[str]
         json={"properties": {key: {"checkbox": bool(checked)}}},
     )
     return bool(res and res.status_code == 200)
+
+
+def _ensure_harmonia_row_id(ctx: dict, concert_id: str, concert_name: str = "") -> str:
+    row = _harmonia_row(ctx, concert_id)
+    if row and row.get("id"):
+        return row.get("id", "")
+    _set_harmonia_checkbox(ctx, concert_id, HARMONIA_CONCERT_PLAN_KEYS, False, concert_name or concert_id)
+    row = _harmonia_row(ctx, concert_id)
+    return (row or {}).get("id", "")
+
+
+def _now_iso_local() -> str:
+    return datetime.now().replace(microsecond=0).isoformat()
+
+
+def _norm_id(v: str) -> str:
+    return (v or "").replace("-", "")
+
+
+def _poke_type_label(poke_type: str) -> str:
+    m = {
+        "att_unanswered": "出欠未回答",
+        "att_maybe": "直近練習△回答",
+        "own_missing": "所有楽器未入力",
+        "pref_missing": "パート希望未入力",
+    }
+    return m.get((poke_type or "").strip(), (poke_type or "").strip() or "催促")
+
+
+def _poke_default_message(poke_type: str, target_name: str, practice_name: str = "") -> str:
+    label = _poke_type_label(poke_type)
+    if poke_type == "att_maybe" and practice_name:
+        return f"{target_name}さんへ：{practice_name} の出欠（△）について確定回答をお願いします。"
+    return f"{target_name}さんへ：{label}の対応をお願いします。"
+
+
+def _parse_dt_safe(v: str) -> datetime | None:
+    txt = (v or "").strip()
+    if not txt:
+        return None
+    try:
+        return datetime.fromisoformat(txt.replace("Z", ""))
+    except Exception:
+        return None
+
+
+def _find_cast_row_for_player(ctx: dict, player_id: str, concert_id: str, participant_rows: list[dict]) -> dict | None:
+    ext_rel = ctx["extract_relation_ids_any"]
+    for row in participant_rows or []:
+        if player_id in ext_rel(row, PARTICIPANT_PLAYER_REL_KEYS) and concert_id in ext_rel(row, PARTICIPANT_CONCERT_REL_KEYS):
+            return row
+    return None
+
+
+def _is_target_in_scope(role: int, my_part_id: str, target_cast: dict, ext_rel_fn) -> bool:
+    if role >= ROLE_MANAGER:
+        return True
+    if role >= ROLE_LEADER:
+        pm_ids = ext_rel_fn(target_cast, PARTICIPANT_PART_REL_KEYS)
+        return bool(pm_ids and pm_ids[0] == my_part_id)
+    return False
+
+
+def _poke_rows_for_concert(ctx: dict, harmonia_row_id: str) -> list[dict]:
+    db_id = (ctx.get("CONCERT_DB_POKE_REQUESTS", "") or "").strip()
+    if not db_id:
+        return []
+    rows = ctx["query_all"](db_id, None)
+    ext_rel = ctx["extract_relation_ids_any"]
+    hid = _norm_id(harmonia_row_id)
+    return [
+        r for r in rows
+        if any(_norm_id(x) == hid for x in ext_rel(r, POKE_CONCERT_REL_KEYS))
+    ]
+
+
+def _poke_mark_status(ctx: dict, row_id: str, status: str) -> bool:
+    db_id = (ctx.get("CONCERT_DB_POKE_REQUESTS", "") or "").strip()
+    if not db_id:
+        return False
+    t = ctx["get_prop_types"](db_id) or {}
+    props: dict = {}
+    ctx["put_prop_any"](props, t, POKE_STATUS_KEYS, status)
+    if status in {"read", "done", "cancelled", "expired"}:
+        # 任意拡張フィールドがある場合のみ書く
+        date_key_candidates = {
+            "read": ["read_at"],
+            "done": ["done_at"],
+            "cancelled": ["cancelled_at"],
+            "expired": ["expired_at"],
+        }.get(status, [])
+        if date_key_candidates:
+            key = ctx["find_prop_name"](t, date_key_candidates)
+            if key:
+                props[key] = {"date": {"start": _now_iso_local()}}
+    if not props:
+        return False
+    res = ctx["api_request"](
+        "patch",
+        f"https://api.notion.com/v1/pages/{row_id}",
+        json={"properties": props},
+    )
+    return bool(res and res.status_code == 200)
+
+
+def _expire_pokes_if_needed(ctx: dict, rows: list[dict]) -> None:
+    ext_txt = ctx["extract_prop_text_any"]
+    now = datetime.now()
+    for r in rows:
+        status = (ext_txt(r, POKE_STATUS_KEYS) or "").strip().lower()
+        if status not in {"sent", "read"}:
+            continue
+        expires = _parse_dt_safe(ext_txt(r, POKE_EXPIRES_AT_KEYS) or "")
+        if expires and expires < now:
+            _poke_mark_status(ctx, r.get("id", ""), "expired")
+
+
+def _create_poke_request(
+    ctx: dict,
+    *,
+    sender_cast_id: str,
+    target_cast_id: str,
+    harmonia_row_id: str,
+    poke_type: str,
+    message: str,
+    practice_id: str = "",
+    expires_at_iso: str = "",
+) -> tuple[bool, str]:
+    db_id = (ctx.get("CONCERT_DB_POKE_REQUESTS", "") or "").strip()
+    if not db_id:
+        return False, "CONCERT_DB_POKE_REQUESTS が未設定です。"
+    t = ctx["get_prop_types"](db_id) or {}
+    if not t:
+        return False, "Poke DB のプロパティ取得に失敗しました。"
+
+    # 重複抑止: 同一 sender/target/type/practice で open(sent/read) があれば作らない
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+    existing = _poke_rows_for_concert(ctx, harmonia_row_id)
+    _expire_pokes_if_needed(ctx, existing)
+    for row in existing:
+        status = (ext_txt(row, POKE_STATUS_KEYS) or "").strip().lower()
+        if status not in {"sent", "read"}:
+            continue
+        sids = ext_rel(row, POKE_SENDER_CAST_REL_KEYS)
+        tids = ext_rel(row, POKE_TARGET_CAST_REL_KEYS)
+        pids = ext_rel(row, POKE_PRACTICE_REL_KEYS)
+        typ = (ext_txt(row, POKE_TYPE_KEYS) or "").strip()
+        if sender_cast_id in sids and target_cast_id in tids and typ == poke_type:
+            if (practice_id and practice_id in pids) or (not practice_id and not pids):
+                return True, "既に同内容のPokeが送信済みです。"
+
+    props: dict = {}
+    ctx["put_key_any"](props, t, POKE_KEY_KEYS, sender_cast_id, target_cast_id, poke_type, prefix="poke")
+    ctx["put_prop_any"](props, t, POKE_SENDER_CAST_REL_KEYS, sender_cast_id)
+    ctx["put_prop_any"](props, t, POKE_TARGET_CAST_REL_KEYS, target_cast_id)
+    ctx["put_prop_any"](props, t, POKE_CONCERT_REL_KEYS, harmonia_row_id)
+    if practice_id:
+        ctx["put_prop_any"](props, t, POKE_PRACTICE_REL_KEYS, practice_id)
+    ctx["put_prop_any"](props, t, POKE_TYPE_KEYS, poke_type)
+    ctx["put_prop_any"](props, t, POKE_MESSAGE_KEYS, message)
+    ctx["put_prop_any"](props, t, POKE_STATUS_KEYS, "sent")
+    if expires_at_iso:
+        ctx["put_prop_any"](props, t, POKE_EXPIRES_AT_KEYS, expires_at_iso)
+
+    res = ctx["api_request"](
+        "post",
+        "https://api.notion.com/v1/pages",
+        json={"parent": {"database_id": db_id}, "properties": props},
+    )
+    if not (res and res.status_code == 200):
+        return False, f"Poke作成に失敗しました (status={getattr(res,'status_code','?')})"
+    return True, "Pokeを送信しました。"
 
 
 def _priority_to_int(v: str) -> int | None:
@@ -1873,6 +2055,241 @@ async def form_debug_role_switch(request: Request, role_mode: Annotated[str, For
         request.session[DEBUG_ROLE_OVERRIDE_SESSION_KEY] = mode
     else:
         request.session.pop(DEBUG_ROLE_OVERRIDE_SESSION_KEY, None)
+    return RedirectResponse("/form", status_code=302)
+
+
+@router.post("/form/poke/send")
+async def form_poke_send(
+    request: Request,
+    target_cast_id: Annotated[str, Form()],
+    poke_type: Annotated[str, Form()],
+    practice_id: Annotated[str, Form()] = "",
+    message: Annotated[str, Form()] = "",
+    expires_hours: Annotated[int, Form()] = 72,
+):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return RedirectResponse("/login", status_code=302)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    participant_rows = data.get("participant_rows_concert", []) or []
+    base_role = resolve_user_role(ctx, pid, cid, participant_rows)
+    my_system_role = _my_system_role(ctx, pid, cid, participant_rows)
+    override_raw = request.session.get(DEBUG_ROLE_OVERRIDE_SESSION_KEY, "")
+    override_role = _role_from_override(override_raw) if _is_administrator_role(my_system_role) else None
+    role = override_role if override_role is not None else base_role
+    if role < ROLE_LEADER:
+        _flash_set(request, "error", "PokeはLeader以上のみ実行できます。")
+        return RedirectResponse("/form", status_code=302)
+
+    ext_rel = ctx["extract_relation_ids_any"]
+    my_cast = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
+    if not my_cast:
+        _flash_set(request, "error", "あなたの参加者情報（CONCERT_CAST）が見つかりません。")
+        return RedirectResponse("/form", status_code=302)
+    my_part_ids = ext_rel(my_cast, PARTICIPANT_PART_REL_KEYS)
+    my_part_id = my_part_ids[0] if my_part_ids else ""
+
+    target_cast_id = (target_cast_id or "").strip()
+    target_cast = next((r for r in participant_rows if r.get("id", "") == target_cast_id), None)
+    if not target_cast:
+        _flash_set(request, "error", "対象メンバーが見つかりません。")
+        return RedirectResponse("/form", status_code=302)
+    if not _is_target_in_scope(role, my_part_id, target_cast, ext_rel):
+        _flash_set(request, "error", "対象メンバーに対するPoke権限がありません。")
+        return RedirectResponse("/form", status_code=302)
+
+    target_player_ids = ext_rel(target_cast, PARTICIPANT_PLAYER_REL_KEYS)
+    target_player_id = target_player_ids[0] if target_player_ids else ""
+    players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    pmap = {p.get("id", ""): p for p in players}
+    target_name = (ctx["extract_prop_text_any"](pmap.get(target_player_id, {}), PLAYER_NAME_KEYS) or "対象者").strip()
+    practice_name = ""
+    if (practice_id or "").strip():
+        practices = data.get("practices", []) or []
+        target_pr = next((p for p in practices if p.get("id", "") == practice_id.strip()), None)
+        if target_pr:
+            practice_name = (ctx["extract_prop_text_any"](target_pr, PRACTICE_NAME_KEYS) or "").strip()
+
+    poke_type = (poke_type or "").strip()
+    if not poke_type:
+        _flash_set(request, "error", "poke_type は必須です。")
+        return RedirectResponse("/form", status_code=302)
+    body = (message or "").strip() or _poke_default_message(poke_type, target_name, practice_name)
+    expires_hours = max(1, min(int(expires_hours or 72), 24 * 14))
+    expires_at_iso = (datetime.now() + timedelta(hours=expires_hours)).replace(microsecond=0).isoformat()
+
+    concert = _find_concert(ctx, cid) or {}
+    c_name = _atlas_concert_name(ctx, concert) if concert else cid
+    harmonia_row_id = _ensure_harmonia_row_id(ctx, cid, c_name)
+    if not harmonia_row_id:
+        _flash_set(request, "error", "HARMONIA_CONCERT の行を解決できませんでした。")
+        return RedirectResponse("/form", status_code=302)
+
+    ok, msg = _create_poke_request(
+        ctx,
+        sender_cast_id=my_cast.get("id", ""),
+        target_cast_id=target_cast_id,
+        harmonia_row_id=harmonia_row_id,
+        poke_type=poke_type,
+        message=body,
+        practice_id=(practice_id or "").strip(),
+        expires_at_iso=expires_at_iso,
+    )
+    if ok:
+        _flash_set(request, "info", msg)
+    else:
+        _flash_set(request, "error", msg)
+    return RedirectResponse("/form", status_code=302)
+
+
+@router.get("/form/poke/inbox", response_class=JSONResponse)
+async def form_poke_inbox(request: Request):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return JSONResponse({"ok": False, "message": "not_logged_in"}, status_code=401)
+    if not cid:
+        return JSONResponse({"ok": False, "message": "concert_not_selected"}, status_code=400)
+
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    participant_rows = data.get("participant_rows_concert", []) or []
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+
+    my_cast = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
+    if not my_cast:
+        return JSONResponse({"ok": True, "items": []})
+
+    harmonia_row_id = _ensure_harmonia_row_id(ctx, cid, _atlas_concert_name(ctx, _find_concert(ctx, cid) or {}))
+    if not harmonia_row_id:
+        return JSONResponse({"ok": True, "items": []})
+    rows = _poke_rows_for_concert(ctx, harmonia_row_id)
+    _expire_pokes_if_needed(ctx, rows)
+    rows = _poke_rows_for_concert(ctx, harmonia_row_id)
+
+    players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    pmap = {p.get("id", ""): p for p in players}
+    cast_by_id = {r.get("id", ""): r for r in participant_rows}
+
+    items: list[dict] = []
+    my_cast_id = my_cast.get("id", "")
+    for r in rows:
+        status = (ext_txt(r, POKE_STATUS_KEYS) or "").strip().lower()
+        if status not in {"sent", "read"}:
+            continue
+        target_ids = ext_rel(r, POKE_TARGET_CAST_REL_KEYS)
+        if my_cast_id not in target_ids:
+            continue
+        sender_ids = ext_rel(r, POKE_SENDER_CAST_REL_KEYS)
+        sender_cast = cast_by_id.get(sender_ids[0], {}) if sender_ids else {}
+        sender_player_ids = ext_rel(sender_cast, PARTICIPANT_PLAYER_REL_KEYS)
+        sender_player = pmap.get(sender_player_ids[0], {}) if sender_player_ids else {}
+        sender_name = (ext_txt(sender_player, PLAYER_NAME_KEYS) or "不明").strip()
+        practice_ids = ext_rel(r, POKE_PRACTICE_REL_KEYS)
+        practice_name = ""
+        if practice_ids:
+            pr = next((p for p in (data.get("practices", []) or []) if p.get("id", "") == practice_ids[0]), None)
+            if pr:
+                practice_name = (ext_txt(pr, PRACTICE_NAME_KEYS) or "").strip()
+        items.append({
+            "id": r.get("id", ""),
+            "sender_name": sender_name,
+            "poke_type": (ext_txt(r, POKE_TYPE_KEYS) or "").strip(),
+            "label": _poke_type_label(ext_txt(r, POKE_TYPE_KEYS) or ""),
+            "message": (ext_txt(r, POKE_MESSAGE_KEYS) or "").strip(),
+            "status": status,
+            "practice_name": practice_name,
+            "created_at": (ext_txt(r, ["created_at", "作成日時"]) or "").strip(),
+            "expires_at": (ext_txt(r, POKE_EXPIRES_AT_KEYS) or "").strip(),
+        })
+    items.sort(key=lambda x: (x.get("expires_at", ""), x.get("id", "")))
+    return JSONResponse({"ok": True, "items": items})
+
+
+@router.post("/form/poke/{poke_id}/read")
+async def form_poke_mark_read(request: Request, poke_id: str):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return RedirectResponse("/login", status_code=302)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    participant_rows = data.get("participant_rows_concert", []) or []
+    my_cast = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
+    if not my_cast:
+        _flash_set(request, "error", "参加者情報が見つかりません。")
+        return RedirectResponse("/form", status_code=302)
+    harmonia_row_id = _ensure_harmonia_row_id(ctx, cid, _atlas_concert_name(ctx, _find_concert(ctx, cid) or {}))
+    rows = _poke_rows_for_concert(ctx, harmonia_row_id)
+    ext_rel = ctx["extract_relation_ids_any"]
+    row = next((r for r in rows if r.get("id", "") == (poke_id or "")), None)
+    if not row or my_cast.get("id", "") not in ext_rel(row, POKE_TARGET_CAST_REL_KEYS):
+        _flash_set(request, "error", "対象Pokeが見つからないか権限がありません。")
+        return RedirectResponse("/form", status_code=302)
+    _poke_mark_status(ctx, row.get("id", ""), "read")
+    _flash_set(request, "info", "Pokeを既読にしました。")
+    return RedirectResponse("/form", status_code=302)
+
+
+@router.post("/form/poke/{poke_id}/done")
+async def form_poke_mark_done(request: Request, poke_id: str):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return RedirectResponse("/login", status_code=302)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    participant_rows = data.get("participant_rows_concert", []) or []
+    my_cast = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
+    if not my_cast:
+        _flash_set(request, "error", "参加者情報が見つかりません。")
+        return RedirectResponse("/form", status_code=302)
+    harmonia_row_id = _ensure_harmonia_row_id(ctx, cid, _atlas_concert_name(ctx, _find_concert(ctx, cid) or {}))
+    rows = _poke_rows_for_concert(ctx, harmonia_row_id)
+    ext_rel = ctx["extract_relation_ids_any"]
+    row = next((r for r in rows if r.get("id", "") == (poke_id or "")), None)
+    if not row or my_cast.get("id", "") not in ext_rel(row, POKE_TARGET_CAST_REL_KEYS):
+        _flash_set(request, "error", "対象Pokeが見つからないか権限がありません。")
+        return RedirectResponse("/form", status_code=302)
+    _poke_mark_status(ctx, row.get("id", ""), "done")
+    _flash_set(request, "info", "Pokeを完了にしました。")
+    return RedirectResponse("/form", status_code=302)
+
+
+@router.post("/form/poke/{poke_id}/cancel")
+async def form_poke_cancel(request: Request, poke_id: str):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return RedirectResponse("/login", status_code=302)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    participant_rows = data.get("participant_rows_concert", []) or []
+    my_cast = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
+    if not my_cast:
+        _flash_set(request, "error", "参加者情報が見つかりません。")
+        return RedirectResponse("/form", status_code=302)
+    harmonia_row_id = _ensure_harmonia_row_id(ctx, cid, _atlas_concert_name(ctx, _find_concert(ctx, cid) or {}))
+    rows = _poke_rows_for_concert(ctx, harmonia_row_id)
+    ext_rel = ctx["extract_relation_ids_any"]
+    row = next((r for r in rows if r.get("id", "") == (poke_id or "")), None)
+    if not row or my_cast.get("id", "") not in ext_rel(row, POKE_SENDER_CAST_REL_KEYS):
+        _flash_set(request, "error", "対象Pokeが見つからないか権限がありません。")
+        return RedirectResponse("/form", status_code=302)
+    _poke_mark_status(ctx, row.get("id", ""), "cancelled")
+    _flash_set(request, "info", "Pokeを取消しました。")
     return RedirectResponse("/form", status_code=302)
 
 
