@@ -10,7 +10,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Request, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
@@ -459,8 +459,8 @@ def _record_invite_failure(request: Request) -> None:
 
 
 @router.get("/", response_class=HTMLResponse)
-async def entry_page(request: Request):
-    if request.session.get("player_id"):
+async def entry_page(request: Request, force_entry: bool = Query(default=False)):
+    if request.session.get("player_id") and not force_entry:
         return RedirectResponse("/concert/select", status_code=302)
     return templates.TemplateResponse("form/login.html", {
         "request": request,
@@ -483,7 +483,7 @@ async def login_page(request: Request):
         "view": "login_email",
         "error": _flash_pop(request, "error"),
         "info": _flash_pop(request, "info"),
-        "back_href": "/",
+        "back_href": "/?force_entry=1",
     })
 
 
@@ -815,7 +815,7 @@ async def concert_select_page(request: Request):
         "concert_options": concert_options,
         "error": _flash_pop(request, "error"),
         "info": _flash_pop(request, "info"),
-        "back_href": "/login",
+        "back_href": "/?force_entry=1",
     })
 
 
