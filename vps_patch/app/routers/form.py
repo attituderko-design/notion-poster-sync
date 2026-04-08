@@ -857,6 +857,149 @@ def _create_poke_request(
     return True, "Pokeを送信しました。"
 
 
+def _poke_action_href(poke_type: str) -> str:
+    t = (poke_type or "").strip()
+    if t in {"att_unanswered", "att_maybe"}:
+        return "/form/att"
+    if t == "pref_missing":
+        return "/form/pref"
+    if t == "own_missing":
+        return "/form/own"
+    return "/form"
+
+
+def _poke_status_label(status: str) -> str:
+    m = {
+        "sent": "送信済",
+        "read": "既読",
+        "done": "完了",
+        "cancelled": "取消",
+        "expired": "期限切れ",
+    }
+    return m.get((status or "").strip().lower(), (status or "").strip() or "-")
+
+
+def _build_poke_panel_data(
+    ctx: dict,
+    *,
+    concert_id: str,
+    participant_rows: list[dict],
+    practices: list[dict],
+    my_cast_id: str,
+) -> dict[str, list[dict] | int]:
+    if not my_cast_id:
+        return {"inbox": [], "sent": [], "inbox_count": 0}
+    concert = _find_concert(ctx, concert_id) or {}
+    harmonia_row_id = _ensure_harmonia_row_id(ctx, concert_id, _atlas_concert_name(ctx, concert))
+    if not harmonia_row_id:
+        return {"inbox": [], "sent": [], "inbox_count": 0}
+
+    rows = _poke_rows_for_concert(ctx, harmonia_row_id)
+    _expire_pokes_if_needed(ctx, rows)
+    rows = _poke_rows_for_concert(ctx, harmonia_row_id)
+
+    ext_txt = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
+    players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    player_map = {p.get("id", ""): p for p in players}
+    cast_map = {r.get("id", ""): r for r in participant_rows}
+    practice_map = {p.get("id", ""): p for p in (practices or [])}
+
+    inbox: list[dict] = []
+    sent: list[dict] = []
+    for r in rows:
+        row_id = r.get("id", "")
+        if not row_id:
+            continue
+        status = (ext_txt(r, POKE_STATUS_KEYS) or "").strip().lower()
+        sender_ids = ext_rel(r, POKE_SENDER_CAST_REL_KEYS)
+        target_ids = ext_rel(r, POKE_TARGET_CAST_REL_KEYS)
+        sender_cast_id = sender_ids[0] if sender_ids else ""
+        target_cast_id = target_ids[0] if target_ids else ""
+        sender_cast = cast_map.get(sender_cast_id, {})
+        target_cast = cast_map.get(target_cast_id, {})
+        sender_player_ids = ext_rel(sender_cast, PARTICIPANT_PLAYER_REL_KEYS)
+        target_player_ids = ext_rel(target_cast, PARTICIPANT_PLAYER_REL_KEYS)
+        sender_name = (ext_txt(player_map.get(sender_player_ids[0], {}), PLAYER_NAME_KEYS) or "不明").strip() if sender_player_ids else "不明"
+        target_name = (ext_txt(player_map.get(target_player_ids[0], {}), PLAYER_NAME_KEYS) or "不明").strip() if target_player_ids else "不明"
+        practice_ids = ext_rel(r, POKE_PRACTICE_REL_KEYS)
+        practice_name = ""
+        if practice_ids:
+            pr = practice_map.get(practice_ids[0], {})
+            practice_name = (ext_txt(pr, PRACTICE_NAME_KEYS) or "").strip()
+        poke_type = (ext_txt(r, POKE_TYPE_KEYS) or "").strip()
+        item = {
+            "id": row_id,
+            "status": status,
+            "status_label": _poke_status_label(status),
+            "poke_type": poke_type,
+            "label": _poke_type_label(poke_type),
+            "message": (ext_txt(r, POKE_MESSAGE_KEYS) or "").strip(),
+            "practice_id": practice_ids[0] if practice_ids else "",
+            "practice_name": practice_name,
+            "sender_cast_id": sender_cast_id,
+            "sender_name": sender_name,
+            "target_cast_id": target_cast_id,
+            "target_name": target_name,
+            "created_at": (r.get("created_time", "") or "").strip(),
+            "expires_at": (ext_txt(r, POKE_EXPIRES_AT_KEYS) or "").strip(),
+            "action_href": _poke_action_href(poke_type),
+        }
+        if target_cast_id == my_cast_id and status in {"sent", "read"}:
+            inbox.append(item)
+        if sender_cast_id == my_cast_id:
+            sent.append(item)
+
+    inbox.sort(key=lambda x: (x.get("expires_at", ""), x.get("created_at", ""), x.get("id", "")))
+    sent.sort(key=lambda x: (x.get("created_at", ""), x.get("id", "")), reverse=True)
+    return {
+        "inbox": inbox,
+        "sent": sent[:30],
+        "inbox_count": len(inbox),
+    }
+
+
+def _auto_complete_pokes_for_target(
+    ctx: dict,
+    *,
+    concert_id: str,
+    target_cast_id: str,
+    poke_type: str,
+    practice_id: str = "",
+    require_no_practice_link: bool = False,
+) -> int:
+    if not target_cast_id:
+        return 0
+    concert = _find_concert(ctx, concert_id) or {}
+    harmonia_row_id = _ensure_harmonia_row_id(ctx, concert_id, _atlas_concert_name(ctx, concert))
+    if not harmonia_row_id:
+        return 0
+    rows = _poke_rows_for_concert(ctx, harmonia_row_id)
+    _expire_pokes_if_needed(ctx, rows)
+    rows = _poke_rows_for_concert(ctx, harmonia_row_id)
+    ext_txt = ctx["extract_prop_text_any"]
+    ext_rel = ctx["extract_relation_ids_any"]
+    done_count = 0
+    for r in rows:
+        status = (ext_txt(r, POKE_STATUS_KEYS) or "").strip().lower()
+        if status not in {"sent", "read"}:
+            continue
+        if target_cast_id not in ext_rel(r, POKE_TARGET_CAST_REL_KEYS):
+            continue
+        typ = (ext_txt(r, POKE_TYPE_KEYS) or "").strip()
+        if typ != (poke_type or "").strip():
+            continue
+        pids = ext_rel(r, POKE_PRACTICE_REL_KEYS)
+        if practice_id:
+            if practice_id not in pids:
+                continue
+        elif require_no_practice_link and pids:
+            continue
+        if _poke_mark_status(ctx, r.get("id", ""), "done"):
+            done_count += 1
+    return done_count
+
+
 def _priority_to_int(v: str) -> int | None:
     m = {
         "第1希望": 1,
@@ -1861,6 +2004,15 @@ async def form_menu(request: Request):
     show_own = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER) and is_perc_role
     role_mode = role >= ROLE_LEADER
     upcoming_practice_id = (upcoming_practice or {}).get("id", "") if upcoming_practice else ""
+    my_cast_row = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
+    my_cast_id = (my_cast_row or {}).get("id", "")
+    poke_panels = _build_poke_panel_data(
+        ctx,
+        concert_id=cid,
+        participant_rows=participant_rows,
+        practices=practices,
+        my_cast_id=my_cast_id,
+    )
     if role >= ROLE_LEADER:
         todo_items = _build_role_todo_items(
             ctx,
@@ -1964,6 +2116,9 @@ async def form_menu(request: Request):
         "show_role_panel": role_mode,
         "show_material_tab": True,
         "todo_items": todo_items,
+        "poke_inbox_items": poke_panels.get("inbox", []),
+        "poke_sent_items": poke_panels.get("sent", []),
+        "poke_inbox_count": poke_panels.get("inbox_count", 0),
         "is_manager": role >= ROLE_MANAGER,
         "manager_part_options": manager_part_options,
         "practice_cols": _build_practice_cols(data.get("practices", [])),
@@ -2205,7 +2360,7 @@ async def form_poke_inbox(request: Request):
             "message": (ext_txt(r, POKE_MESSAGE_KEYS) or "").strip(),
             "status": status,
             "practice_name": practice_name,
-            "created_at": (ext_txt(r, ["created_at", "作成日時"]) or "").strip(),
+            "created_at": ((ext_txt(r, ["created_at", "作成日時"]) or "").strip() or (r.get("created_time", "") or "").strip()),
             "expires_at": (ext_txt(r, POKE_EXPIRES_AT_KEYS) or "").strip(),
         })
     items.sort(key=lambda x: (x.get("expires_at", ""), x.get("id", "")))
@@ -2581,6 +2736,43 @@ async def form_att_save(request: Request):
     if errors:
         _flash_set(request, "error", " / ".join(errors[:2]))
     else:
+        my_cast = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
+        my_cast_id = (my_cast or {}).get("id", "")
+        if my_cast_id:
+            # 全練習で未回答が消えたら、未回答催促Pokeを完了
+            has_any_unanswered = any(_is_unanswered_status(att.get(p.get("id", ""), "未回答")) for p in practices)
+            if not has_any_unanswered:
+                _auto_complete_pokes_for_target(
+                    ctx,
+                    concert_id=cid,
+                    target_cast_id=my_cast_id,
+                    poke_type="att_unanswered",
+                    require_no_practice_link=True,
+                )
+            # 直近練習の△が解消されたら、当該催促Pokeを完了
+            now_dt = datetime.now()
+            upcoming_practice = None
+            for p in practices:
+                dtxt = (ctx["extract_prop_text_any"](p, PRACTICE_DATE_KEYS) or "").strip()
+                pd = _parse_dt_safe(dtxt)
+                if pd is None:
+                    continue
+                if pd >= now_dt:
+                    upcoming_practice = p
+                    break
+            if upcoming_practice is None and practices:
+                upcoming_practice = practices[0]
+            upcoming_practice_id = (upcoming_practice or {}).get("id", "")
+            if upcoming_practice_id:
+                upcoming_status = (att.get(upcoming_practice_id, "未回答") or "").strip()
+                if not _is_maybe_status(upcoming_status):
+                    _auto_complete_pokes_for_target(
+                        ctx,
+                        concert_id=cid,
+                        target_cast_id=my_cast_id,
+                        poke_type="att_maybe",
+                        practice_id=upcoming_practice_id,
+                    )
         _flash_set(request, "info", f"出欠を保存しました（{ok_n}件更新）。")
     return RedirectResponse("/form/att", status_code=302)
 
@@ -2647,7 +2839,7 @@ def _build_attendance_table(
                     break
             cells[pr_id] = status
             comments[pr_id] = comment
-        rows.append({"part": part, "name": name, "cells": cells, "comments": comments})
+        rows.append({"cast_id": cast.get("id", ""), "part": part, "name": name, "cells": cells, "comments": comments})
     rows.sort(key=lambda r: (r["part"], r["name"]))
     return rows
 
@@ -2986,6 +3178,18 @@ async def form_pref_save(request: Request):
     if errors:
         _flash_set(request, "error", " / ".join(errors[:2]))
     else:
+        my_cast = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
+        my_cast_id = (my_cast or {}).get("id", "")
+        if my_cast_id:
+            answered_all = all((v or "").strip() not in ("", "未回答") for v in pref.values())
+            if answered_all:
+                _auto_complete_pokes_for_target(
+                    ctx,
+                    concert_id=cid,
+                    target_cast_id=my_cast_id,
+                    poke_type="pref_missing",
+                    require_no_practice_link=True,
+                )
         answered = sum(1 for v in pref.values() if v not in ("未回答", ""))
         _flash_set(request, "info", f"希望を保存しました（{answered}件入力済み）。")
     return RedirectResponse("/form/pref", status_code=302)
@@ -3083,6 +3287,16 @@ async def form_own_save(request: Request):
     if errors:
         _flash_set(request, "error", " / ".join(errors[:2]))
     else:
+        my_cast = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
+        my_cast_id = (my_cast or {}).get("id", "")
+        if my_cast_id:
+            _auto_complete_pokes_for_target(
+                ctx,
+                concert_id=cid,
+                target_cast_id=my_cast_id,
+                poke_type="own_missing",
+                require_no_practice_link=True,
+            )
         saved = sum(1 for v in own.values() if v > 0)
         _flash_set(request, "info", f"所有楽器を保存しました（{saved}件）。")
     return RedirectResponse("/form/own", status_code=302)

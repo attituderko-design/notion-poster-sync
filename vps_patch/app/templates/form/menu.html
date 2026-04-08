@@ -156,6 +156,59 @@
 </div>
 {% endif %}
 
+<div class="poke-board f3">
+  <div class="poke-head">
+    <div class="poke-title"><i class="bi bi-bell"></i>通知</div>
+    {% if poke_inbox_count and poke_inbox_count > 0 %}<div class="poke-count">{{ poke_inbox_count }}件</div>{% endif %}
+  </div>
+  {% if poke_inbox_items %}
+  <div class="poke-list">
+    {% for p in poke_inbox_items %}
+    <div class="poke-item">
+      <div class="poke-item-head">
+        <span class="poke-item-label">{{ p.label }}</span>
+        <span class="poke-item-meta">{{ p.sender_name }}</span>
+      </div>
+      {% if p.practice_name %}<div class="poke-item-sub">{{ p.practice_name }}</div>{% endif %}
+      <div class="poke-item-message">{{ p.message }}</div>
+      <div class="poke-item-actions">
+        {% if p.status == "sent" %}
+        <form method="post" action="/form/poke/{{ p.id }}/read"><button type="submit" class="poke-btn">既読</button></form>
+        {% endif %}
+        <form method="post" action="/form/poke/{{ p.id }}/done"><button type="submit" class="poke-btn is-primary">完了</button></form>
+        <a class="poke-link" href="{{ p.action_href }}">対象画面へ</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="poke-empty">未対応の通知はありません。</div>
+  {% endif %}
+  {% if poke_sent_items %}
+  <details class="poke-sent">
+    <summary>送信履歴</summary>
+    <div class="poke-sent-list">
+      {% for p in poke_sent_items %}
+      <div class="poke-sent-row">
+        <div class="poke-sent-main">
+          <span class="poke-item-label">{{ p.label }}</span>
+          <span class="poke-item-meta">{{ p.target_name }}</span>
+          {% if p.practice_name %}<span class="poke-item-meta">{{ p.practice_name }}</span>{% endif %}
+        </div>
+        <div class="poke-sent-side">
+          <span class="poke-status status-{{ p.status }}">{{ p.status_label }}</span>
+          <a class="poke-link" href="{{ p.action_href }}">開く</a>
+          {% if p.status in ["sent", "read"] %}
+          <form method="post" action="/form/poke/{{ p.id }}/cancel"><button type="submit" class="poke-btn">取消</button></form>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+</div>
+
 <div class="todo-board f3">
   <div class="todo-head">
     <div class="todo-title"><i class="bi bi-list-check"></i>あなたのToDo</div>
@@ -690,6 +743,37 @@
   .member-detail-item{border-top:1px dashed rgba(255,255,255,.08);padding-top:8px}
   .member-detail-label{display:block;font-size:11px;color:#8ea6d1}
   .member-detail-value{display:block;font-size:12px;color:#d5e4ff}
+  .poke-board{margin:0 0 10px;border:1px solid rgba(100,170,255,.2);background:linear-gradient(180deg,rgba(15,24,38,.66),rgba(12,20,33,.55));border-radius:12px;padding:12px}
+  .poke-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+  .poke-title{display:flex;align-items:center;gap:7px;font-size:13px;color:#dce9ff;font-weight:600}
+  .poke-title .bi{color:#7cb7ff}
+  .poke-count{font-size:11px;color:#8fb2de}
+  .poke-list{display:flex;flex-direction:column;gap:8px}
+  .poke-item{border:1px solid rgba(255,255,255,.09);border-radius:10px;background:rgba(255,255,255,.03);padding:9px 10px}
+  .poke-item-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .poke-item-label{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;color:#7eb8ff;background:rgba(74,158,255,.13);border:1px solid rgba(74,158,255,.35)}
+  .poke-item-meta{font-size:11px;color:#9db5dd}
+  .poke-item-sub{font-size:11px;color:#95afd7;margin-top:4px}
+  .poke-item-message{font-size:12px;color:#dbe8ff;line-height:1.5;margin-top:6px}
+  .poke-item-actions{margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .poke-item-actions form{margin:0}
+  .poke-btn{height:27px;padding:0 10px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05);color:#cfe2ff;font-size:11px;cursor:pointer}
+  .poke-btn:hover{border-color:rgba(122,169,244,.5)}
+  .poke-btn.is-primary{border-color:rgba(100,200,130,.5);background:rgba(100,200,130,.16);color:#bff0d1}
+  .poke-link{font-size:11px;color:#8ec5ff;text-decoration:underline}
+  .poke-empty{font-size:12px;color:#97b3dc;padding:6px 2px}
+  .poke-sent{margin-top:8px;border-top:1px dashed rgba(255,255,255,.09);padding-top:8px}
+  .poke-sent summary{cursor:pointer;color:#b8ceef;font-size:12px;list-style:none}
+  .poke-sent summary::-webkit-details-marker{display:none}
+  .poke-sent-list{margin-top:8px;display:flex;flex-direction:column;gap:7px}
+  .poke-sent-row{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:7px 9px;background:rgba(255,255,255,.02)}
+  .poke-sent-main{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .poke-sent-side{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+  .poke-status{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid rgba(255,255,255,.18);color:#c7dbff}
+  .poke-status.status-done{border-color:rgba(100,200,130,.42);background:rgba(100,200,130,.15);color:#a7e8c0}
+  .poke-status.status-read{border-color:rgba(74,158,255,.42);background:rgba(74,158,255,.14);color:#a8d2ff}
+  .poke-status.status-sent{border-color:rgba(255,255,255,.22);background:rgba(255,255,255,.06);color:#cadbf6}
+  .poke-status.status-cancelled,.poke-status.status-expired{border-color:rgba(220,120,120,.4);background:rgba(220,80,80,.14);color:#efb0b0}
   .todo-board{margin:0 0 8px;border:1px solid rgba(74,158,255,.2);background:linear-gradient(180deg,rgba(16,26,41,.64),rgba(13,21,34,.55));border-radius:12px;padding:12px}
   .todo-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
   .todo-title{display:flex;align-items:center;gap:7px;font-size:13px;color:#dce9ff;font-weight:600}
