@@ -1900,17 +1900,21 @@ def _build_attendance_table(
         name    = ext_txt(player, PLAYER_NAME_KEYS) or "—"
         targets = {pid, cast.get("id", "")}
         cells: dict[str, str] = {}
+        comments: dict[str, str] = {}
         for p in practices:
             pr_id = p.get("id", "")
             status = "—"
+            comment = ""
             for att in attendance_rows:
                 att_pids = set(ext_rel(att, ATT_PLAYER_REL_KEYS))
                 att_prids = ext_rel(att, ATT_PRACTICE_REL_KEYS)
                 if targets.intersection(att_pids) and pr_id in att_prids:
                     status = ext_txt(att, ATT_STATUS_KEYS) or "—"
+                    comment = (ext_txt(att, ATT_NOTE_KEYS) or "").strip()
                     break
             cells[pr_id] = status
-        rows.append({"part": part, "name": name, "cells": cells})
+            comments[pr_id] = comment
+        rows.append({"part": part, "name": name, "cells": cells, "comments": comments})
     rows.sort(key=lambda r: (r["part"], r["name"]))
     return rows
 
