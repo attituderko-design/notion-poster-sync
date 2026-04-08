@@ -364,7 +364,7 @@
       <div class="assign-solver-head">
         <div class="assign-solver-title">厳密解アサイン（A〜D）</div>
       </div>
-      <form method="post" action="/form/assign/run" class="assign-solver-form">
+      <form method="post" action="/form/assign/run" class="assign-solver-form js-preserve-scroll">
         <div class="panel-filter-item">
           <label for="solver-song-select">曲</label>
           <select id="solver-song-select" name="target_song_id" class="panel-filter-select" data-filter-target="assign" data-filter-kind="song" data-static-options="1">
@@ -391,36 +391,37 @@
       {% if assign_solver_candidates %}
       <div class="assign-candidate-tabs">
         {% for c in assign_solver_candidates %}
-        <form method="post" action="/form/assign/select" class="assign-candidate-tab-form">
-          <input type="hidden" name="candidate_index" value="{{ loop.index0 }}">
-          <button type="submit" class="assign-candidate-tab{% if loop.index0 == assign_solver_selected_idx %} is-active{% endif %}">
+        {% set hint_text = "評価関数に基づく厳密解" %}
+        {% if loop.index0 == 0 %}{% set hint_text = "第1希望率を最大化（同率時は総スコア優先）" %}{% endif %}
+        {% if loop.index0 == 1 %}{% set hint_text = "総スコアを最大化" %}{% endif %}
+        {% if loop.index0 == 2 %}{% set hint_text = "公平性（低スコア奏者の底上げ）重視" %}{% endif %}
+        {% if loop.index0 == 3 %}{% set hint_text = "降り番の偏りを最小化" %}{% endif %}
+        <div class="assign-candidate-tab-item">
+          <button
+            type="button"
+            class="assign-candidate-tab js-assign-candidate-tab{% if loop.index0 == assign_solver_selected_idx %} is-active{% endif %}"
+            data-candidate-index="{{ loop.index0 }}"
+          >
             案{{ "ABCD"[loop.index0] if loop.index0 < 4 else loop.index }}
           </button>
-        </form>
+          <span class="hint-wrap assign-tab-hint">
+            <button type="button" class="hint-icon js-hint-toggle" aria-expanded="false" aria-label="ヒントを表示">?</button>
+            <span class="hint-popover" role="tooltip">{{ hint_text }}</span>
+          </span>
+        </div>
         {% endfor %}
       </div>
-      {% if assign_solver_selected %}
-      <div class="assign-candidate-hint">
-        <strong>Hint</strong>
-        {% set hint_text = "評価関数に基づく厳密解" %}
-        {% if "候補A" in assign_solver_selected.label %}{% set hint_text = "第1希望率を最大化（同率時は総スコア優先）" %}{% endif %}
-        {% if "候補B" in assign_solver_selected.label %}{% set hint_text = "総スコアを最大化" %}{% endif %}
-        {% if "候補C" in assign_solver_selected.label %}{% set hint_text = "公平性（低スコア奏者の底上げ）重視" %}{% endif %}
-        {% if "候補D" in assign_solver_selected.label %}{% set hint_text = "降り番の偏りを最小化" %}{% endif %}
-        <span class="hint-wrap">
-          <button type="button" class="hint-icon js-hint-toggle" aria-expanded="false" aria-label="ヒントを表示">?</button>
-          <span class="hint-popover" role="tooltip">{{ hint_text }}</span>
-        </span>
-      </div>
+      {% for c in assign_solver_candidates %}
+      <div class="assign-candidate-panel{% if loop.index0 != assign_solver_selected_idx %} is-hidden{% endif %}" data-candidate-panel="{{ loop.index0 }}">
       <div class="assign-candidate-stats">
-        {% if assign_solver_selected.stats %}
-        <span>第1希望率: {{ "%.1f"|format((assign_solver_selected.stats.first_choice_rate or 0) * 100) }}%</span>
-        <span>総スコア: {{ "%.2f"|format(assign_solver_selected.stats.total_score or 0) }}</span>
-        <span>降り番率: {{ "%.1f"|format((assign_solver_selected.stats.no_assign_rate or 0) * 100) }}%</span>
+        {% if c.stats %}
+        <span>第1希望率: {{ "%.1f"|format((c.stats.first_choice_rate or 0) * 100) }}%</span>
+        <span>総スコア: {{ "%.2f"|format(c.stats.total_score or 0) }}</span>
+        <span>降り番率: {{ "%.1f"|format((c.stats.no_assign_rate or 0) * 100) }}%</span>
         {% endif %}
       </div>
       <div class="assign-role-list assign-candidate-list" data-role-list="assign-candidate">
-        {% for row in assign_solver_selected.assignments %}
+        {% for row in c.assignments %}
         <div class="assign-role-card" data-song="{{ row.song_name }}" data-part="{{ row.part_master_name or row.part_name }}">
           <div class="assign-role-song">{{ row.song_name }}</div>
           <div class="assign-role-bottom">
@@ -431,14 +432,16 @@
         {% endfor %}
       </div>
       <div class="assign-candidate-actions">
-        <form method="post" action="/form/assign/propose">
+        <form method="post" action="/form/assign/propose" class="js-preserve-scroll">
+          <input type="hidden" name="candidate_index" value="{{ loop.index0 }}">
           <button type="submit" class="assign-action-btn"{% if assign_flags.assign_done %} disabled{% endif %}>案提示する（この案）</button>
         </form>
-        <form method="post" action="/form/assign/confirm">
+        <form method="post" action="/form/assign/confirm" class="js-preserve-scroll">
           <button type="submit" class="assign-action-btn is-primary"{% if (not assign_flags.plan_done) or assign_flags.assign_done %} disabled{% endif %}>確定する</button>
         </form>
       </div>
-      {% endif %}
+      </div>
+      {% endfor %}
       {% else %}
       <div class="menu-hint">厳密解を生成すると、案A〜Dをここに表示します。</div>
       {% endif %}
@@ -611,15 +614,18 @@
   .assign-action-btn:disabled{opacity:.45;cursor:not-allowed}
   .assign-action-btn.is-primary{border-color:rgba(100,200,130,.45);background:rgba(100,200,130,.14);color:#bff0d1}
   .assign-candidate-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-  .assign-candidate-tab-form{margin:0}
+  .assign-candidate-tab-item{display:inline-flex;align-items:center;gap:6px}
   .assign-candidate-tab{height:28px;padding:0 11px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(18,26,42,.7);color:#c9d6f3;font-size:12px;cursor:pointer}
   .assign-candidate-tab.is-active{border-color:#6ca8ff;background:rgba(74,158,255,.18);color:#e8f2ff}
-  .assign-candidate-hint{margin-top:8px;font-size:12px;color:#a6bee5}
+  .assign-tab-hint{margin-left:0}
+  .assign-candidate-panel{margin-top:8px}
+  .assign-candidate-panel.is-hidden{display:none}
   .hint-wrap{position:relative;display:inline-flex;align-items:center;margin-left:6px}
   .hint-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:999px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.05);color:#bcd4f7;font-weight:700;font-size:11px;cursor:pointer;padding:0}
   .hint-icon:focus{outline:none;border-color:#7eb8ff;box-shadow:0 0 0 2px rgba(74,158,255,.2)}
   .hint-popover{position:absolute;left:50%;top:130%;transform:translateX(-50%);min-width:180px;max-width:min(320px,76vw);padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.18);background:rgba(11,18,30,.97);color:#d7e8ff;font-size:12px;line-height:1.5;box-shadow:0 10px 24px rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:opacity .16s ease}
   .hint-wrap.is-open .hint-popover{opacity:1;pointer-events:auto}
+  @media (hover:hover) and (pointer:fine){.hint-wrap:hover .hint-popover{opacity:1;pointer-events:auto}}
   .assign-candidate-stats{margin-top:7px;display:flex;flex-wrap:wrap;gap:7px}
   .assign-candidate-stats span{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#c3d6f6;font-size:11px}
   .assign-candidate-list{margin-top:8px}
@@ -724,11 +730,19 @@
     const tabs = document.querySelectorAll('[data-role-tab]');
     const panels = document.querySelectorAll('[data-role-panel]');
     if (!tabs.length || !panels.length) return;
+    const activate = (name) => {
+      tabs.forEach(x => x.classList.toggle('is-active', x.getAttribute('data-role-tab') === name));
+      panels.forEach(p => p.classList.toggle('is-active', p.getAttribute('data-role-panel') === name));
+    };
+    const restored = sessionStorage.getItem("form_menu_role_panel");
+    if (restored) {
+      activate(restored);
+      sessionStorage.removeItem("form_menu_role_panel");
+    }
     tabs.forEach(tab => {
       tab.addEventListener('click', () => {
         const name = tab.getAttribute('data-role-tab');
-        tabs.forEach(x => x.classList.toggle('is-active', x === tab));
-        panels.forEach(p => p.classList.toggle('is-active', p.getAttribute('data-role-panel') === name));
+        activate(name);
       });
     });
   })();
@@ -959,6 +973,8 @@
   (() => {
     const wraps = Array.from(document.querySelectorAll(".hint-wrap"));
     if (!wraps.length) return;
+    const coarseOnly = window.matchMedia("(hover: none), (pointer: coarse)").matches;
+    if (!coarseOnly) return;
     const closeAll = () => {
       wraps.forEach((w) => {
         w.classList.remove("is-open");
@@ -989,18 +1005,55 @@
   })();
 
   (() => {
+    const tabs = Array.from(document.querySelectorAll(".js-assign-candidate-tab"));
+    const panels = Array.from(document.querySelectorAll("[data-candidate-panel]"));
+    if (!tabs.length || !panels.length) return;
+    const activate = (idx) => {
+      tabs.forEach((t) => {
+        t.classList.toggle("is-active", t.getAttribute("data-candidate-index") === String(idx));
+      });
+      panels.forEach((p) => {
+        p.classList.toggle("is-hidden", p.getAttribute("data-candidate-panel") !== String(idx));
+      });
+    };
+    tabs.forEach((t) => {
+      t.addEventListener("click", () => activate(t.getAttribute("data-candidate-index")));
+    });
+  })();
+
+  (() => {
+    const forms = Array.from(document.querySelectorAll("form.js-preserve-scroll"));
+    if (!forms.length) return;
+    forms.forEach((form) => {
+      form.addEventListener("submit", () => {
+        sessionStorage.setItem("form_menu_scroll_y", String(window.scrollY || window.pageYOffset || 0));
+        const panel = form.closest("[data-role-panel]");
+        if (panel) sessionStorage.setItem("form_menu_role_panel", panel.getAttribute("data-role-panel") || "");
+      });
+    });
+    const y = sessionStorage.getItem("form_menu_scroll_y");
+    if (y !== null) {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: Number(y) || 0, left: 0, behavior: "auto" });
+        sessionStorage.removeItem("form_menu_scroll_y");
+      });
+    }
+  })();
+
+  (() => {
     const collator = new Intl.Collator("ja");
     const listByType = {
       att: document.querySelector('[data-role-list="att"]'),
       member: document.querySelector('[data-role-list="member"]'),
       assign: document.querySelector('[data-role-list="assign"]'),
-      assignCandidate: document.querySelector('[data-role-list="assign-candidate"]'),
+      assignCandidate: document,
     };
     const getCards = (type) => {
       const root = listByType[type];
       if (!root) return [];
       if (type === "att") return Array.from(root.querySelectorAll(".att-member-card"));
       if (type === "member") return Array.from(root.querySelectorAll(".member-card"));
+      if (type === "assignCandidate") return Array.from(document.querySelectorAll(".assign-candidate-list .assign-role-card"));
       return Array.from(root.querySelectorAll(".assign-role-card"));
     };
     const normalized = (v) => (v || "").trim();

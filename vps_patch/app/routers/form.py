@@ -1656,7 +1656,10 @@ async def form_assign_select(request: Request, candidate_index: Annotated[int, F
 
 
 @router.post("/form/assign/propose")
-async def form_assign_propose(request: Request):
+async def form_assign_propose(
+    request: Request,
+    candidate_index: Annotated[str, Form()] = "",
+):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
@@ -1681,12 +1684,18 @@ async def form_assign_propose(request: Request):
     solver_cache = _solver_cache_get(pid, cid)
     results = solver_cache.get("results", []) if isinstance(solver_cache, dict) else []
     selected = int(state.get("selected", 0) or 0) if results else 0
+    if results and str(candidate_index).strip() != "":
+        try:
+            selected = int(str(candidate_index).strip())
+        except Exception:
+            pass
     if not results:
         _flash_set(request, "error", "提示する候補がありません。先にA〜Dを生成してください。")
         return RedirectResponse("/form", status_code=302)
     selected = max(0, min(selected, len(results) - 1))
     selected_label = (results[selected].get("label", "") or f"候補{chr(ord('A') + selected)}").strip()
     if isinstance(state, dict):
+        state["selected"] = selected
         state["proposed_selected"] = selected
         state["proposed_label"] = selected_label
         state["proposed_at"] = datetime.now().isoformat(timespec="seconds")
