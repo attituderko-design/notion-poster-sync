@@ -180,14 +180,19 @@
 <div class="role-panel is-active" data-role-panel="att">
   <div class="menu-item f4 att-modern-panel">
     {% if practice_cols and attendance_table_rows %}
+    {% if is_manager %}
     <div class="panel-filters">
       <div class="panel-filter-item">
         <label for="att-part-filter">パート</label>
-        <select id="att-part-filter" class="panel-filter-select" data-filter-target="att" data-filter-kind="part">
+        <select id="att-part-filter" class="panel-filter-select" data-filter-target="att" data-filter-kind="part" data-static-options="1">
           <option value="">全パート</option>
+          {% for part_name in manager_part_options %}
+          <option value="{{ part_name }}">{{ part_name }}</option>
+          {% endfor %}
         </select>
       </div>
     </div>
+    {% endif %}
     <div class="att-date-tabs">
       {% for pc in practice_cols %}
       <button type="button" class="att-date-tab{% if loop.first %} is-active{% endif %}" data-practice-id="{{ pc.id }}">
@@ -226,14 +231,19 @@
 <div class="role-panel" data-role-panel="member">
   <div class="menu-item f4 member-panel">
     {% if member_table_rows %}
+    {% if is_manager %}
     <div class="panel-filters">
       <div class="panel-filter-item">
         <label for="member-part-filter">パート</label>
-        <select id="member-part-filter" class="panel-filter-select" data-filter-target="member" data-filter-kind="part">
+        <select id="member-part-filter" class="panel-filter-select" data-filter-target="member" data-filter-kind="part" data-static-options="1">
           <option value="">全パート</option>
+          {% for part_name in manager_part_options %}
+          <option value="{{ part_name }}">{{ part_name }}</option>
+          {% endfor %}
         </select>
       </div>
     </div>
+    {% endif %}
     <div class="member-list js-member-list" data-role-list="member">
       {% for row in member_table_rows %}
       <article class="member-card js-member-card" data-member-card data-part="{{ row.part }}">
@@ -280,17 +290,21 @@
           <option value="">全曲</option>
         </select>
       </div>
+      {% if is_manager %}
       <div class="panel-filter-item">
         <label for="assign-part-filter">パート</label>
-        <select id="assign-part-filter" class="panel-filter-select" data-filter-target="assign" data-filter-kind="part">
+        <select id="assign-part-filter" class="panel-filter-select" data-filter-target="assign" data-filter-kind="part" data-static-options="1">
           <option value="">全パート</option>
+          {% for part_name in manager_part_options %}
+          <option value="{{ part_name }}">{{ part_name }}</option>
+          {% endfor %}
         </select>
       </div>
+      {% endif %}
     </div>
     <div class="assign-role-list" data-role-list="assign">
       {% for row in role_assignment_rows %}
-      <div class="assign-role-card" data-song="{{ row.song }}" data-part="{{ row.part }}">
-        <div class="assign-role-song">{{ row.song }}</div>
+      <div class="assign-role-card" data-song="{{ row.song }}" data-part="{{ row.part_master }}">
         <div class="assign-role-bottom">
           <span class="assign-chip">{{ row.part }}</span>
           <span class="assign-role-player">{{ row.player }}</span>
@@ -394,8 +408,7 @@
   .assign-role-list{display:flex;flex-direction:column;gap:8px;width:100%}
   .assign-role-card{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.025);border-radius:10px;padding:10px 11px;transition:transform .18s ease,border-color .18s ease,background-color .18s ease}
   .assign-role-card:hover{transform:translateY(-1px);border-color:rgba(74,158,255,.28);background:rgba(255,255,255,.04)}
-  .assign-role-song{font-size:13px;font-weight:600;color:#d9e7ff;line-height:1.5}
-  .assign-role-bottom{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:7px}
+  .assign-role-bottom{display:flex;justify-content:space-between;align-items:center;gap:10px}
   .assign-role-player{font-size:12px;color:#b4c7e8}
   .member-panel{display:block;padding:12px}
   .member-list{display:flex;flex-direction:column;gap:8px;transition:opacity .18s ease, transform .18s ease}
@@ -618,8 +631,11 @@
     ["att", "member", "assign"].forEach((type) => {
       const partSel = document.querySelector(`[data-filter-target="${type}"][data-filter-kind="part"]`);
       if (partSel) {
-        const partValues = collectValues(type, "part");
-        fillOptions(partSel, partValues, "全パート");
+        const hasStatic = partSel.getAttribute("data-static-options") === "1";
+        if (!hasStatic) {
+          const partValues = collectValues(type, "part");
+          fillOptions(partSel, partValues, "全パート");
+        }
       }
       const songSel = document.querySelector(`[data-filter-target="${type}"][data-filter-kind="song"]`);
       if (songSel) {

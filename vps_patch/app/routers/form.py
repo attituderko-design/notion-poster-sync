@@ -979,6 +979,21 @@ async def form_menu(request: Request):
         assignment_rows=all_assign_rows,
         player_rows=players,
     ) if role >= ROLE_LEADER else []
+    manager_part_options: list[str] = []
+    if role >= ROLE_MANAGER:
+        ext_rel = ctx["extract_relation_ids_any"]
+        pm_map = data.get("part_master_map", {}) or {}
+        seen_pm: set[str] = set()
+        for cast in participant_rows:
+            pm_ids = ext_rel(cast, PARTICIPANT_PART_REL_KEYS)
+            pmid = pm_ids[0] if pm_ids else ""
+            if not pmid or pmid in seen_pm:
+                continue
+            pm_name = (pm_map.get(pmid, {}) or {}).get("name", "") or ""
+            if pm_name:
+                seen_pm.add(pmid)
+                manager_part_options.append(pm_name)
+        manager_part_options = sorted(set(manager_part_options), key=lambda x: x.lower())
     if pref_total == 0:
         pref_hint = ""
     elif proposal_done:
@@ -1056,6 +1071,7 @@ async def form_menu(request: Request):
         "assign_summary": assign_summary,
         "show_role_panel": role_mode,
         "is_manager": role >= ROLE_MANAGER,
+        "manager_part_options": manager_part_options,
         "practice_cols": _build_practice_cols(data.get("practices", [])),
         "attendance_table_rows": _build_attendance_table(
             ctx, cid, participant_rows, data.get("practices", []), data.get("attendance_rows", []),

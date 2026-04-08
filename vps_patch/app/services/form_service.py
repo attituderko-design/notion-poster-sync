@@ -812,6 +812,17 @@ def build_role_assignment_rows(
         partdef_pm[pdid] = pm_ids[0] if pm_ids else ""
         partdef_name[pdid] = ext(pd, PARTDEF_DISPLAY_NAME_KEYS) or ext(pd, PARTDEF_NAME_KEYS) or "-"
 
+    part_master_name_map: dict[str, str] = {}
+    try:
+        part_master_rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
+        for pm in part_master_rows:
+            pmid = pm.get("id", "")
+            if not pmid:
+                continue
+            part_master_name_map[pmid] = ext(pm, PARTMASTER_NAME_KEYS) or "-"
+    except Exception:
+        part_master_name_map = {}
+
     song_name_map = {s.get("id", ""): (ext(s, SONG_NAME_KEYS) or "") for s in songs or []}
     if player_rows is None:
         player_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
@@ -850,8 +861,14 @@ def build_role_assignment_rows(
             pid = cast_to_player.get(rid, rid)
             performer = player_name_map.get(pid, "-")
 
-        out.append({"song": song_name_map.get(sid, "未設定"), "part": partdef_name.get(pdid, "-"), "player": performer})
-    out.sort(key=lambda x: (x["song"], x["part"], x["player"]))
+        pmid = partdef_pm.get(pdid, "")
+        out.append({
+            "song": song_name_map.get(sid, "未設定"),
+            "part": partdef_name.get(pdid, "-"),
+            "part_master": part_master_name_map.get(pmid, "-") if pmid else "-",
+            "player": performer,
+        })
+    out.sort(key=lambda x: (x["song"], x["part_master"], x["part"], x["player"]))
     return out
 
 
