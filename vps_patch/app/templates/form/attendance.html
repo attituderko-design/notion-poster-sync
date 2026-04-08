@@ -18,31 +18,84 @@
 {% endif %}
 
 <div class="f2">
-  <div class="scr-title">出欠入力</div>
-  <div class="scr-sub">{{ concert_name }} / {{ player_name }}</div>
+  <div class="att-step-title">Step 2 / 練習出欠を入力してください</div>
+  <div class="scr-sub">{{ player_name }}</div>
+  <div class="att-note">※ 本番当日の出席は自動で登録されます。</div>
 </div>
 
 <form method="post" action="/form/att/save" class="f3">
   {% for r in rows %}
-  <div class="practice-card" style="margin-bottom:14px;">
-    <div class="practice-name">{{ r.name }}</div>
-    <div class="practice-meta">{{ r.date }}{% if r.venue %} / {{ r.venue }}{% endif %}</div>
-    <div class="form-group" style="margin-top:8px;">
-      <label class="form-label">出欠</label>
-      <select class="form-input" name="status_{{ r.id }}">
-        <option value="未回答" {% if r.status == "未回答" %}selected{% endif %}>未回答</option>
-        <option value="○" {% if r.status == "○" %}selected{% endif %}>○</option>
-        <option value="△" {% if r.status == "△" %}selected{% endif %}>△</option>
-        <option value="×" {% if r.status == "×" %}selected{% endif %}>×</option>
-      </select>
+  <div class="att-practice-card">
+    <div class="att-practice-head">
+      <div class="att-practice-title">{{ r.name }}</div>
+      <div class="att-practice-meta">
+        {% if r.date %}<span><i class="bi bi-clock"></i>{{ r.date }}</span>{% endif %}
+        {% if r.venue %}<span><i class="bi bi-geo-alt"></i>{{ r.venue }}</span>{% endif %}
+      </div>
     </div>
-    <div class="form-group">
-      <label class="form-label">コメント</label>
+
+    <div class="att-status-group" data-att-group>
+      <input type="hidden" name="status_{{ r.id }}" value="{{ r.status or '未回答' }}" data-att-hidden>
+      <button type="button" class="att-btn{% if r.status == '○' %} is-active is-ok{% endif %}" data-att-value="○">○</button>
+      <button type="button" class="att-btn{% if r.status == '△' %} is-active is-maybe{% endif %}" data-att-value="△">△</button>
+      <button type="button" class="att-btn{% if r.status == '×' %} is-active is-ng{% endif %}" data-att-value="×">×</button>
+      <button type="button" class="att-btn{% if r.status == '未回答' %} is-active is-none{% endif %}" data-att-value="未回答">未回答</button>
+    </div>
+
+    <div class="form-group" style="margin-top:10px;">
+      <label class="form-label">コメント（任意）</label>
       <input class="form-input" type="text" name="comment_{{ r.id }}" value="{{ r.comment or '' }}" placeholder="任意">
     </div>
   </div>
   {% endfor %}
   <button class="btn btn-primary" type="submit">保存する</button>
 </form>
+
+<style>
+  .att-step-title{font-family:'Outfit',sans-serif;font-size:28px;line-height:1.25;font-weight:600;color:#eaf1ff;margin-bottom:8px}
+  .att-note{font-size:14px;color:#9fb2d8;margin-top:4px}
+  .att-practice-card{background:rgba(255,255,255,.028);border:.5px solid rgba(255,255,255,.09);border-radius:14px;padding:14px 14px 12px;margin-bottom:14px}
+  .att-practice-head{display:flex;flex-direction:column;gap:6px}
+  .att-practice-title{font-size:18px;font-weight:700;color:#f2f7ff}
+  .att-practice-meta{display:flex;flex-wrap:wrap;gap:10px;font-size:13px;color:#a3b5d8}
+  .att-practice-meta span{display:inline-flex;align-items:center;gap:5px}
+  .att-status-group{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}
+  .att-btn{height:42px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.03);color:#c5d5f1;font-size:16px;font-weight:700;cursor:pointer;transition:transform .14s ease,background-color .16s ease,border-color .16s ease,color .16s ease}
+  .att-btn:hover{transform:translateY(-1px)}
+  .att-btn.is-active{box-shadow:0 0 0 1px rgba(255,255,255,.04) inset}
+  .att-btn.is-ok{color:#75d39c;background:rgba(100,200,130,.13);border-color:rgba(100,200,130,.35)}
+  .att-btn.is-maybe{color:#e5c06c;background:rgba(228,180,89,.13);border-color:rgba(228,180,89,.35)}
+  .att-btn.is-ng{color:#f08b8b;background:rgba(220,80,80,.14);border-color:rgba(220,80,80,.35)}
+  .att-btn.is-none{color:#a4b6d9;background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.16)}
+  @media (max-width: 639px){
+    .att-step-title{font-size:24px}
+    .att-practice-title{font-size:16px}
+    .att-status-group{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+</style>
+<script>
+  (() => {
+    const groups = Array.from(document.querySelectorAll('[data-att-group]'));
+    if (!groups.length) return;
+    groups.forEach(group => {
+      const hidden = group.querySelector('[data-att-hidden]');
+      const buttons = Array.from(group.querySelectorAll('.att-btn[data-att-value]'));
+      if (!hidden || !buttons.length) return;
+      const setValue = (value) => {
+        hidden.value = value;
+        buttons.forEach(btn => {
+          const isActive = btn.getAttribute('data-att-value') === value;
+          btn.classList.toggle('is-active', isActive);
+          btn.classList.toggle('is-ok', isActive && value === '○');
+          btn.classList.toggle('is-maybe', isActive && value === '△');
+          btn.classList.toggle('is-ng', isActive && value === '×');
+          btn.classList.toggle('is-none', isActive && value === '未回答');
+        });
+      };
+      buttons.forEach(btn => btn.addEventListener('click', () => setValue(btn.getAttribute('data-att-value') || '未回答')));
+      setValue(hidden.value || '未回答');
+    });
+  })();
+</script>
 
 {% endblock %}

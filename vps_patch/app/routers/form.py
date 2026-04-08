@@ -58,6 +58,7 @@ from app.services.form_service import (
     ROLE_MANAGER,
     is_perc,
     load_form_data,
+    load_attendance_data,
     load_existing_prefs,
     resolve_user_role,
     submit_all,
@@ -893,6 +894,8 @@ async def form_menu(request: Request):
     attendance_rows = data.get("attendance_rows", [])
     preference_rows = data.get("preference_rows", [])
     partdefs = data.get("partdefs", [])
+    players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    player_map = {p.get("id", ""): p for p in players}
 
     role = resolve_user_role(ctx, pid, cid, participant_rows)
     cast_id, att_map = _attendance_map_robust(ctx, pid, cid, participant_rows, attendance_rows, practices)
@@ -978,8 +981,13 @@ async def form_menu(request: Request):
         "show_role_panel": role_mode,
         "is_manager": role >= ROLE_MANAGER,
         "practice_cols": _build_practice_cols(data.get("practices", [])),
-        "attendance_table_rows": _build_attendance_table(ctx, cid, participant_rows, data.get("practices", []), data.get("attendance_rows", []), data.get("part_master_map", {}), my_part_id, role),
-        "member_table_rows": _build_member_table(ctx, participant_rows, data.get("part_master_map", {}), my_part_id, role),
+        "attendance_table_rows": _build_attendance_table(
+            ctx, cid, participant_rows, data.get("practices", []), data.get("attendance_rows", []),
+            data.get("part_master_map", {}), my_part_id, role, player_map=player_map
+        ),
+        "member_table_rows": _build_member_table(
+            ctx, participant_rows, data.get("part_master_map", {}), my_part_id, role, player_map=player_map
+        ),
         "material_rows": _build_material_rows(ctx, data.get("partdefs", []), data.get("songs", []), my_part_id, role) if role_mode else [],
         "material_links": _build_material_links(ctx, data.get("partdefs", []), data.get("songs", []), my_part_id, role) if role_mode else [],
         "material_practices": _build_material_practice_items(ctx, data.get("practices", [])) if role_mode else [],
@@ -1000,7 +1008,7 @@ async def form_material_practice_pdf(request: Request, practice_id: str):
     if not concert:
         return RedirectResponse("/concert/select", status_code=302)
 
-    data = load_form_data(ctx, cid)
+    data = load_attendance_data(ctx, cid)
     practices = data.get("practices", []) or []
     target = next((p for p in practices if p.get("id", "") == (practice_id or "")), None)
     if not target:
@@ -1048,7 +1056,7 @@ async def form_att_page(request: Request):
     concert = _find_concert(ctx, cid)
     if not concert:
         return RedirectResponse("/concert/select", status_code=302)
-    data = load_form_data(ctx, cid)
+    data = load_attendance_data(ctx, cid)
     practices = data.get("practices", [])
     participant_rows = data.get("participant_rows_concert", [])
     attendance_rows = data.get("attendance_rows", [])
@@ -1087,16 +1095,15 @@ async def form_att_save(request: Request):
         return RedirectResponse("/concert/select", status_code=302)
     form = await request.form()
     ctx = get_ctx()
-    data = load_form_data(ctx, cid)
+    data = load_attendance_data(ctx, cid)
     concert = _find_concert(ctx, cid)
     if not concert:
         return RedirectResponse("/concert/select", status_code=302)
 
     practices = data.get("practices", [])
     concert_day = data.get("concert_day")
-    part_master_map = data.get("part_master_map", {})
     participant_rows = data.get("participant_rows_concert", [])
-    my_part_name, my_part_id = _my_part_info(ctx, pid, cid, participant_rows)
+    _, my_part_id = _my_part_info(ctx, pid, cid, participant_rows)
 
     att: dict[str, str] = {}
     att_comment: dict[str, str] = {}
@@ -1148,12 +1155,23 @@ def _build_practice_cols(practices: list) -> list:
     return cols
 
 
-def _build_attendance_table(ctx, concert_id, participant_rows, practices, attendance_rows, part_master_map, my_part_id, role) -> list:
+def _build_attendance_table(
+    ctx,
+    concert_id,
+    participant_rows,
+    practices,
+    attendance_rows,
+    part_master_map,
+    my_part_id,
+    role,
+    player_map: dict | None = None,
+) -> list:
     """出欠テーブル行を構築。LeaderはPART_MASTERが同一のメンバーのみ、Managerは全員。"""
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
-    players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
-    player_map = {p.get("id", ""): p for p in players}
+    if player_map is None:
+        players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+        player_map = {p.get("id", ""): p for p in players}
     rows = []
     for cast in participant_rows:
         pm_ids = ext_rel(cast, PARTICIPANT_PART_REL_KEYS)
@@ -1183,12 +1201,13 @@ def _build_attendance_table(ctx, concert_id, participant_rows, practices, attend
     return rows
 
 
-def _build_member_table(ctx, participant_rows, part_master_map, my_part_id, role) -> list:
+def _build_member_table(ctx, participant_rows, part_master_map, my_part_id, role, player_map: dict | None = None) -> list:
     """メンバーテーブル行を構築。"""
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
-    players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
-    player_map = {p.get("id", ""): p for p in players}
+    if player_map is None:
+        players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+        player_map = {p.get("id", ""): p for p in players}
     rows = []
     for cast in participant_rows:
         pm_ids = ext_rel(cast, PARTICIPANT_PART_REL_KEYS)
@@ -1203,7 +1222,14 @@ def _build_member_table(ctx, participant_rows, part_master_map, my_part_id, role
         name       = ext_txt(player, PLAYER_NAME_KEYS) or "—"
         role_music = ext_txt(cast, PARTICIPANT_ROLE_KEYS) or ""
         role_ops   = ext_txt(cast, PARTICIPANT_ROLE_OPS_KEYS) or ""
-        rows.append({"part": part, "name": name, "role_music": role_music, "role_ops": role_ops})
+        role_system = ext_txt(cast, ["システムロール", "system_role", "SystemRole"]) or ""
+        rows.append({
+            "part": part,
+            "name": name,
+            "role_music": role_music,
+            "role_ops": role_ops,
+            "role_system": role_system,
+        })
     rows.sort(key=lambda r: (r["part"], r["name"]))
     return rows
 

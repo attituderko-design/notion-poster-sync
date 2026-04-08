@@ -40,11 +40,11 @@
 <div class="greeting f3">
   こんにちは、<strong>{{ player_name }}</strong> さん
   {% if my_part or my_music_role or my_ops_role or my_system_role %}
-  <span class="greeting-part">
-    {% if my_part %}<span class="greeting-pill">{{ my_part }}</span>{% endif %}
-    {% if my_music_role %}<span class="greeting-pill">{{ my_music_role }}</span>{% endif %}
-    {% if my_ops_role %}<span class="greeting-pill">運営: {{ my_ops_role }}</span>{% endif %}
-    {% if my_system_role %}<span class="greeting-pill">System: {{ my_system_role }}</span>{% endif %}
+  <span class="greeting-part greeting-meta">
+    {% if my_part %}{{ my_part }}{% endif %}
+    {% if my_music_role %} / {{ my_music_role }}{% endif %}
+    {% if my_ops_role %} / 運営: {{ my_ops_role }}{% endif %}
+    {% if my_system_role %} / System: {{ my_system_role }}{% endif %}
   </span>
   {% endif %}
 </div>
@@ -102,7 +102,7 @@
 {% endif %}
 
 {% if can_show_assign %}
-<div class="section-label f4" style="margin-top:18px;">アサイン状況</div>
+<div class="section-label f4" style="margin-top:18px;">あなたのアサイン状況</div>
 <div class="menu-item f4 assign-panel" style="padding:14px 16px;">
   {% if assign_summary %}
   <div class="assign-list">
@@ -184,12 +184,14 @@
               <span class="member-detail-label">音楽役職</span>
               <span class="member-detail-value">{{ row.role_music or "—" }}</span>
             </div>
-            {% if is_manager %}
             <div class="member-detail-item">
               <span class="member-detail-label">運営役職</span>
               <span class="member-detail-value">{{ row.role_ops or "—" }}</span>
             </div>
-            {% endif %}
+            <div class="member-detail-item">
+              <span class="member-detail-label">System</span>
+              <span class="member-detail-value">{{ row.role_system or "—" }}</span>
+            </div>
           </div>
         </div>
       </article>
@@ -202,21 +204,22 @@
 </div>
 
 <div class="role-panel" data-role-panel="assign">
-  <div class="menu-item f4" style="padding:12px;overflow-x:auto;">
-    <table class="table-mini">
-      <thead>
-        <tr><th>曲</th><th>担当パート</th><th>担当者</th></tr>
-      </thead>
-      <tbody>
-        {% for row in role_assignment_rows %}
-        <tr>
-          <td>{{ row.song }}</td>
-          <td>{{ row.part }}</td>
-          <td>{{ row.player }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="menu-item f4 assign-role-panel">
+    {% if role_assignment_rows %}
+    <div class="assign-role-list">
+      {% for row in role_assignment_rows %}
+      <div class="assign-role-card">
+        <div class="assign-role-song">{{ row.song }}</div>
+        <div class="assign-role-bottom">
+          <span class="assign-chip">{{ row.part }}</span>
+          <span class="assign-role-player">{{ row.player }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="menu-hint">アサイン情報はまだありません。</div>
+    {% endif %}
   </div>
 </div>
 
@@ -271,7 +274,7 @@
   .hero-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;font-size:11px;color:#b8c9ea;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
   .hero-chip .bi{font-size:11px;opacity:.8}
   .hero-songline{margin-top:10px;color:#9fb3d8;font-size:12px;line-height:1.6}
-  .greeting-pill{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);margin-right:6px}
+  .greeting-meta{display:inline-block;margin-top:4px;color:#93a9cf;letter-spacing:.01em}
   .badge-warn{background:rgba(228,180,89,.15);color:#e8c16b}
   .assign-panel{display:block}
   .assign-list{display:flex;flex-direction:column;gap:8px}
@@ -280,6 +283,13 @@
   .assign-song{font-size:.92rem;color:#d8e2f5;line-height:1.45}
   .assign-part{flex-shrink:0}
   .assign-chip{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;color:#7eb8ff;background:rgba(74,158,255,.13);border:1px solid rgba(74,158,255,.35)}
+  .assign-role-panel{display:block;padding:12px}
+  .assign-role-list{display:flex;flex-direction:column;gap:8px;width:100%}
+  .assign-role-card{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.025);border-radius:10px;padding:10px 11px;transition:transform .18s ease,border-color .18s ease,background-color .18s ease}
+  .assign-role-card:hover{transform:translateY(-1px);border-color:rgba(74,158,255,.28);background:rgba(255,255,255,.04)}
+  .assign-role-song{font-size:13px;font-weight:600;color:#d9e7ff;line-height:1.5}
+  .assign-role-bottom{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:7px}
+  .assign-role-player{font-size:12px;color:#b4c7e8}
   .member-panel{display:block;padding:12px}
   .member-list{display:flex;flex-direction:column;gap:8px;transition:opacity .18s ease, transform .18s ease}
   .member-list.is-switching{opacity:.45;transform:translateY(2px)}
