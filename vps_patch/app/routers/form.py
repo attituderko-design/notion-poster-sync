@@ -1919,7 +1919,7 @@ def _build_attendance_table(
                 att_prids = ext_rel(att, ATT_PRACTICE_REL_KEYS)
                 if targets.intersection(att_pids) and pr_id in att_prids:
                     status = ext_txt(att, ATT_STATUS_KEYS) or "—"
-                    comment = (ext_txt(att, ATT_NOTE_KEYS) or "").strip()
+                    comment = (ext_txt(att, _K.ATT_NOTE_KEYS) or "").strip()
                     break
             cells[pr_id] = status
             comments[pr_id] = comment
