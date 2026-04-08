@@ -27,12 +27,19 @@
   {% if concert_date %}<div class="concert-card-row"><div class="concert-card-dot"></div><span>{{ concert_date }}</span></div>{% endif %}
   {% if concert_venue %}<div class="concert-card-row"><div class="concert-card-dot"></div><span>{{ concert_venue }}</span></div>{% endif %}
   {% if concert_conductor %}<div class="concert-card-row"><div class="concert-card-dot"></div><span>指揮：{{ concert_conductor }}</span></div>{% endif %}
+  {% if concert_songs_line %}<div class="concert-card-row"><div class="concert-card-dot"></div><span>{{ concert_songs_line }}</span></div>{% endif %}
 </div>
 {% endif %}
 
 <div class="greeting f3">
   こんにちは、<strong>{{ player_name }}</strong> さん
-  {% if my_part %}<span class="greeting-part">{{ my_part }}</span>{% endif %}
+  {% if my_part or my_music_role %}
+  <span class="greeting-part">
+    {% if my_part %}{{ my_part }}{% endif %}
+    {% if my_part and my_music_role %}&nbsp;&nbsp;{% endif %}
+    {% if my_music_role %}{{ my_music_role }}{% endif %}
+  </span>
+  {% endif %}
 </div>
 
 <div class="section-label f4">メニュー</div>

@@ -195,7 +195,7 @@ BILLING_NOTE_KEYS         = ["備考", "メモ", "Note"]
 # ── CONCERT_CAST 追加フィールド ───────────────────────────────
 PARTICIPANT_PART_KEYS     = ["パート", "担当パート", "Part"]          # 旧Select型（互換用に残す）
 PARTICIPANT_PART_REL_KEYS = ["パート", "担当パート", "Part"]          # Relation型（PART_MASTERへ）
-PARTICIPANT_ROLE_KEYS     = ["役職_音楽", "役職", "Role"]
+PARTICIPANT_ROLE_KEYS     = ["音楽・役職", "役職_音楽", "役職", "Role"]
 PARTICIPANT_ROLE_OPS_KEYS = ["役職_運営", "RoleOps"]
 PARTICIPANT_SYSTEM_ROLE_KEYS = ["システムロール", "system_role", "SystemRole"]
 PARTICIPANT_FEE_KEYS      = ["参加費", "Fee"]

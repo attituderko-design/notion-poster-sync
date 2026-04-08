@@ -253,6 +253,18 @@ def _my_part_info(ctx: dict, player_id: str, concert_id: str, participant_rows: 
     return "", ""
 
 
+def _my_music_role(ctx: dict, player_id: str, concert_id: str, participant_rows: list[dict]) -> str:
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+    for row in participant_rows:
+        if player_id not in ext_rel(row, PARTICIPANT_PLAYER_REL_KEYS):
+            continue
+        if concert_id not in ext_rel(row, PARTICIPANT_CONCERT_REL_KEYS):
+            continue
+        return (ext_txt(row, PARTICIPANT_ROLE_KEYS) or "").strip()
+    return ""
+
+
 def _harmonia_flags(ctx: dict, concert_id: str) -> dict:
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
@@ -868,6 +880,7 @@ async def form_menu(request: Request):
     pref_total = len(partdefs)
     pref_answered = sum(1 for pd in partdefs if (pref_map.get(pd.get("id", ""), "未回答") != "未回答"))
     my_part_name, my_part_id = _my_part_info(ctx, pid, cid, participant_rows)
+    my_music_role = _my_music_role(ctx, pid, cid, participant_rows)
     is_perc_role = False
     if my_part_id:
         pm_rows = ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
@@ -904,6 +917,14 @@ async def form_menu(request: Request):
     show_pref = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER)
     show_own = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER) and is_perc_role
     role_mode = role >= ROLE_LEADER
+    song_names = []
+    for s in (data.get("songs", []) or []):
+        n = (ext(s, SONG_NAME_KEYS) or "").strip()
+        if n:
+            song_names.append(n)
+    # 同名重複を除去しつつ順序は維持
+    seen = set()
+    song_names = [x for x in song_names if not (x in seen or seen.add(x))]
     return templates.TemplateResponse("form/menu.html", {
         "request": request,
         "concert": concert,
@@ -911,8 +932,10 @@ async def form_menu(request: Request):
         "concert_date": (ext(concert, CONCERT_DATE_KEYS) or "")[:10],
         "concert_venue": ext(concert, CONCERT_VENUE_KEYS) or "",
         "concert_conductor": ext(concert, ["クリエイター", "指揮者", "Conductor"]) or "",
+        "concert_songs_line": " / ".join(song_names),
         "player_name": request.session.get("player_name", ""),
         "my_part": my_part_name,
+        "my_music_role": my_music_role,
         "att_unanswered": att_unanswered,
         "att_hint": att_hint,
         "pref_total": pref_total if show_pref else 0,
