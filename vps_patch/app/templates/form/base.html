@@ -40,7 +40,8 @@
   const factNode = loader.querySelector(".js-loader-fact");
   const bootAt = performance.now();
   const MIN_VISIBLE_MS = 400;
-  const FACT_INTERVAL_MS = 3800;
+  const FACT_INTERVAL_MS = 5000;
+  const FACT_FADE_OUT_MS = 350;
   let hideTimer = null;
   let progressTimer = null;
   let factTimer = null;
@@ -134,13 +135,15 @@
   };
   const showFact = () => {
     if (!factNode || !shuffled.length) return;
-    factNode.classList.add("is-changing");
     const nextText = shuffled[factIdx % shuffled.length];
     factIdx += 1;
+    factNode.classList.add("is-hidden");
     setTimeout(() => {
       factNode.textContent = nextText;
-      factNode.classList.remove("is-changing");
-    }, 150);
+      factNode.classList.add("is-enter");
+      factNode.classList.remove("is-hidden");
+      requestAnimationFrame(() => factNode.classList.remove("is-enter"));
+    }, FACT_FADE_OUT_MS);
   };
   const startFacts = () => {
     if (!factNode || factTimer) return;
