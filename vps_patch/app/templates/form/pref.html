@@ -117,7 +117,7 @@
 </div>
 
 {% for group in song_groups %}
-<div class="pref-song-header fade-3">🎵 {{ group.song_name }}</div>
+<div class="pref-song-header fade-3"><i class="bi bi-music-note-beamed"></i> {{ group.song_name }}</div>
 {% for row in group.rows %}
 <div class="pref-row fade-3">
   <div class="pref-name">{{ row.display_name }}</div>
@@ -134,7 +134,7 @@
 
 <div style="margin-top:20px;">
   <a href="{{ back_href }}" class="btn-s" style="display:block;text-align:center;text-decoration:none;padding:11px;border-radius:9px;font-family:'Outfit',sans-serif;font-size:13px;color:rgba(180,200,240,0.7);background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.1);">
-    ← メニューに戻る
+    <i class="bi bi-arrow-left"></i> メニューに戻る
   </a>
 </div>
 
@@ -156,7 +156,7 @@
   <div id="pref-summary" class="pref-summary fade-2"></div>
 
   {% for group in song_groups %}
-  <div class="pref-song-header fade-3">🎵 {{ group.song_name }}</div>
+  <div class="pref-song-header fade-3"><i class="bi bi-music-note-beamed"></i> {{ group.song_name }}</div>
   {% for row in group.rows %}
   <div class="pref-row fade-3">
     <div class="pref-name">{{ row.display_name }}</div>
@@ -182,7 +182,7 @@
       保存する
     </button>
     <a href="{{ back_href }}" style="display:block;text-align:center;text-decoration:none;padding:11px;border-radius:9px;font-family:'Outfit',sans-serif;font-size:13px;color:rgba(180,200,240,0.6);background:rgba(255,255,255,0.03);border:0.5px solid rgba(255,255,255,0.08);">
-      ← メニューに戻る
+      <i class="bi bi-arrow-left"></i> メニューに戻る
     </a>
   </div>
 

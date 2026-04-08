@@ -7,7 +7,7 @@
 </div>
 
 {% if back_href %}
-<a href="{{ back_href }}" class="back-btn f2">← 戻る</a>
+<a href="{{ back_href }}" class="back-btn f2"><i class="bi bi-arrow-left"></i> 戻る</a>
 {% endif %}
 
 {% if error %}
@@ -24,11 +24,11 @@
 </div>
 <form method="post" action="/entry/mode" class="f3" style="margin-bottom:12px;">
   <input type="hidden" name="mode" value="login">
-  <button class="btn btn-primary" type="submit">🔑 ログイン</button>
+  <button class="btn btn-primary" type="submit"><i class="bi bi-key-fill"></i> ログイン</button>
 </form>
 <form method="post" action="/entry/mode" class="f4">
   <input type="hidden" name="mode" value="invite">
-  <button class="btn btn-secondary" type="submit">🎟 招待コードで参加</button>
+  <button class="btn btn-secondary" type="submit"><i class="bi bi-ticket-perforated"></i> 招待コードで参加</button>
 </form>
 {% endif %}
 

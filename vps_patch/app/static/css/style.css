@@ -232,6 +232,10 @@ body {
   font-size: 14px;
   flex-shrink: 0;
 }
+.menu-icon .bi {
+  font-size: 15px;
+  line-height: 1;
+}
 
 .icon-a {
   background: rgba(74, 158, 255, 0.13);
@@ -586,6 +590,10 @@ body {
   font-size: 13px;
   pointer-events: none;
 }
+.cover-zoom .bi {
+  font-size: 13px;
+  line-height: 1;
+}
 
 .lb-overlay {
   display: flex;
@@ -637,6 +645,10 @@ body {
 .lb-close:hover {
   background: rgba(255, 255, 255, 0.2);
 }
+.lb-close .bi {
+  font-size: 16px;
+  line-height: 1;
+}
 
 /* ── back button ── */
 .back-btn {
@@ -653,6 +665,10 @@ body {
   text-decoration: none;
   margin-bottom: 14px;
   transition: border-color 0.15s, color 0.15s;
+}
+.back-btn .bi {
+  font-size: 12px;
+  line-height: 1;
 }
 
 .back-btn:hover {
@@ -696,6 +712,11 @@ body {
   font-size: 10px;
   color: var(--text-hint);
   font-family: "Outfit", sans-serif;
+}
+
+.btn .bi {
+  margin-right: 0.35em;
+  font-size: 0.95em;
 }
 
 /* ── global loader ── */

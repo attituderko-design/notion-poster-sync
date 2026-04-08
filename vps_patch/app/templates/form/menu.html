@@ -6,16 +6,16 @@
   <div class="wordmark-sub">Concert Management</div>
 </div>
 
-<a href="/concert/select" class="back-btn f2">← 演奏会選択に戻る</a>
+<a href="/concert/select" class="back-btn f2"><i class="bi bi-arrow-left"></i> 演奏会選択に戻る</a>
 
 {% if cover_url %}
 <div class="f2">
   <button type="button" class="cover-wrap js-cover-open" aria-label="カバー画像を拡大表示">
     <img src="{{ cover_url }}" class="cover-img" alt="演奏会カバー">
-    <div class="cover-zoom">🔍</div>
+    <div class="cover-zoom"><i class="bi bi-zoom-in"></i></div>
   </button>
   <div class="lb-overlay js-cover-modal" aria-hidden="true">
-    <button type="button" class="lb-close js-cover-close" aria-label="閉じる">×</button>
+    <button type="button" class="lb-close js-cover-close" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
     <img src="{{ cover_url }}" alt="演奏会カバー拡大画像">
   </div>
 </div>
@@ -40,7 +40,7 @@
 <form method="post" action="/form/menu-action" style="margin-bottom:8px;">
   <input type="hidden" name="action" value="att">
   <div class="menu-item f4" onclick="this.closest('form').submit()" style="cursor:pointer;">
-    <div class="menu-icon icon-a">📅</div>
+    <div class="menu-icon icon-a"><i class="bi bi-calendar-week"></i></div>
     <div class="menu-body">
       <div class="menu-title">出欠入力</div>
       <div class="menu-hint">{{ att_hint }}</div>
@@ -58,7 +58,7 @@
   <input type="hidden" name="action" value="pref">
   <div class="menu-item f4" {% if not proposal_done %}onclick="this.closest('form').submit()"{% endif %}
        style="{% if proposal_done %}opacity:.5;cursor:default;{% else %}cursor:pointer;{% endif %}">
-    <div class="menu-icon icon-b">🎵</div>
+    <div class="menu-icon icon-b"><i class="bi bi-music-note-beamed"></i></div>
     <div class="menu-body">
       <div class="menu-title">楽器・パート希望</div>
       <div class="menu-hint">{{ pref_hint }}</div>
@@ -77,7 +77,7 @@
 <form method="post" action="/form/menu-action" style="margin-bottom:8px;">
   <input type="hidden" name="action" value="own">
   <div class="menu-item f4" onclick="this.closest('form').submit()" style="cursor:pointer;">
-    <div class="menu-icon icon-d">🥁</div>
+    <div class="menu-icon icon-d"><i class="bi bi-vinyl"></i></div>
     <div class="menu-body">
       <div class="menu-title">所有楽器</div>
       <div class="menu-hint">入力・変更</div>
@@ -108,10 +108,10 @@
 {% if show_role_panel %}
 <div class="section-label f4" style="margin-top:18px;">{% if is_manager %}Managerメニュー{% else %}パートリーダーメニュー{% endif %}</div>
 <div class="role-tabs f4">
-  <button type="button" class="role-tab is-active" data-role-tab="att">📋 出欠</button>
-  <button type="button" class="role-tab" data-role-tab="member">👥 メンバー</button>
-  <button type="button" class="role-tab" data-role-tab="assign">🎯 アサイン</button>
-  <button type="button" class="role-tab" data-role-tab="material">📄 資料</button>
+  <button type="button" class="role-tab is-active" data-role-tab="att"><i class="bi bi-clipboard-data"></i>出欠</button>
+  <button type="button" class="role-tab" data-role-tab="member"><i class="bi bi-people"></i>メンバー</button>
+  <button type="button" class="role-tab" data-role-tab="assign"><i class="bi bi-bullseye"></i>アサイン</button>
+  <button type="button" class="role-tab" data-role-tab="material"><i class="bi bi-file-earmark-text"></i>資料</button>
 </div>
 
 <div class="role-panel is-active" data-role-panel="att">
@@ -211,6 +211,7 @@
   .table-mini th{color:#9db1d6;font-weight:700}
   .role-tabs{display:flex;gap:10px;margin:8px 0 10px}
   .role-tab{border:1px solid rgba(255,255,255,.16);background:rgba(18,26,42,.7);color:#c9d6f3;border-radius:10px;padding:8px 12px;cursor:pointer}
+  .role-tab .bi{margin-right:6px;font-size:.9em}
   .role-tab.is-active{border-color:#6ca8ff;color:#fff}
   .role-panel{display:none}
   .role-panel.is-active{display:block}
