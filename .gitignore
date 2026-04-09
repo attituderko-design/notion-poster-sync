@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 backup/
 .streamlit/secrets.toml
+
+# local runtime/config snapshots (do not commit)
+vps_patch/app/.env
+vps_patch/app/_meta/
+vps_patch/tools/
+*.log

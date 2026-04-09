@@ -4429,8 +4429,8 @@ def _build_own_bring_rows(
             rental_qty_by_inst[inst_id] += qty
 
     # 必要数（partdefsベース）
-    rows: list[dict] = []
-    seen: set[tuple[str, str]] = set()
+    # 同じ (song, instrument) が複数パートで定義される場合は合算する。
+    required_by_pair: dict[tuple[str, str], int] = defaultdict(int)
     for pd in partdefs or []:
         part_ids = ext_rel(pd, PARTDEF_PART_REL_KEYS)
         if role < ROLE_MANAGER and my_part_id:
@@ -4445,43 +4445,43 @@ def _build_own_bring_rows(
         except Exception:
             required_qty = 1
         for inst_id in inst_ids:
-            key = (song_id, inst_id)
-            if key in seen:
-                continue
-            seen.add(key)
-            owners = owner_qty_by_inst_player.get(inst_id, {})
-            available_ok = 0
-            available_maybe = 0
-            owner_badges_ok: list[dict] = []
-            owner_badges_maybe: list[dict] = []
-            for pid, qty in owners.items():
-                cast_id = player_to_cast_norm.get(pid, "")
-                st = att_by_cast.get(cast_id, "")
-                badge = {"player_id": pid, "name": player_name_map.get(pid, "不明"), "qty": qty}
-                if st == "ok":
-                    available_ok += qty
-                    owner_badges_ok.append(badge)
-                elif st == "maybe":
-                    available_maybe += qty
-                    owner_badges_maybe.append(badge)
-            owner_badges_ok.sort(key=lambda x: x["name"].lower())
-            owner_badges_maybe.sort(key=lambda x: x["name"].lower())
-            shortage = max(0, required_qty - available_ok)
-            shortage_with_maybe = max(0, required_qty - (available_ok + available_maybe))
-            rows.append({
-                "song_id": song_id,
-                "song_name": song_name_map.get(song_id, "未設定"),
-                "instrument_id": inst_id,
-                "instrument_name": inst_name_map.get(inst_id, inst_id or "—"),
-                "required_qty": required_qty,
-                "available_ok": available_ok,
-                "available_maybe": available_maybe,
-                "shortage": shortage,
-                "shortage_with_maybe": shortage_with_maybe,
-                "rental_qty": int(rental_qty_by_inst.get(inst_id, 0)),
-                "owner_badges_ok": owner_badges_ok,
-                "owner_badges_maybe": owner_badges_maybe,
-            })
+            required_by_pair[(song_id, inst_id)] += required_qty
+
+    rows: list[dict] = []
+    for (song_id, inst_id), required_qty in required_by_pair.items():
+        owners = owner_qty_by_inst_player.get(inst_id, {})
+        available_ok = 0
+        available_maybe = 0
+        owner_badges_ok: list[dict] = []
+        owner_badges_maybe: list[dict] = []
+        for pid, qty in owners.items():
+            cast_id = player_to_cast_norm.get(pid, "")
+            st = att_by_cast.get(cast_id, "")
+            badge = {"player_id": pid, "name": player_name_map.get(pid, "不明"), "qty": qty}
+            if st == "ok":
+                available_ok += qty
+                owner_badges_ok.append(badge)
+            elif st == "maybe":
+                available_maybe += qty
+                owner_badges_maybe.append(badge)
+        owner_badges_ok.sort(key=lambda x: x["name"].lower())
+        owner_badges_maybe.sort(key=lambda x: x["name"].lower())
+        shortage = max(0, required_qty - available_ok)
+        shortage_with_maybe = max(0, required_qty - (available_ok + available_maybe))
+        rows.append({
+            "song_id": song_id,
+            "song_name": song_name_map.get(song_id, "未設定"),
+            "instrument_id": inst_id,
+            "instrument_name": inst_name_map.get(inst_id, inst_id or "—"),
+            "required_qty": required_qty,
+            "available_ok": available_ok,
+            "available_maybe": available_maybe,
+            "shortage": shortage,
+            "shortage_with_maybe": shortage_with_maybe,
+            "rental_qty": int(rental_qty_by_inst.get(inst_id, 0)),
+            "owner_badges_ok": owner_badges_ok,
+            "owner_badges_maybe": owner_badges_maybe,
+        })
     rows.sort(key=lambda x: (x["song_name"].lower(), x["instrument_name"].lower()))
     return rows
 
