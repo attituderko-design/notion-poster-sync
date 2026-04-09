@@ -7,9 +7,9 @@
   </button>
   <button type="button" class="top-action-btn js-open-top-modal" data-modal-target="notify" aria-label="通知を開く">
     <i class="bi bi-bell-fill"></i>
-    {% if poke_inbox_count and poke_inbox_count > 0 %}
-    <span class="top-action-badge">{{ poke_inbox_count }}</span>
-    {% endif %}
+    <span class="top-action-badge js-notify-badge {% if not (poke_inbox_count and poke_inbox_count > 0) %}is-hidden{% endif %}">
+      {% if poke_inbox_count and poke_inbox_count > 0 %}{{ poke_inbox_count }}{% endif %}
+    </span>
   </button>
 </div>
 
@@ -896,7 +896,13 @@
       <ul class="howto-list">
         <li>通知は右上のベルアイコンから確認できます。</li>
         <li>ToDoから該当画面へすぐ移動できます。</li>
-        <li>詳細ガイドは最終調整フェーズで追加予定です。</li>
+        <li>PWAインストール:
+          <ul class="howto-sublist">
+            <li>iPhone(Safari): 共有 → ホーム画面に追加</li>
+            <li>Android(Chrome): メニュー → アプリをインストール</li>
+            <li>PC(Chrome/Edge): アドレスバー右のインストールアイコン</li>
+          </ul>
+        </li>
       </ul>
     </div>
   </div>
@@ -909,6 +915,15 @@
       <button type="button" class="top-modal-close js-close-top-modal" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
     </div>
     <div class="top-modal-body">
+      <div class="notify-intro js-notify-intro is-hidden">
+        <div class="notify-intro-head"><i class="bi bi-megaphone"></i> お知らせ</div>
+        <div class="notify-intro-body">
+          HARMONIAはホーム画面に追加できます。右上の <i class="bi bi-question-circle"></i> から手順を確認してください。
+        </div>
+        <div class="notify-intro-actions">
+          <button type="button" class="poke-btn is-primary js-notify-intro-done">確認しました</button>
+        </div>
+      </div>
       {% if poke_inbox_items %}
       <div class="poke-list">
         {% for p in poke_inbox_items %}
@@ -929,7 +944,7 @@
         </div>
         {% endfor %}
       </div>
-      {% else %}
+      {% elif not poke_inbox_items %}
       <div class="poke-empty">未対応の通知はありません。</div>
       {% endif %}
       {% if poke_sent_items %}
@@ -968,6 +983,7 @@
   .top-action-btn{position:relative;width:40px;height:40px;border-radius:999px;border:1px solid rgba(130,190,255,.38);background:rgba(18,28,44,.82);color:#deecff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .16s ease,border-color .16s ease,background .16s ease}
   .top-action-btn:hover{transform:translateY(-1px);border-color:rgba(130,190,255,.62);background:rgba(24,38,58,.95)}
   .top-action-badge{position:absolute;top:-5px;right:-4px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#5aa9ff;color:#071321;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.45)}
+  .top-action-badge.is-hidden{display:none}
   .top-modal-backdrop{position:fixed;inset:0;background:rgba(4,10,18,.74);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:10070;display:none;align-items:center;justify-content:center;padding:14px}
   .top-modal-backdrop.is-open{display:flex}
   .top-modal-dialog{width:min(560px,96vw);max-height:88vh;overflow:auto;border-radius:14px;border:1px solid rgba(255,255,255,.16);background:linear-gradient(180deg,rgba(14,23,38,.98),rgba(10,18,31,.96));box-shadow:0 22px 60px rgba(0,0,0,.52);padding:12px}
@@ -978,6 +994,11 @@
   .top-modal-body{margin-top:10px}
   .howto-list{margin:0;padding:0 0 0 18px;color:#c9dbf8;font-size:13px;line-height:1.75}
   .howto-list li+li{margin-top:4px}
+  .howto-sublist{margin-top:4px;padding-left:16px;line-height:1.6}
+  .notify-intro{border:1px solid rgba(96,178,255,.34);background:rgba(74,158,255,.12);border-radius:10px;padding:10px 11px;margin-bottom:10px}
+  .notify-intro-head{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#d9ebff}
+  .notify-intro-body{margin-top:6px;font-size:12px;line-height:1.65;color:#c5daf8}
+  .notify-intro-actions{margin-top:8px}
   .hero-shell{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:12px}
   .hero-poster-wrap{display:flex;justify-content:center}
   .hero-card{margin-bottom:0}
@@ -1358,6 +1379,35 @@
     const modals = Array.from(document.querySelectorAll(".js-top-modal"));
     const closeBtns = Array.from(document.querySelectorAll(".js-close-top-modal"));
     if (!buttons.length || !modals.length) return;
+    const notifyModal = document.querySelector('.js-top-modal[data-top-modal="notify"]');
+    const introBox = notifyModal ? notifyModal.querySelector(".js-notify-intro") : null;
+    const introDoneBtn = notifyModal ? notifyModal.querySelector(".js-notify-intro-done") : null;
+    const notifyBadge = document.querySelector(".js-notify-badge");
+    const serverBadgeText = notifyBadge ? (notifyBadge.textContent || "").trim() : "";
+    const hasServerBadge = !!serverBadgeText;
+    const introStorageKey = "harmonia_notice_first_access_seen_v1";
+
+    const hasPendingIntro = () => {
+      try { return localStorage.getItem(introStorageKey) !== "1"; } catch (_) { return true; }
+    };
+    const setIntroSeen = () => {
+      try { localStorage.setItem(introStorageKey, "1"); } catch (_) {}
+    };
+    const renderIntroState = () => {
+      const pending = hasPendingIntro();
+      if (introBox) introBox.classList.toggle("is-hidden", !pending);
+      if (!notifyBadge) return;
+      if (pending) {
+        notifyBadge.textContent = hasServerBadge ? serverBadgeText : "!";
+        notifyBadge.classList.remove("is-hidden");
+      } else if (!hasServerBadge) {
+        notifyBadge.textContent = "";
+        notifyBadge.classList.add("is-hidden");
+      } else {
+        notifyBadge.textContent = serverBadgeText;
+        notifyBadge.classList.remove("is-hidden");
+      }
+    };
     const openByName = (name) => {
       modals.forEach((m) => {
         const open = m.getAttribute("data-top-modal") === name;
@@ -1365,6 +1415,7 @@
         m.setAttribute("aria-hidden", open ? "false" : "true");
       });
       document.body.style.overflow = "hidden";
+      if (name === "notify" && hasPendingIntro()) renderIntroState();
     };
     const closeAll = () => {
       modals.forEach((m) => {
@@ -1379,6 +1430,12 @@
         if (target) openByName(target);
       });
     });
+    if (introDoneBtn) {
+      introDoneBtn.addEventListener("click", () => {
+        setIntroSeen();
+        renderIntroState();
+      });
+    }
     closeBtns.forEach((btn) => btn.addEventListener("click", closeAll));
     modals.forEach((m) => {
       m.addEventListener("click", (e) => {
@@ -1388,6 +1445,12 @@
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closeAll();
     });
+    renderIntroState();
+    if (hasPendingIntro()) {
+      setTimeout(() => {
+        openByName("notify");
+      }, 700);
+    }
   })();
 
   (() => {

@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi import Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.responses import FileResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.routers import form as form_router
@@ -51,6 +52,21 @@ async def request_timing_middleware(request: Request, call_next):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    path = BASE_DIR / "app" / "static" / "manifest.webmanifest"
+    return FileResponse(path, media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+def sw():
+    path = BASE_DIR / "app" / "static" / "sw.js"
+    resp = FileResponse(path, media_type="application/javascript")
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 @app.get("/debug/notion")
 def debug_notion(token: str | None = Query(default=None)):
