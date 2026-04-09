@@ -261,6 +261,22 @@
 </form>
 
 {% if pref_total > 0 %}
+{% if proposal_done or assign_done %}
+<a href="#my-assign-summary" class="menu-item menu-card f4" style="margin-bottom:8px;cursor:pointer;text-decoration:none;">
+  <div class="menu-icon icon-b"><i class="bi bi-music-note-beamed"></i></div>
+  <div class="menu-body">
+    <div class="menu-title">楽器・パート希望</div>
+    <div class="menu-hint">{{ pref_hint }}</div>
+  </div>
+  <div class="menu-right">
+    {% if assign_done %}<span class="badge badge-done">確定済</span>
+    {% elif proposal_done %}<span class="badge">案提示中</span>
+    {% elif pref_answered == pref_total %}<span class="badge badge-ok">完了</span>
+    {% else %}<span class="badge badge-warn">{{ pref_total - pref_answered }}件未入力</span>{% endif %}
+    <span class="chev">›</span>
+  </div>
+</a>
+{% else %}
 <form method="post" action="/form/menu-action" style="margin-bottom:8px;">
   <input type="hidden" name="action" value="pref">
   <div class="menu-item menu-card f4" onclick="this.closest('form').submit()" style="cursor:pointer;">
@@ -278,6 +294,7 @@
     </div>
   </div>
 </form>
+{% endif %}
 {% endif %}
 
 {% if is_perc %}
