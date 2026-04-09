@@ -944,9 +944,12 @@
         </div>
         {% endfor %}
       </div>
-      {% elif not poke_inbox_items %}
-      <div class="poke-empty">未対応の通知はありません。</div>
       {% endif %}
+      <div class="poke-empty js-notify-empty {% if poke_inbox_items or poke_sent_items %}is-hidden{% endif %}">未対応の通知はありません。</div>
+      <details class="notify-history js-notify-history is-hidden">
+        <summary>対応履歴</summary>
+        <div class="notify-history-list js-notify-history-list"></div>
+      </details>
       {% if poke_sent_items %}
       <details class="poke-sent">
         <summary>送信履歴</summary>
@@ -1000,6 +1003,12 @@
   .notify-intro-head{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#d9ebff}
   .notify-intro-body{margin-top:6px;font-size:12px;line-height:1.65;color:#c5daf8}
   .notify-intro-actions{margin-top:8px}
+  .notify-history{margin-top:10px;border:1px solid rgba(255,255,255,.12);border-radius:10px;background:rgba(255,255,255,.03);padding:8px 10px}
+  .notify-history.is-hidden{display:none}
+  .notify-history summary{cursor:pointer;color:#cfe1fd;font-size:12px}
+  .notify-history-list{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+  .notify-history-item{font-size:12px;color:#b6ccec;line-height:1.5;border-top:1px dashed rgba(255,255,255,.1);padding-top:6px}
+  .notify-history-item:first-child{border-top:none;padding-top:0}
   .hero-shell{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:12px}
   .hero-poster-wrap{display:flex;justify-content:center}
   .hero-card{margin-bottom:0}
@@ -1232,6 +1241,7 @@
   .poke-btn.is-primary{border-color:rgba(100,200,130,.5);background:rgba(100,200,130,.16);color:#bff0d1}
   .poke-link{font-size:11px;color:#8ec5ff;text-decoration:underline}
   .poke-empty{font-size:12px;color:#97b3dc;padding:6px 2px}
+  .poke-empty.is-hidden{display:none}
   .poke-sent{margin-top:8px;border-top:1px dashed rgba(255,255,255,.09);padding-top:8px}
   .poke-sent summary{cursor:pointer;color:#b8ceef;font-size:12px;list-style:none}
   .poke-sent summary::-webkit-details-marker{display:none}
@@ -1383,10 +1393,16 @@
     const notifyModal = document.querySelector('.js-top-modal[data-top-modal="notify"]');
     const introBox = notifyModal ? notifyModal.querySelector(".js-notify-intro") : null;
     const introDoneBtn = notifyModal ? notifyModal.querySelector(".js-notify-intro-done") : null;
+    const notifyEmpty = notifyModal ? notifyModal.querySelector(".js-notify-empty") : null;
+    const notifyHistory = notifyModal ? notifyModal.querySelector(".js-notify-history") : null;
+    const notifyHistoryList = notifyModal ? notifyModal.querySelector(".js-notify-history-list") : null;
+    const hasInboxItems = !!(notifyModal && notifyModal.querySelector(".poke-list .poke-item"));
+    const hasSentItems = !!(notifyModal && notifyModal.querySelector(".poke-sent"));
     const notifyBadge = document.querySelector(".js-notify-badge");
     const serverBadgeText = notifyBadge ? (notifyBadge.textContent || "").trim() : "";
     const hasServerBadge = !!serverBadgeText;
     const introStorageKey = "harmonia_notice_first_access_seen_v1";
+    const introHistoryKey = "harmonia_notice_history_v1";
 
     const hasPendingIntro = () => {
       try { return localStorage.getItem(introStorageKey) !== "1"; } catch (_) { return true; }
@@ -1394,9 +1410,51 @@
     const setIntroSeen = () => {
       try { localStorage.setItem(introStorageKey, "1"); } catch (_) {}
     };
-    const renderIntroState = () => {
+    const readIntroHistory = () => {
+      try {
+        const raw = localStorage.getItem(introHistoryKey);
+        if (!raw) return [];
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+      } catch (_) {
+        return [];
+      }
+    };
+    const writeIntroHistory = (arr) => {
+      try { localStorage.setItem(introHistoryKey, JSON.stringify(arr)); } catch (_) {}
+    };
+    const appendIntroHistory = () => {
+      const now = new Date();
+      const row = {
+        at: now.toISOString(),
+        text: "PWA案内を確認"
+      };
+      const next = [row, ...readIntroHistory()].slice(0, 20);
+      writeIntroHistory(next);
+    };
+    const renderIntroHistory = () => {
+      if (!notifyHistory || !notifyHistoryList) return 0;
+      const rows = readIntroHistory();
+      notifyHistoryList.innerHTML = "";
+      rows.forEach((r) => {
+        const dt = new Date(r.at || "");
+        const ts = Number.isNaN(dt.getTime()) ? "" : dt.toLocaleString("ja-JP", { hour12: false });
+        const div = document.createElement("div");
+        div.className = "notify-history-item";
+        div.textContent = ts ? `${ts} - ${r.text || "対応済み"}` : (r.text || "対応済み");
+        notifyHistoryList.appendChild(div);
+      });
+      notifyHistory.classList.toggle("is-hidden", rows.length === 0);
+      return rows.length;
+    };
+    const renderNotifyState = () => {
       const pending = hasPendingIntro();
+      const historyCount = renderIntroHistory();
       if (introBox) introBox.classList.toggle("is-hidden", !pending);
+      if (notifyEmpty) {
+        const showEmpty = !pending && !hasInboxItems && !hasSentItems && historyCount === 0;
+        notifyEmpty.classList.toggle("is-hidden", !showEmpty);
+      }
       if (!notifyBadge) return;
       if (pending) {
         notifyBadge.textContent = hasServerBadge ? serverBadgeText : "!";
@@ -1416,7 +1474,7 @@
         m.setAttribute("aria-hidden", open ? "false" : "true");
       });
       document.body.style.overflow = "hidden";
-      if (name === "notify" && hasPendingIntro()) renderIntroState();
+      if (name === "notify") renderNotifyState();
     };
     const closeAll = () => {
       modals.forEach((m) => {
@@ -1434,7 +1492,8 @@
     if (introDoneBtn) {
       introDoneBtn.addEventListener("click", () => {
         setIntroSeen();
-        renderIntroState();
+        appendIntroHistory();
+        renderNotifyState();
       });
     }
     closeBtns.forEach((btn) => btn.addEventListener("click", closeAll));
@@ -1446,7 +1505,7 @@
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closeAll();
     });
-    renderIntroState();
+    renderNotifyState();
     if (hasPendingIntro()) {
       setTimeout(() => {
         openByName("notify");
