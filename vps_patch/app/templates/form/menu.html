@@ -536,66 +536,45 @@
 
     {% if not own_bring_has_practice_songs %}
     <div class="menu-hint">先に進行表で「種別=練習」かつ「演奏曲」を設定してください。</div>
-    {% elif own_bring_rows_needed or own_bring_rows_disabled %}
-    <div class="own-carry-head">必要な楽器（出欠○が担当する楽器）</div>
+    {% elif own_bring_song_groups %}
+    <div class="own-carry-head">曲ごとの持参/レンタル判定</div>
     <div class="own-role-list" data-role-list="rental">
-      {% for row in own_bring_rows_needed %}
-      <div class="own-role-card own-carry-card" data-song="{{ row.song_name }}">
-        <div class="own-role-head">
-          <div class="own-role-song">{{ row.song_name }}</div>
-          <div class="own-role-inst">{{ row.instrument_name }}</div>
+      {% for g in own_bring_song_groups %}
+      <div class="own-role-card rental-song-card" data-song="{{ g.song_name }}">
+        <div class="rental-song-title">{{ g.song_name }}</div>
+        <div class="rental-chip-zone">
+          {% for row in g.needed %}
+            {% if row.shortage > 0 %}
+              {% if is_manager and own_selected_practice_id %}
+              <form method="post" action="/form/rental/upsert" class="js-preserve-scroll rental-chip-form">
+                <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
+                <input type="hidden" name="song_id" value="{{ row.song_id }}">
+                <input type="hidden" name="instrument_id" value="{{ row.instrument_id }}">
+                <input type="hidden" name="suggested_qty" value="{{ row.shortage }}">
+                <button type="submit" class="rental-chip is-need">要るもの: {{ row.instrument_name }} ×{{ row.shortage }}</button>
+              </form>
+              {% else %}
+              <span class="rental-chip is-need">要るもの: {{ row.instrument_name }} ×{{ row.shortage }}</span>
+              {% endif %}
+            {% elif row.rental_qty > 0 %}
+              <span class="rental-chip is-rented">手配済: {{ row.instrument_name }} ×{{ row.rental_qty }}</span>
+            {% else %}
+              <span class="rental-chip is-bring">持参するもの: {{ row.instrument_name }}{% if row.available_ok > 0 %} ×{{ row.available_ok }}{% endif %}</span>
+            {% endif %}
+          {% endfor %}
         </div>
-        <div class="own-carry-metrics">
-          <span class="own-metric-chip">必要 {{ row.required_qty }}</span>
-          <span class="own-metric-chip is-ok">○持参 {{ row.available_ok }}</span>
-          <span class="own-metric-chip is-maybe">△持参 {{ row.available_maybe }}</span>
-          <span class="own-metric-chip{% if row.shortage > 0 %} is-ng{% endif %}">不足 {{ row.shortage }}</span>
-          <span class="own-metric-chip{% if row.rental_qty > 0 %} is-rented{% endif %}">手配済 {{ row.rental_qty }}</span>
-        </div>
-        <div class="own-role-badges">
-          {% if row.owner_badges_ok %}
-            {% for b in row.owner_badges_ok %}
-            <span class="own-owner-chip">{{ b.name }} ×{{ b.qty }}</span>
+        <div class="rental-split-line"></div>
+        <div class="rental-chip-zone">
+          {% if g.disabled %}
+            {% for row in g.disabled %}
+            <span class="rental-chip is-unused">要らないもの: {{ row.instrument_name }}</span>
             {% endfor %}
           {% else %}
-            <span class="own-owner-empty">○参加の所有者なし</span>
+            <span class="rental-chip is-none">要らないものはありません</span>
           {% endif %}
-          {% if row.owner_badges_maybe %}
-            {% for b in row.owner_badges_maybe %}
-            <span class="own-owner-chip is-maybe">{{ b.name }}(△) ×{{ b.qty }}</span>
-            {% endfor %}
-          {% endif %}
-        </div>
-        {% if is_manager and row.shortage > 0 and own_selected_practice_id %}
-        <div class="own-carry-actions">
-          <form method="post" action="/form/rental/upsert" class="js-preserve-scroll">
-            <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
-            <input type="hidden" name="song_id" value="{{ row.song_id }}">
-            <input type="hidden" name="instrument_id" value="{{ row.instrument_id }}">
-            <input type="hidden" name="suggested_qty" value="{{ row.shortage }}">
-            <button type="submit" class="assign-action-btn is-danger">不足{{ row.shortage }}をレンタル登録</button>
-          </form>
-        </div>
-        {% endif %}
-      </div>
-      {% endfor %}
-
-      {% if own_bring_rows_disabled %}
-      <div class="own-carry-head" style="margin-top:4px;">不要な楽器（担当者が全員欠席）</div>
-      {% for row in own_bring_rows_disabled %}
-      <div class="own-role-card own-carry-card is-disabled" data-song="{{ row.song_name }}">
-        <div class="own-role-head">
-          <div class="own-role-song">{{ row.song_name }}</div>
-          <div class="own-role-inst">{{ row.instrument_name }}</div>
-        </div>
-        <div class="own-carry-metrics">
-          <span class="own-metric-chip is-disabled">不要</span>
-          <span class="own-metric-chip">必要 {{ row.required_qty }}</span>
-          <span class="own-metric-chip">手配済 {{ row.rental_qty }}</span>
         </div>
       </div>
       {% endfor %}
-      {% endif %}
     </div>
     <div class="panel-empty is-hidden" data-empty-for="rental">該当する行がありません。</div>
     {% else %}
@@ -1318,6 +1297,18 @@
   .own-owner-empty{font-size:11px;color:#93add6}
   .own-carry-actions{margin-top:8px}
   .own-carry-card.is-disabled{border-color:rgba(170,180,198,.22);background:rgba(130,138,150,.08)}
+  .rental-song-card{padding:12px 12px 10px}
+  .rental-song-title{display:inline-flex;align-items:center;padding:3px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);font-size:12px;font-weight:600;color:#e3eeff;margin-bottom:10px}
+  .rental-chip-zone{display:flex;flex-wrap:wrap;gap:8px}
+  .rental-split-line{height:1px;background:rgba(95,168,230,.55);margin:10px 0 10px;opacity:.75}
+  .rental-chip{display:inline-flex;align-items:center;border-radius:999px;padding:5px 12px;font-size:12px;line-height:1.2;border:1px solid transparent}
+  .rental-chip-form{margin:0}
+  .rental-chip-form .rental-chip{cursor:pointer}
+  .rental-chip.is-need{background:rgba(221,65,65,.16);border-color:rgba(235,90,90,.55);color:#ffd8d8}
+  .rental-chip.is-bring{background:rgba(76,155,68,.18);border-color:rgba(107,191,95,.55);color:#d9f8cf}
+  .rental-chip.is-rented{background:rgba(204,110,42,.2);border-color:rgba(224,137,73,.55);color:#ffe4cb}
+  .rental-chip.is-unused{background:rgba(132,146,162,.2);border-color:rgba(162,174,190,.48);color:#d5deea}
+  .rental-chip.is-none{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.16);color:#a9bddc}
   .assign-list{display:flex;flex-direction:column;gap:8px}
   .assign-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
   .assign-row:last-child{border-bottom:none}

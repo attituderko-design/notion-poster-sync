@@ -2757,6 +2757,7 @@ async def form_menu(
     own_bring_rows_disabled: list[dict] = []
     own_bring_has_practice_songs = True
     own_bring_song_options: list[dict] = []
+    own_bring_song_groups: list[dict] = []
     if role >= ROLE_LEADER:
         own_role_rows, own_role_song_options = _build_role_own_rows(
             ctx,
@@ -2791,6 +2792,19 @@ async def form_menu(
                 song_opt_map[sid] = sname
         own_bring_song_options = [{"id": sid, "name": sname} for sid, sname in song_opt_map.items()]
         own_bring_song_options.sort(key=lambda x: x["name"].lower())
+        group_map: dict[str, dict] = {}
+        for rr in own_bring_rows_needed:
+            sid = (rr.get("song_id", "") or "").strip()
+            sname = (rr.get("song_name", "") or "未設定").strip()
+            g = group_map.setdefault(sid or sname, {"song_id": sid, "song_name": sname, "needed": [], "disabled": []})
+            g["needed"].append(rr)
+        for rr in own_bring_rows_disabled:
+            sid = (rr.get("song_id", "") or "").strip()
+            sname = (rr.get("song_name", "") or "未設定").strip()
+            g = group_map.setdefault(sid or sname, {"song_id": sid, "song_name": sname, "needed": [], "disabled": []})
+            g["disabled"].append(rr)
+        own_bring_song_groups = list(group_map.values())
+        own_bring_song_groups.sort(key=lambda x: (x.get("song_name", "") or "").lower())
     resp = templates.TemplateResponse("form/menu.html", {
         "request": request,
         "concert": concert,
@@ -2862,6 +2876,7 @@ async def form_menu(
         "own_bring_rows_disabled": own_bring_rows_disabled,
         "own_bring_has_practice_songs": own_bring_has_practice_songs,
         "own_bring_song_options": own_bring_song_options,
+        "own_bring_song_groups": own_bring_song_groups,
         "own_selected_practice_id": selected_own_practice_id,
         "upcoming_schedule_rows": upcoming_schedule_rows,
         "assign_solver_candidates": candidate_results,
