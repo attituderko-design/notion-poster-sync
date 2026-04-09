@@ -262,11 +262,11 @@ ASSIGNMENT_NOTE_KEYS        = ["備考", "メモ", "note"]
 # ── ASSIGN_RESPONSE（案提示への返答）DB ──────────────────────
 ASSIGN_RESP_KEY_KEYS         = ["assign_response_key", "response_key", "タイトル"]
 ASSIGN_RESP_CONCERT_REL_KEYS = ["concert_id", "演奏会", "concert"]
-ASSIGN_RESP_CAST_REL_KEYS    = ["cast_id", "対象者", "出演者", "参加者"]
-ASSIGN_RESP_PLAN_KEYS        = ["plan_variant", "案", "候補案"]
-ASSIGN_RESP_STATUS_KEYS      = ["status", "返答", "ステータス"]
+ASSIGN_RESP_CAST_REL_KEYS    = ["cast_id", "target_cast_id", "対象者", "出演者", "参加者"]
+ASSIGN_RESP_PLAN_KEYS        = ["plan_variant", "proposal_version", "案", "候補案"]
+ASSIGN_RESP_STATUS_KEYS      = ["status", "decision", "返答", "ステータス"]
 ASSIGN_RESP_COMMENT_KEYS     = ["comment", "コメント", "備考"]
-ASSIGN_RESP_REPLIED_AT_KEYS  = ["replied_at", "返答日時", "updated_time"]
+ASSIGN_RESP_REPLIED_AT_KEYS  = ["replied_at", "decided_at", "返答日時", "updated_time"]
 
 # ── POKE_REQUESTS（催促通知）DB ──────────────────────────────
 POKE_KEY_KEYS               = ["poke_id", "poke_key", "タイトル"]
