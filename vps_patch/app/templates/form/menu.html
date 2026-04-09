@@ -567,7 +567,7 @@
     {% set last_row = schedule_manage_rows|last if schedule_manage_rows else None %}
     <form method="post" action="/form/schedule/save" class="schedule-edit-form schedule-add-form js-preserve-scroll">
       <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}" class="js-schedule-practice-hidden">
-      <input type="hidden" name="order_no" value="{{ (last_row.order|int + 1) if last_row and last_row.order else 1 }}">
+      <input type="hidden" name="order_no" value="{{ (last_row.order|int + 10) if last_row and last_row.order else 10 }}">
       <div class="schedule-add-head">
         <div class="schedule-add-title"><i class="bi bi-plus-circle"></i> 追加</div>
       </div>
@@ -579,6 +579,10 @@
         <div class="panel-filter-item">
           <label>終了</label>
           <input class="panel-filter-select js-schedule-add-end" type="text" name="end_time" value="" placeholder="19:00">
+        </div>
+        <div class="panel-filter-item">
+          <label>所要時間（分）</label>
+          <input class="panel-filter-select js-schedule-add-duration" type="number" min="1" step="1" name="duration_min" value="">
         </div>
         <div class="panel-filter-item">
           <label>種別</label>
@@ -611,16 +615,22 @@
     <form method="post" action="/form/schedule/reorder" class="js-preserve-scroll js-schedule-reorder-form">
       <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}" class="js-schedule-practice-hidden">
       <input type="hidden" name="ordered_ids" class="js-schedule-ordered-ids" value="">
+      <input type="hidden" name="base_start_time" class="js-schedule-base-start" value="{{ (schedule_manage_rows[0].start if schedule_manage_rows else '') }}">
+      <div class="schedule-actions schedule-reorder-actions">
+        <button type="submit" class="assign-action-btn js-schedule-reorder-save" disabled>並び替えを保存</button>
+        <span class="menu-hint js-schedule-reorder-hint">並び替え後に保存してください</span>
+      </div>
     </form>
     <div class="schedule-flow js-schedule-flow">
       {% for row in schedule_manage_rows %}
-      <div class="schedule-flow-item js-schedule-item" draggable="true" data-id="{{ row.id }}">
+      <div class="schedule-flow-item js-schedule-item" draggable="true" data-id="{{ row.id }}" data-start="{{ row.start }}" data-duration="{{ row.duration }}">
         <div class="schedule-flow-line"></div>
         <div class="schedule-flow-dot"></div>
         <div class="schedule-flow-card">
           <div class="schedule-flow-time">{{ row.start or "--:--" }}{% if row.end %} - {{ row.end }}{% endif %}</div>
           <div class="schedule-flow-main">
             <span class="schedule-type {{ row.type_class }}">{{ row.type or "その他" }}</span>
+            {% if row.duration %}<span class="schedule-duration">{{ row.duration }}分</span>{% endif %}
             {% if row.song_name %}<span class="schedule-song">{{ row.song_name }}</span>{% endif %}
           </div>
           {% if row.content %}<div class="schedule-content">{{ row.content }}</div>{% endif %}
@@ -631,6 +641,7 @@
                     data-id="{{ row.id }}"
                     data-start="{{ row.start }}"
                     data-end="{{ row.end }}"
+                    data-duration="{{ row.duration }}"
                     data-type="{{ row.type }}"
                     data-song-id="{{ row.song_id }}"
                     data-order="{{ row.order }}"
@@ -663,6 +674,10 @@
             <div class="panel-filter-item">
               <label>終了</label>
               <input class="panel-filter-select js-edit-end" type="text" name="end_time" placeholder="19:00">
+            </div>
+            <div class="panel-filter-item">
+              <label>所要時間（分）</label>
+              <input class="panel-filter-select js-edit-duration" type="number" min="1" step="1" name="duration_min">
             </div>
             <div class="panel-filter-item">
               <label>種別</label>
@@ -1105,12 +1120,15 @@
   .schedule-flow-card{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.02);border-radius:11px;padding:10px 11px}
   .schedule-flow-time{font-size:12px;color:#9db8e2;font-family:'Outfit',sans-serif}
   .schedule-flow-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:5px}
+  .schedule-duration{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05);color:#c8daf4;font-size:11px}
   .schedule-flow-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:8px}
   .schedule-flow-actions form{margin:0}
   .schedule-flow-item{cursor:grab}
   .schedule-flow-item.is-dragging{opacity:.5;cursor:grabbing}
   .schedule-flow-item.is-drop-target .schedule-flow-card{border-color:rgba(95,174,255,.55);box-shadow:0 0 0 2px rgba(95,174,255,.18)}
   .schedule-drag-hint{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#97b3db;border:1px dashed rgba(255,255,255,.2);border-radius:999px;padding:2px 8px}
+  .schedule-reorder-actions{align-items:center}
+  .schedule-reorder-hint{font-size:11px}
   .schedule-edit-modal-backdrop{position:fixed;inset:0;background:rgba(5,10,18,.76);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:10080;padding:14px}
   .schedule-edit-modal-backdrop.is-open{display:flex}
   .schedule-edit-modal{width:min(620px,96vw);max-height:86vh;overflow:auto;border-radius:14px;border:1px solid rgba(255,255,255,.16);background:linear-gradient(180deg,rgba(14,23,38,.98),rgba(10,18,31,.96));box-shadow:0 22px 60px rgba(0,0,0,.52);padding:12px}
@@ -1670,6 +1688,7 @@
     const idInput = modal.querySelector(".js-edit-schedule-id");
     const startInput = modal.querySelector(".js-edit-start");
     const endInput = modal.querySelector(".js-edit-end");
+    const durationInput = modal.querySelector(".js-edit-duration");
     const typeInput = modal.querySelector(".js-edit-type");
     const songInput = modal.querySelector(".js-edit-song");
     const orderInput = modal.querySelector(".js-edit-order");
@@ -1691,6 +1710,7 @@
         if (idInput) idInput.value = btn.dataset.id || "";
         if (startInput) startInput.value = btn.dataset.start || "";
         if (endInput) endInput.value = btn.dataset.end || "";
+        if (durationInput) durationInput.value = btn.dataset.duration || "";
         if (typeInput) typeInput.value = btn.dataset.type || "";
         if (songInput) songInput.value = btn.dataset.songId || "";
         if (orderInput) orderInput.value = btn.dataset.order || "";
@@ -1711,6 +1731,7 @@
   (() => {
     const startInput = document.querySelector(".js-schedule-add-start");
     const endInput = document.querySelector(".js-schedule-add-end");
+    const durationInput = document.querySelector(".js-schedule-add-duration");
     if (!startInput || !endInput) return;
 
     const parseHHMM = (text) => {
@@ -1731,34 +1752,102 @@
       if ((endInput.value || "").trim() !== "") return;
       const m = parseHHMM(startInput.value);
       if (m === null) return;
-      endInput.value = fmtHHMM(m + 15);
+      const d = Number((durationInput && durationInput.value) ? durationInput.value : "15");
+      const duration = Number.isFinite(d) && d > 0 ? d : 15;
+      endInput.value = fmtHHMM(m + duration);
+    };
+    const syncDurationFromTimes = () => {
+      if (!durationInput) return;
+      const s = parseHHMM(startInput.value);
+      const e = parseHHMM(endInput.value);
+      if (s === null || e === null || e < s) return;
+      durationInput.value = String(Math.max(1, e - s));
+    };
+    const syncEndFromDuration = () => {
+      if (!durationInput) return;
+      const s = parseHHMM(startInput.value);
+      const d = Number(durationInput.value || "");
+      if (s === null || !Number.isFinite(d) || d <= 0) return;
+      endInput.value = fmtHHMM(s + d);
     };
     startInput.addEventListener("change", syncEndFromStart);
     startInput.addEventListener("blur", syncEndFromStart);
+    endInput.addEventListener("change", syncDurationFromTimes);
+    endInput.addEventListener("blur", syncDurationFromTimes);
+    if (durationInput) {
+      durationInput.addEventListener("change", syncEndFromDuration);
+      durationInput.addEventListener("blur", syncEndFromDuration);
+    }
     syncEndFromStart();
+    syncDurationFromTimes();
   })();
 
   (() => {
     const flow = document.querySelector(".js-schedule-flow");
     const reorderForm = document.querySelector(".js-schedule-reorder-form");
     const orderedInput = reorderForm ? reorderForm.querySelector(".js-schedule-ordered-ids") : null;
+    const baseStartInput = reorderForm ? reorderForm.querySelector(".js-schedule-base-start") : null;
+    const saveBtn = reorderForm ? reorderForm.querySelector(".js-schedule-reorder-save") : null;
     if (!flow || !reorderForm || !orderedInput) return;
 
     let dragging = null;
     let touchDragging = null;
     let touchTimer = null;
     let touchStartedOnInteractive = false;
+    let dirty = false;
+    const parseHHMM = (text) => {
+      const m = (text || "").trim().match(/^(\d{1,2}):(\d{2})$/);
+      if (!m) return null;
+      const h = Number(m[1]);
+      const mm = Number(m[2]);
+      if (Number.isNaN(h) || Number.isNaN(mm) || h < 0 || h > 23 || mm < 0 || mm > 59) return null;
+      return h * 60 + mm;
+    };
+    const fmtHHMM = (min) => {
+      const m = ((min % 1440) + 1440) % 1440;
+      const h = Math.floor(m / 60);
+      const mm = m % 60;
+      return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    };
+    const parsePositiveInt = (value, fallback) => {
+      const n = Number(value);
+      if (Number.isFinite(n) && n > 0) return Math.floor(n);
+      return fallback;
+    };
     const clearDropTargets = () => {
       flow.querySelectorAll(".js-schedule-item.is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
     };
     const itemList = () => Array.from(flow.querySelectorAll(".js-schedule-item"));
     const buildOrderedIds = () => itemList().map((el) => el.getAttribute("data-id") || "").filter(Boolean).join(",");
-    const submitReorder = () => {
+    const recomputeLocalTimes = () => {
+      const items = itemList();
+      if (!items.length) return;
+      let base = parseHHMM((items[0].dataset.start || "").trim());
+      if (base === null) {
+        const t = items[0].querySelector(".schedule-flow-time");
+        if (t) {
+          const m = (t.textContent || "").match(/(\d{1,2}:\d{2})/);
+          base = m ? parseHHMM(m[1]) : null;
+        }
+      }
+      if (base === null) return;
+      let current = base;
+      items.forEach((item) => {
+        const duration = parsePositiveInt(item.dataset.duration || "15", 15);
+        const st = fmtHHMM(current);
+        const ed = fmtHHMM(current + duration);
+        const timeNode = item.querySelector(".schedule-flow-time");
+        if (timeNode) timeNode.textContent = `${st} - ${ed}`;
+        item.dataset.start = st;
+        current += duration;
+      });
+      if (baseStartInput) baseStartInput.value = fmtHHMM(base);
+    };
+    const markDirty = () => {
+      dirty = true;
       orderedInput.value = buildOrderedIds();
-      if (!orderedInput.value) return;
-      sessionStorage.setItem("form_menu_scroll_y", String(window.scrollY || window.pageYOffset || 0));
-      sessionStorage.setItem("form_menu_role_panel", "schedule");
-      reorderForm.submit();
+      if (saveBtn) saveBtn.disabled = false;
+      recomputeLocalTimes();
     };
     const findDropTarget = (clientX, clientY) => {
       const el = document.elementFromPoint(clientX, clientY);
@@ -1788,7 +1877,7 @@
         touchDragging = null;
       }
       clearDropTargets();
-      if (doSubmit) submitReorder();
+      if (doSubmit) markDirty();
     };
 
     itemList().forEach((item) => {
@@ -1821,7 +1910,7 @@
       item.addEventListener("drop", (e) => {
         e.preventDefault();
         clearDropTargets();
-        submitReorder();
+        markDirty();
       });
 
       item.addEventListener("touchstart", (e) => {
@@ -1868,6 +1957,23 @@
         finishTouchDrag(false);
         touchStartedOnInteractive = false;
       }, { passive: true });
+    });
+    if (saveBtn) {
+      saveBtn.addEventListener("click", (e) => {
+        if (!dirty) {
+          e.preventDefault();
+          return;
+        }
+      });
+    }
+    reorderForm.addEventListener("submit", (e) => {
+      orderedInput.value = buildOrderedIds();
+      if (!orderedInput.value || !dirty) {
+        e.preventDefault();
+        return;
+      }
+      sessionStorage.setItem("form_menu_scroll_y", String(window.scrollY || window.pageYOffset || 0));
+      sessionStorage.setItem("form_menu_role_panel", "schedule");
     });
   })();
 

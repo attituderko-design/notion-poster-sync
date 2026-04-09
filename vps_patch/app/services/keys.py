@@ -151,6 +151,7 @@ SCHEDULE_TYPE_KEYS        = ["種別", "Type", "区分"]
 SCHEDULE_CONTENT_KEYS     = ["内容", "メモ", "Content"]
 SCHEDULE_SONG_REL_KEYS    = ["演奏曲", "楽曲", "FK楽曲"]
 SCHEDULE_ORDER_KEYS       = ["表示順", "順番", "Order"]
+SCHEDULE_DURATION_KEYS    = ["所要時間", "duration", "duration_min", "所要時間(分)"]
 
 SCHEDULE_TYPE_OPTIONS     = ["練習", "休憩", "開場", "搬入", "搬出", "退館", "その他"]
 

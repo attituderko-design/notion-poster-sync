@@ -105,6 +105,7 @@ SCHEDULE_TYPE_KEYS = _K.SCHEDULE_TYPE_KEYS
 SCHEDULE_CONTENT_KEYS = _K.SCHEDULE_CONTENT_KEYS
 SCHEDULE_SONG_REL_KEYS = _K.SCHEDULE_SONG_REL_KEYS
 SCHEDULE_ORDER_KEYS = _K.SCHEDULE_ORDER_KEYS
+SCHEDULE_DURATION_KEYS = _K.SCHEDULE_DURATION_KEYS
 SCHEDULE_TYPE_OPTIONS = _K.SCHEDULE_TYPE_OPTIONS
 POKE_KEY_KEYS = _K.POKE_KEY_KEYS
 POKE_SENDER_CAST_REL_KEYS = _K.POKE_SENDER_CAST_REL_KEYS
@@ -659,6 +660,36 @@ def _minutes_to_hhmm(v: int) -> str:
     return f"{h:02d}:{mm:02d}"
 
 
+def _parse_positive_int(value: str | int | float | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            iv = int(float(value))
+        except Exception:
+            return None
+        return iv if iv > 0 else None
+    txt = str(value).strip()
+    if not txt:
+        return None
+    try:
+        iv = int(float(txt))
+    except Exception:
+        return None
+    return iv if iv > 0 else None
+
+
+def _schedule_duration_minutes(row: dict, ext_txt, *, default_minutes: int = 15) -> int:
+    dv = _parse_positive_int(ext_txt(row, SCHEDULE_DURATION_KEYS))
+    if dv is not None:
+        return dv
+    st_old = _hhmm_to_minutes((ext_txt(row, SCHEDULE_START_KEYS) or "").strip())
+    ed_old = _hhmm_to_minutes((ext_txt(row, SCHEDULE_END_KEYS) or "").strip())
+    if st_old is not None and ed_old is not None and ed_old >= st_old:
+        return max(1, ed_old - st_old)
+    return max(1, int(default_minutes or 15))
+
+
 def _schedule_type_class(type_name: str) -> str:
     v = (type_name or "").strip()
     if v == "練習":
@@ -704,6 +735,7 @@ def _build_schedule_manage_rows(
             "type": (ext_txt(row, SCHEDULE_TYPE_KEYS) or "").strip(),
             "content": (ext_txt(row, SCHEDULE_CONTENT_KEYS) or "").strip(),
             "order": (ext_txt(row, SCHEDULE_ORDER_KEYS) or "").strip(),
+            "duration": _schedule_duration_minutes(row, ext_txt),
             "song_id": song_id,
             "song_name": song_name,
         })
@@ -3336,6 +3368,7 @@ async def form_schedule_save(
     practice_id: Annotated[str, Form()],
     start_time: Annotated[str, Form()] = "",
     end_time: Annotated[str, Form()] = "",
+    duration_min: Annotated[str, Form()] = "",
     type_name: Annotated[str, Form()] = "",
     content: Annotated[str, Form()] = "",
     song_id: Annotated[str, Form()] = "",
@@ -3380,17 +3413,36 @@ async def form_schedule_save(
 
     st = _format_hhmm(start_time)
     ed = _format_hhmm(end_time)
+    duration_value = _parse_positive_int(duration_min)
     tp = (type_name or "").strip() or "その他"
     ct = (content or "").strip()
     sid = (song_id or "").strip()
     order_txt = (order_no or "").strip()
+    st_min = _hhmm_to_minutes(st)
+    ed_min = _hhmm_to_minutes(ed)
+
+    if st_min is None:
+        _flash_set(request, "error", "開始時刻を HH:MM 形式で入力してください。")
+        return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={practice_id}#role-menu-panels", status_code=302)
+    if duration_value is None:
+        if ed_min is None:
+            _flash_set(request, "error", "終了時刻か所要時間（分）を入力してください。")
+            return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={practice_id}#role-menu-panels", status_code=302)
+        if ed_min < st_min:
+            _flash_set(request, "error", "日跨ぎは非許可です。終了時刻は開始時刻以降にしてください。")
+            return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={practice_id}#role-menu-panels", status_code=302)
+        duration_value = max(1, ed_min - st_min)
+    ed_calc = st_min + int(duration_value)
+    if ed_calc >= (24 * 60):
+        _flash_set(request, "error", "日跨ぎは非許可です。開始時刻と所要時間を見直してください。")
+        return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={practice_id}#role-menu-panels", status_code=302)
+    ed = _minutes_to_hhmm(ed_calc)
 
     props: dict = {}
     ctx["put_prop_any"](props, t, SCHEDULE_PRACTICE_REL_KEYS, practice_id)
-    if st:
-        ctx["put_prop_any"](props, t, SCHEDULE_START_KEYS, st)
-    if ed:
-        ctx["put_prop_any"](props, t, SCHEDULE_END_KEYS, ed)
+    ctx["put_prop_any"](props, t, SCHEDULE_START_KEYS, st)
+    ctx["put_prop_any"](props, t, SCHEDULE_END_KEYS, ed)
+    ctx["put_prop_any"](props, t, SCHEDULE_DURATION_KEYS, str(duration_value))
     ctx["put_prop_any"](props, t, SCHEDULE_TYPE_KEYS, tp)
     if ct:
         ctx["put_prop_any"](props, t, SCHEDULE_CONTENT_KEYS, ct)
@@ -3479,6 +3531,7 @@ async def form_schedule_reorder(
     request: Request,
     practice_id: Annotated[str, Form()],
     ordered_ids: Annotated[str, Form()] = "",
+    base_start_time: Annotated[str, Form()] = "",
 ):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
@@ -3538,6 +3591,9 @@ async def form_schedule_reorder(
     base_start = None
     for sid in ordered:
         r = row_map.get(sid, {})
+        base_start = _hhmm_to_minutes((base_start_time or "").strip())
+        if base_start is not None:
+            break
         base_start = _hhmm_to_minutes((r.get("start", "") or "").strip())
         if base_start is not None:
             break
@@ -3547,19 +3603,19 @@ async def form_schedule_reorder(
     failed = 0
     for idx, sid in enumerate(ordered, start=1):
         r = row_map.get(sid, {})
-        st_old = _hhmm_to_minutes((r.get("start", "") or "").strip())
-        ed_old = _hhmm_to_minutes((r.get("end", "") or "").strip())
-        duration = 15
-        if st_old is not None and ed_old is not None and ed_old >= st_old:
-            duration = max(1, ed_old - st_old)
+        duration = _parse_positive_int(r.get("duration")) or 15
 
         props: dict = {}
-        ctx["put_prop_any"](props, t, SCHEDULE_ORDER_KEYS, str(idx))
+        ctx["put_prop_any"](props, t, SCHEDULE_ORDER_KEYS, str(idx * 10))
         if current is not None:
+            if (current + duration) >= (24 * 60):
+                failed += 1
+                continue
             st_txt = _minutes_to_hhmm(current)
             ed_txt = _minutes_to_hhmm(current + duration)
             ctx["put_prop_any"](props, t, SCHEDULE_START_KEYS, st_txt)
             ctx["put_prop_any"](props, t, SCHEDULE_END_KEYS, ed_txt)
+            ctx["put_prop_any"](props, t, SCHEDULE_DURATION_KEYS, str(duration))
             current = current + duration
 
         res = ctx["api_request"](
