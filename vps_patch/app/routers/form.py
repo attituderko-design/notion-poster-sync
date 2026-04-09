@@ -3923,20 +3923,20 @@ async def form_rental_upsert(
 
     db_id = (ctx.get("CONCERT_DB_RENTAL", "") or "").strip()
     if not db_id:
-        _flash_set(request, "error", "CONCERT_DB_RENTAL が未設定です。")
-        return RedirectResponse(f"/form?tab=ownmap&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+        _flash_set(request, "error", "CONCERT_DB_RENTAL が未設定です（vps_patch/app/.env にDB ID設定が必要）。")
+        return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
 
     t = ctx["get_prop_types"](db_id) or {}
     if not t:
         _flash_set(request, "error", "RENTAL DB のプロパティ取得に失敗しました。")
-        return RedirectResponse(f"/form?tab=ownmap&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+        return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
 
     practice_id = (practice_id or "").strip()
     instrument_id = (instrument_id or "").strip()
     song_id = (song_id or "").strip()
     if not practice_id or not instrument_id:
         _flash_set(request, "error", "練習日と楽器情報が不正です。")
-        return RedirectResponse("/form?tab=ownmap#role-menu-panels", status_code=302)
+        return RedirectResponse("/form?tab=rental#role-menu-panels", status_code=302)
 
     qty = _parse_positive_int(suggested_qty)
     if qty is None:
@@ -3997,7 +3997,7 @@ async def form_rental_upsert(
         if ok
         else f"レンタル情報の保存に失敗しました。{_api_err_brief(res)}",
     )
-    return RedirectResponse(f"/form?tab=ownmap&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+    return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
 
 
 @router.get("/form/att", response_class=HTMLResponse)
@@ -4450,6 +4450,8 @@ def _build_own_bring_rows(
     # 既存レンタル（practice + instrument + item_name 単位）
     rental_qty_by_inst: dict[str, int] = defaultdict(int)
     rental_qty_by_song_inst: dict[tuple[str, str], int] = defaultdict(int)
+    rental_detail_by_inst: dict[str, list[str]] = defaultdict(list)
+    rental_detail_by_song_inst: dict[tuple[str, str], list[str]] = defaultdict(list)
     rental_db_id = (ctx.get("CONCERT_DB_RENTAL", "") or "").strip()
     if rental_db_id and selected_practice_id:
         for r in ctx["query_all"](rental_db_id, None):
@@ -4466,11 +4468,33 @@ def _build_own_bring_rows(
             except Exception:
                 qty = 0
             rental_qty_by_inst[inst_id] += qty
+            vendor = (ext_txt(r, RENTAL_VENDOR_KEYS) or "").strip()
+            unit_raw = (ext_txt(r, RENTAL_UNIT_PRICE_KEYS) or "").strip()
+            try:
+                unit_price = int(float(unit_raw)) if unit_raw else 0
+            except Exception:
+                unit_price = 0
+            if vendor or unit_price > 0:
+                if unit_price > 0:
+                    detail = f"{vendor or '業者未設定'} : ¥ {unit_price:,}"
+                else:
+                    detail = f"{vendor} : 単価未設定"
+                if qty > 0:
+                    detail = f"{detail} ×{qty}"
+                rental_detail_by_inst[inst_id].append(detail)
             item_name = (ext_txt(r, RENTAL_ITEM_NAME_KEYS) or "").strip()
             if item_name:
                 for sid, sname in song_name_map.items():
                     if sname and item_name.startswith(f"{sname} / "):
                         rental_qty_by_song_inst[(sid, inst_id)] += qty
+                        if vendor or unit_price > 0:
+                            if unit_price > 0:
+                                detail2 = f"{vendor or '業者未設定'} : ¥ {unit_price:,}"
+                            else:
+                                detail2 = f"{vendor} : 単価未設定"
+                            if qty > 0:
+                                detail2 = f"{detail2} ×{qty}"
+                            rental_detail_by_song_inst[(sid, inst_id)].append(detail2)
                         break
 
     # 対象練習日の「その日にやる曲」: 種別=練習 かつ 演奏曲あり
@@ -4604,6 +4628,19 @@ def _build_own_bring_rows(
             state = "ng"
         elif rental_qty > 0:
             state = "rented"
+        owner_ok_text = ", ".join([f"{b['name']}×{b['qty']}" for b in owner_badges_ok]) or "なし"
+        owner_maybe_text = ", ".join([f"{b['name']}×{b['qty']}" for b in owner_badges_maybe]) or "なし"
+        rental_detail = rental_detail_by_song_inst.get((song_id, inst_id), rental_detail_by_inst.get(inst_id, []))
+        rental_detail_text = " / ".join(rental_detail) if rental_detail else "業者未設定"
+        absent_names: list[str] = []
+        if assigned_casts:
+            for cast_norm in assigned_casts:
+                pid2 = cast_to_player.get(cast_norm, "")
+                nm = player_name_map.get(pid2, "不明")
+                if att_by_cast.get(cast_norm, "") != "ok":
+                    absent_names.append(nm)
+        absent_names = sorted(set(absent_names))
+        absent_text = ", ".join(absent_names) if absent_names else "不明"
         row = {
             "song_id": song_id,
             "song_name": song_name_map.get(song_id, "未設定"),
@@ -4619,6 +4656,10 @@ def _build_own_bring_rows(
             "state": state,
             "owner_badges_ok": owner_badges_ok,
             "owner_badges_maybe": owner_badges_maybe,
+            "tip_need": f"必要 {required_qty} / 持参可 {available_ok} / 不足 {shortage}",
+            "tip_bring": f"持参者: {owner_ok_text}" + (f" / △: {owner_maybe_text}" if owner_maybe_text != "なし" else ""),
+            "tip_rented": f"手配済 {rental_qty} / {rental_detail_text}",
+            "tip_unused": f"担当者欠席: {absent_text}",
         }
         if needed_today:
             rows_needed.append(row)

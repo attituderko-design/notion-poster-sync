@@ -551,15 +551,15 @@
                 <input type="hidden" name="song_id" value="{{ row.song_id }}">
                 <input type="hidden" name="instrument_id" value="{{ row.instrument_id }}">
                 <input type="hidden" name="suggested_qty" value="{{ row.shortage }}">
-                <button type="submit" class="rental-chip is-need">要るもの: {{ row.instrument_name }} ×{{ row.shortage }}</button>
+                <button type="submit" class="rental-chip is-need js-chip-tip" title="{{ row.tip_need }}" data-tip="{{ row.tip_need }}">{{ row.instrument_name }}</button>
               </form>
               {% else %}
-              <span class="rental-chip is-need">要るもの: {{ row.instrument_name }} ×{{ row.shortage }}</span>
+              <span class="rental-chip is-need js-chip-tip" title="{{ row.tip_need }}" data-tip="{{ row.tip_need }}">{{ row.instrument_name }}</span>
               {% endif %}
             {% elif row.rental_qty > 0 %}
-              <span class="rental-chip is-rented">手配済: {{ row.instrument_name }} ×{{ row.rental_qty }}</span>
+              <span class="rental-chip is-rented js-chip-tip" title="{{ row.tip_rented }}" data-tip="{{ row.tip_rented }}">{{ row.instrument_name }}</span>
             {% else %}
-              <span class="rental-chip is-bring">持参するもの: {{ row.instrument_name }}{% if row.available_ok > 0 %} ×{{ row.available_ok }}{% endif %}</span>
+              <span class="rental-chip is-bring js-chip-tip" title="{{ row.tip_bring }}" data-tip="{{ row.tip_bring }}">{{ row.instrument_name }}</span>
             {% endif %}
           {% endfor %}
         </div>
@@ -567,7 +567,7 @@
         <div class="rental-chip-zone">
           {% if g.disabled %}
             {% for row in g.disabled %}
-            <span class="rental-chip is-unused">要らないもの: {{ row.instrument_name }}</span>
+            <span class="rental-chip is-unused js-chip-tip" title="{{ row.tip_unused }}" data-tip="{{ row.tip_unused }}">{{ row.instrument_name }}</span>
             {% endfor %}
           {% else %}
             <span class="rental-chip is-none">要らないものはありません</span>
@@ -1302,6 +1302,7 @@
   .rental-chip-zone{display:flex;flex-wrap:wrap;gap:8px}
   .rental-split-line{height:1px;background:rgba(95,168,230,.55);margin:10px 0 10px;opacity:.75}
   .rental-chip{display:inline-flex;align-items:center;border-radius:999px;padding:5px 12px;font-size:12px;line-height:1.2;border:1px solid transparent}
+  .rental-chip.js-chip-tip{cursor:help}
   .rental-chip-form{margin:0}
   .rental-chip-form .rental-chip{cursor:pointer}
   .rental-chip.is-need{background:rgba(221,65,65,.16);border-color:rgba(235,90,90,.55);color:#ffd8d8}
@@ -1309,6 +1310,8 @@
   .rental-chip.is-rented{background:rgba(204,110,42,.2);border-color:rgba(224,137,73,.55);color:#ffe4cb}
   .rental-chip.is-unused{background:rgba(132,146,162,.2);border-color:rgba(162,174,190,.48);color:#d5deea}
   .rental-chip.is-none{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.16);color:#a9bddc}
+  .chip-tip-toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:10090;max-width:min(90vw,520px);padding:9px 12px;border-radius:10px;border:1px solid rgba(140,190,255,.35);background:rgba(10,20,34,.95);color:#d3e6ff;font-size:12px;line-height:1.55;box-shadow:0 10px 28px rgba(0,0,0,.42);opacity:0;pointer-events:none;transition:opacity .18s ease}
+  .chip-tip-toast.is-show{opacity:1}
   .assign-list{display:flex;flex-direction:column;gap:8px}
   .assign-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
   .assign-row:last-child{border-bottom:none}
@@ -2621,6 +2624,46 @@
         if (!type) return;
         applyFilters(type);
       });
+    });
+  })();
+
+  (() => {
+    const chips = Array.from(document.querySelectorAll(".js-chip-tip[data-tip]"));
+    if (!chips.length) return;
+    const toast = document.createElement("div");
+    toast.className = "chip-tip-toast";
+    document.body.appendChild(toast);
+    let hideTimer = null;
+    const showToast = (text) => {
+      if (!text) return;
+      toast.textContent = text;
+      toast.classList.add("is-show");
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        toast.classList.remove("is-show");
+      }, 2200);
+    };
+
+    let pressTimer = null;
+    chips.forEach((chip) => {
+      chip.addEventListener("pointerdown", (e) => {
+        if (e.pointerType !== "touch") return;
+        pressTimer = setTimeout(() => {
+          showToast(chip.getAttribute("data-tip") || "");
+        }, 450);
+      }, { passive: true });
+      chip.addEventListener("pointerup", () => {
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+      }, { passive: true });
+      chip.addEventListener("pointercancel", () => {
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+      }, { passive: true });
     });
   })();
 </script>
