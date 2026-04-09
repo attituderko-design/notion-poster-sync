@@ -758,6 +758,18 @@ def _effective_role(
     return override_role if override_role is not None else base_role
 
 
+def _practice_label_by_id(ctx: dict, practice_rows: list[dict], practice_id: str) -> str:
+    ext = ctx["extract_prop_text_any"]
+    pid_norm = _norm_id(practice_id)
+    for p in (practice_rows or []):
+        if _norm_id(p.get("id", "")) != pid_norm:
+            continue
+        pname = (ext(p, PRACTICE_NAME_KEYS) or "練習").strip()
+        pdate = (ext(p, PRACTICE_DATE_KEYS) or "").strip()[:10]
+        return f"{pdate} {pname}".strip()
+    return practice_id[:8] if practice_id else "練習"
+
+
 def _harmonia_flags(ctx: dict, concert_id: str) -> dict:
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
@@ -2522,6 +2534,15 @@ async def form_menu(
             "schedule_count": scount,
             "has_schedule": scount > 0,
         })
+    # ID表記ゆれ（ハイフン有無）を吸収して選択先ズレを防ぐ
+    if selected_schedule_practice_id and practice_options:
+        exact_ids = {x["id"] for x in practice_options}
+        if selected_schedule_practice_id not in exact_ids:
+            sel_norm = _norm_id(selected_schedule_practice_id)
+            for opt in practice_options:
+                if _norm_id(opt["id"]) == sel_norm:
+                    selected_schedule_practice_id = opt["id"]
+                    break
     if not selected_schedule_practice_id:
         selected_schedule_practice_id = upcoming_practice_id or (practice_options[0]["id"] if practice_options else "")
     if selected_schedule_practice_id:
@@ -3314,7 +3335,8 @@ async def form_schedule_save(
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
-    participant_rows = load_form_data(ctx, cid).get("participant_rows_concert", [])
+    form_data = load_form_data(ctx, cid)
+    participant_rows = form_data.get("participant_rows_concert", [])
     role = _effective_role(
         request,
         ctx,
@@ -3340,6 +3362,7 @@ async def form_schedule_save(
     if not practice_id:
         _flash_set(request, "error", "対象練習を選択してください。")
         return RedirectResponse("/form?tab=schedule#role-menu-panels", status_code=302)
+    practice_label = _practice_label_by_id(ctx, form_data.get("practices", []) or [], practice_id)
 
     st = _format_hhmm(start_time)
     ed = _format_hhmm(end_time)
@@ -3377,7 +3400,7 @@ async def form_schedule_save(
             json={"properties": props},
         )
         ok = bool(res and res.status_code in (200, 201))
-        _flash_set(request, "info" if ok else "error", "スケジュールを更新しました。" if ok else f"スケジュール更新に失敗しました。{_api_err_brief(res)}")
+        _flash_set(request, "info" if ok else "error", f"スケジュールを更新しました（{practice_label}）。" if ok else f"スケジュール更新に失敗しました。{_api_err_brief(res)}")
     else:
         res = ctx["api_request"](
             "post",
@@ -3385,7 +3408,7 @@ async def form_schedule_save(
             json={"parent": {"database_id": db_id}, "properties": props},
         )
         ok = bool(res and res.status_code in (200, 201))
-        _flash_set(request, "info" if ok else "error", "スケジュールを追加しました。" if ok else f"スケジュール追加に失敗しました。{_api_err_brief(res)}")
+        _flash_set(request, "info" if ok else "error", f"スケジュールを追加しました（{practice_label}）。" if ok else f"スケジュール追加に失敗しました。{_api_err_brief(res)}")
 
     return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={practice_id}#role-menu-panels", status_code=302)
 
