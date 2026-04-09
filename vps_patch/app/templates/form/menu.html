@@ -692,28 +692,63 @@
           {% if rental_manage_rows %}
             {% for r in rental_manage_rows %}
             {% set row_amount = (r.qty or 0) * (r.unit_price or 0) %}
-            <form method="post" action="/form/rental/save" class="js-preserve-scroll rental-ledger-row">
-              <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
-              <input type="hidden" name="rental_id" value="{{ r.id }}">
-              <input type="hidden" name="return_tab" value="rental_manage">
-              <input class="panel-filter-select" type="text" name="cost_type" value="{{ r.cost_type }}" placeholder="費用種別">
-              <input class="panel-filter-select" type="text" name="item_name" value="{{ r.item_name }}" placeholder="品目名">
-              <input class="panel-filter-select" type="text" name="vendor" value="{{ r.vendor }}" placeholder="業者名">
-              <input class="panel-filter-select is-num" type="number" min="0" step="1" name="qty" value="{{ r.qty }}" placeholder="数量">
-              <input class="panel-filter-select is-num" type="number" min="0" step="1" name="unit_price" value="{{ r.unit_price }}" placeholder="単価">
-              <div class="rental-amount-cell">¥ {{ "{:,}".format(row_amount) }}</div>
-              <input class="panel-filter-select" type="text" name="note" value="{{ r.note }}" placeholder="備考">
-              <div class="rental-row-actions is-pair">
-                <button type="submit" class="assign-action-btn">更新</button>
-                <button type="submit" formaction="/form/rental/delete" formmethod="post" class="assign-action-btn is-danger">削除</button>
-              </div>
-            </form>
+            <button
+              type="button"
+              class="rental-compact-row js-rental-open-modal"
+              data-rental-id="{{ r.id }}"
+              data-cost-type="{{ r.cost_type }}"
+              data-item-name="{{ r.item_name }}"
+              data-vendor="{{ r.vendor }}"
+              data-qty="{{ r.qty }}"
+              data-unit-price="{{ r.unit_price }}"
+              data-note="{{ r.note }}"
+              data-song-id="{{ r.song_id }}"
+              data-instrument-id="{{ r.instrument_id }}"
+            >
+              <span class="rental-compact-cell">{{ r.cost_type or "-" }}</span>
+              <span class="rental-compact-cell">{{ r.item_name or "-" }}</span>
+              <span class="rental-compact-cell">{{ r.vendor or "-" }}</span>
+              <span class="rental-compact-cell is-num">{{ r.qty }}</span>
+              <span class="rental-compact-cell is-num">¥ {{ "{:,}".format(r.unit_price or 0) }}</span>
+              <span class="rental-compact-cell is-num">¥ {{ "{:,}".format(row_amount) }}</span>
+              <span class="rental-compact-cell">{{ (r.note or "-")[:26] }}{% if r.note and (r.note|length) > 26 %}…{% endif %}</span>
+              <span class="rental-compact-cell is-action">詳細</span>
+            </button>
             {% endfor %}
           {% else %}
             <div class="menu-hint">コスト明細はまだありません。</div>
           {% endif %}
         </div>
       </section>
+    </div>
+
+    <div id="rental-edit-modal" class="rental-edit-modal" aria-hidden="true">
+      <div class="rental-edit-card">
+        <div class="rental-edit-head">
+          <div class="rental-edit-title">明細を編集</div>
+          <button type="button" class="rental-edit-close js-rental-modal-close">×</button>
+        </div>
+        <form method="post" action="/form/rental/save" class="js-preserve-scroll rental-edit-form" id="rental-edit-form">
+          <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
+          <input type="hidden" name="rental_id" value="">
+          <input type="hidden" name="return_tab" value="rental_manage">
+          <input type="hidden" name="song_id" value="">
+          <input type="hidden" name="instrument_id" value="">
+          <div class="rental-edit-grid">
+            <label class="rental-edit-field"><span>区分</span><input class="panel-filter-select" type="text" name="cost_type" value=""></label>
+            <label class="rental-edit-field"><span>品目名</span><input class="panel-filter-select" type="text" name="item_name" value=""></label>
+            <label class="rental-edit-field"><span>業者</span><input class="panel-filter-select" type="text" name="vendor" value=""></label>
+            <label class="rental-edit-field"><span>数量</span><input class="panel-filter-select is-num" type="number" min="0" step="1" name="qty" value=""></label>
+            <label class="rental-edit-field"><span>単価</span><input class="panel-filter-select is-num" type="number" min="0" step="1" name="unit_price" value=""></label>
+            <label class="rental-edit-field rental-edit-field-full"><span>備考</span><input class="panel-filter-select" type="text" name="note" value=""></label>
+          </div>
+          <div class="rental-edit-actions">
+            <button type="button" class="assign-action-btn js-rental-modal-close">閉じる</button>
+            <button type="submit" class="assign-action-btn">更新</button>
+            <button type="submit" formaction="/form/rental/delete" formmethod="post" class="assign-action-btn is-danger">削除</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 </div>
@@ -1473,11 +1508,27 @@
   .rental-ledger-row .panel-filter-select.is-num{text-align:right}
   .rental-amount-cell{font-family:'Outfit',sans-serif;font-size:12px;color:#dce9ff;text-align:right;white-space:nowrap}
   .rental-row-actions{display:flex;justify-content:flex-end}
-  .rental-row-actions.is-pair{display:grid;grid-template-columns:1fr 1fr;gap:6px}
   .rental-row-actions .assign-action-btn{height:32px;min-width:0;width:100%;padding:0 8px}
+  .rental-compact-row{display:grid;grid-template-columns:var(--rental-cols);gap:8px;align-items:center;width:100%;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:rgba(255,255,255,.015);padding:8px 10px;margin-top:8px;text-align:left;color:inherit;cursor:pointer;transition:border-color .15s ease,background .15s ease}
+  .rental-compact-row:hover{border-color:rgba(112,170,255,.45);background:rgba(255,255,255,.04)}
+  .rental-compact-cell{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#d7e6ff}
+  .rental-compact-cell.is-num{text-align:right;font-family:'Outfit',sans-serif}
+  .rental-compact-cell.is-action{text-align:center;color:#9dc7ff;font-weight:600}
+  .rental-edit-modal{position:fixed;inset:0;background:rgba(4,8,14,.74);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:10095;padding:18px}
+  .rental-edit-modal.is-open{display:flex}
+  .rental-edit-card{width:min(740px,94vw);border:1px solid rgba(255,255,255,.14);border-radius:14px;background:linear-gradient(180deg,rgba(21,30,46,.98),rgba(14,21,35,.98));padding:14px 14px 12px}
+  .rental-edit-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .rental-edit-title{font-family:'Outfit',sans-serif;font-size:16px;color:#e6f0ff}
+  .rental-edit-close{width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.04);color:#d8e7ff;cursor:pointer}
+  .rental-edit-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .rental-edit-field{display:flex;flex-direction:column;gap:4px}
+  .rental-edit-field span{font-size:11px;color:#9db6dd}
+  .rental-edit-field-full{grid-column:1 / -1}
+  .rental-edit-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+  .rental-edit-actions .assign-action-btn{min-width:92px}
   @media (max-width: 1120px){
     .rental-ledger-wrap{overflow-x:auto}
-    .rental-ledger-head,.rental-ledger-row{min-width:980px}
+    .rental-ledger-head,.rental-ledger-row,.rental-compact-row{min-width:980px}
   }
   @media (max-width: 860px){
     .rental-ledger-head{display:none}
@@ -1491,7 +1542,9 @@
     .rental-ledger-row.is-new{border-color:rgba(140,190,255,.3)}
     .rental-ledger-row .rental-amount-cell,
     .rental-ledger-row .rental-row-actions{grid-column:1 / -1}
-    .rental-row-actions.is-pair{grid-template-columns:1fr 1fr}
+    .rental-compact-row{grid-template-columns:1fr 1fr;border-radius:10px;padding:10px}
+    .rental-compact-cell.is-action{grid-column:1 / -1;text-align:right}
+    .rental-edit-grid{grid-template-columns:1fr}
   }
   .chip-tip-toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:10090;max-width:min(90vw,520px);padding:9px 12px;border-radius:10px;border:1px solid rgba(140,190,255,.35);background:rgba(10,20,34,.95);color:#d3e6ff;font-size:12px;line-height:1.55;box-shadow:0 10px 28px rgba(0,0,0,.42);opacity:0;pointer-events:none;transition:opacity .18s ease}
   .chip-tip-toast.is-show{opacity:1}
@@ -2938,6 +2991,10 @@
     const candidates = Array.from(document.querySelectorAll(".js-rental-candidate"));
     const zones = Array.from(document.querySelectorAll(".js-rental-drop-zone"));
     const ledgerRows = Array.from(document.querySelectorAll(".rental-ledger-row"));
+    const modal = document.getElementById("rental-edit-modal");
+    const openRows = Array.from(document.querySelectorAll(".js-rental-open-modal"));
+    const modalClose = Array.from(document.querySelectorAll(".js-rental-modal-close"));
+    const editForm = document.getElementById("rental-edit-form");
     if (!form) return;
 
     const fields = {
@@ -3027,6 +3084,39 @@
         if (!el) return;
         el.addEventListener("input", () => syncLedgerAmount(row));
       });
+    });
+
+    if (!modal || !editForm || !openRows.length) return;
+    const setVal = (name, value) => {
+      const el = editForm.querySelector(`[name="${name}"]`);
+      if (el) el.value = value || "";
+    };
+    const openModal = (btn) => {
+      setVal("rental_id", btn.getAttribute("data-rental-id") || "");
+      setVal("cost_type", btn.getAttribute("data-cost-type") || "");
+      setVal("item_name", btn.getAttribute("data-item-name") || "");
+      setVal("vendor", btn.getAttribute("data-vendor") || "");
+      setVal("qty", btn.getAttribute("data-qty") || "1");
+      setVal("unit_price", btn.getAttribute("data-unit-price") || "0");
+      setVal("note", btn.getAttribute("data-note") || "");
+      setVal("song_id", btn.getAttribute("data-song-id") || "");
+      setVal("instrument_id", btn.getAttribute("data-instrument-id") || "");
+      modal.classList.add("is-open");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.style.overflow = "hidden";
+    };
+    const closeModal = () => {
+      modal.classList.remove("is-open");
+      modal.setAttribute("aria-hidden", "true");
+      document.body.style.overflow = "";
+    };
+    openRows.forEach((btn) => btn.addEventListener("click", () => openModal(btn)));
+    modalClose.forEach((btn) => btn.addEventListener("click", closeModal));
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeModal();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && modal.classList.contains("is-open")) closeModal();
     });
   })();
 
