@@ -552,7 +552,7 @@
 <div class="role-panel" data-role-panel="schedule">
   <div class="menu-item f4 schedule-role-panel">
     {% if schedule_practice_options %}
-    <form method="get" action="/form" class="schedule-practice-form js-preserve-scroll">
+    <form method="get" action="/form#role-menu-panels" class="schedule-practice-form js-preserve-scroll js-schedule-practice-form">
       <input type="hidden" name="tab" value="schedule">
       <div class="panel-filter-item">
         <label for="schedule-practice-select">練習回</label>
@@ -566,7 +566,7 @@
 
     {% set last_row = schedule_manage_rows|last if schedule_manage_rows else None %}
     <form method="post" action="/form/schedule/save" class="schedule-edit-form schedule-add-form js-preserve-scroll">
-      <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}">
+      <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}" class="js-schedule-practice-hidden">
       <input type="hidden" name="order_no" value="{{ (last_row.order|int + 1) if last_row and last_row.order else 1 }}">
       <div class="schedule-add-head">
         <div class="schedule-add-title"><i class="bi bi-plus-circle"></i> 追加</div>
@@ -609,7 +609,7 @@
 
     {% if schedule_manage_rows %}
     <form method="post" action="/form/schedule/reorder" class="js-preserve-scroll js-schedule-reorder-form">
-      <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}">
+      <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}" class="js-schedule-practice-hidden">
       <input type="hidden" name="ordered_ids" class="js-schedule-ordered-ids" value="">
     </form>
     <div class="schedule-flow js-schedule-flow">
@@ -637,7 +637,7 @@
                     data-content="{{ row.content|default('', true) }}">編集</button>
             <form method="post" action="/form/schedule/delete" class="js-preserve-scroll">
               <input type="hidden" name="schedule_id" value="{{ row.id }}">
-              <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}">
+              <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}" class="js-schedule-practice-hidden">
               <button type="submit" class="assign-action-btn is-danger">削除</button>
             </form>
           </div>
@@ -653,7 +653,7 @@
           <button type="button" class="schedule-close js-schedule-edit-close" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
         </div>
         <form method="post" action="/form/schedule/save" class="schedule-edit-form js-preserve-scroll">
-          <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}">
+          <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}" class="js-schedule-practice-hidden">
           <input type="hidden" name="schedule_id" class="js-edit-schedule-id" value="">
           <div class="schedule-grid">
             <div class="panel-filter-item">
@@ -1919,6 +1919,26 @@
     };
     tabs.forEach((t) => {
       t.addEventListener("click", () => activate(t.getAttribute("data-candidate-index")));
+    });
+  })();
+
+  (() => {
+    const practiceSelect = document.getElementById("schedule-practice-select");
+    const syncPracticeHidden = () => {
+      if (!practiceSelect) return;
+      const v = practiceSelect.value || "";
+      document.querySelectorAll(".js-schedule-practice-hidden").forEach((el) => {
+        el.value = v;
+      });
+    };
+    syncPracticeHidden();
+    if (practiceSelect) {
+      practiceSelect.addEventListener("change", syncPracticeHidden);
+    }
+    document.querySelectorAll(".js-schedule-practice-form").forEach((form) => {
+      form.addEventListener("submit", () => {
+        syncPracticeHidden();
+      });
     });
   })();
 
