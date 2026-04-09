@@ -1604,53 +1604,57 @@
   .table-mini{width:100%;border-collapse:collapse;font-size:.92rem}
   .table-mini th,.table-mini td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;white-space:nowrap}
   .table-mini th{color:#9db1d6;font-weight:700}
-  .role-tabs{display:flex;gap:10px;margin:8px 0 10px}
-  .role-tab{border:1px solid rgba(255,255,255,.16);background:rgba(18,26,42,.7);color:#c9d6f3;border-radius:10px;padding:8px 12px;cursor:pointer}
+  .role-tabs{display:flex;gap:10px;margin:8px 0 10px;overflow-x:auto;padding-bottom:2px;-ms-overflow-style:none;scrollbar-width:none}
+  .role-tabs::-webkit-scrollbar{display:none}
+  .role-tab{
+    position:relative;
+    border:1px solid rgba(255,255,255,.16);
+    background:rgba(18,26,42,.7);
+    color:#c9d6f3;
+    border-radius:10px;
+    padding:8px 12px;
+    cursor:pointer;
+    white-space:nowrap;
+    transition:transform .16s ease,border-color .16s ease,background-color .16s ease;
+  }
   .role-tab .bi{margin-right:6px;font-size:.9em}
+  .role-tab:hover{transform:translateY(-1px);border-color:rgba(122,169,244,.5);background:rgba(26,38,58,.82)}
   .role-tab.is-active{border-color:#6ca8ff;color:#fff}
+  .role-tabs.is-compact{gap:7px}
+  .role-tabs.is-compact .role-tab{
+    width:42px;min-width:42px;height:40px;padding:0;
+    display:inline-flex;align-items:center;justify-content:center;
+    font-size:0;line-height:0;
+  }
+  .role-tabs.is-compact .role-tab .bi{margin-right:0;font-size:16px;line-height:1}
+  .role-tabs.is-compact .role-tab:hover{transform:translateY(-1px) scale(1.08)}
+  .role-tabs.is-compact .role-tab:hover::after,
+  .role-tabs.is-compact .role-tab:focus-visible::after,
+  .role-tabs.is-compact .role-tab.is-hold-hint::after{
+    content:attr(data-hold-label);
+    position:absolute;
+    left:50%;
+    bottom:calc(100% + 8px);
+    transform:translateX(-50%);
+    padding:4px 8px;
+    border-radius:7px;
+    border:1px solid rgba(255,255,255,.2);
+    background:rgba(11,18,30,.96);
+    color:#d8e8ff;
+    font-size:11px;
+    line-height:1.2;
+    white-space:nowrap;
+    box-shadow:0 8px 20px rgba(0,0,0,.35);
+    pointer-events:none;
+    z-index:20;
+  }
   .role-panel{display:none}
   .role-panel.is-active{display:block}
   @media (max-width: 640px){
     .role-tabs{gap:8px}
-    .role-tab{
-      position:relative;
-      width:46px;
-      min-width:46px;
-      height:42px;
-      padding:0;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      font-size:0;
-      line-height:0;
-    }
-    .role-tab .bi{
-      margin-right:0;
-      font-size:16px;
-      line-height:1;
-    }
+    .role-tab{width:46px;min-width:46px;height:42px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:0;line-height:0}
+    .role-tab .bi{margin-right:0;font-size:16px;line-height:1}
     .role-tab.is-hold-hint::after{
-      content:attr(data-hold-label);
-      position:absolute;
-      left:50%;
-      bottom:calc(100% + 8px);
-      transform:translateX(-50%);
-      padding:4px 8px;
-      border-radius:7px;
-      border:1px solid rgba(255,255,255,.2);
-      background:rgba(11,18,30,.96);
-      color:#d8e8ff;
-      font-size:11px;
-      line-height:1.2;
-      white-space:nowrap;
-      box-shadow:0 8px 20px rgba(0,0,0,.35);
-      pointer-events:none;
-      z-index:20;
-    }
-  }
-  @media (max-width: 640px) and (hover: hover) and (pointer: fine){
-    .role-tab:hover::after,
-    .role-tab:focus-visible::after{
       content:attr(data-hold-label);
       position:absolute;
       left:50%;
@@ -1812,9 +1816,10 @@
   })();
 
   (() => {
+    const tabWrap = document.getElementById("role-menu-panels");
     const tabs = document.querySelectorAll('[data-role-tab]');
     const panels = document.querySelectorAll('[data-role-panel]');
-    if (!tabs.length || !panels.length) return;
+    if (!tabs.length || !panels.length || !tabWrap) return;
     const initialTab = "{{ initial_role_tab or '' }}";
     const isMobileTouch = window.matchMedia("(max-width: 640px) and (hover: none), (max-width: 640px) and (pointer: coarse)").matches;
     const longPressMs = 420;
@@ -1830,6 +1835,12 @@
       if (holdTimer) {
         clearTimeout(holdTimer);
         holdTimer = null;
+      }
+    };
+    const applyCompactTabs = () => {
+      tabWrap.classList.remove("is-compact");
+      if (tabWrap.scrollWidth > (tabWrap.clientWidth + 2)) {
+        tabWrap.classList.add("is-compact");
       }
     };
     const restored = sessionStorage.getItem("form_menu_role_panel");
@@ -1876,6 +1887,8 @@
         clearHoldHint();
       }, { passive: true });
     }
+    applyCompactTabs();
+    window.addEventListener("resize", applyCompactTabs);
   })();
 
   (() => {
