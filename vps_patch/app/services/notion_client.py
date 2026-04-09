@@ -28,9 +28,19 @@ _QUERY_CACHE: dict[str, tuple[float, list[dict]]] = {}
 _TYPE_CACHE: dict[str, tuple[float, dict]] = {}
 _METRICS: ContextVar[list[dict]] = ContextVar("notion_metrics", default=[])
 
-REQ_CONNECT_TIMEOUT = 6
-REQ_READ_TIMEOUT = 30
-REQ_MAX_RETRIES = 2
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int((os.environ.get(name, str(default)) or str(default)).strip())
+    except Exception:
+        return default
+
+
+# NOTE:
+# 長時間の「90%張り付き」を避けるため、既定値は控えめにして
+# 必要時は .env から上書き可能にする。
+REQ_CONNECT_TIMEOUT = max(1, _env_int("NOTION_CONNECT_TIMEOUT_SECONDS", 4))
+REQ_READ_TIMEOUT = max(3, _env_int("NOTION_READ_TIMEOUT_SECONDS", 12))
+REQ_MAX_RETRIES = max(0, _env_int("NOTION_MAX_RETRIES", 1))
 
 
 def _cache_ttl_seconds() -> int:
