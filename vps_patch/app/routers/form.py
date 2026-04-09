@@ -138,6 +138,7 @@ RENTAL_UNIT_PRICE_KEYS = _K.RENTAL_UNIT_PRICE_KEYS
 RENTAL_COST_TYPE_KEYS = _K.RENTAL_COST_TYPE_KEYS
 RENTAL_NOTE_KEYS = _K.RENTAL_NOTE_KEYS
 RENTAL_KEY_KEYS = _K.RENTAL_KEY_KEYS
+RENTAL_CONFIRMED_KEYS = _K.RENTAL_CONFIRMED_KEYS
 MASTER_PLAYER_REL_KEYS = _K.MASTER_PLAYER_REL_KEYS
 MASTER_INST_REL_KEYS = _K.MASTER_INST_REL_KEYS
 MASTER_OWN_COUNT_KEYS = _K.MASTER_OWN_COUNT_KEYS
@@ -2768,6 +2769,8 @@ async def form_menu(
     own_bring_song_groups: list[dict] = []
     rental_manage_rows: list[dict] = []
     rental_candidate_groups: list[dict] = []
+    rental_day_summaries: list[dict] = []
+    rental_selected_summary: dict = {}
     if role >= ROLE_LEADER:
         own_role_rows, own_role_song_options = _build_role_own_rows(
             ctx,
@@ -2824,6 +2827,14 @@ async def form_menu(
         rental_candidate_groups = _build_rental_candidate_groups(
             own_bring_song_groups,
             rental_manage_rows,
+        )
+        rental_day_summaries = _build_rental_day_summaries(
+            ctx,
+            practices=data.get("practices", []) or [],
+        )
+        rental_selected_summary = next(
+            (x for x in rental_day_summaries if (x.get("practice_id", "") or "") == selected_own_practice_id),
+            {},
         )
     resp = templates.TemplateResponse("form/menu.html", {
         "request": request,
@@ -2899,6 +2910,8 @@ async def form_menu(
         "own_bring_song_groups": own_bring_song_groups,
         "rental_manage_rows": rental_manage_rows,
         "rental_candidate_groups": rental_candidate_groups,
+        "rental_day_summaries": rental_day_summaries,
+        "rental_selected_summary": rental_selected_summary,
         "own_selected_practice_id": selected_own_practice_id,
         "upcoming_schedule_rows": upcoming_schedule_rows,
         "assign_solver_candidates": candidate_results,
@@ -4047,6 +4060,7 @@ async def form_rental_save(
     unit_price: Annotated[str, Form()] = "",
     cost_type: Annotated[str, Form()] = "",
     note: Annotated[str, Form()] = "",
+    confirmed: Annotated[str, Form()] = "",
 ):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
@@ -4088,6 +4102,7 @@ async def form_rental_save(
     vendor = (vendor or "").strip()
     note = (note or "").strip()
     cost_type = (cost_type or "").strip()
+    confirmed_bool = _truthy_text(confirmed or "")
     song_id = (song_id or "").strip()
     instrument_id = (instrument_id or "").strip()
     if not item_name:
@@ -4105,6 +4120,7 @@ async def form_rental_save(
     ctx["put_prop_any"](props, t, RENTAL_UNIT_PRICE_KEYS, str(uv))
     ctx["put_prop_any"](props, t, RENTAL_COST_TYPE_KEYS, cost_type)
     ctx["put_prop_any"](props, t, RENTAL_NOTE_KEYS, note)
+    ctx["put_prop_any"](props, t, RENTAL_CONFIRMED_KEYS, confirmed_bool)
     if instrument_id:
         ctx["put_prop_any"](props, t, RENTAL_INST_REL_KEYS, instrument_id)
     rid = (rental_id or "").strip()
@@ -4133,6 +4149,83 @@ async def form_rental_save(
         except Exception:
             pass
     return RedirectResponse(f"/form?tab={dest_tab}&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+
+
+@router.post("/form/rental/confirm-practice")
+async def form_rental_confirm_practice(
+    request: Request,
+    practice_id: Annotated[str, Form()],
+    checked: Annotated[str, Form()] = "1",
+):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return _session_expired_redirect(request)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    role = _effective_role(
+        request, ctx,
+        player_id=pid,
+        concert_id=cid,
+        participant_rows=data.get("participant_rows_concert", []),
+    )
+    if role < ROLE_MANAGER:
+        _flash_set(request, "error", "この操作にはManager権限が必要です。")
+        return RedirectResponse("/form", status_code=302)
+
+    db_id = (ctx.get("CONCERT_DB_RENTAL", "") or "").strip()
+    if not db_id:
+        _flash_set(request, "error", "CONCERT_DB_RENTAL が未設定です。")
+        return RedirectResponse(f"/form?tab=rental_manage&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+    t = ctx["get_prop_types"](db_id) or {}
+    key = ctx["find_prop_name"](t, RENTAL_CONFIRMED_KEYS) if t else ""
+    if not key:
+        _flash_set(request, "error", "RENTAL DB に確定フラグ項目がありません。")
+        return RedirectResponse(f"/form?tab=rental_manage&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+
+    practice_id = (practice_id or "").strip()
+    if not practice_id:
+        _flash_set(request, "error", "練習日が不正です。")
+        return RedirectResponse("/form?tab=rental_manage#role-menu-panels", status_code=302)
+
+    ext_rel = ctx["extract_relation_ids_any"]
+    to_checked = _truthy_text(checked or "")
+    targets = []
+    pnorm = _norm_id(practice_id)
+    for r in ctx["query_all"](db_id, None):
+        pids = ext_rel(r, RENTAL_PRACTICE_REL_KEYS)
+        if pids and _norm_id(pids[0]) == pnorm:
+            targets.append((r.get("id", "") or "").strip())
+
+    success = 0
+    for rid in targets:
+        if not rid:
+            continue
+        res = ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{rid}",
+            json={"properties": {key: {"checkbox": bool(to_checked)}}},
+        )
+        if res and res.status_code in (200, 201):
+            success += 1
+
+    if success > 0:
+        _flash_set(request, "info", f"対象 {success} 件を{'確定' if to_checked else '下書き戻し'}しました。")
+        try:
+            invalidate_form_data_cache(cid)
+        except Exception:
+            pass
+        try:
+            inv = ctx.get("invalidate_query_cache")
+            if callable(inv):
+                inv((ctx.get("CONCERT_DB_RENTAL", "") or "").strip())
+        except Exception:
+            pass
+    else:
+        _flash_set(request, "error", "更新対象が見つからないか、更新に失敗しました。")
+    return RedirectResponse(f"/form?tab=rental_manage&own_practice_id={practice_id}#role-menu-panels", status_code=302)
 
 
 @router.post("/form/rental/delete")
@@ -4897,6 +4990,8 @@ def _build_rental_manage_rows(
             unit = 0
         note = (ext_txt(r, RENTAL_NOTE_KEYS) or "").strip()
         cost_type = (ext_txt(r, RENTAL_COST_TYPE_KEYS) or "").strip()
+        confirmed = _truthy_text(ext_txt(r, RENTAL_CONFIRMED_KEYS) or "")
+        amount = qty * unit
         sid = ""
         if item_name and " / " in item_name:
             left = item_name.split(" / ", 1)[0].strip()
@@ -4916,6 +5011,9 @@ def _build_rental_manage_rows(
             "unit_price": unit,
             "note": note,
             "cost_type": cost_type,
+            "confirmed": confirmed,
+            "status_label": ("確定" if confirmed else "下書き"),
+            "amount": amount,
         })
     out.sort(key=lambda x: ((x.get("song_name") or "").lower(), (x.get("instrument_name") or "").lower(), x.get("item_name", "")))
     return out
@@ -4947,12 +5045,10 @@ def _build_rental_candidate_groups(
             inst_name = (row.get("instrument_name", "") or "楽器").strip()
             matched = by_key.get((song_id, inst_id), [])
             best = matched[0] if matched else {}
-            vendor = (best.get("vendor", "") or "").strip()
-            unit = int(best.get("unit_price", 0) or 0)
             qty = int(best.get("qty", 0) or 0)
             status = "pending"
             if matched:
-                status = "done" if (vendor or unit > 0) else "draft"
+                status = "done" if bool(best.get("confirmed", False)) else "draft"
             tags.append({
                 "song_id": song_id,
                 "song_name": song_name,
@@ -4975,6 +5071,78 @@ def _build_rental_candidate_groups(
             })
     groups.sort(key=lambda x: (x.get("song_name", "") or "").lower())
     return groups
+
+
+def _build_rental_day_summaries(
+    ctx: dict,
+    *,
+    practices: list[dict],
+) -> list[dict]:
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+    db_id = (ctx.get("CONCERT_DB_RENTAL", "") or "").strip()
+    if not db_id:
+        return []
+
+    practice_label_map: dict[str, str] = {}
+    for p in practices or []:
+        pid = (p.get("id", "") or "").strip()
+        if not pid:
+            continue
+        practice_label_map[pid] = _practice_label(ctx, p)
+
+    bucket: dict[str, dict] = {}
+    for r in ctx["query_all"](db_id, None):
+        pr_ids = ext_rel(r, RENTAL_PRACTICE_REL_KEYS)
+        if not pr_ids:
+            continue
+        pid = (pr_ids[0] or "").strip()
+        if not pid:
+            continue
+        row = bucket.setdefault(pid, {
+            "practice_id": pid,
+            "practice_label": practice_label_map.get(pid, _practice_label_from_rows(ctx, pid, practices)),
+            "count": 0,
+            "confirmed_count": 0,
+            "amount_total": 0,
+            "amount_confirmed": 0,
+        })
+        try:
+            qty = max(0, int(float((ext_txt(r, RENTAL_QTY_KEYS) or "0").strip() or "0")))
+        except Exception:
+            qty = 0
+        try:
+            unit = max(0, int(float((ext_txt(r, RENTAL_UNIT_PRICE_KEYS) or "0").strip() or "0")))
+        except Exception:
+            unit = 0
+        amount = qty * unit
+        confirmed = _truthy_text(ext_txt(r, RENTAL_CONFIRMED_KEYS) or "")
+        row["count"] += 1
+        row["amount_total"] += amount
+        if confirmed:
+            row["confirmed_count"] += 1
+            row["amount_confirmed"] += amount
+
+    out = list(bucket.values())
+    for row in out:
+        count = int(row.get("count", 0) or 0)
+        c_count = int(row.get("confirmed_count", 0) or 0)
+        if count <= 0:
+            status = "none"
+            status_label = "未登録"
+        elif c_count <= 0:
+            status = "draft"
+            status_label = "下書き"
+        elif c_count >= count:
+            status = "confirmed"
+            status_label = "確定済"
+        else:
+            status = "partial"
+            status_label = "一部確定"
+        row["status"] = status
+        row["status_label"] = status_label
+    out.sort(key=lambda x: x.get("practice_label", ""))
+    return out
 
 
 def _build_material_rows(ctx, partdefs, songs, my_part_id, role) -> list:

@@ -657,8 +657,27 @@
         {% endfor %}
         <div id="rental-manage" class="own-carry-head">当日コスト明細</div>
         <div class="rental-total-bar">
+          {% if rental_selected_summary %}
+          <span class="rental-day-status is-{{ rental_selected_summary.status }}">{{ rental_selected_summary.status_label }}</span>
+          <span>合計</span>
+          <strong>¥ {{ "{:,}".format(rental_selected_summary.amount_total or 0) }}</strong>
+          <span class="rental-total-sub">確定 ¥ {{ "{:,}".format(rental_selected_summary.amount_confirmed or 0) }}</span>
+          {% else %}
           <span>合計</span>
           <strong>¥ {{ "{:,}".format(rental_total.v) }}</strong>
+          {% endif %}
+          <div class="rental-total-actions">
+            <form method="post" action="/form/rental/confirm-practice" class="js-preserve-scroll">
+              <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
+              <input type="hidden" name="checked" value="1">
+              <button type="submit" class="assign-action-btn">この練習日を確定</button>
+            </form>
+            <form method="post" action="/form/rental/confirm-practice" class="js-preserve-scroll">
+              <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
+              <input type="hidden" name="checked" value="0">
+              <button type="submit" class="assign-action-btn">下書きに戻す</button>
+            </form>
+          </div>
         </div>
         <div class="rental-ledger-wrap">
           <div class="rental-ledger-head">
@@ -677,6 +696,7 @@
             <input type="hidden" name="return_tab" value="rental_manage">
             <input type="hidden" name="song_id" value="">
             <input type="hidden" name="instrument_id" value="">
+            <input type="hidden" name="confirmed" value="0">
             <input class="panel-filter-select" type="text" name="cost_type" value="" placeholder="費用種別">
             <input class="panel-filter-select" type="text" name="item_name" value="" placeholder="品目名" required>
             <input class="panel-filter-select" type="text" name="vendor" value="" placeholder="業者名">
@@ -704,8 +724,9 @@
               data-note="{{ r.note }}"
               data-song-id="{{ r.song_id }}"
               data-instrument-id="{{ r.instrument_id }}"
+              data-confirmed="{% if r.confirmed %}1{% else %}0{% endif %}"
             >
-              <span class="rental-compact-cell">{{ r.cost_type or "-" }}</span>
+              <span class="rental-compact-cell">{{ r.cost_type or "-" }}<span class="rental-row-status is-{% if r.confirmed %}confirmed{% else %}draft{% endif %}">{{ r.status_label }}</span></span>
               <span class="rental-compact-cell">{{ r.item_name or "-" }}</span>
               <span class="rental-compact-cell">{{ r.vendor or "-" }}</span>
               <span class="rental-compact-cell is-num">{{ r.qty }}</span>
@@ -740,6 +761,12 @@
             <label class="rental-edit-field"><span>業者</span><input class="panel-filter-select" type="text" name="vendor" value=""></label>
             <label class="rental-edit-field"><span>数量</span><input class="panel-filter-select is-num" type="number" min="0" step="1" name="qty" value=""></label>
             <label class="rental-edit-field"><span>単価</span><input class="panel-filter-select is-num" type="number" min="0" step="1" name="unit_price" value=""></label>
+            <label class="rental-edit-field"><span>状態</span>
+              <select class="panel-filter-select" name="confirmed">
+                <option value="0">下書き</option>
+                <option value="1">確定</option>
+              </select>
+            </label>
             <label class="rental-edit-field rental-edit-field-full"><span>備考</span><input class="panel-filter-select" type="text" name="note" value=""></label>
           </div>
           <div class="rental-edit-actions">
@@ -749,6 +776,23 @@
           </div>
         </form>
       </div>
+    </div>
+    <div class="rental-day-summary">
+      <div class="own-carry-head">練習日別コスト集計</div>
+      {% if rental_day_summaries %}
+      <div class="rental-day-summary-list">
+        {% for s in rental_day_summaries %}
+        <a href="/form?tab=rental_manage&own_practice_id={{ s.practice_id }}#role-menu-panels" class="rental-day-summary-row{% if own_selected_practice_id == s.practice_id %} is-active{% endif %}">
+          <span class="rental-day-label">{{ s.practice_label }}</span>
+          <span class="rental-day-badge is-{{ s.status }}">{{ s.status_label }}</span>
+          <span class="rental-day-amount">¥ {{ "{:,}".format(s.amount_total or 0) }}</span>
+          <span class="rental-day-sub">確定 ¥ {{ "{:,}".format(s.amount_confirmed or 0) }}</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="menu-hint">コスト明細がまだありません。</div>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -1497,6 +1541,15 @@
   .rental-candidate-tag.is-done{background:rgba(76,155,68,.18);border-color:rgba(107,191,95,.55);color:#d9f8cf}
   .rental-total-bar{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:2px;margin-bottom:8px;font-size:12px;color:#b6cae8}
   .rental-total-bar strong{font-family:'Outfit',sans-serif;color:#e3eeff;font-size:15px;letter-spacing:.02em}
+  .rental-total-sub{font-size:11px;color:#9fc1ea}
+  .rental-total-actions{display:inline-flex;gap:6px;margin-left:8px}
+  .rental-total-actions form{margin:0}
+  .rental-total-actions .assign-action-btn{height:30px;padding:0 10px;font-size:11px}
+  .rental-day-status{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.2);font-size:11px}
+  .rental-day-status.is-confirmed{background:rgba(95,182,115,.16);border-color:rgba(110,200,135,.5);color:#cef3d8}
+  .rental-day-status.is-partial{background:rgba(222,164,78,.2);border-color:rgba(234,182,92,.55);color:#ffe7be}
+  .rental-day-status.is-draft{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.22);color:#d5e5ff}
+  .rental-day-status.is-none{background:rgba(130,140,155,.16);border-color:rgba(145,158,176,.4);color:#cfdaec}
   .rental-ledger-wrap{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:10px;padding:8px;overflow-x:hidden}
   .rental-ledger-wrap{--rental-cols:1fr 1.25fr 1fr .62fr .62fr .75fr 1.25fr .72fr}
   .rental-ledger-head,.rental-ledger-row{display:grid;grid-template-columns:var(--rental-cols);gap:8px;align-items:center}
@@ -1514,6 +1567,9 @@
   .rental-compact-cell{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#d7e6ff}
   .rental-compact-cell.is-num{text-align:right;font-family:'Outfit',sans-serif}
   .rental-compact-cell.is-action{text-align:center;color:#9dc7ff;font-weight:600}
+  .rental-row-status{display:inline-flex;align-items:center;margin-left:6px;padding:1px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.2);font-size:10px;color:#cfe0f8}
+  .rental-row-status.is-confirmed{background:rgba(95,182,115,.16);border-color:rgba(110,200,135,.5);color:#cef3d8}
+  .rental-row-status.is-draft{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.2);color:#cfe0f8}
   .rental-edit-modal{position:fixed;inset:0;background:rgba(4,8,14,.74);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:10095;padding:18px}
   .rental-edit-modal.is-open{display:flex}
   .rental-edit-card{width:min(740px,94vw);border:1px solid rgba(255,255,255,.14);border-radius:14px;background:linear-gradient(180deg,rgba(21,30,46,.98),rgba(14,21,35,.98));padding:14px 14px 12px}
@@ -1526,12 +1582,29 @@
   .rental-edit-field-full{grid-column:1 / -1}
   .rental-edit-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
   .rental-edit-actions .assign-action-btn{min-width:92px}
+  .rental-day-summary{margin-top:10px;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:rgba(255,255,255,.015);padding:10px}
+  .rental-day-summary-list{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+  .rental-day-summary-row{display:grid;grid-template-columns:minmax(180px,1.8fr) auto auto auto;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);text-decoration:none;color:inherit}
+  .rental-day-summary-row:hover{border-color:rgba(112,170,255,.42);background:rgba(255,255,255,.04)}
+  .rental-day-summary-row.is-active{border-color:rgba(112,170,255,.55);box-shadow:0 0 0 1px rgba(112,170,255,.22) inset}
+  .rental-day-label{font-size:12px;color:#d7e7ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rental-day-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.2);font-size:11px}
+  .rental-day-badge.is-confirmed{background:rgba(95,182,115,.16);border-color:rgba(110,200,135,.5);color:#cef3d8}
+  .rental-day-badge.is-partial{background:rgba(222,164,78,.2);border-color:rgba(234,182,92,.55);color:#ffe7be}
+  .rental-day-badge.is-draft{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.22);color:#d5e5ff}
+  .rental-day-badge.is-none{background:rgba(130,140,155,.16);border-color:rgba(145,158,176,.4);color:#cfdaec}
+  .rental-day-amount{font-family:'Outfit',sans-serif;font-size:13px;color:#e1eeff;text-align:right}
+  .rental-day-sub{font-size:11px;color:#9fc1ea;white-space:nowrap}
   @media (max-width: 1120px){
     .rental-ledger-wrap{overflow-x:auto}
     .rental-ledger-wrap{--rental-cols:minmax(110px,1fr) minmax(170px,1.2fr) minmax(120px,1fr) 70px 70px 84px minmax(160px,1.2fr) 96px}
     .rental-ledger-head,.rental-ledger-row,.rental-compact-row{min-width:860px}
   }
   @media (max-width: 860px){
+    .rental-total-bar{justify-content:flex-start;flex-wrap:wrap}
+    .rental-total-actions{margin-left:0;display:flex;flex-wrap:wrap}
+    .rental-day-summary-row{grid-template-columns:1fr auto;row-gap:4px}
+    .rental-day-amount,.rental-day-sub{text-align:left}
     .rental-ledger-head{display:none}
     .rental-ledger-row{
       grid-template-columns:1fr 1fr;
@@ -3102,6 +3175,7 @@
       setVal("note", btn.getAttribute("data-note") || "");
       setVal("song_id", btn.getAttribute("data-song-id") || "");
       setVal("instrument_id", btn.getAttribute("data-instrument-id") || "");
+      setVal("confirmed", btn.getAttribute("data-confirmed") || "0");
       modal.classList.add("is-open");
       modal.setAttribute("aria-hidden", "false");
       document.body.style.overflow = "hidden";
