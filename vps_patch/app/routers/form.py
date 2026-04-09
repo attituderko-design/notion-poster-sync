@@ -743,6 +743,21 @@ def _api_err_brief(res) -> str:
         return "unknown error"
 
 
+def _effective_role(
+    request: Request,
+    ctx: dict,
+    *,
+    player_id: str,
+    concert_id: str,
+    participant_rows: list[dict],
+) -> int:
+    base_role = resolve_user_role(ctx, player_id, concert_id, participant_rows)
+    my_system_role = _my_system_role(ctx, player_id, concert_id, participant_rows)
+    override_raw = request.session.get(DEBUG_ROLE_OVERRIDE_SESSION_KEY, "")
+    override_role = _role_from_override(override_raw) if _is_administrator_role(my_system_role) else None
+    return override_role if override_role is not None else base_role
+
+
 def _harmonia_flags(ctx: dict, concert_id: str) -> dict:
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
@@ -3300,7 +3315,13 @@ async def form_schedule_save(
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
     participant_rows = load_form_data(ctx, cid).get("participant_rows_concert", [])
-    role = resolve_user_role(ctx, pid, cid, participant_rows)
+    role = _effective_role(
+        request,
+        ctx,
+        player_id=pid,
+        concert_id=cid,
+        participant_rows=participant_rows,
+    )
     if role < ROLE_MANAGER:
         _flash_set(request, "error", "この操作にはManager権限が必要です。")
         return RedirectResponse("/form", status_code=302)
@@ -3383,7 +3404,13 @@ async def form_schedule_delete(
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
     participant_rows = load_form_data(ctx, cid).get("participant_rows_concert", [])
-    role = resolve_user_role(ctx, pid, cid, participant_rows)
+    role = _effective_role(
+        request,
+        ctx,
+        player_id=pid,
+        concert_id=cid,
+        participant_rows=participant_rows,
+    )
     if role < ROLE_MANAGER:
         _flash_set(request, "error", "この操作にはManager権限が必要です。")
         return RedirectResponse("/form", status_code=302)
@@ -3420,7 +3447,13 @@ async def form_schedule_reorder(
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
     participant_rows = load_form_data(ctx, cid).get("participant_rows_concert", [])
-    role = resolve_user_role(ctx, pid, cid, participant_rows)
+    role = _effective_role(
+        request,
+        ctx,
+        player_id=pid,
+        concert_id=cid,
+        participant_rows=participant_rows,
+    )
     if role < ROLE_MANAGER:
         _flash_set(request, "error", "この操作にはManager権限が必要です。")
         return RedirectResponse("/form", status_code=302)
