@@ -557,7 +557,7 @@
               <span class="rental-chip is-need js-chip-tip" title="{{ row.tip_need }}" data-tip="{{ row.tip_need }}">{{ row.instrument_name }}</span>
               {% endif %}
             {% elif row.rental_qty > 0 %}
-              <span class="rental-chip is-rented js-chip-tip" title="{{ row.tip_rented }}" data-tip="{{ row.tip_rented }}">{{ row.instrument_name }}</span>
+              <a href="#rental-manage" class="rental-chip is-rented js-chip-tip" title="{{ row.tip_rented }}" data-tip="{{ row.tip_rented }}">{{ row.instrument_name }}</a>
             {% else %}
               <span class="rental-chip is-bring js-chip-tip" title="{{ row.tip_bring }}" data-tip="{{ row.tip_bring }}">{{ row.instrument_name }}</span>
             {% endif %}
@@ -577,6 +577,43 @@
       {% endfor %}
     </div>
     <div class="panel-empty is-hidden" data-empty-for="rental">該当する行がありません。</div>
+
+    {% if is_manager %}
+    <div id="rental-manage" class="own-carry-head" style="margin-top:12px;">レンタル手配一覧（編集）</div>
+    {% if rental_manage_rows %}
+    <div class="rental-manage-list">
+      {% for r in rental_manage_rows %}
+      <div class="rental-manage-row">
+      <form method="post" action="/form/rental/save" class="js-preserve-scroll">
+        <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
+        <input type="hidden" name="rental_id" value="{{ r.id }}">
+        <div class="rental-manage-title">{{ r.item_name }}</div>
+        <div class="rental-manage-grid">
+          <input class="panel-filter-select" type="text" name="vendor" value="{{ r.vendor }}" placeholder="業者名">
+          <input class="panel-filter-select" type="number" min="0" step="1" name="unit_price" value="{{ r.unit_price }}" placeholder="単価">
+          <input class="panel-filter-select" type="number" min="0" step="1" name="qty" value="{{ r.qty }}" placeholder="数量">
+          <input class="panel-filter-select" type="text" name="item_name" value="{{ r.item_name }}" placeholder="品目名">
+        </div>
+        <div class="rental-manage-grid" style="margin-top:6px;">
+          <input class="panel-filter-select" type="text" name="note" value="{{ r.note }}" placeholder="備考">
+        </div>
+        <div class="rental-manage-actions">
+          <button type="submit" class="assign-action-btn">更新</button>
+        </div>
+      </form>
+      <form method="post" action="/form/rental/delete" class="js-preserve-scroll">
+        <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
+        <input type="hidden" name="rental_id" value="{{ r.id }}">
+        <div class="rental-manage-actions" style="margin-top:6px;">
+          <button type="submit" class="assign-action-btn is-danger">削除</button>
+        </div>
+      </form>
+      </div>{% endfor %}
+    </div>
+    {% else %}
+    <div class="menu-hint">レンタル手配はまだありません。</div>
+    {% endif %}
+    {% endif %}
     {% else %}
     <div class="menu-hint">練習日の出欠と所有楽器を突き合わせた結果がありません。</div>
     {% endif %}
@@ -1310,6 +1347,13 @@
   .rental-chip.is-rented{background:rgba(204,110,42,.2);border-color:rgba(224,137,73,.55);color:#ffe4cb}
   .rental-chip.is-unused{background:rgba(132,146,162,.2);border-color:rgba(162,174,190,.48);color:#d5deea}
   .rental-chip.is-none{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.16);color:#a9bddc}
+  .rental-chip[href]{text-decoration:none}
+  .rental-manage-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .rental-manage-row{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:10px;padding:10px}
+  .rental-manage-title{font-size:12px;color:#d9e8ff;margin-bottom:6px;font-weight:600}
+  .rental-manage-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+  .rental-manage-actions{display:flex;gap:6px;align-items:center;margin-top:6px}
+  @media (max-width: 860px){.rental-manage-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
   .chip-tip-toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:10090;max-width:min(90vw,520px);padding:9px 12px;border-radius:10px;border:1px solid rgba(140,190,255,.35);background:rgba(10,20,34,.95);color:#d3e6ff;font-size:12px;line-height:1.55;box-shadow:0 10px 28px rgba(0,0,0,.42);opacity:0;pointer-events:none;transition:opacity .18s ease}
   .chip-tip-toast.is-show{opacity:1}
   .assign-list{display:flex;flex-direction:column;gap:8px}

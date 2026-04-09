@@ -2763,6 +2763,7 @@ async def form_menu(
     own_bring_has_practice_songs = True
     own_bring_song_options: list[dict] = []
     own_bring_song_groups: list[dict] = []
+    rental_manage_rows: list[dict] = []
     if role >= ROLE_LEADER:
         own_role_rows, own_role_song_options = _build_role_own_rows(
             ctx,
@@ -2810,6 +2811,12 @@ async def form_menu(
             g["disabled"].append(rr)
         own_bring_song_groups = list(group_map.values())
         own_bring_song_groups.sort(key=lambda x: (x.get("song_name", "") or "").lower())
+        rental_manage_rows = _build_rental_manage_rows(
+            ctx,
+            concert_id=cid,
+            practice_id=selected_own_practice_id,
+            songs=data.get("songs", []) or [],
+        )
     resp = templates.TemplateResponse("form/menu.html", {
         "request": request,
         "concert": concert,
@@ -2882,6 +2889,7 @@ async def form_menu(
         "own_bring_has_practice_songs": own_bring_has_practice_songs,
         "own_bring_song_options": own_bring_song_options,
         "own_bring_song_groups": own_bring_song_groups,
+        "rental_manage_rows": rental_manage_rows,
         "own_selected_practice_id": selected_own_practice_id,
         "upcoming_schedule_rows": upcoming_schedule_rows,
         "assign_solver_candidates": candidate_results,
@@ -4016,6 +4024,134 @@ async def form_rental_upsert(
     return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
 
 
+@router.post("/form/rental/save")
+async def form_rental_save(
+    request: Request,
+    practice_id: Annotated[str, Form()],
+    rental_id: Annotated[str, Form()] = "",
+    item_name: Annotated[str, Form()] = "",
+    qty: Annotated[str, Form()] = "",
+    vendor: Annotated[str, Form()] = "",
+    unit_price: Annotated[str, Form()] = "",
+    note: Annotated[str, Form()] = "",
+):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return _session_expired_redirect(request)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    role = _effective_role(
+        request, ctx,
+        player_id=pid,
+        concert_id=cid,
+        participant_rows=data.get("participant_rows_concert", []),
+    )
+    if role < ROLE_MANAGER:
+        _flash_set(request, "error", "この操作にはManager権限が必要です。")
+        return RedirectResponse("/form", status_code=302)
+
+    db_id = (ctx.get("CONCERT_DB_RENTAL", "") or "").strip()
+    if not db_id:
+        _flash_set(request, "error", "CONCERT_DB_RENTAL が未設定です（vps_patch/app/.env にDB ID設定が必要）。")
+        return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+    t = ctx["get_prop_types"](db_id) or {}
+    if not t:
+        _flash_set(request, "error", "RENTAL DB のプロパティ取得に失敗しました。")
+        return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+
+    qv = _parse_positive_int(qty)
+    if qv is None:
+        qv = 0
+    qv = max(0, qv)
+    uv = _parse_positive_int(unit_price)
+    if uv is None:
+        uv = 0
+    uv = max(0, uv)
+    item_name = (item_name or "").strip()
+    vendor = (vendor or "").strip()
+    note = (note or "").strip()
+    if not item_name:
+        _flash_set(request, "error", "品目名は必須です。")
+        return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+
+    props: dict = {}
+    ctx["put_prop_any"](props, t, RENTAL_ITEM_NAME_KEYS, item_name)
+    ctx["put_prop_any"](props, t, RENTAL_QTY_KEYS, str(qv))
+    ctx["put_prop_any"](props, t, RENTAL_VENDOR_KEYS, vendor)
+    ctx["put_prop_any"](props, t, RENTAL_UNIT_PRICE_KEYS, str(uv))
+    ctx["put_prop_any"](props, t, RENTAL_NOTE_KEYS, note)
+    rid = (rental_id or "").strip()
+    if rid:
+        res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{rid}", json={"properties": props})
+    else:
+        # 追加は upsert 専用ルート経由を想定
+        _flash_set(request, "error", "新規登録は不足タグから実行してください。")
+        return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+
+    ok = bool(res and res.status_code in (200, 201))
+    _flash_set(request, "info" if ok else "error", "レンタル詳細を更新しました。" if ok else f"レンタル詳細の更新に失敗しました。{_api_err_brief(res)}")
+    if ok:
+        try:
+            invalidate_form_data_cache(cid)
+        except Exception:
+            pass
+        try:
+            inv = ctx.get("invalidate_query_cache")
+            if callable(inv):
+                inv((ctx.get("CONCERT_DB_RENTAL", "") or "").strip())
+        except Exception:
+            pass
+    return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+
+
+@router.post("/form/rental/delete")
+async def form_rental_delete(
+    request: Request,
+    practice_id: Annotated[str, Form()],
+    rental_id: Annotated[str, Form()],
+):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return _session_expired_redirect(request)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    role = _effective_role(
+        request, ctx,
+        player_id=pid,
+        concert_id=cid,
+        participant_rows=data.get("participant_rows_concert", []),
+    )
+    if role < ROLE_MANAGER:
+        _flash_set(request, "error", "この操作にはManager権限が必要です。")
+        return RedirectResponse("/form", status_code=302)
+
+    rid = (rental_id or "").strip()
+    if not rid:
+        _flash_set(request, "error", "削除対象が不正です。")
+        return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+    res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{rid}", json={"archived": True})
+    ok = bool(res and res.status_code in (200, 201))
+    _flash_set(request, "info" if ok else "error", "レンタル情報を削除しました。" if ok else f"レンタル情報の削除に失敗しました。{_api_err_brief(res)}")
+    if ok:
+        try:
+            invalidate_form_data_cache(cid)
+        except Exception:
+            pass
+        try:
+            inv = ctx.get("invalidate_query_cache")
+            if callable(inv):
+                inv((ctx.get("CONCERT_DB_RENTAL", "") or "").strip())
+        except Exception:
+            pass
+    return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+
+
 @router.get("/form/att", response_class=HTMLResponse)
 async def form_att_page(request: Request):
     pid = request.session.get("player_id", "")
@@ -4692,6 +4828,65 @@ def _build_own_bring_rows(
         "practice_song_ids": sorted(practice_song_ids),
         "has_practice_songs": bool(practice_song_ids),
     }
+
+
+def _build_rental_manage_rows(
+    ctx: dict,
+    *,
+    concert_id: str,
+    practice_id: str,
+    songs: list[dict],
+) -> list[dict]:
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+    db_id = (ctx.get("CONCERT_DB_RENTAL", "") or "").strip()
+    if not db_id or not practice_id:
+        return []
+
+    inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"], None)
+    inst_name_map = {r.get("id", ""): (ext_txt(r, INSTRUMENT_NAME_KEYS) or "").strip() for r in inst_rows}
+    song_name_map = {s.get("id", ""): (ext_txt(s, SONG_NAME_KEYS) or "未設定").strip() for s in (songs or [])}
+    practice_norm = _norm_id(practice_id)
+    out: list[dict] = []
+    for r in ctx["query_all"](db_id, None):
+        pr_ids = ext_rel(r, RENTAL_PRACTICE_REL_KEYS)
+        if not pr_ids or _norm_id(pr_ids[0]) != practice_norm:
+            continue
+        iid = (ext_rel(r, RENTAL_INST_REL_KEYS) or [""])[0]
+        item_name = (ext_txt(r, RENTAL_ITEM_NAME_KEYS) or "").strip()
+        qty_raw = (ext_txt(r, RENTAL_QTY_KEYS) or "0").strip()
+        try:
+            qty = max(0, int(float(qty_raw or "0")))
+        except Exception:
+            qty = 0
+        vendor = (ext_txt(r, RENTAL_VENDOR_KEYS) or "").strip()
+        unit_raw = (ext_txt(r, RENTAL_UNIT_PRICE_KEYS) or "").strip()
+        try:
+            unit = int(float(unit_raw)) if unit_raw else 0
+        except Exception:
+            unit = 0
+        note = (ext_txt(r, RENTAL_NOTE_KEYS) or "").strip()
+        sid = ""
+        if item_name and " / " in item_name:
+            left = item_name.split(" / ", 1)[0].strip()
+            for x, nm in song_name_map.items():
+                if nm == left:
+                    sid = x
+                    break
+        out.append({
+            "id": r.get("id", ""),
+            "song_id": sid,
+            "song_name": song_name_map.get(sid, ""),
+            "instrument_id": iid,
+            "instrument_name": inst_name_map.get(iid, iid or "楽器"),
+            "item_name": item_name or inst_name_map.get(iid, iid or "楽器"),
+            "qty": qty,
+            "vendor": vendor,
+            "unit_price": unit,
+            "note": note,
+        })
+    out.sort(key=lambda x: ((x.get("song_name") or "").lower(), (x.get("instrument_name") or "").lower(), x.get("item_name", "")))
+    return out
 
 
 def _build_material_rows(ctx, partdefs, songs, my_part_id, role) -> list:
