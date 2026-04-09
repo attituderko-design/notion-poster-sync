@@ -337,6 +337,7 @@
   <button type="button" class="role-tab" data-role-tab="ownmap" data-hold-label="所有楽器"><i class="bi bi-box-seam"></i>所有楽器</button>
   {% if is_manager %}
   <button type="button" class="role-tab" data-role-tab="progress" data-hold-label="進捗"><i class="bi bi-speedometer2"></i>進捗</button>
+  <button type="button" class="role-tab" data-role-tab="schedule" data-hold-label="進行表"><i class="bi bi-list-task"></i>進行表</button>
   {% endif %}
   <button type="button" class="role-tab" data-role-tab="assign" data-hold-label="アサイン"><i class="bi bi-bullseye"></i>アサイン</button>
   <button type="button" class="role-tab" data-role-tab="material" data-hold-label="資料"><i class="bi bi-file-earmark-text"></i>資料</button>
@@ -542,6 +543,130 @@
     <div class="panel-empty is-hidden" data-empty-for="progress">該当するパートがありません。</div>
     {% else %}
     <div class="menu-hint">進捗データがまだありません。</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if is_manager %}
+<div class="role-panel" data-role-panel="schedule">
+  <div class="menu-item f4 schedule-role-panel">
+    {% if schedule_practice_options %}
+    <form method="get" action="/form" class="schedule-practice-form">
+      <input type="hidden" name="tab" value="schedule">
+      <div class="panel-filter-item">
+        <label for="schedule-practice-select">練習回</label>
+        <select id="schedule-practice-select" name="schedule_practice_id" class="panel-filter-select" onchange="this.form.submit()">
+          {% for p in schedule_practice_options %}
+          <option value="{{ p.id }}" {% if schedule_selected_practice_id == p.id %}selected{% endif %}>{{ p.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+
+    <form method="post" action="/form/schedule/save" class="schedule-edit-form js-preserve-scroll">
+      <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}">
+      <div class="schedule-grid">
+        <div class="panel-filter-item">
+          <label>開始</label>
+          <input class="panel-filter-select" type="text" name="start_time" placeholder="18:30">
+        </div>
+        <div class="panel-filter-item">
+          <label>終了</label>
+          <input class="panel-filter-select" type="text" name="end_time" placeholder="19:00">
+        </div>
+        <div class="panel-filter-item">
+          <label>種別</label>
+          <select class="panel-filter-select" name="type_name">
+            {% for t in schedule_type_options %}
+            <option value="{{ t }}">{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="panel-filter-item">
+          <label>曲（任意）</label>
+          <select class="panel-filter-select" name="song_id">
+            <option value="">未指定</option>
+            {% for s in schedule_song_options %}
+            <option value="{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="panel-filter-item">
+          <label>順番</label>
+          <input class="panel-filter-select" type="number" name="order_no" min="1" step="1" placeholder="1">
+        </div>
+        <div class="panel-filter-item schedule-content-item">
+          <label>内容</label>
+          <input class="panel-filter-select" type="text" name="content" placeholder="例: セッティング">
+        </div>
+      </div>
+      <div class="schedule-actions">
+        <button type="submit" class="assign-action-btn">追加する</button>
+      </div>
+    </form>
+
+    {% if schedule_manage_rows %}
+    <div class="schedule-manage-list">
+      {% for row in schedule_manage_rows %}
+      <div class="schedule-manage-item">
+        <form method="post" action="/form/schedule/save" class="schedule-edit-form js-preserve-scroll">
+          <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}">
+          <input type="hidden" name="schedule_id" value="{{ row.id }}">
+          <div class="schedule-grid">
+            <div class="panel-filter-item">
+              <label>開始</label>
+              <input class="panel-filter-select" type="text" name="start_time" value="{{ row.start }}">
+            </div>
+            <div class="panel-filter-item">
+              <label>終了</label>
+              <input class="panel-filter-select" type="text" name="end_time" value="{{ row.end }}">
+            </div>
+            <div class="panel-filter-item">
+              <label>種別</label>
+              <select class="panel-filter-select" name="type_name">
+                {% for t in schedule_type_options %}
+                <option value="{{ t }}" {% if row.type == t %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="panel-filter-item">
+              <label>曲（任意）</label>
+              <select class="panel-filter-select" name="song_id">
+                <option value="">未指定</option>
+                {% for s in schedule_song_options %}
+                <option value="{{ s.id }}" {% if row.song_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="panel-filter-item">
+              <label>順番</label>
+              <input class="panel-filter-select" type="number" name="order_no" min="1" step="1" value="{{ row.order }}">
+            </div>
+            <div class="panel-filter-item schedule-content-item">
+              <label>内容</label>
+              <input class="panel-filter-select" type="text" name="content" value="{{ row.content }}">
+            </div>
+          </div>
+          <div class="schedule-actions">
+            <button type="submit" class="assign-action-btn">更新</button>
+          </div>
+        </form>
+        <div class="schedule-actions">
+          <form method="post" action="/form/schedule/delete" class="js-preserve-scroll">
+            <input type="hidden" name="schedule_id" value="{{ row.id }}">
+            <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}">
+            <button type="submit" class="assign-action-btn is-danger">削除</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="menu-hint">この練習回のスケジュールは未登録です。</div>
+    {% endif %}
+    {% else %}
+    <div class="menu-hint">練習回が登録されていません。</div>
     {% endif %}
   </div>
 </div>
@@ -928,6 +1053,17 @@
   .progress-chip{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);color:#c7d8f4;font-size:11px}
   .progress-chip.is-agree{border-color:rgba(100,200,130,.45);background:rgba(100,200,130,.12);color:#bdeecf}
   .progress-chip.is-object{border-color:rgba(230,120,120,.45);background:rgba(230,120,120,.12);color:#ffd1d1}
+  .schedule-role-panel{display:block;padding:12px}
+  .schedule-practice-form{margin-bottom:10px}
+  .schedule-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .schedule-content-item{grid-column:1/-1}
+  .schedule-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .schedule-manage-list{display:flex;flex-direction:column;gap:9px;margin-top:10px}
+  .schedule-manage-item{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:10px;padding:9px 10px}
+  .assign-action-btn.is-danger{border-color:rgba(230,120,120,.45);background:rgba(230,120,120,.14);color:#ffd1d1}
+  @media (max-width: 640px){
+    .schedule-grid{grid-template-columns:1fr}
+  }
   .assign-solver-box{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(255,255,255,.02);padding:10px 11px;margin-bottom:10px}
   .assign-solver-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
   .assign-solver-title{font-size:13px;font-weight:700;color:#dceaff}
