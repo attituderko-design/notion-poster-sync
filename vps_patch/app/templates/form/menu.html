@@ -1497,8 +1497,8 @@
   .rental-candidate-tag.is-done{background:rgba(76,155,68,.18);border-color:rgba(107,191,95,.55);color:#d9f8cf}
   .rental-total-bar{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:2px;margin-bottom:8px;font-size:12px;color:#b6cae8}
   .rental-total-bar strong{font-family:'Outfit',sans-serif;color:#e3eeff;font-size:15px;letter-spacing:.02em}
-  .rental-ledger-wrap{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:10px;padding:8px}
-  .rental-ledger-wrap{--rental-cols:minmax(120px,1fr) minmax(180px,1.35fr) minmax(130px,1fr) 76px 76px 88px minmax(170px,1.2fr) 148px}
+  .rental-ledger-wrap{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:10px;padding:8px;overflow-x:hidden}
+  .rental-ledger-wrap{--rental-cols:1fr 1.25fr 1fr .62fr .62fr .75fr 1.25fr .72fr}
   .rental-ledger-head,.rental-ledger-row{display:grid;grid-template-columns:var(--rental-cols);gap:8px;align-items:center}
   .rental-ledger-head{padding:0 2px 6px;border-bottom:1px solid rgba(255,255,255,.12);font-size:11px;color:#9db6dd;line-height:1.2}
   .rental-ledger-row{padding:8px 2px;border-bottom:1px solid rgba(255,255,255,.08)}
@@ -1508,7 +1508,7 @@
   .rental-ledger-row .panel-filter-select.is-num{text-align:right}
   .rental-amount-cell{font-family:'Outfit',sans-serif;font-size:12px;color:#dce9ff;text-align:right;white-space:nowrap}
   .rental-row-actions{display:flex;justify-content:flex-end}
-  .rental-row-actions .assign-action-btn{height:32px;min-width:0;width:100%;padding:0 8px}
+  .rental-row-actions .assign-action-btn{height:32px;min-width:72px;width:100%;padding:0 8px}
   .rental-compact-row{display:grid;grid-template-columns:var(--rental-cols);gap:8px;align-items:center;width:100%;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:rgba(255,255,255,.015);padding:8px 10px;margin-top:8px;text-align:left;color:inherit;cursor:pointer;transition:border-color .15s ease,background .15s ease}
   .rental-compact-row:hover{border-color:rgba(112,170,255,.45);background:rgba(255,255,255,.04)}
   .rental-compact-cell{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#d7e6ff}
@@ -1528,7 +1528,8 @@
   .rental-edit-actions .assign-action-btn{min-width:92px}
   @media (max-width: 1120px){
     .rental-ledger-wrap{overflow-x:auto}
-    .rental-ledger-head,.rental-ledger-row,.rental-compact-row{min-width:980px}
+    .rental-ledger-wrap{--rental-cols:minmax(110px,1fr) minmax(170px,1.2fr) minmax(120px,1fr) 70px 70px 84px minmax(160px,1.2fr) 96px}
+    .rental-ledger-head,.rental-ledger-row,.rental-compact-row{min-width:860px}
   }
   @media (max-width: 860px){
     .rental-ledger-head{display:none}
