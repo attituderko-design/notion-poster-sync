@@ -527,17 +527,19 @@
         <label for="rental-song-filter">曲</label>
         <select id="rental-song-filter" class="panel-filter-select" data-filter-target="rental" data-filter-kind="song" data-static-options="1">
           <option value="">全曲</option>
-          {% for s in own_role_song_options %}
+          {% for s in own_bring_song_options %}
           <option value="{{ s.name }}" data-filter-value="{{ s.name }}">{{ s.name }}</option>
           {% endfor %}
         </select>
       </div>
     </div>
 
-    {% if own_bring_rows %}
-    <div class="own-carry-head">持参見込み（出欠×所有楽器）</div>
+    {% if not own_bring_has_practice_songs %}
+    <div class="menu-hint">先に進行表で「種別=練習」かつ「演奏曲」を設定してください。</div>
+    {% elif own_bring_rows_needed or own_bring_rows_disabled %}
+    <div class="own-carry-head">必要な楽器（出欠○が担当する楽器）</div>
     <div class="own-role-list" data-role-list="rental">
-      {% for row in own_bring_rows %}
+      {% for row in own_bring_rows_needed %}
       <div class="own-role-card own-carry-card" data-song="{{ row.song_name }}">
         <div class="own-role-head">
           <div class="own-role-song">{{ row.song_name }}</div>
@@ -548,7 +550,7 @@
           <span class="own-metric-chip is-ok">○持参 {{ row.available_ok }}</span>
           <span class="own-metric-chip is-maybe">△持参 {{ row.available_maybe }}</span>
           <span class="own-metric-chip{% if row.shortage > 0 %} is-ng{% endif %}">不足 {{ row.shortage }}</span>
-          <span class="own-metric-chip">レンタル {{ row.rental_qty }}</span>
+          <span class="own-metric-chip{% if row.rental_qty > 0 %} is-rented{% endif %}">手配済 {{ row.rental_qty }}</span>
         </div>
         <div class="own-role-badges">
           {% if row.owner_badges_ok %}
@@ -577,6 +579,23 @@
         {% endif %}
       </div>
       {% endfor %}
+
+      {% if own_bring_rows_disabled %}
+      <div class="own-carry-head" style="margin-top:4px;">不要な楽器（担当者が全員欠席）</div>
+      {% for row in own_bring_rows_disabled %}
+      <div class="own-role-card own-carry-card is-disabled" data-song="{{ row.song_name }}">
+        <div class="own-role-head">
+          <div class="own-role-song">{{ row.song_name }}</div>
+          <div class="own-role-inst">{{ row.instrument_name }}</div>
+        </div>
+        <div class="own-carry-metrics">
+          <span class="own-metric-chip is-disabled">不要</span>
+          <span class="own-metric-chip">必要 {{ row.required_qty }}</span>
+          <span class="own-metric-chip">手配済 {{ row.rental_qty }}</span>
+        </div>
+      </div>
+      {% endfor %}
+      {% endif %}
     </div>
     <div class="panel-empty is-hidden" data-empty-for="rental">該当する行がありません。</div>
     {% else %}
@@ -1291,11 +1310,14 @@
   .own-metric-chip.is-ok{border-color:rgba(100,200,130,.42);background:rgba(100,200,130,.12);color:#bdeecf}
   .own-metric-chip.is-maybe{border-color:rgba(228,180,89,.42);background:rgba(228,180,89,.12);color:#f4ddab}
   .own-metric-chip.is-ng{border-color:rgba(230,120,120,.45);background:rgba(230,120,120,.12);color:#ffd1d1}
+  .own-metric-chip.is-rented{border-color:rgba(173,131,255,.45);background:rgba(160,120,240,.14);color:#e8d9ff}
+  .own-metric-chip.is-disabled{border-color:rgba(170,180,198,.45);background:rgba(144,154,171,.16);color:#d2d9e4}
   .own-role-badges{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
   .own-owner-chip{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;color:#a8d2ff;background:rgba(74,158,255,.14);border:1px solid rgba(74,158,255,.35)}
   .own-owner-chip.is-maybe{color:#f1d49b;background:rgba(228,180,89,.14);border-color:rgba(228,180,89,.36)}
   .own-owner-empty{font-size:11px;color:#93add6}
   .own-carry-actions{margin-top:8px}
+  .own-carry-card.is-disabled{border-color:rgba(170,180,198,.22);background:rgba(130,138,150,.08)}
   .assign-list{display:flex;flex-direction:column;gap:8px}
   .assign-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
   .assign-row:last-child{border-bottom:none}

@@ -135,6 +135,10 @@ RENTAL_ITEM_NAME_KEYS = _K.RENTAL_ITEM_NAME_KEYS
 RENTAL_QTY_KEYS = _K.RENTAL_QTY_KEYS
 RENTAL_NOTE_KEYS = _K.RENTAL_NOTE_KEYS
 RENTAL_KEY_KEYS = _K.RENTAL_KEY_KEYS
+CONCERT_INST_CONCERT_REL_KEYS = _K.CONCERT_INST_CONCERT_REL_KEYS
+CONCERT_INST_SONG_REL_KEYS = _K.CONCERT_INST_SONG_REL_KEYS
+CONCERT_INST_INST_REL_KEYS = _K.CONCERT_INST_INST_REL_KEYS
+CONCERT_INST_QTY_KEYS = _K.CONCERT_INST_QTY_KEYS
 
 PRIVACY_POLICY_LINES = [
     "本フォームは ArtéMis HARMONIA が提供する演奏会運営支援フォームです。",
@@ -2749,7 +2753,10 @@ async def form_menu(
     song_names = [x for x in song_names if not (x in seen or seen.add(x))]
     own_role_rows: list[dict] = []
     own_role_song_options: list[dict] = []
-    own_bring_rows: list[dict] = []
+    own_bring_rows_needed: list[dict] = []
+    own_bring_rows_disabled: list[dict] = []
+    own_bring_has_practice_songs = True
+    own_bring_song_options: list[dict] = []
     if role >= ROLE_LEADER:
         own_role_rows, own_role_song_options = _build_role_own_rows(
             ctx,
@@ -2761,7 +2768,7 @@ async def form_menu(
             songs=data.get("songs", []) or [],
             player_rows=players,
         )
-        own_bring_rows = _build_own_bring_rows(
+        own_bring_data = _build_own_bring_rows(
             ctx,
             concert_id=cid,
             role=role,
@@ -2773,6 +2780,17 @@ async def form_menu(
             attendance_rows=attendance_rows,
             selected_practice_id=selected_own_practice_id,
         )
+        own_bring_rows_needed = own_bring_data.get("rows_needed", []) or []
+        own_bring_rows_disabled = own_bring_data.get("rows_disabled", []) or []
+        own_bring_has_practice_songs = bool(own_bring_data.get("has_practice_songs", False))
+        song_opt_map: dict[str, str] = {}
+        for rr in own_bring_rows_needed + own_bring_rows_disabled:
+            sid = (rr.get("song_id", "") or "").strip()
+            sname = (rr.get("song_name", "") or "").strip()
+            if sid and sname:
+                song_opt_map[sid] = sname
+        own_bring_song_options = [{"id": sid, "name": sname} for sid, sname in song_opt_map.items()]
+        own_bring_song_options.sort(key=lambda x: x["name"].lower())
     resp = templates.TemplateResponse("form/menu.html", {
         "request": request,
         "concert": concert,
@@ -2840,7 +2858,10 @@ async def form_menu(
         "role_assignment_rows": role_assignment_rows,
         "own_role_rows": own_role_rows,
         "own_role_song_options": own_role_song_options,
-        "own_bring_rows": own_bring_rows,
+        "own_bring_rows_needed": own_bring_rows_needed,
+        "own_bring_rows_disabled": own_bring_rows_disabled,
+        "own_bring_has_practice_songs": own_bring_has_practice_songs,
+        "own_bring_song_options": own_bring_song_options,
         "own_selected_practice_id": selected_own_practice_id,
         "upcoming_schedule_rows": upcoming_schedule_rows,
         "assign_solver_candidates": candidate_results,
@@ -4323,8 +4344,8 @@ def _build_own_bring_rows(
     player_rows: list[dict],
     attendance_rows: list[dict],
     selected_practice_id: str,
-) -> list[dict]:
-    """Leader/Manager向け: 練習日の出欠×所有楽器を突き合わせた持参候補/不足数。"""
+) -> dict:
+    """Leader/Manager向け: 当日練習曲×必要楽器の持参/不足/レンタル状況。"""
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
     song_name_map = {s.get("id", ""): (ext_txt(s, SONG_NAME_KEYS) or "未設定").strip() for s in songs}
@@ -4411,8 +4432,9 @@ def _build_own_bring_rows(
             continue
         owner_qty_by_inst_player[inst_id][target_pid] += qty
 
-    # 既存レンタル（practice + instrument 単位）
+    # 既存レンタル（practice + instrument + item_name 単位）
     rental_qty_by_inst: dict[str, int] = defaultdict(int)
+    rental_qty_by_song_inst: dict[tuple[str, str], int] = defaultdict(int)
     rental_db_id = (ctx.get("CONCERT_DB_RENTAL", "") or "").strip()
     if rental_db_id and selected_practice_id:
         for r in ctx["query_all"](rental_db_id, None):
@@ -4429,35 +4451,124 @@ def _build_own_bring_rows(
             except Exception:
                 qty = 0
             rental_qty_by_inst[inst_id] += qty
+            item_name = (ext_txt(r, RENTAL_ITEM_NAME_KEYS) or "").strip()
+            if item_name:
+                for sid, sname in song_name_map.items():
+                    if sname and item_name.startswith(f"{sname} / "):
+                        rental_qty_by_song_inst[(sid, inst_id)] += qty
+                        break
 
-    # 必要数（partdefsベース）
-    # 同じ (song, instrument) が複数パートで定義される場合は合算する。
-    required_by_pair: dict[tuple[str, str], int] = defaultdict(int)
-    for pd in partdefs or []:
-        part_ids = ext_rel(pd, PARTDEF_PART_REL_KEYS)
-        if role < ROLE_MANAGER and my_part_id:
-            if not part_ids or part_ids[0] != my_part_id:
+    # 対象練習日の「その日にやる曲」: 種別=練習 かつ 演奏曲あり
+    practice_song_ids: set[str] = set()
+    schedule_db_id = (ctx.get("CONCERT_DB_SCHEDULE", "") or "").strip()
+    if schedule_db_id and selected_practice_id:
+        for row in ctx["query_all"](schedule_db_id, None):
+            pr_ids = ext_rel(row, SCHEDULE_PRACTICE_REL_KEYS)
+            if not pr_ids or _norm_id(pr_ids[0]) != practice_norm:
                 continue
-        song_ids = ext_rel(pd, PARTDEF_SONG_REL_KEYS)
-        song_id = song_ids[0] if song_ids else ""
-        inst_ids = ext_rel(pd, PARTDEF_INST_REL_KEYS)
-        raw_need = (ext_txt(pd, _K.PART_COUNT_KEYS) or "1").strip()
-        try:
-            required_qty = max(1, int(float(raw_need or "1")))
-        except Exception:
-            required_qty = 1
-        for inst_id in inst_ids:
-            required_by_pair[(song_id, inst_id)] += required_qty
+            tp = (ext_txt(row, SCHEDULE_TYPE_KEYS) or "").strip()
+            if tp != "練習":
+                continue
+            sids = ext_rel(row, SCHEDULE_SONG_REL_KEYS)
+            if sids:
+                practice_song_ids.add(sids[0])
 
-    rows: list[dict] = []
+    # 必要数（CONCERT_INSTRUMENTベース）
+    required_by_pair: dict[tuple[str, str], int] = defaultdict(int)
+    ci_db_id = (ctx.get("CONCERT_DB_CONCERT_INSTRUMENT", "") or "").strip()
+    if ci_db_id:
+        for row in ctx["query_all"](ci_db_id, None):
+            cids = ext_rel(row, CONCERT_INST_CONCERT_REL_KEYS)
+            if cids and not any(_norm_id(x) == cid_norm for x in cids):
+                continue
+            sids = ext_rel(row, CONCERT_INST_SONG_REL_KEYS)
+            inst_ids = ext_rel(row, CONCERT_INST_INST_REL_KEYS)
+            if not sids or not inst_ids:
+                continue
+            sid = sids[0]
+            if practice_song_ids and sid not in practice_song_ids:
+                continue
+            iid = inst_ids[0]
+            raw_need = (ext_txt(row, CONCERT_INST_QTY_KEYS) or "1").strip()
+            try:
+                qty_need = max(1, int(float(raw_need or "1")))
+            except Exception:
+                qty_need = 1
+            required_by_pair[(sid, iid)] += qty_need
+
+    # 代替: CONCERT_INSTRUMENTが空なら partdefs から算出
+    if not required_by_pair:
+        for pd in partdefs or []:
+            part_ids = ext_rel(pd, PARTDEF_PART_REL_KEYS)
+            if role < ROLE_MANAGER and my_part_id:
+                if not part_ids or part_ids[0] != my_part_id:
+                    continue
+            song_ids = ext_rel(pd, PARTDEF_SONG_REL_KEYS)
+            sid = song_ids[0] if song_ids else ""
+            if practice_song_ids and sid not in practice_song_ids:
+                continue
+            inst_ids = ext_rel(pd, PARTDEF_INST_REL_KEYS)
+            raw_need = (ext_txt(pd, _K.PART_COUNT_KEYS) or "1").strip()
+            try:
+                required_qty = max(1, int(float(raw_need or "1")))
+            except Exception:
+                required_qty = 1
+            for iid in inst_ids:
+                required_by_pair[(sid, iid)] += required_qty
+
+    # assignment: song+instrument を担当している cast
+    partdef_inst_map: dict[str, list[str]] = {}
+    for pd in partdefs or []:
+        pid2 = pd.get("id", "")
+        if not pid2:
+            continue
+        partdef_inst_map[pid2] = ext_rel(pd, PARTDEF_INST_REL_KEYS) or []
+    assignment_rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+    assigned_casts_by_pair: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for ar in assignment_rows:
+        cids = ext_rel(ar, ASSIGNMENT_CONCERT_REL_KEYS)
+        if cids and not any(_norm_id(x) == cid_norm for x in cids):
+            continue
+        sids = ext_rel(ar, ASSIGNMENT_SONG_REL_KEYS)
+        if not sids:
+            continue
+        sid = sids[0]
+        pdef_ids = ext_rel(ar, ASSIGNMENT_PARTDEF_REL_KEYS)
+        inst_ids: list[str] = []
+        for pdef_id in pdef_ids:
+            inst_ids.extend(partdef_inst_map.get(pdef_id, []))
+        if not inst_ids:
+            continue
+        targets = ext_rel(ar, ASSIGNMENT_PLAYER_REL_KEYS)
+        for t in targets:
+            cast_norm = ""
+            if _norm_id(t) in cast_to_player:
+                cast_norm = _norm_id(t)
+            else:
+                # player id だった場合は cast へ引く
+                cast_norm = player_to_cast_norm.get(t, "")
+            if not cast_norm:
+                continue
+            for iid in inst_ids:
+                assigned_casts_by_pair[(sid, iid)].add(cast_norm)
+
+    rows_needed: list[dict] = []
+    rows_disabled: list[dict] = []
     for (song_id, inst_id), required_qty in required_by_pair.items():
         owners = owner_qty_by_inst_player.get(inst_id, {})
+        assigned_casts = assigned_casts_by_pair.get((song_id, inst_id), set())
+        assigned_attending_casts = [c for c in assigned_casts if att_by_cast.get(c, "") == "ok"]
+        needed_today = True
+        if assigned_casts and not assigned_attending_casts:
+            needed_today = False
         available_ok = 0
         available_maybe = 0
         owner_badges_ok: list[dict] = []
         owner_badges_maybe: list[dict] = []
         for pid, qty in owners.items():
             cast_id = player_to_cast_norm.get(pid, "")
+            if assigned_casts and cast_id not in assigned_casts:
+                continue
             st = att_by_cast.get(cast_id, "")
             badge = {"player_id": pid, "name": player_name_map.get(pid, "不明"), "qty": qty}
             if st == "ok":
@@ -4468,9 +4579,17 @@ def _build_own_bring_rows(
                 owner_badges_maybe.append(badge)
         owner_badges_ok.sort(key=lambda x: x["name"].lower())
         owner_badges_maybe.sort(key=lambda x: x["name"].lower())
-        shortage = max(0, required_qty - available_ok)
+        rental_qty = int(rental_qty_by_song_inst.get((song_id, inst_id), rental_qty_by_inst.get(inst_id, 0)))
+        shortage = max(0, required_qty - available_ok - rental_qty)
         shortage_with_maybe = max(0, required_qty - (available_ok + available_maybe))
-        rows.append({
+        state = "ok"
+        if not needed_today:
+            state = "disabled"
+        elif shortage > 0:
+            state = "ng"
+        elif rental_qty > 0:
+            state = "rented"
+        row = {
             "song_id": song_id,
             "song_name": song_name_map.get(song_id, "未設定"),
             "instrument_id": inst_id,
@@ -4480,12 +4599,24 @@ def _build_own_bring_rows(
             "available_maybe": available_maybe,
             "shortage": shortage,
             "shortage_with_maybe": shortage_with_maybe,
-            "rental_qty": int(rental_qty_by_inst.get(inst_id, 0)),
+            "rental_qty": rental_qty,
+            "needed_today": needed_today,
+            "state": state,
             "owner_badges_ok": owner_badges_ok,
             "owner_badges_maybe": owner_badges_maybe,
-        })
-    rows.sort(key=lambda x: (x["song_name"].lower(), x["instrument_name"].lower()))
-    return rows
+        }
+        if needed_today:
+            rows_needed.append(row)
+        else:
+            rows_disabled.append(row)
+    rows_needed.sort(key=lambda x: (x["song_name"].lower(), x["instrument_name"].lower()))
+    rows_disabled.sort(key=lambda x: (x["song_name"].lower(), x["instrument_name"].lower()))
+    return {
+        "rows_needed": rows_needed,
+        "rows_disabled": rows_disabled,
+        "practice_song_ids": sorted(practice_song_ids),
+        "has_practice_songs": bool(practice_song_ids),
+    }
 
 
 def _build_material_rows(ctx, partdefs, songs, my_part_id, role) -> list:

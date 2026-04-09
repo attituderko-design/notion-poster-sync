@@ -218,6 +218,16 @@ SONG_CREATOR_KEYS         = ["クリエイター", "作曲家", "Composer", "作
 CONCERT_SONG_KEY_KEYS         = ["concert_song_key", "CONCERT_SONG_KEY", "key"]
 CONCERT_SONG_CONCERT_REL_KEYS = ["演奏会", "FK演奏会", "concert"]
 CONCERT_SONG_SONG_REL_KEYS    = ["曲", "楽曲", "演奏曲", "song"]
+
+# ── CONCERT_INSTRUMENT（演奏会×必要楽器）DB ──────────────────
+CONCERT_INST_CONCERT_REL_KEYS = ["演奏会", "出演", "FK演奏会", "concert"]
+CONCERT_INST_SONG_REL_KEYS    = ["演奏曲", "曲", "楽曲", "FK楽曲", "song"]
+CONCERT_INST_INST_REL_KEYS    = ["楽器", "楽器種別", "必要楽器", "FK楽器種別", "instrument"]
+CONCERT_INST_QTY_KEYS         = ["必要数量", "必要数", "数量", "台数", "必要台数", "required_qty"]
+CONCERT_INST_KEY_KEYS         = ["concert_instrument_key", "タイトル"]
+CONCERT_INST_NOTE_KEYS        = ["備考", "メモ", "note"]
+# 互換エイリアス
+CONCERT_INST_COUNT_KEYS       = CONCERT_INST_QTY_KEYS
 CONCERT_SONG_ORDER_KEYS       = ["曲順", "順番", "order"]
 CONCERT_SONG_DONE_KEYS        = ["定義完了", "definition_done", "完了"]
 CONCERT_SONG_NOTE_KEYS        = ["備考", "メモ", "note"]
@@ -241,14 +251,6 @@ HARMONIA_CONCERT_PLAN_KEYS = ["案提示", "proposal_presented"]
 HARMONIA_CONCERT_ASSIGN_KEYS = ["アサイン確定", "assign_confirmed"]
 HARMONIA_CONCERT_FINANCE_KEYS = ["収支確定", "finance_confirmed"]
 HARMONIA_CONCERT_INVITE_CODE_KEYS = ["招待コード", "invite_code"]
-
-# ── CONCERT_INSTRUMENT（演奏会必要楽器）DB ──────────────────
-CONCERT_INST_KEY_KEYS         = ["concert_instrument_key", "タイトル"]
-CONCERT_INST_CONCERT_REL_KEYS = ["演奏会", "FK演奏会", "concert"]
-CONCERT_INST_SONG_REL_KEYS    = ["演奏曲", "CONCERT_SONG", "曲", "FK演奏曲"]
-CONCERT_INST_INST_REL_KEYS    = ["楽器", "楽器種別", "FK楽器", "instrument"]
-CONCERT_INST_COUNT_KEYS       = ["必要台数", "台数", "count", "required_count"]
-CONCERT_INST_NOTE_KEYS        = ["備考", "メモ", "note"]
 
 # ── CONCERT_ASSIGNMENT（アサイン結果）DB ────────────────────
 ASSIGNMENT_KEY_KEYS         = ["assignment_key", "タイトル"]
