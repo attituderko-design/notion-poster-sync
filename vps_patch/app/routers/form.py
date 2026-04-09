@@ -107,6 +107,11 @@ SCHEDULE_SONG_REL_KEYS = _K.SCHEDULE_SONG_REL_KEYS
 SCHEDULE_ORDER_KEYS = _K.SCHEDULE_ORDER_KEYS
 SCHEDULE_DURATION_KEYS = _K.SCHEDULE_DURATION_KEYS
 SCHEDULE_TYPE_OPTIONS = _K.SCHEDULE_TYPE_OPTIONS
+PRACTICE_KEY_KEYS = _K.PRACTICE_KEY_KEYS
+PRACTICE_ADDRESS_KEYS = _K.PRACTICE_ADDRESS_KEYS
+PRACTICE_MEMO_KEYS = _K.PRACTICE_MEMO_KEYS
+PRACTICE_CONCERT_REL_KEYS = _K.PRACTICE_CONCERT_REL_KEYS
+PRACTICE_CONCERT_DAY_KEYS = _K.PRACTICE_CONCERT_DAY_KEYS
 POKE_KEY_KEYS = _K.POKE_KEY_KEYS
 POKE_SENDER_CAST_REL_KEYS = _K.POKE_SENDER_CAST_REL_KEYS
 POKE_TARGET_CAST_REL_KEYS = _K.POKE_TARGET_CAST_REL_KEYS
@@ -814,6 +819,29 @@ def _practice_label_by_id(ctx: dict, practice_rows: list[dict], practice_id: str
         pdate = (ext(p, PRACTICE_DATE_KEYS) or "").strip()[:10]
         return f"{pdate} {pname}".strip()
     return practice_id[:8] if practice_id else "練習"
+
+
+def _truthy_text(v: str) -> bool:
+    return (v or "").strip().lower() in ("1", "true", "yes", "on", "済", "完了")
+
+
+def _build_practice_manage_rows(ctx: dict, practices: list[dict]) -> list[dict]:
+    ext = ctx["extract_prop_text_any"]
+    out: list[dict] = []
+    for p in practices or []:
+        pid = p.get("id", "")
+        if not pid:
+            continue
+        out.append({
+            "id": pid,
+            "name": (ext(p, PRACTICE_NAME_KEYS) or "練習").strip(),
+            "date": (ext(p, PRACTICE_DATE_KEYS) or "").strip()[:16].replace("T", " "),
+            "venue": (ext(p, PRACTICE_VENUE_KEYS) or "").strip(),
+            "address": (ext(p, PRACTICE_ADDRESS_KEYS) or "").strip(),
+            "memo": (ext(p, PRACTICE_MEMO_KEYS) or "").strip(),
+            "is_concert_day": _truthy_text(ext(p, PRACTICE_CONCERT_DAY_KEYS) or ""),
+        })
+    return out
 
 
 def _harmonia_flags(ctx: dict, concert_id: str) -> dict:
@@ -2538,7 +2566,7 @@ async def form_menu(
     show_pref = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER)
     show_own = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER) and is_perc_role
     role_mode = role >= ROLE_LEADER
-    allowed_tabs = {"att", "member", "assign", "material", "ownmap", "progress", "schedule"}
+    allowed_tabs = {"att", "member", "assign", "material", "ownmap", "progress", "schedule", "practice"}
     initial_role_tab = (tab or "").strip().lower()
     if initial_role_tab not in allowed_tabs:
         initial_role_tab = ""
@@ -2547,6 +2575,8 @@ async def form_menu(
     if initial_role_tab == "progress" and role < ROLE_MANAGER:
         initial_role_tab = ""
     if initial_role_tab == "schedule" and role < ROLE_MANAGER:
+        initial_role_tab = ""
+    if initial_role_tab == "practice" and role < ROLE_MANAGER:
         initial_role_tab = ""
     upcoming_practice_id = (upcoming_practice or {}).get("id", "") if upcoming_practice else ""
     selected_schedule_practice_id = (schedule_practice_id or "").strip()
@@ -2598,6 +2628,7 @@ async def form_menu(
         practice_id=selected_schedule_practice_id,
         songs=data.get("songs", []) or [],
     ) if role >= ROLE_MANAGER else []
+    practice_manage_rows = _build_practice_manage_rows(ctx, practices) if role >= ROLE_MANAGER else []
     my_cast_row = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
     my_cast_id = (my_cast_row or {}).get("id", "")
     proposal_phase = proposal_done and not assign_done
@@ -2755,6 +2786,7 @@ async def form_menu(
         "schedule_manage_rows": schedule_manage_rows,
         "schedule_song_options": assign_song_options,
         "schedule_type_options": SCHEDULE_TYPE_OPTIONS,
+        "practice_manage_rows": practice_manage_rows,
         "practice_cols": _build_practice_cols(data.get("practices", [])),
         "attendance_table_rows": _build_attendance_table(
             ctx, cid, participant_rows, data.get("practices", []), data.get("attendance_rows", []),
@@ -3360,6 +3392,153 @@ async def menu_action(request: Request, action: Annotated[str, Form()]):
     if act == "own":
         return RedirectResponse("/form/own", status_code=302)
     return RedirectResponse("/form", status_code=302)
+
+
+@router.post("/form/practice/save")
+async def form_practice_save(
+    request: Request,
+    practice_id: Annotated[str, Form()] = "",
+    name: Annotated[str, Form()] = "",
+    date_time: Annotated[str, Form()] = "",
+    venue: Annotated[str, Form()] = "",
+    address: Annotated[str, Form()] = "",
+    memo: Annotated[str, Form()] = "",
+    is_concert_day: Annotated[str, Form()] = "",
+):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return _session_expired_redirect(request)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+
+    ctx = get_ctx()
+    participant_rows = load_form_data(ctx, cid).get("participant_rows_concert", [])
+    role = _effective_role(
+        request,
+        ctx,
+        player_id=pid,
+        concert_id=cid,
+        participant_rows=participant_rows,
+    )
+    if role < ROLE_MANAGER:
+        _flash_set(request, "error", "この操作にはManager権限が必要です。")
+        return RedirectResponse("/form", status_code=302)
+
+    db_id = (ctx.get("CONCERT_DB_PRACTICE", "") or "").strip()
+    if not db_id:
+        _flash_set(request, "error", "CONCERT_DB_PRACTICE が未設定です。")
+        return RedirectResponse("/form?tab=practice#role-menu-panels", status_code=302)
+    t = ctx["get_prop_types"](db_id) or {}
+    if not t:
+        _flash_set(request, "error", "PRACTICE DB のプロパティ取得に失敗しました。")
+        return RedirectResponse("/form?tab=practice#role-menu-panels", status_code=302)
+
+    pname = (name or "").strip()
+    pdate = (date_time or "").strip()
+    pvenue = (venue or "").strip()
+    paddr = (address or "").strip()
+    pmemo = (memo or "").strip()
+    pday = bool(is_concert_day)
+    pid_row = (practice_id or "").strip()
+
+    if not pname:
+        _flash_set(request, "error", "練習名は必須です。")
+        return RedirectResponse("/form?tab=practice#role-menu-panels", status_code=302)
+    if not pdate:
+        _flash_set(request, "error", "日時は必須です。")
+        return RedirectResponse("/form?tab=practice#role-menu-panels", status_code=302)
+
+    props: dict = {}
+    ctx["put_prop_any"](props, t, PRACTICE_CONCERT_REL_KEYS, cid)
+    ctx["put_prop_any"](props, t, PRACTICE_NAME_KEYS, pname)
+    ctx["put_prop_any"](props, t, PRACTICE_DATE_KEYS, pdate)
+    ctx["put_prop_any"](props, t, PRACTICE_VENUE_KEYS, pvenue)
+    if paddr:
+        ctx["put_prop_any"](props, t, PRACTICE_ADDRESS_KEYS, paddr)
+    elif pid_row:
+        # 既存編集で空にされた場合はクリア
+        k = _pick_prop_key_exact_first(t, PRACTICE_ADDRESS_KEYS)
+        if k:
+            typ = t.get(k, "")
+            if typ == "rich_text":
+                props[k] = {"rich_text": []}
+            elif typ == "title":
+                props[k] = {"title": []}
+    if pmemo:
+        ctx["put_prop_any"](props, t, PRACTICE_MEMO_KEYS, pmemo)
+    elif pid_row:
+        k = _pick_prop_key_exact_first(t, PRACTICE_MEMO_KEYS)
+        if k:
+            typ = t.get(k, "")
+            if typ == "rich_text":
+                props[k] = {"rich_text": []}
+            elif typ == "title":
+                props[k] = {"title": []}
+    ctx["put_prop_any"](props, t, PRACTICE_CONCERT_DAY_KEYS, "true" if pday else "false")
+
+    if not pid_row:
+        ctx["put_key_any"](props, t, PRACTICE_KEY_KEYS, cid, pdate, pname, prefix="practice")
+
+    if pid_row:
+        res = ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{pid_row}",
+            json={"properties": props},
+        )
+        ok = bool(res and res.status_code in (200, 201))
+        _flash_set(request, "info" if ok else "error", "練習日程を更新しました。" if ok else f"練習日程の更新に失敗しました。{_api_err_brief(res)}")
+    else:
+        res = ctx["api_request"](
+            "post",
+            "https://api.notion.com/v1/pages",
+            json={"parent": {"database_id": db_id}, "properties": props},
+        )
+        ok = bool(res and res.status_code in (200, 201))
+        _flash_set(request, "info" if ok else "error", "練習日程を追加しました。" if ok else f"練習日程の追加に失敗しました。{_api_err_brief(res)}")
+
+    if ok:
+        _invalidate_schedule_related_cache(ctx, cid)
+    return RedirectResponse("/form?tab=practice#role-menu-panels", status_code=302)
+
+
+@router.post("/form/practice/delete")
+async def form_practice_delete(
+    request: Request,
+    practice_id: Annotated[str, Form()],
+):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return _session_expired_redirect(request)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+    ctx = get_ctx()
+    participant_rows = load_form_data(ctx, cid).get("participant_rows_concert", [])
+    role = _effective_role(
+        request,
+        ctx,
+        player_id=pid,
+        concert_id=cid,
+        participant_rows=participant_rows,
+    )
+    if role < ROLE_MANAGER:
+        _flash_set(request, "error", "この操作にはManager権限が必要です。")
+        return RedirectResponse("/form", status_code=302)
+    pid_row = (practice_id or "").strip()
+    if not pid_row:
+        _flash_set(request, "error", "削除対象が不正です。")
+        return RedirectResponse("/form?tab=practice#role-menu-panels", status_code=302)
+    res = ctx["api_request"](
+        "patch",
+        f"https://api.notion.com/v1/pages/{pid_row}",
+        json={"archived": True},
+    )
+    ok = bool(res and res.status_code == 200)
+    _flash_set(request, "info" if ok else "error", "練習日程を削除しました。" if ok else f"練習日程の削除に失敗しました。{_api_err_brief(res)}")
+    if ok:
+        _invalidate_schedule_related_cache(ctx, cid)
+    return RedirectResponse("/form?tab=practice#role-menu-panels", status_code=302)
 
 
 @router.post("/form/schedule/save")

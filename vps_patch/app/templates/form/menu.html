@@ -337,6 +337,7 @@
   <button type="button" class="role-tab" data-role-tab="ownmap" data-hold-label="所有楽器" title="所有楽器"><i class="bi bi-box-seam"></i>所有楽器</button>
   {% if is_manager %}
   <button type="button" class="role-tab" data-role-tab="progress" data-hold-label="進捗" title="進捗"><i class="bi bi-speedometer2"></i>進捗</button>
+  <button type="button" class="role-tab" data-role-tab="practice" data-hold-label="練習日程" title="練習日程"><i class="bi bi-calendar2-week"></i>練習日程</button>
   <button type="button" class="role-tab" data-role-tab="schedule" data-hold-label="進行表" title="進行表"><i class="bi bi-list-task"></i>進行表</button>
   {% endif %}
   <button type="button" class="role-tab" data-role-tab="assign" data-hold-label="アサイン" title="アサイン"><i class="bi bi-bullseye"></i>アサイン</button>
@@ -549,6 +550,115 @@
 {% endif %}
 
 {% if is_manager %}
+<div class="role-panel" data-role-panel="practice">
+  <div class="menu-item f4 schedule-role-panel">
+    <form method="post" action="/form/practice/save" class="schedule-edit-form js-preserve-scroll">
+      <input type="hidden" name="practice_id" value="">
+      <div class="schedule-add-head">
+        <div class="schedule-add-title"><i class="bi bi-plus-circle"></i> 練習日程を追加</div>
+      </div>
+      <div class="schedule-grid schedule-grid-compact">
+        <div class="panel-filter-item">
+          <label>練習名</label>
+          <input class="panel-filter-select" type="text" name="name" placeholder="例: 第3回練習">
+        </div>
+        <div class="panel-filter-item">
+          <label>日時</label>
+          <input class="panel-filter-select" type="datetime-local" name="date_time">
+        </div>
+        <div class="panel-filter-item">
+          <label>会場名</label>
+          <input class="panel-filter-select" type="text" name="venue" placeholder="例: ○○市民ホール">
+        </div>
+        <div class="panel-filter-item">
+          <label>会場住所（任意）</label>
+          <input class="panel-filter-select" type="text" name="address" placeholder="例: 兵庫県尼崎市...">
+        </div>
+        <div class="panel-filter-item schedule-content-item">
+          <label>メモ（任意）</label>
+          <input class="panel-filter-select" type="text" name="memo" placeholder="補足メモ">
+        </div>
+      </div>
+      <div class="schedule-actions">
+        <button type="submit" class="assign-action-btn">追加する</button>
+      </div>
+    </form>
+
+    {% if practice_manage_rows %}
+    <div class="practice-manage-list">
+      {% for row in practice_manage_rows %}
+      <div class="practice-manage-card">
+        <div class="practice-manage-head">
+          <div class="practice-manage-title">{{ row.name }}</div>
+          {% if row.is_concert_day %}<span class="practice-day-badge">本番日</span>{% endif %}
+        </div>
+        <div class="practice-manage-meta">
+          {% if row.date %}<span><i class="bi bi-calendar-event"></i>{{ row.date }}</span>{% endif %}
+          {% if row.venue %}<span><i class="bi bi-geo-alt"></i>{{ row.venue }}</span>{% endif %}
+        </div>
+        {% if row.address %}<div class="menu-hint">{{ row.address }}</div>{% endif %}
+        {% if row.memo %}<div class="schedule-content">{{ row.memo }}</div>{% endif %}
+        <div class="schedule-flow-actions" style="margin-top:8px;">
+          <button type="button"
+                  class="assign-action-btn js-practice-edit-open"
+                  data-id="{{ row.id }}"
+                  data-name="{{ row.name }}"
+                  data-date="{{ row.date }}"
+                  data-venue="{{ row.venue|default('', true) }}"
+                  data-address="{{ row.address|default('', true) }}"
+                  data-memo="{{ row.memo|default('', true) }}"
+                  data-concert-day="{{ '1' if row.is_concert_day else '0' }}">編集</button>
+          <form method="post" action="/form/practice/delete" class="js-preserve-scroll">
+            <input type="hidden" name="practice_id" value="{{ row.id }}">
+            <button type="submit" class="assign-action-btn is-danger">削除</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="menu-hint">練習日程はまだ登録されていません。</div>
+    {% endif %}
+  </div>
+
+  <div class="schedule-edit-modal-backdrop js-practice-edit-modal" aria-hidden="true">
+    <div class="schedule-edit-modal" role="dialog" aria-modal="true" aria-label="練習日程編集">
+      <div class="schedule-modal-head">
+        <div class="schedule-modal-title">練習日程を編集</div>
+        <button type="button" class="schedule-close js-practice-edit-close" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <form method="post" action="/form/practice/save" class="schedule-edit-form js-preserve-scroll">
+        <input type="hidden" name="practice_id" class="js-practice-id" value="">
+        <div class="schedule-grid schedule-grid-compact">
+          <div class="panel-filter-item">
+            <label>練習名</label>
+            <input class="panel-filter-select js-practice-name" type="text" name="name">
+          </div>
+          <div class="panel-filter-item">
+            <label>日時</label>
+            <input class="panel-filter-select js-practice-date" type="datetime-local" name="date_time">
+          </div>
+          <div class="panel-filter-item">
+            <label>会場名</label>
+            <input class="panel-filter-select js-practice-venue" type="text" name="venue">
+          </div>
+          <div class="panel-filter-item">
+            <label>会場住所（任意）</label>
+            <input class="panel-filter-select js-practice-address" type="text" name="address">
+          </div>
+          <div class="panel-filter-item schedule-content-item">
+            <label>メモ（任意）</label>
+            <input class="panel-filter-select js-practice-memo" type="text" name="memo">
+          </div>
+        </div>
+        <div class="schedule-actions">
+          <button type="submit" class="assign-action-btn">更新する</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <div class="role-panel" data-role-panel="schedule">
   <div class="menu-item f4 schedule-role-panel">
     {% if schedule_practice_options %}
@@ -1156,6 +1266,13 @@
   .schedule-flow-item:last-child .schedule-flow-line{display:none}
   .schedule-flow-dot{position:absolute;left:1px;top:13px;width:10px;height:10px;border-radius:50%;background:rgba(95,174,255,.5);box-shadow:0 0 0 2px rgba(95,174,255,.16)}
   .schedule-flow-card{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.02);border-radius:11px;padding:10px 11px}
+  .practice-manage-list{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+  .practice-manage-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(255,255,255,.02);padding:10px 11px}
+  .practice-manage-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .practice-manage-title{font-size:14px;font-weight:600;color:#dce9ff}
+  .practice-manage-meta{margin-top:5px;display:flex;flex-wrap:wrap;gap:8px 12px}
+  .practice-manage-meta span{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#a8bfe4}
+  .practice-day-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;color:#ffe4a8;background:rgba(228,180,89,.16);border:1px solid rgba(228,180,89,.45)}
   .schedule-flow-time{font-size:12px;color:#9db8e2;font-family:'Outfit',sans-serif}
   .schedule-flow-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:5px}
   .schedule-duration{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05);color:#c8daf4;font-size:11px}
@@ -1878,6 +1995,53 @@
       });
     });
 
+    if (closeButton) closeButton.addEventListener("click", close);
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) close();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && modal.classList.contains("is-open")) close();
+    });
+  })();
+
+  (() => {
+    const openButtons = Array.from(document.querySelectorAll(".js-practice-edit-open"));
+    const modal = document.querySelector(".js-practice-edit-modal");
+    if (!openButtons.length || !modal) return;
+    const closeButton = modal.querySelector(".js-practice-edit-close");
+    const idInput = modal.querySelector(".js-practice-id");
+    const nameInput = modal.querySelector(".js-practice-name");
+    const dateInput = modal.querySelector(".js-practice-date");
+    const venueInput = modal.querySelector(".js-practice-venue");
+    const addressInput = modal.querySelector(".js-practice-address");
+    const memoInput = modal.querySelector(".js-practice-memo");
+
+    const toDateTimeLocal = (v) => {
+      const txt = (v || "").trim();
+      if (!txt) return "";
+      return txt.replace(" ", "T").slice(0, 16);
+    };
+    const open = () => {
+      modal.classList.add("is-open");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.style.overflow = "hidden";
+    };
+    const close = () => {
+      modal.classList.remove("is-open");
+      modal.setAttribute("aria-hidden", "true");
+      document.body.style.overflow = "";
+    };
+    openButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (idInput) idInput.value = btn.dataset.id || "";
+        if (nameInput) nameInput.value = btn.dataset.name || "";
+        if (dateInput) dateInput.value = toDateTimeLocal(btn.dataset.date || "");
+        if (venueInput) venueInput.value = btn.dataset.venue || "";
+        if (addressInput) addressInput.value = btn.dataset.address || "";
+        if (memoInput) memoInput.value = btn.dataset.memo || "";
+        open();
+      });
+    });
     if (closeButton) closeButton.addEventListener("click", close);
     modal.addEventListener("click", (e) => {
       if (e.target === modal) close();
