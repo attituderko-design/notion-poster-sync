@@ -133,8 +133,13 @@ RENTAL_PRACTICE_REL_KEYS = _K.RENTAL_PRACTICE_REL_KEYS
 RENTAL_INST_REL_KEYS = _K.RENTAL_INST_REL_KEYS
 RENTAL_ITEM_NAME_KEYS = _K.RENTAL_ITEM_NAME_KEYS
 RENTAL_QTY_KEYS = _K.RENTAL_QTY_KEYS
+RENTAL_VENDOR_KEYS = _K.RENTAL_VENDOR_KEYS
+RENTAL_UNIT_PRICE_KEYS = _K.RENTAL_UNIT_PRICE_KEYS
 RENTAL_NOTE_KEYS = _K.RENTAL_NOTE_KEYS
 RENTAL_KEY_KEYS = _K.RENTAL_KEY_KEYS
+MASTER_PLAYER_REL_KEYS = _K.MASTER_PLAYER_REL_KEYS
+MASTER_INST_REL_KEYS = _K.MASTER_INST_REL_KEYS
+MASTER_OWN_COUNT_KEYS = _K.MASTER_OWN_COUNT_KEYS
 CONCERT_INST_CONCERT_REL_KEYS = _K.CONCERT_INST_CONCERT_REL_KEYS
 CONCERT_INST_SONG_REL_KEYS = _K.CONCERT_INST_SONG_REL_KEYS
 CONCERT_INST_INST_REL_KEYS = _K.CONCERT_INST_INST_REL_KEYS
@@ -4266,35 +4271,74 @@ def _build_role_own_rows(
             scope_player_ids.add(pids[0])
 
     owner_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    pi_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"], None)
-    cid_norm = _norm_id(concert_id)
-    for r in pi_rows:
-        rel_cids = {_norm_id(x) for x in ext_rel(r, _K.PI_CONCERT_REL_KEYS)}
-        if cid_norm not in rel_cids:
-            continue
-        rel_targets = set(ext_rel(r, _K.PI_PLAYER_REL_KEYS))
-        target_pid = ""
-        if rel_targets.intersection(scope_player_ids):
-            target_pid = next(iter(rel_targets.intersection(scope_player_ids)))
-        elif rel_targets.intersection(scope_cast_ids):
-            cast_id = next(iter(rel_targets.intersection(scope_cast_ids)))
-            cast_row = next((c for c in participant_rows if c.get("id", "") == cast_id), {})
-            pids = ext_rel(cast_row, PARTICIPANT_PLAYER_REL_KEYS)
-            target_pid = pids[0] if pids else ""
-        if not target_pid:
-            continue
-        inst_ids = ext_rel(r, _K.PI_INST_REL_KEYS)
-        if not inst_ids:
-            continue
-        inst_id = inst_ids[0]
-        raw = (ext_txt(r, _K.PI_OWN_COUNT_KEYS) or "0").strip()
-        try:
-            qty = max(0, int(float(raw or "0")))
-        except Exception:
-            qty = 0
-        if qty <= 0:
-            continue
-        owner_counts[inst_id][target_pid] += qty
+    cast_to_player_map: dict[str, str] = {}
+    for cast in participant_rows or []:
+        cast_id = cast.get("id", "")
+        pids = ext_rel(cast, PARTICIPANT_PLAYER_REL_KEYS)
+        if cast_id and pids:
+            cast_to_player_map[_norm_id(cast_id)] = pids[0]
+
+    # 1) 所有楽器マスタを優先
+    master_db_id = (ctx.get("CONCERT_DB_PLAYER_INSTRUMENT_MASTER", "") or "").strip()
+    if master_db_id:
+        for r in ctx["query_all"](master_db_id, None):
+            rel_targets = set(ext_rel(r, MASTER_PLAYER_REL_KEYS))
+            target_pid = ""
+            for t in rel_targets:
+                if t in scope_player_ids:
+                    target_pid = t
+                    break
+                pid2 = cast_to_player_map.get(_norm_id(t), "")
+                if pid2 and pid2 in scope_player_ids:
+                    target_pid = pid2
+                    break
+            if not target_pid:
+                continue
+            inst_ids = ext_rel(r, MASTER_INST_REL_KEYS)
+            if not inst_ids:
+                continue
+            inst_id = inst_ids[0]
+            raw = (ext_txt(r, MASTER_OWN_COUNT_KEYS) or "0").strip()
+            try:
+                qty = max(0, int(float(raw or "0")))
+            except Exception:
+                qty = 0
+            if qty <= 0:
+                continue
+            owner_counts[inst_id][target_pid] += qty
+
+    # 2) 互換 fallback: masterが空なら PI から算出
+    if not owner_counts:
+        pi_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"], None)
+        cid_norm = _norm_id(concert_id)
+        for r in pi_rows:
+            rel_cids = {_norm_id(x) for x in ext_rel(r, _K.PI_CONCERT_REL_KEYS)}
+            if cid_norm not in rel_cids:
+                continue
+            rel_targets = set(ext_rel(r, _K.PI_PLAYER_REL_KEYS))
+            target_pid = ""
+            if rel_targets.intersection(scope_player_ids):
+                target_pid = next(iter(rel_targets.intersection(scope_player_ids)))
+            elif rel_targets.intersection(scope_cast_ids):
+                cast_id = next(iter(rel_targets.intersection(scope_cast_ids)))
+                cast_row = next((c for c in participant_rows if c.get("id", "") == cast_id), {})
+                pids = ext_rel(cast_row, PARTICIPANT_PLAYER_REL_KEYS)
+                target_pid = pids[0] if pids else ""
+            if not target_pid:
+                continue
+            inst_ids = ext_rel(r, _K.PI_INST_REL_KEYS)
+            if not inst_ids:
+                continue
+            inst_id = inst_ids[0]
+            raw = (ext_txt(r, _K.PI_OWN_COUNT_KEYS) or "0").strip()
+            try:
+                qty = max(0, int(float(raw or "0")))
+            except Exception:
+                qty = 0
+            if qty <= 0:
+                continue
+            # PIは重複行が起こりやすいので同一人×同一楽器は最大値を採用
+            owner_counts[inst_id][target_pid] = max(owner_counts[inst_id].get(target_pid, 0), qty)
 
     rows: list[dict] = []
     seen: set[tuple[str, str]] = set()
@@ -4414,38 +4458,69 @@ def _build_own_bring_rows(
 
     # 所有楽器（参加者単位/奏者単位のゆれを吸収）
     owner_qty_by_inst_player: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    pi_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"], None)
     cid_norm = _norm_id(concert_id)
-    for r in pi_rows:
-        rel_cids = {_norm_id(x) for x in ext_rel(r, _K.PI_CONCERT_REL_KEYS)}
-        if cid_norm not in rel_cids:
-            continue
-        inst_ids = ext_rel(r, _K.PI_INST_REL_KEYS)
-        if not inst_ids:
-            continue
-        inst_id = inst_ids[0]
-        raw = (ext_txt(r, _K.PI_OWN_COUNT_KEYS) or "0").strip()
-        try:
-            qty = max(0, int(float(raw or "0")))
-        except Exception:
-            qty = 0
-        if qty <= 0:
-            continue
-        rel_targets = ext_rel(r, _K.PI_PLAYER_REL_KEYS)
-        target_pid = ""
-        for t in rel_targets:
-            if t in scope_player_ids:
-                target_pid = t
-                break
-            t_norm = _norm_id(t)
-            if t in scope_cast_ids or t_norm in cast_to_player:
-                pid = cast_to_player.get(t_norm, "")
-                if pid:
-                    target_pid = pid
+    master_db_id = (ctx.get("CONCERT_DB_PLAYER_INSTRUMENT_MASTER", "") or "").strip()
+    if master_db_id:
+        for r in ctx["query_all"](master_db_id, None):
+            inst_ids = ext_rel(r, MASTER_INST_REL_KEYS)
+            if not inst_ids:
+                continue
+            inst_id = inst_ids[0]
+            raw = (ext_txt(r, MASTER_OWN_COUNT_KEYS) or "0").strip()
+            try:
+                qty = max(0, int(float(raw or "0")))
+            except Exception:
+                qty = 0
+            if qty <= 0:
+                continue
+            rel_targets = ext_rel(r, MASTER_PLAYER_REL_KEYS)
+            target_pid = ""
+            for t in rel_targets:
+                if t in scope_player_ids:
+                    target_pid = t
                     break
-        if not target_pid:
-            continue
-        owner_qty_by_inst_player[inst_id][target_pid] += qty
+                t_norm = _norm_id(t)
+                if t in scope_cast_ids or t_norm in cast_to_player:
+                    pid = cast_to_player.get(t_norm, "")
+                    if pid and pid in scope_player_ids:
+                        target_pid = pid
+                        break
+            if not target_pid:
+                continue
+            owner_qty_by_inst_player[inst_id][target_pid] += qty
+
+    if not owner_qty_by_inst_player:
+        pi_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"], None)
+        for r in pi_rows:
+            rel_cids = {_norm_id(x) for x in ext_rel(r, _K.PI_CONCERT_REL_KEYS)}
+            if cid_norm not in rel_cids:
+                continue
+            inst_ids = ext_rel(r, _K.PI_INST_REL_KEYS)
+            if not inst_ids:
+                continue
+            inst_id = inst_ids[0]
+            raw = (ext_txt(r, _K.PI_OWN_COUNT_KEYS) or "0").strip()
+            try:
+                qty = max(0, int(float(raw or "0")))
+            except Exception:
+                qty = 0
+            if qty <= 0:
+                continue
+            rel_targets = ext_rel(r, _K.PI_PLAYER_REL_KEYS)
+            target_pid = ""
+            for t in rel_targets:
+                if t in scope_player_ids:
+                    target_pid = t
+                    break
+                t_norm = _norm_id(t)
+                if t in scope_cast_ids or t_norm in cast_to_player:
+                    pid = cast_to_player.get(t_norm, "")
+                    if pid:
+                        target_pid = pid
+                        break
+            if not target_pid:
+                continue
+            owner_qty_by_inst_player[inst_id][target_pid] = max(owner_qty_by_inst_player[inst_id].get(target_pid, 0), qty)
 
     # 既存レンタル（practice + instrument + item_name 単位）
     rental_qty_by_inst: dict[str, int] = defaultdict(int)
