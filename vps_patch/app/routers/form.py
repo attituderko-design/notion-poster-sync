@@ -4002,6 +4002,17 @@ async def form_rental_upsert(
         if ok
         else f"レンタル情報の保存に失敗しました。{_api_err_brief(res)}",
     )
+    if ok:
+        try:
+            invalidate_form_data_cache(cid)
+        except Exception:
+            pass
+        try:
+            inv = ctx.get("invalidate_query_cache")
+            if callable(inv):
+                inv((ctx.get("CONCERT_DB_RENTAL", "") or "").strip())
+        except Exception:
+            pass
     return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
 
 

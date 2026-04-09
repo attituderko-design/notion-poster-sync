@@ -2643,9 +2643,22 @@
         toast.classList.remove("is-show");
       }, 2200);
     };
+    const hideToast = () => {
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+      toast.classList.remove("is-show");
+    };
 
     let pressTimer = null;
     chips.forEach((chip) => {
+      chip.addEventListener("mouseenter", () => {
+        showToast(chip.getAttribute("data-tip") || "");
+      });
+      chip.addEventListener("mouseleave", () => {
+        hideToast();
+      });
       chip.addEventListener("pointerdown", (e) => {
         if (e.pointerType !== "touch") return;
         pressTimer = setTimeout(() => {
