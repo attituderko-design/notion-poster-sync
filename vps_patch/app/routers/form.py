@@ -128,6 +128,13 @@ ASSIGN_RESP_PLAN_KEYS = _K.ASSIGN_RESP_PLAN_KEYS
 ASSIGN_RESP_STATUS_KEYS = _K.ASSIGN_RESP_STATUS_KEYS
 ASSIGN_RESP_COMMENT_KEYS = _K.ASSIGN_RESP_COMMENT_KEYS
 ASSIGN_RESP_REPLIED_AT_KEYS = _K.ASSIGN_RESP_REPLIED_AT_KEYS
+RENTAL_RECORD_KEYS = _K.RENTAL_RECORD_KEYS
+RENTAL_PRACTICE_REL_KEYS = _K.RENTAL_PRACTICE_REL_KEYS
+RENTAL_INST_REL_KEYS = _K.RENTAL_INST_REL_KEYS
+RENTAL_ITEM_NAME_KEYS = _K.RENTAL_ITEM_NAME_KEYS
+RENTAL_QTY_KEYS = _K.RENTAL_QTY_KEYS
+RENTAL_NOTE_KEYS = _K.RENTAL_NOTE_KEYS
+RENTAL_KEY_KEYS = _K.RENTAL_KEY_KEYS
 
 PRIVACY_POLICY_LINES = [
     "本フォームは ArtéMis HARMONIA が提供する演奏会運営支援フォームです。",
@@ -2361,6 +2368,7 @@ async def form_menu(
     request: Request,
     tab: str = Query(default=""),
     schedule_practice_id: str = Query(default=""),
+    own_practice_id: str = Query(default=""),
 ):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
@@ -2623,6 +2631,21 @@ async def form_menu(
         selected_schedule_practice_id = upcoming_practice_id or (practice_options[0]["id"] if practice_options else "")
     if selected_schedule_practice_id:
         request.session["schedule_selected_practice_id"] = selected_schedule_practice_id
+    selected_own_practice_id = (own_practice_id or "").strip()
+    if not selected_own_practice_id:
+        selected_own_practice_id = (request.session.get("ownmap_selected_practice_id", "") or "").strip()
+    if selected_own_practice_id and practice_options:
+        exact_ids2 = {x["id"] for x in practice_options}
+        if selected_own_practice_id not in exact_ids2:
+            sel_norm2 = _norm_id(selected_own_practice_id)
+            for opt in practice_options:
+                if _norm_id(opt["id"]) == sel_norm2:
+                    selected_own_practice_id = opt["id"]
+                    break
+    if not selected_own_practice_id:
+        selected_own_practice_id = upcoming_practice_id or (practice_options[0]["id"] if practice_options else "")
+    if selected_own_practice_id:
+        request.session["ownmap_selected_practice_id"] = selected_own_practice_id
     schedule_manage_rows = _build_schedule_manage_rows(
         ctx,
         practice_id=selected_schedule_practice_id,
@@ -2724,6 +2747,7 @@ async def form_menu(
     song_names = [x for x in song_names if not (x in seen or seen.add(x))]
     own_role_rows: list[dict] = []
     own_role_song_options: list[dict] = []
+    own_bring_rows: list[dict] = []
     if role >= ROLE_LEADER:
         own_role_rows, own_role_song_options = _build_role_own_rows(
             ctx,
@@ -2734,6 +2758,18 @@ async def form_menu(
             partdefs=data.get("partdefs", []) or [],
             songs=data.get("songs", []) or [],
             player_rows=players,
+        )
+        own_bring_rows = _build_own_bring_rows(
+            ctx,
+            concert_id=cid,
+            role=role,
+            my_part_id=my_part_id,
+            participant_rows=participant_rows,
+            partdefs=data.get("partdefs", []) or [],
+            songs=data.get("songs", []) or [],
+            player_rows=players,
+            attendance_rows=attendance_rows,
+            selected_practice_id=selected_own_practice_id,
         )
     resp = templates.TemplateResponse("form/menu.html", {
         "request": request,
@@ -2786,6 +2822,7 @@ async def form_menu(
         "schedule_manage_rows": schedule_manage_rows,
         "schedule_song_options": assign_song_options,
         "schedule_type_options": SCHEDULE_TYPE_OPTIONS,
+        "own_practice_options": practice_options,
         "practice_manage_rows": practice_manage_rows,
         "practice_cols": _build_practice_cols(data.get("practices", [])),
         "attendance_table_rows": _build_attendance_table(
@@ -2801,6 +2838,8 @@ async def form_menu(
         "role_assignment_rows": role_assignment_rows,
         "own_role_rows": own_role_rows,
         "own_role_song_options": own_role_song_options,
+        "own_bring_rows": own_bring_rows,
+        "own_selected_practice_id": selected_own_practice_id,
         "upcoming_schedule_rows": upcoming_schedule_rows,
         "assign_solver_candidates": candidate_results,
         "assign_solver_selected_idx": selected_idx,
@@ -3816,6 +3855,113 @@ async def form_schedule_reorder(
     return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={pid_q}#role-menu-panels", status_code=302)
 
 
+@router.post("/form/rental/upsert")
+async def form_rental_upsert(
+    request: Request,
+    practice_id: Annotated[str, Form()],
+    instrument_id: Annotated[str, Form()],
+    song_id: Annotated[str, Form()] = "",
+    suggested_qty: Annotated[str, Form()] = "",
+):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return _session_expired_redirect(request)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    participant_rows = data.get("participant_rows_concert", [])
+    role = _effective_role(
+        request,
+        ctx,
+        player_id=pid,
+        concert_id=cid,
+        participant_rows=participant_rows,
+    )
+    if role < ROLE_MANAGER:
+        _flash_set(request, "error", "この操作にはManager権限が必要です。")
+        return RedirectResponse("/form", status_code=302)
+
+    db_id = (ctx.get("CONCERT_DB_RENTAL", "") or "").strip()
+    if not db_id:
+        _flash_set(request, "error", "CONCERT_DB_RENTAL が未設定です。")
+        return RedirectResponse(f"/form?tab=ownmap&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+
+    t = ctx["get_prop_types"](db_id) or {}
+    if not t:
+        _flash_set(request, "error", "RENTAL DB のプロパティ取得に失敗しました。")
+        return RedirectResponse(f"/form?tab=ownmap&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+
+    practice_id = (practice_id or "").strip()
+    instrument_id = (instrument_id or "").strip()
+    song_id = (song_id or "").strip()
+    if not practice_id or not instrument_id:
+        _flash_set(request, "error", "練習日と楽器情報が不正です。")
+        return RedirectResponse("/form?tab=ownmap#role-menu-panels", status_code=302)
+
+    qty = _parse_positive_int(suggested_qty)
+    if qty is None:
+        qty = 1
+    qty = max(1, qty)
+
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+    inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"], None)
+    inst_name_map = {r.get("id", ""): (ext_txt(r, INSTRUMENT_NAME_KEYS) or "").strip() for r in inst_rows}
+    songs = data.get("songs", []) or []
+    song_name_map = {s.get("id", ""): (ext_txt(s, SONG_NAME_KEYS) or "").strip() for s in songs}
+    inst_name = inst_name_map.get(instrument_id, "楽器")
+    song_name = song_name_map.get(song_id, "")
+    item_name = f"{song_name} / {inst_name}" if song_name else inst_name
+    note_text = "持参不足分をownmapから登録"
+
+    # 同一練習・同一楽器・同一品目名は upsert（上書き）
+    target_row = None
+    for r in ctx["query_all"](db_id, None):
+        pr_ids = ext_rel(r, RENTAL_PRACTICE_REL_KEYS)
+        if not pr_ids or _norm_id(pr_ids[0]) != _norm_id(practice_id):
+            continue
+        inst_ids = ext_rel(r, RENTAL_INST_REL_KEYS)
+        if not inst_ids or _norm_id(inst_ids[0]) != _norm_id(instrument_id):
+            continue
+        name_txt = (ext_txt(r, RENTAL_ITEM_NAME_KEYS) or "").strip()
+        if name_txt == item_name:
+            target_row = r
+            break
+
+    props: dict = {}
+    ctx["put_prop_any"](props, t, RENTAL_PRACTICE_REL_KEYS, practice_id)
+    ctx["put_prop_any"](props, t, RENTAL_INST_REL_KEYS, instrument_id)
+    ctx["put_prop_any"](props, t, RENTAL_ITEM_NAME_KEYS, item_name)
+    ctx["put_prop_any"](props, t, RENTAL_QTY_KEYS, str(qty))
+    ctx["put_prop_any"](props, t, RENTAL_NOTE_KEYS, note_text)
+    if not target_row:
+        ctx["put_key_any"](props, t, RENTAL_KEY_KEYS, practice_id, instrument_id, prefix="rental")
+
+    if target_row:
+        res = ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{target_row.get('id', '')}",
+            json={"properties": props},
+        )
+    else:
+        res = ctx["api_request"](
+            "post",
+            "https://api.notion.com/v1/pages",
+            json={"parent": {"database_id": db_id}, "properties": props},
+        )
+    ok = bool(res and res.status_code in (200, 201))
+    _flash_set(
+        request,
+        "info" if ok else "error",
+        ("レンタル情報を更新しました。" if target_row else "レンタル情報を追加しました。")
+        if ok
+        else f"レンタル情報の保存に失敗しました。{_api_err_brief(res)}",
+    )
+    return RedirectResponse(f"/form?tab=ownmap&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+
+
 @router.get("/form/att", response_class=HTMLResponse)
 async def form_att_page(request: Request):
     pid = request.session.get("player_id", "")
@@ -4148,6 +4294,196 @@ def _build_role_own_rows(
     song_options = [{"id": sid, "name": name} for sid, name in song_option_map.items()]
     song_options.sort(key=lambda x: x["name"].lower())
     return rows, song_options
+
+
+def _normalize_att_status(raw: str) -> str:
+    t = (raw or "").strip().lower()
+    if not t:
+        return ""
+    if ("○" in t) or ("参加" in t and "不" not in t):
+        return "ok"
+    if "△" in t:
+        return "maybe"
+    if ("×" in t) or ("欠席" in t) or ("不可" in t):
+        return "ng"
+    return ""
+
+
+def _build_own_bring_rows(
+    ctx: dict,
+    *,
+    concert_id: str,
+    role: int,
+    my_part_id: str,
+    participant_rows: list[dict],
+    partdefs: list[dict],
+    songs: list[dict],
+    player_rows: list[dict],
+    attendance_rows: list[dict],
+    selected_practice_id: str,
+) -> list[dict]:
+    """Leader/Manager向け: 練習日の出欠×所有楽器を突き合わせた持参候補/不足数。"""
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+    song_name_map = {s.get("id", ""): (ext_txt(s, SONG_NAME_KEYS) or "未設定").strip() for s in songs}
+    inst_rows = ctx["query_all"](ctx["CONCERT_DB_INSTRUMENT"], None)
+    inst_name_map = {r.get("id", ""): (ext_txt(r, INSTRUMENT_NAME_KEYS) or "").strip() for r in inst_rows}
+    player_name_map = {p.get("id", ""): (ext_txt(p, PLAYER_NAME_KEYS) or "不明").strip() for p in (player_rows or [])}
+
+    # 対象参加者（Percussionのみ）
+    scope_cast_ids: set[str] = set()
+    scope_player_ids: set[str] = set()
+    cast_to_player: dict[str, str] = {}
+    player_to_cast_norm: dict[str, str] = {}
+    part_master_name_map = {
+        r.get("id", ""): (ext_txt(r, PARTMASTER_NAME_KEYS) or "").strip()
+        for r in ctx["query_all"](ctx["CONCERT_DB_PART_MASTER"], None)
+    }
+    for cast in participant_rows or []:
+        cast_id = cast.get("id", "")
+        if not cast_id:
+            continue
+        pm_ids = ext_rel(cast, PARTICIPANT_PART_REL_KEYS)
+        pm_id = pm_ids[0] if pm_ids else ""
+        pm_name = (part_master_name_map.get(pm_id, "") or "").strip()
+        if not is_perc(pm_name):
+            continue
+        if role < ROLE_MANAGER and my_part_id and pm_id != my_part_id:
+            continue
+        pids = ext_rel(cast, PARTICIPANT_PLAYER_REL_KEYS)
+        pid = pids[0] if pids else ""
+        cast_to_player[_norm_id(cast_id)] = pid
+        if pid:
+            player_to_cast_norm[pid] = _norm_id(cast_id)
+        scope_cast_ids.add(cast_id)
+        if pid:
+            scope_player_ids.add(pid)
+
+    # 出欠（選択練習日のみ）
+    att_by_cast: dict[str, str] = {}
+    practice_norm = _norm_id(selected_practice_id)
+    for att in attendance_rows or []:
+        cast_ids = ext_rel(att, ATT_PLAYER_REL_KEYS)
+        pr_ids = ext_rel(att, ATT_PRACTICE_REL_KEYS)
+        if not cast_ids or not pr_ids:
+            continue
+        if _norm_id(pr_ids[0]) != practice_norm:
+            continue
+        cast_id = cast_ids[0]
+        if cast_id not in scope_cast_ids:
+            continue
+        att_by_cast[_norm_id(cast_id)] = _normalize_att_status(ext_txt(att, ATT_STATUS_KEYS))
+
+    # 所有楽器（参加者単位/奏者単位のゆれを吸収）
+    owner_qty_by_inst_player: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    pi_rows = ctx["query_all"](ctx["CONCERT_DB_PLAYER_INSTRUMENT"], None)
+    cid_norm = _norm_id(concert_id)
+    for r in pi_rows:
+        rel_cids = {_norm_id(x) for x in ext_rel(r, _K.PI_CONCERT_REL_KEYS)}
+        if cid_norm not in rel_cids:
+            continue
+        inst_ids = ext_rel(r, _K.PI_INST_REL_KEYS)
+        if not inst_ids:
+            continue
+        inst_id = inst_ids[0]
+        raw = (ext_txt(r, _K.PI_OWN_COUNT_KEYS) or "0").strip()
+        try:
+            qty = max(0, int(float(raw or "0")))
+        except Exception:
+            qty = 0
+        if qty <= 0:
+            continue
+        rel_targets = ext_rel(r, _K.PI_PLAYER_REL_KEYS)
+        target_pid = ""
+        for t in rel_targets:
+            if t in scope_player_ids:
+                target_pid = t
+                break
+            t_norm = _norm_id(t)
+            if t in scope_cast_ids or t_norm in cast_to_player:
+                pid = cast_to_player.get(t_norm, "")
+                if pid:
+                    target_pid = pid
+                    break
+        if not target_pid:
+            continue
+        owner_qty_by_inst_player[inst_id][target_pid] += qty
+
+    # 既存レンタル（practice + instrument 単位）
+    rental_qty_by_inst: dict[str, int] = defaultdict(int)
+    rental_db_id = (ctx.get("CONCERT_DB_RENTAL", "") or "").strip()
+    if rental_db_id and selected_practice_id:
+        for r in ctx["query_all"](rental_db_id, None):
+            pr_ids = ext_rel(r, RENTAL_PRACTICE_REL_KEYS)
+            if not pr_ids or _norm_id(pr_ids[0]) != practice_norm:
+                continue
+            inst_ids = ext_rel(r, RENTAL_INST_REL_KEYS)
+            if not inst_ids:
+                continue
+            inst_id = inst_ids[0]
+            raw = (ext_txt(r, RENTAL_QTY_KEYS) or "0").strip()
+            try:
+                qty = max(0, int(float(raw or "0")))
+            except Exception:
+                qty = 0
+            rental_qty_by_inst[inst_id] += qty
+
+    # 必要数（partdefsベース）
+    rows: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for pd in partdefs or []:
+        part_ids = ext_rel(pd, PARTDEF_PART_REL_KEYS)
+        if role < ROLE_MANAGER and my_part_id:
+            if not part_ids or part_ids[0] != my_part_id:
+                continue
+        song_ids = ext_rel(pd, PARTDEF_SONG_REL_KEYS)
+        song_id = song_ids[0] if song_ids else ""
+        inst_ids = ext_rel(pd, PARTDEF_INST_REL_KEYS)
+        raw_need = (ext_txt(pd, _K.PART_COUNT_KEYS) or "1").strip()
+        try:
+            required_qty = max(1, int(float(raw_need or "1")))
+        except Exception:
+            required_qty = 1
+        for inst_id in inst_ids:
+            key = (song_id, inst_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            owners = owner_qty_by_inst_player.get(inst_id, {})
+            available_ok = 0
+            available_maybe = 0
+            owner_badges_ok: list[dict] = []
+            owner_badges_maybe: list[dict] = []
+            for pid, qty in owners.items():
+                cast_id = player_to_cast_norm.get(pid, "")
+                st = att_by_cast.get(cast_id, "")
+                badge = {"player_id": pid, "name": player_name_map.get(pid, "不明"), "qty": qty}
+                if st == "ok":
+                    available_ok += qty
+                    owner_badges_ok.append(badge)
+                elif st == "maybe":
+                    available_maybe += qty
+                    owner_badges_maybe.append(badge)
+            owner_badges_ok.sort(key=lambda x: x["name"].lower())
+            owner_badges_maybe.sort(key=lambda x: x["name"].lower())
+            shortage = max(0, required_qty - available_ok)
+            shortage_with_maybe = max(0, required_qty - (available_ok + available_maybe))
+            rows.append({
+                "song_id": song_id,
+                "song_name": song_name_map.get(song_id, "未設定"),
+                "instrument_id": inst_id,
+                "instrument_name": inst_name_map.get(inst_id, inst_id or "—"),
+                "required_qty": required_qty,
+                "available_ok": available_ok,
+                "available_maybe": available_maybe,
+                "shortage": shortage,
+                "shortage_with_maybe": shortage_with_maybe,
+                "rental_qty": int(rental_qty_by_inst.get(inst_id, 0)),
+                "owner_badges_ok": owner_badges_ok,
+                "owner_badges_maybe": owner_badges_maybe,
+            })
+    rows.sort(key=lambda x: (x["song_name"].lower(), x["instrument_name"].lower()))
+    return rows
 
 
 def _build_material_rows(ctx, partdefs, songs, my_part_id, role) -> list:

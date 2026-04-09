@@ -472,6 +472,17 @@
   <div class="menu-item f4 own-role-panel">
     {% if own_role_rows %}
     <div class="panel-filters">
+      <form method="get" action="/form" class="js-preserve-scroll">
+        <input type="hidden" name="tab" value="ownmap">
+        <div class="panel-filter-item">
+          <label for="own-practice-filter">練習日</label>
+          <select id="own-practice-filter" class="panel-filter-select" name="own_practice_id" onchange="this.form.submit()">
+            {% for p in own_practice_options %}
+            <option value="{{ p.id }}"{% if own_selected_practice_id == p.id %} selected{% endif %}>{{ p.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </form>
       <div class="panel-filter-item">
         <label for="own-song-filter">曲</label>
         <select id="own-song-filter" class="panel-filter-select" data-filter-target="ownmap" data-filter-kind="song" data-static-options="1">
@@ -482,6 +493,57 @@
         </select>
       </div>
     </div>
+
+    {% if own_bring_rows %}
+    <div class="own-carry-head">持参見込み（出欠×所有楽器）</div>
+    <div class="own-role-list" data-role-list="ownmap">
+      {% for row in own_bring_rows %}
+      <div class="own-role-card own-carry-card" data-song="{{ row.song_name }}">
+        <div class="own-role-head">
+          <div class="own-role-song">{{ row.song_name }}</div>
+          <div class="own-role-inst">{{ row.instrument_name }}</div>
+        </div>
+        <div class="own-carry-metrics">
+          <span class="own-metric-chip">必要 {{ row.required_qty }}</span>
+          <span class="own-metric-chip is-ok">○持参 {{ row.available_ok }}</span>
+          <span class="own-metric-chip is-maybe">△持参 {{ row.available_maybe }}</span>
+          <span class="own-metric-chip{% if row.shortage > 0 %} is-ng{% endif %}">不足 {{ row.shortage }}</span>
+          <span class="own-metric-chip">レンタル {{ row.rental_qty }}</span>
+        </div>
+        <div class="own-role-badges">
+          {% if row.owner_badges_ok %}
+            {% for b in row.owner_badges_ok %}
+            <span class="own-owner-chip">{{ b.name }} ×{{ b.qty }}</span>
+            {% endfor %}
+          {% else %}
+            <span class="own-owner-empty">○参加の所有者なし</span>
+          {% endif %}
+          {% if row.owner_badges_maybe %}
+            {% for b in row.owner_badges_maybe %}
+            <span class="own-owner-chip is-maybe">{{ b.name }}(△) ×{{ b.qty }}</span>
+            {% endfor %}
+          {% endif %}
+        </div>
+        {% if is_manager and row.shortage > 0 and own_selected_practice_id %}
+        <div class="own-carry-actions">
+          <form method="post" action="/form/rental/upsert" class="js-preserve-scroll">
+            <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
+            <input type="hidden" name="song_id" value="{{ row.song_id }}">
+            <input type="hidden" name="instrument_id" value="{{ row.instrument_id }}">
+            <input type="hidden" name="suggested_qty" value="{{ row.shortage }}">
+            <button type="submit" class="assign-action-btn is-danger">不足{{ row.shortage }}をレンタル登録</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="menu-hint">練習日の出欠と所有楽器を突き合わせた結果がありません。</div>
+    {% endif %}
+
+    <div class="divider"></div>
+    <div class="own-carry-head">所有楽器一覧</div>
     <div class="own-role-list" data-role-list="ownmap">
       {% for row in own_role_rows %}
       <div class="own-role-card" data-song="{{ row.song_name }}">
@@ -1203,14 +1265,22 @@
   .assign-panel{display:block}
   .own-role-panel{display:block;padding:12px}
   .own-role-list{display:flex;flex-direction:column;gap:8px}
+  .own-carry-head{margin:8px 0 8px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#88a4d0}
   .own-role-card{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:10px;padding:10px 11px;transition:transform .18s ease,border-color .18s ease,background-color .18s ease}
   .own-role-card:hover{transform:translateY(-1px);border-color:rgba(74,158,255,.28);background:rgba(255,255,255,.04)}
   .own-role-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
   .own-role-song{font-size:12px;color:#9db8e2}
   .own-role-inst{font-size:13px;font-weight:600;color:#dbe8ff}
+  .own-carry-metrics{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:2px 0 8px}
+  .own-metric-chip{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);color:#c7d8f4;font-size:11px}
+  .own-metric-chip.is-ok{border-color:rgba(100,200,130,.42);background:rgba(100,200,130,.12);color:#bdeecf}
+  .own-metric-chip.is-maybe{border-color:rgba(228,180,89,.42);background:rgba(228,180,89,.12);color:#f4ddab}
+  .own-metric-chip.is-ng{border-color:rgba(230,120,120,.45);background:rgba(230,120,120,.12);color:#ffd1d1}
   .own-role-badges{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
   .own-owner-chip{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;color:#a8d2ff;background:rgba(74,158,255,.14);border:1px solid rgba(74,158,255,.35)}
+  .own-owner-chip.is-maybe{color:#f1d49b;background:rgba(228,180,89,.14);border-color:rgba(228,180,89,.36)}
   .own-owner-empty{font-size:11px;color:#93add6}
+  .own-carry-actions{margin-top:8px}
   .assign-list{display:flex;flex-direction:column;gap:8px}
   .assign-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
   .assign-row:last-child{border-bottom:none}
@@ -2420,7 +2490,7 @@
       if (!root) return [];
       if (type === "att") return Array.from(root.querySelectorAll(".att-member-card"));
       if (type === "member") return Array.from(root.querySelectorAll(".member-card"));
-      if (type === "ownmap") return Array.from(root.querySelectorAll(".own-role-card"));
+      if (type === "ownmap") return Array.from(document.querySelectorAll('[data-role-panel="ownmap"] .own-role-card'));
       if (type === "assignCandidate") return Array.from(document.querySelectorAll(".assign-candidate-list .assign-role-card"));
       if (type === "progress") return Array.from(root.querySelectorAll(".progress-part-card"));
       return Array.from(root.querySelectorAll(".assign-role-card"));
