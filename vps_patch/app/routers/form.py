@@ -1245,6 +1245,8 @@ def _build_manager_part_progress(
     for pm_id, pm in (part_master_map or {}).items():
         name = (pm.get("name", "") or "").strip() or pm_id[:8]
         member_total = int(part_member_count.get(pm_id, 0))
+        if member_total <= 0:
+            continue
         agree = int(response_by_part.get(pm_id, {}).get("agree", 0))
         obj = int(response_by_part.get(pm_id, {}).get("object", 0))
         unanswered = max(0, member_total - agree - obj)
