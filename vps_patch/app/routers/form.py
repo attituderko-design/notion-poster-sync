@@ -117,6 +117,7 @@ ASSIGN_RESP_CAST_REL_KEYS = _K.ASSIGN_RESP_CAST_REL_KEYS
 ASSIGN_RESP_PLAN_KEYS = _K.ASSIGN_RESP_PLAN_KEYS
 ASSIGN_RESP_STATUS_KEYS = _K.ASSIGN_RESP_STATUS_KEYS
 ASSIGN_RESP_COMMENT_KEYS = _K.ASSIGN_RESP_COMMENT_KEYS
+ASSIGN_RESP_REPLIED_AT_KEYS = _K.ASSIGN_RESP_REPLIED_AT_KEYS
 
 
 def get_ctx():
@@ -1013,6 +1014,9 @@ def _upsert_assign_response(
                 ctx["put_prop_any"](props, t, ASSIGN_RESP_PLAN_KEYS, plan_label)
     if comment:
         ctx["put_prop_any"](props, t, ASSIGN_RESP_COMMENT_KEYS, comment)
+    replied_key = _pick_prop_key_exact_first(t, ASSIGN_RESP_REPLIED_AT_KEYS)
+    if replied_key:
+        props[replied_key] = {"date": {"start": _now_iso_local()}}
     key_key = _pick_prop_key_exact_first(t, ASSIGN_RESP_KEY_KEYS)
     if key_key:
         ctx["put_key_any"](props, t, [key_key], concert_id, cast_id, status, prefix="assignresp")
@@ -2934,12 +2938,25 @@ async def form_assign_respond(
         _flash_set(request, "error", "アサイン案の受付期間ではありません。")
         return RedirectResponse("/form#my-assign-summary", status_code=302)
 
+    state_all = request.session.get("assign_solver_state") or {}
+    state = state_all.get(cid, {}) if isinstance(state_all, dict) else {}
+    plan_label = (state.get("proposed_label", "") if isinstance(state, dict) else "") or ""
+    if not plan_label:
+        idx = 0
+        if isinstance(state, dict):
+            try:
+                idx = int(state.get("proposed_selected", state.get("selected", 0)) or 0)
+            except Exception:
+                idx = 0
+        idx = max(0, min(3, idx))
+        plan_label = f"案{chr(ord('A') + idx)}"
+
     ok, msg = _upsert_assign_response(
         ctx,
         concert_id=cid,
         cast_id=my_cast_id,
         status=status,
-        plan_label=("案提示中" if bool(flags.get("plan_done")) else ""),
+        plan_label=plan_label,
     )
     if not ok:
         _flash_set(request, "error", f"回答を保存できませんでした: {msg}")
