@@ -332,16 +332,28 @@
 <div class="section-label f4" style="margin-top:18px;">{% if show_role_panel %}{% if is_manager %}Managerメニュー{% else %}パートリーダーメニュー{% endif %}{% else %}資料{% endif %}</div>
 <div class="role-tabs f4" id="role-menu-panels">
   {% if show_role_panel %}
+  {% if is_manager %}
+  <button type="button" class="role-tab is-active" data-role-tab="practice" data-hold-label="練習日程管理" title="練習日程管理"><i class="bi bi-calendar2-week"></i>練習日程管理</button>
+  <button type="button" class="role-tab" data-role-tab="schedule" data-hold-label="スケジュール管理" title="スケジュール管理"><i class="bi bi-list-task"></i>スケジュール管理</button>
+  {% else %}
   <button type="button" class="role-tab is-active" data-role-tab="att" data-hold-label="出欠" title="出欠"><i class="bi bi-clipboard-data"></i>出欠</button>
+  {% endif %}
+  {% if not is_manager %}
   <button type="button" class="role-tab" data-role-tab="member" data-hold-label="メンバー" title="メンバー"><i class="bi bi-people"></i>メンバー</button>
   <button type="button" class="role-tab" data-role-tab="ownmap" data-hold-label="所有楽器" title="所有楽器"><i class="bi bi-box-seam"></i>所有楽器</button>
-  <button type="button" class="role-tab" data-role-tab="rental" data-hold-label="持参/レンタル" title="持参/レンタル"><i class="bi bi-truck"></i>持参/レンタル</button>
+  <button type="button" class="role-tab" data-role-tab="rental" data-hold-label="持参楽器整理" title="持参楽器整理"><i class="bi bi-truck"></i>持参楽器整理</button>
+  {% endif %}
   {% if is_manager %}
-  <button type="button" class="role-tab" data-role-tab="progress" data-hold-label="進捗" title="進捗"><i class="bi bi-speedometer2"></i>進捗</button>
-  <button type="button" class="role-tab" data-role-tab="practice" data-hold-label="練習日程" title="練習日程"><i class="bi bi-calendar2-week"></i>練習日程</button>
-  <button type="button" class="role-tab" data-role-tab="schedule" data-hold-label="進行表" title="進行表"><i class="bi bi-list-task"></i>進行表</button>
+  <button type="button" class="role-tab" data-role-tab="att" data-hold-label="出欠" title="出欠"><i class="bi bi-clipboard-data"></i>出欠</button>
+  <button type="button" class="role-tab" data-role-tab="member" data-hold-label="メンバー" title="メンバー"><i class="bi bi-people"></i>メンバー</button>
+  <button type="button" class="role-tab" data-role-tab="ownmap" data-hold-label="所有楽器" title="所有楽器"><i class="bi bi-box-seam"></i>所有楽器</button>
+  <button type="button" class="role-tab" data-role-tab="rental" data-hold-label="持参楽器整理" title="持参楽器整理"><i class="bi bi-truck"></i>持参楽器整理</button>
+  <button type="button" class="role-tab" data-role-tab="rental_manage" data-hold-label="レンタル管理" title="レンタル管理"><i class="bi bi-receipt"></i>レンタル管理</button>
   {% endif %}
   <button type="button" class="role-tab" data-role-tab="assign" data-hold-label="アサイン" title="アサイン"><i class="bi bi-bullseye"></i>アサイン</button>
+  {% if is_manager %}
+  <button type="button" class="role-tab" data-role-tab="progress" data-hold-label="アサイン進捗" title="アサイン進捗"><i class="bi bi-speedometer2"></i>アサイン進捗</button>
+  {% endif %}
   <button type="button" class="role-tab" data-role-tab="material" data-hold-label="資料" title="資料"><i class="bi bi-file-earmark-text"></i>資料</button>
   {% else %}
   <button type="button" class="role-tab is-active" data-role-tab="material" data-hold-label="資料" title="資料"><i class="bi bi-file-earmark-text"></i>資料</button>
@@ -349,7 +361,7 @@
 </div>
 
 {% if show_role_panel %}
-<div class="role-panel is-active" data-role-panel="att">
+<div class="role-panel{% if not is_manager %} is-active{% endif %}" data-role-panel="att">
   <div class="menu-item f4 att-modern-panel">
     {% if practice_cols and attendance_table_rows %}
     {% if is_manager %}
@@ -557,7 +569,7 @@
               <span class="rental-chip is-need js-chip-tip" title="{{ row.tip_need }}" data-tip="{{ row.tip_need }}">{{ row.instrument_name }}</span>
               {% endif %}
             {% elif row.rental_qty > 0 %}
-              <a href="#rental-manage" class="rental-chip is-rented js-chip-tip" title="{{ row.tip_rented }}" data-tip="{{ row.tip_rented }}">{{ row.instrument_name }}</a>
+              <a href="/form?tab=rental_manage&own_practice_id={{ own_selected_practice_id }}#role-menu-panels" class="rental-chip is-rented js-chip-tip" title="{{ row.tip_rented }}" data-tip="{{ row.tip_rented }}">{{ row.instrument_name }}</a>
             {% else %}
               <span class="rental-chip is-bring js-chip-tip" title="{{ row.tip_bring }}" data-tip="{{ row.tip_bring }}">{{ row.instrument_name }}</span>
             {% endif %}
@@ -577,9 +589,49 @@
       {% endfor %}
     </div>
     <div class="panel-empty is-hidden" data-empty-for="rental">該当する行がありません。</div>
+    {% else %}
+    <div class="menu-hint">練習日の出欠と所有楽器を突き合わせた結果がありません。</div>
+    {% endif %}
+  </div>
+</div>
 
-    {% if is_manager %}
-    <div id="rental-manage" class="own-carry-head" style="margin-top:12px;">レンタル手配一覧（編集）</div>
+{% if is_manager %}
+<div class="role-panel" data-role-panel="rental_manage">
+  <div class="menu-item f4 own-role-panel">
+    <div class="panel-filters">
+      <form method="get" action="/form" class="js-preserve-scroll">
+        <input type="hidden" name="tab" value="rental_manage">
+        <div class="panel-filter-item">
+          <label for="rental-manage-practice-filter">練習日</label>
+          <select id="rental-manage-practice-filter" class="panel-filter-select" name="own_practice_id" onchange="this.form.submit()">
+            {% for p in own_practice_options %}
+            <option value="{{ p.id }}"{% if own_selected_practice_id == p.id %} selected{% endif %}>{{ p.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </form>
+    </div>
+
+    <div id="rental-manage" class="own-carry-head">レンタル項目を追加</div>
+    <form method="post" action="/form/rental/save" class="js-preserve-scroll">
+      <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
+      <input type="hidden" name="return_tab" value="rental_manage">
+      <div class="rental-manage-grid">
+        <input class="panel-filter-select" type="text" name="item_name" value="" placeholder="品目名（楽器以外の費用も可）" required>
+        <input class="panel-filter-select" type="text" name="vendor" value="" placeholder="業者名">
+        <input class="panel-filter-select" type="number" min="0" step="1" name="qty" value="1" placeholder="数量">
+        <input class="panel-filter-select" type="number" min="0" step="1" name="unit_price" value="0" placeholder="単価">
+      </div>
+      <div class="rental-manage-grid" style="margin-top:6px;">
+        <input class="panel-filter-select" type="text" name="cost_type" value="" placeholder="費用種別（例: 楽器レンタル / 運送費 / 管理費）">
+        <input class="panel-filter-select" type="text" name="note" value="" placeholder="備考">
+      </div>
+      <div class="rental-manage-actions">
+        <button type="submit" class="assign-action-btn">追加する</button>
+      </div>
+    </form>
+
+    <div class="own-carry-head" style="margin-top:12px;">レンタル手配一覧（編集）</div>
     {% if rental_manage_rows %}
     <div class="rental-manage-list">
       {% for r in rental_manage_rows %}
@@ -587,6 +639,7 @@
       <form method="post" action="/form/rental/save" class="js-preserve-scroll">
         <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
         <input type="hidden" name="rental_id" value="{{ r.id }}">
+        <input type="hidden" name="return_tab" value="rental_manage">
         <div class="rental-manage-title">{{ r.item_name }}</div>
         <div class="rental-manage-grid">
           <input class="panel-filter-select" type="text" name="vendor" value="{{ r.vendor }}" placeholder="業者名">
@@ -595,6 +648,7 @@
           <input class="panel-filter-select" type="text" name="item_name" value="{{ r.item_name }}" placeholder="品目名">
         </div>
         <div class="rental-manage-grid" style="margin-top:6px;">
+          <input class="panel-filter-select" type="text" name="cost_type" value="{{ r.cost_type }}" placeholder="費用種別（例: 楽器レンタル / 運送費 / 管理費）">
           <input class="panel-filter-select" type="text" name="note" value="{{ r.note }}" placeholder="備考">
         </div>
         <div class="rental-manage-actions">
@@ -604,6 +658,7 @@
       <form method="post" action="/form/rental/delete" class="js-preserve-scroll">
         <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
         <input type="hidden" name="rental_id" value="{{ r.id }}">
+        <input type="hidden" name="return_tab" value="rental_manage">
         <div class="rental-manage-actions" style="margin-top:6px;">
           <button type="submit" class="assign-action-btn is-danger">削除</button>
         </div>
@@ -613,12 +668,9 @@
     {% else %}
     <div class="menu-hint">レンタル手配はまだありません。</div>
     {% endif %}
-    {% endif %}
-    {% else %}
-    <div class="menu-hint">練習日の出欠と所有楽器を突き合わせた結果がありません。</div>
-    {% endif %}
   </div>
 </div>
+{% endif %}
 
 {% if is_manager %}
 <div class="role-panel" data-role-panel="progress">
@@ -662,7 +714,7 @@
 {% endif %}
 
 {% if is_manager %}
-<div class="role-panel" data-role-panel="practice">
+<div class="role-panel{% if is_manager %} is-active{% endif %}" data-role-panel="practice">
   <div class="menu-item f4 schedule-role-panel">
     <form method="post" action="/form/practice/save" class="schedule-edit-form js-preserve-scroll">
       <input type="hidden" name="practice_id" value="">

@@ -135,6 +135,7 @@ RENTAL_ITEM_NAME_KEYS = _K.RENTAL_ITEM_NAME_KEYS
 RENTAL_QTY_KEYS = _K.RENTAL_QTY_KEYS
 RENTAL_VENDOR_KEYS = _K.RENTAL_VENDOR_KEYS
 RENTAL_UNIT_PRICE_KEYS = _K.RENTAL_UNIT_PRICE_KEYS
+RENTAL_COST_TYPE_KEYS = _K.RENTAL_COST_TYPE_KEYS
 RENTAL_NOTE_KEYS = _K.RENTAL_NOTE_KEYS
 RENTAL_KEY_KEYS = _K.RENTAL_KEY_KEYS
 MASTER_PLAYER_REL_KEYS = _K.MASTER_PLAYER_REL_KEYS
@@ -2583,13 +2584,15 @@ async def form_menu(
     show_pref = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER)
     show_own = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER) and is_perc_role
     role_mode = role >= ROLE_LEADER
-    allowed_tabs = {"att", "member", "assign", "material", "ownmap", "rental", "progress", "schedule", "practice"}
+    allowed_tabs = {"att", "member", "assign", "material", "ownmap", "rental", "rental_manage", "progress", "schedule", "practice"}
     initial_role_tab = (tab or "").strip().lower()
     if initial_role_tab not in allowed_tabs:
         initial_role_tab = ""
     if initial_role_tab == "ownmap" and role < ROLE_LEADER:
         initial_role_tab = ""
     if initial_role_tab == "rental" and role < ROLE_LEADER:
+        initial_role_tab = ""
+    if initial_role_tab == "rental_manage" and role < ROLE_MANAGER:
         initial_role_tab = ""
     if initial_role_tab == "progress" and role < ROLE_MANAGER:
         initial_role_tab = ""
@@ -4029,10 +4032,12 @@ async def form_rental_save(
     request: Request,
     practice_id: Annotated[str, Form()],
     rental_id: Annotated[str, Form()] = "",
+    return_tab: Annotated[str, Form()] = "",
     item_name: Annotated[str, Form()] = "",
     qty: Annotated[str, Form()] = "",
     vendor: Annotated[str, Form()] = "",
     unit_price: Annotated[str, Form()] = "",
+    cost_type: Annotated[str, Form()] = "",
     note: Annotated[str, Form()] = "",
 ):
     pid = request.session.get("player_id", "")
@@ -4054,13 +4059,14 @@ async def form_rental_save(
         return RedirectResponse("/form", status_code=302)
 
     db_id = (ctx.get("CONCERT_DB_RENTAL", "") or "").strip()
+    dest_tab = "rental_manage" if (return_tab or "").strip() == "rental_manage" else "rental"
     if not db_id:
         _flash_set(request, "error", "CONCERT_DB_RENTAL が未設定です（vps_patch/app/.env にDB ID設定が必要）。")
-        return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+        return RedirectResponse(f"/form?tab={dest_tab}&own_practice_id={practice_id}#role-menu-panels", status_code=302)
     t = ctx["get_prop_types"](db_id) or {}
     if not t:
         _flash_set(request, "error", "RENTAL DB のプロパティ取得に失敗しました。")
-        return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+        return RedirectResponse(f"/form?tab={dest_tab}&own_practice_id={practice_id}#role-menu-panels", status_code=302)
 
     qv = _parse_positive_int(qty)
     if qv is None:
@@ -4073,26 +4079,36 @@ async def form_rental_save(
     item_name = (item_name or "").strip()
     vendor = (vendor or "").strip()
     note = (note or "").strip()
+    cost_type = (cost_type or "").strip()
     if not item_name:
         _flash_set(request, "error", "品目名は必須です。")
-        return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+        return RedirectResponse(f"/form?tab={dest_tab}&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+    if not (practice_id or "").strip():
+        _flash_set(request, "error", "練習日が不正です。")
+        return RedirectResponse(f"/form?tab={dest_tab}#role-menu-panels", status_code=302)
 
     props: dict = {}
+    ctx["put_prop_any"](props, t, RENTAL_PRACTICE_REL_KEYS, (practice_id or "").strip())
     ctx["put_prop_any"](props, t, RENTAL_ITEM_NAME_KEYS, item_name)
     ctx["put_prop_any"](props, t, RENTAL_QTY_KEYS, str(qv))
     ctx["put_prop_any"](props, t, RENTAL_VENDOR_KEYS, vendor)
     ctx["put_prop_any"](props, t, RENTAL_UNIT_PRICE_KEYS, str(uv))
+    ctx["put_prop_any"](props, t, RENTAL_COST_TYPE_KEYS, cost_type)
     ctx["put_prop_any"](props, t, RENTAL_NOTE_KEYS, note)
     rid = (rental_id or "").strip()
     if rid:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{rid}", json={"properties": props})
     else:
-        # 追加は upsert 専用ルート経由を想定
-        _flash_set(request, "error", "新規登録は不足タグから実行してください。")
-        return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+        ctx["put_key_any"](props, t, RENTAL_KEY_KEYS, (practice_id or "").strip(), item_name, vendor, prefix="rental")
+        res = ctx["api_request"](
+            "post",
+            "https://api.notion.com/v1/pages",
+            json={"parent": {"database_id": db_id}, "properties": props},
+        )
 
     ok = bool(res and res.status_code in (200, 201))
-    _flash_set(request, "info" if ok else "error", "レンタル詳細を更新しました。" if ok else f"レンタル詳細の更新に失敗しました。{_api_err_brief(res)}")
+    msg_ok = "レンタル詳細を更新しました。" if rid else "レンタル項目を追加しました。"
+    _flash_set(request, "info" if ok else "error", msg_ok if ok else f"レンタル詳細の更新に失敗しました。{_api_err_brief(res)}")
     if ok:
         try:
             invalidate_form_data_cache(cid)
@@ -4104,7 +4120,7 @@ async def form_rental_save(
                 inv((ctx.get("CONCERT_DB_RENTAL", "") or "").strip())
         except Exception:
             pass
-    return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+    return RedirectResponse(f"/form?tab={dest_tab}&own_practice_id={practice_id}#role-menu-panels", status_code=302)
 
 
 @router.post("/form/rental/delete")
@@ -4112,6 +4128,7 @@ async def form_rental_delete(
     request: Request,
     practice_id: Annotated[str, Form()],
     rental_id: Annotated[str, Form()],
+    return_tab: Annotated[str, Form()] = "",
 ):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
@@ -4131,10 +4148,11 @@ async def form_rental_delete(
         _flash_set(request, "error", "この操作にはManager権限が必要です。")
         return RedirectResponse("/form", status_code=302)
 
+    dest_tab = "rental_manage" if (return_tab or "").strip() == "rental_manage" else "rental"
     rid = (rental_id or "").strip()
     if not rid:
         _flash_set(request, "error", "削除対象が不正です。")
-        return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+        return RedirectResponse(f"/form?tab={dest_tab}&own_practice_id={practice_id}#role-menu-panels", status_code=302)
     res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{rid}", json={"archived": True})
     ok = bool(res and res.status_code in (200, 201))
     _flash_set(request, "info" if ok else "error", "レンタル情報を削除しました。" if ok else f"レンタル情報の削除に失敗しました。{_api_err_brief(res)}")
@@ -4149,7 +4167,7 @@ async def form_rental_delete(
                 inv((ctx.get("CONCERT_DB_RENTAL", "") or "").strip())
         except Exception:
             pass
-    return RedirectResponse(f"/form?tab=rental&own_practice_id={practice_id}#role-menu-panels", status_code=302)
+    return RedirectResponse(f"/form?tab={dest_tab}&own_practice_id={practice_id}#role-menu-panels", status_code=302)
 
 
 @router.get("/form/att", response_class=HTMLResponse)
@@ -4866,6 +4884,7 @@ def _build_rental_manage_rows(
         except Exception:
             unit = 0
         note = (ext_txt(r, RENTAL_NOTE_KEYS) or "").strip()
+        cost_type = (ext_txt(r, RENTAL_COST_TYPE_KEYS) or "").strip()
         sid = ""
         if item_name and " / " in item_name:
             left = item_name.split(" / ", 1)[0].strip()
@@ -4884,6 +4903,7 @@ def _build_rental_manage_rows(
             "vendor": vendor,
             "unit_price": unit,
             "note": note,
+            "cost_type": cost_type,
         })
     out.sort(key=lambda x: ((x.get("song_name") or "").lower(), (x.get("instrument_name") or "").lower(), x.get("item_name", "")))
     return out
