@@ -573,6 +573,13 @@
         {% endif %}
         <button type="submit" class="assign-action-btn">厳密解を生成</button>
       </form>
+      {% if assign_flags.plan_done and (not assign_flags.assign_done) %}
+      <div class="assign-global-actions">
+        <form method="post" action="/form/assign/confirm" class="js-preserve-scroll">
+          <button type="submit" class="assign-action-btn is-primary">確定する</button>
+        </form>
+      </div>
+      {% endif %}
 
       {% if assign_solver_candidates %}
       <div class="assign-candidate-tabs">
@@ -844,6 +851,8 @@
   .assign-candidate-list{margin-top:8px}
   .assign-candidate-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
   .assign-candidate-actions form{margin:0}
+  .assign-global-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
+  .assign-global-actions form{margin:0}
   .assign-current-head{margin:10px 0 8px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#88a4d0}
   .assign-role-list{display:flex;flex-direction:column;gap:8px;width:100%}
   .assign-role-card{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.025);border-radius:10px;padding:10px 11px;transition:transform .18s ease,border-color .18s ease,background-color .18s ease}

@@ -2891,7 +2891,15 @@ async def form_assign_confirm(request: Request):
     solver_cache = _solver_cache_get(pid, cid)
     results = solver_cache.get("results", []) if isinstance(solver_cache, dict) else []
     if not results:
-        _flash_set(request, "error", "確定できる候補がありません。先に厳密解A〜Dを生成してください。")
+        existing_rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+        if not has_published_assignments(ctx, cid, assignment_rows=existing_rows):
+            _flash_set(request, "error", "確定できるアサインがありません。先に案提示を実行してください。")
+            return RedirectResponse("/form", status_code=302)
+        concert = _find_concert(ctx, cid) or {}
+        c_name = _atlas_concert_name(ctx, concert) if concert else cid
+        _set_harmonia_checkbox(ctx, cid, HARMONIA_CONCERT_PLAN_KEYS, True, c_name)
+        _set_harmonia_checkbox(ctx, cid, HARMONIA_CONCERT_ASSIGN_KEYS, True, c_name)
+        _flash_set(request, "info", "提示中のアサインを確定しました。")
         return RedirectResponse("/form", status_code=302)
     selected = max(0, min(int(state.get("selected", 0) or 0), len(results) - 1))
     assignments = results[selected].get("assignments", [])
