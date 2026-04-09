@@ -1,6 +1,18 @@
 {% extends "form/base.html" %}
 {% block content %}
 
+<div class="top-actions f1">
+  <button type="button" class="top-action-btn js-open-top-modal" data-modal-target="howto" aria-label="HowToを開く">
+    <i class="bi bi-question-lg"></i>
+  </button>
+  <button type="button" class="top-action-btn js-open-top-modal" data-modal-target="notify" aria-label="通知を開く">
+    <i class="bi bi-bell-fill"></i>
+    {% if poke_inbox_count and poke_inbox_count > 0 %}
+    <span class="top-action-badge">{{ poke_inbox_count }}</span>
+    {% endif %}
+  </button>
+</div>
+
 <div class="wordmark f1">
   <div class="wordmark-title">ArtéMis HARMONIA</div>
   <div class="wordmark-sub">Concert Management</div>
@@ -155,59 +167,6 @@
   </div>
 </div>
 {% endif %}
-
-<div class="poke-board f3">
-  <div class="poke-head">
-    <div class="poke-title"><i class="bi bi-bell"></i>通知</div>
-    {% if poke_inbox_count and poke_inbox_count > 0 %}<div class="poke-count">{{ poke_inbox_count }}件</div>{% endif %}
-  </div>
-  {% if poke_inbox_items %}
-  <div class="poke-list">
-    {% for p in poke_inbox_items %}
-    <div class="poke-item">
-      <div class="poke-item-head">
-        <span class="poke-item-label">{{ p.label }}</span>
-        <span class="poke-item-meta">{{ p.sender_name }}</span>
-      </div>
-      {% if p.practice_name %}<div class="poke-item-sub">{{ p.practice_name }}</div>{% endif %}
-      <div class="poke-item-message">{{ p.message }}</div>
-      <div class="poke-item-actions">
-        {% if p.status == "sent" %}
-        <form method="post" action="/form/poke/{{ p.id }}/read"><button type="submit" class="poke-btn">既読</button></form>
-        {% endif %}
-        <form method="post" action="/form/poke/{{ p.id }}/done"><button type="submit" class="poke-btn is-primary">完了</button></form>
-        <a class="poke-link" href="{{ p.action_href }}">対象画面へ</a>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="poke-empty">未対応の通知はありません。</div>
-  {% endif %}
-  {% if poke_sent_items %}
-  <details class="poke-sent">
-    <summary>送信履歴</summary>
-    <div class="poke-sent-list">
-      {% for p in poke_sent_items %}
-      <div class="poke-sent-row">
-        <div class="poke-sent-main">
-          <span class="poke-item-label">{{ p.label }}</span>
-          <span class="poke-item-meta">{{ p.target_name }}</span>
-          {% if p.practice_name %}<span class="poke-item-meta">{{ p.practice_name }}</span>{% endif %}
-        </div>
-        <div class="poke-sent-side">
-          <span class="poke-status status-{{ p.status }}">{{ p.status_label }}</span>
-          <a class="poke-link" href="{{ p.action_href }}">開く</a>
-          {% if p.status in ["sent", "read"] %}
-          <form method="post" action="/form/poke/{{ p.id }}/cancel"><button type="submit" class="poke-btn">取消</button></form>
-          {% endif %}
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-  </details>
-  {% endif %}
-</div>
 
 <div class="todo-board f3">
   <div class="todo-head">
@@ -376,6 +335,9 @@
   <button type="button" class="role-tab is-active" data-role-tab="att" data-hold-label="出欠"><i class="bi bi-clipboard-data"></i>出欠</button>
   <button type="button" class="role-tab" data-role-tab="member" data-hold-label="メンバー"><i class="bi bi-people"></i>メンバー</button>
   <button type="button" class="role-tab" data-role-tab="ownmap" data-hold-label="所有楽器"><i class="bi bi-box-seam"></i>所有楽器</button>
+  {% if is_manager %}
+  <button type="button" class="role-tab" data-role-tab="progress" data-hold-label="進捗"><i class="bi bi-speedometer2"></i>進捗</button>
+  {% endif %}
   <button type="button" class="role-tab" data-role-tab="assign" data-hold-label="アサイン"><i class="bi bi-bullseye"></i>アサイン</button>
   <button type="button" class="role-tab" data-role-tab="material" data-hold-label="資料"><i class="bi bi-file-earmark-text"></i>資料</button>
   {% else %}
@@ -544,6 +506,47 @@
   </div>
 </div>
 
+{% if is_manager %}
+<div class="role-panel" data-role-panel="progress">
+  <div class="menu-item f4 progress-role-panel">
+    {% if manager_part_progress %}
+    <div class="panel-filters">
+      <div class="panel-filter-item">
+        <label for="progress-part-filter">パート</label>
+        <select id="progress-part-filter" class="panel-filter-select" data-filter-target="progress" data-filter-kind="part" data-static-options="1">
+          <option value="">全パート</option>
+          {% for part_name in manager_part_options %}
+          <option value="{{ part_name }}">{{ part_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="progress-part-list" data-role-list="progress">
+      {% for row in manager_part_progress %}
+      <div class="progress-part-card" data-part="{{ row.part_name }}">
+        <div class="progress-part-head">
+          <div class="progress-part-name">{{ row.part_name }}</div>
+          <span class="progress-status{% if row.status == '確定済' %} is-done{% elif row.status == '提示中' %} is-plan{% else %} is-none{% endif %}">
+            {{ row.status }}
+          </span>
+        </div>
+        <div class="progress-metrics">
+          <span class="progress-chip">対象 {{ row.member_total }}人</span>
+          <span class="progress-chip is-agree">賛同 {{ row.agree }}</span>
+          <span class="progress-chip is-object">異議 {{ row.object }}</span>
+          <span class="progress-chip">未回答 {{ row.unanswered }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="panel-empty is-hidden" data-empty-for="progress">該当するパートがありません。</div>
+    {% else %}
+    <div class="menu-hint">進捗データがまだありません。</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 <div class="role-panel" data-role-panel="assign">
   <div class="menu-item f4 assign-role-panel">
     <div class="assign-solver-box">
@@ -710,11 +713,98 @@
   </div>
 </div>
 
+<div class="top-modal-backdrop js-top-modal" data-top-modal="howto" aria-hidden="true">
+  <div class="top-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="top-howto-title">
+    <div class="top-modal-head">
+      <div class="top-modal-title" id="top-howto-title">HowTo</div>
+      <button type="button" class="top-modal-close js-close-top-modal" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="top-modal-body">
+      <ul class="howto-list">
+        <li>通知は右上のベルアイコンから確認できます。</li>
+        <li>ToDoから該当画面へすぐ移動できます。</li>
+        <li>詳細ガイドは最終調整フェーズで追加予定です。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="top-modal-backdrop js-top-modal" data-top-modal="notify" aria-hidden="true">
+  <div class="top-modal-dialog top-modal-dialog-notify" role="dialog" aria-modal="true" aria-labelledby="top-notify-title">
+    <div class="top-modal-head">
+      <div class="top-modal-title" id="top-notify-title"><i class="bi bi-bell"></i> 通知</div>
+      <button type="button" class="top-modal-close js-close-top-modal" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="top-modal-body">
+      {% if poke_inbox_items %}
+      <div class="poke-list">
+        {% for p in poke_inbox_items %}
+        <div class="poke-item">
+          <div class="poke-item-head">
+            <span class="poke-item-label">{{ p.label }}</span>
+            <span class="poke-item-meta">{{ p.sender_name }}</span>
+          </div>
+          {% if p.practice_name %}<div class="poke-item-sub">{{ p.practice_name }}</div>{% endif %}
+          <div class="poke-item-message">{{ p.message }}</div>
+          <div class="poke-item-actions">
+            {% if p.status == "sent" %}
+            <form method="post" action="/form/poke/{{ p.id }}/read"><button type="submit" class="poke-btn">既読</button></form>
+            {% endif %}
+            <form method="post" action="/form/poke/{{ p.id }}/done"><button type="submit" class="poke-btn is-primary">完了</button></form>
+            <a class="poke-link" href="{{ p.action_href }}">対象画面へ</a>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="poke-empty">未対応の通知はありません。</div>
+      {% endif %}
+      {% if poke_sent_items %}
+      <details class="poke-sent">
+        <summary>送信履歴</summary>
+        <div class="poke-sent-list">
+          {% for p in poke_sent_items %}
+          <div class="poke-sent-row">
+            <div class="poke-sent-main">
+              <span class="poke-item-label">{{ p.label }}</span>
+              <span class="poke-item-meta">{{ p.target_name }}</span>
+              {% if p.practice_name %}<span class="poke-item-meta">{{ p.practice_name }}</span>{% endif %}
+            </div>
+            <div class="poke-sent-side">
+              <span class="poke-status status-{{ p.status }}">{{ p.status_label }}</span>
+              <a class="poke-link" href="{{ p.action_href }}">開く</a>
+              {% if p.status in ["sent", "read"] %}
+              <form method="post" action="/form/poke/{{ p.id }}/cancel"><button type="submit" class="poke-btn">取消</button></form>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
 <div style="margin-top:24px;" class="f6">
   <a href="/logout" class="btn btn-secondary">ログアウト</a>
 </div>
 
 <style>
+  .top-actions{display:flex;justify-content:flex-end;gap:10px;margin-bottom:-2px}
+  .top-action-btn{position:relative;width:40px;height:40px;border-radius:999px;border:1px solid rgba(130,190,255,.38);background:rgba(18,28,44,.82);color:#deecff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .16s ease,border-color .16s ease,background .16s ease}
+  .top-action-btn:hover{transform:translateY(-1px);border-color:rgba(130,190,255,.62);background:rgba(24,38,58,.95)}
+  .top-action-badge{position:absolute;top:-5px;right:-4px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#5aa9ff;color:#071321;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.45)}
+  .top-modal-backdrop{position:fixed;inset:0;background:rgba(4,10,18,.74);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:10070;display:none;align-items:center;justify-content:center;padding:14px}
+  .top-modal-backdrop.is-open{display:flex}
+  .top-modal-dialog{width:min(560px,96vw);max-height:88vh;overflow:auto;border-radius:14px;border:1px solid rgba(255,255,255,.16);background:linear-gradient(180deg,rgba(14,23,38,.98),rgba(10,18,31,.96));box-shadow:0 22px 60px rgba(0,0,0,.52);padding:12px}
+  .top-modal-dialog-notify{width:min(760px,96vw)}
+  .top-modal-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .top-modal-title{font-size:15px;font-weight:700;color:#e2eeff;display:inline-flex;align-items:center;gap:6px}
+  .top-modal-close{width:32px;height:32px;border-radius:9px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04);color:#d8e9ff;cursor:pointer}
+  .top-modal-body{margin-top:10px}
+  .howto-list{margin:0;padding:0 0 0 18px;color:#c9dbf8;font-size:13px;line-height:1.75}
+  .howto-list li+li{margin-top:4px}
   .hero-shell{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:12px}
   .hero-poster-wrap{display:flex;justify-content:center}
   .hero-card{margin-bottom:0}
@@ -824,6 +914,20 @@
   .assign-part{flex-shrink:0}
   .assign-chip{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;color:#7eb8ff;background:rgba(74,158,255,.13);border:1px solid rgba(74,158,255,.35)}
   .assign-role-panel{display:block;padding:12px}
+  .progress-role-panel{display:block;padding:12px}
+  .progress-part-list{display:flex;flex-direction:column;gap:8px}
+  .progress-part-card{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.025);border-radius:10px;padding:10px 11px;transition:transform .18s ease,border-color .18s ease,background-color .18s ease}
+  .progress-part-card:hover{transform:translateY(-1px);border-color:rgba(74,158,255,.28);background:rgba(255,255,255,.04)}
+  .progress-part-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .progress-part-name{font-size:13px;font-weight:600;color:#d9e7ff}
+  .progress-status{display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;font-size:11px;border:1px solid rgba(255,255,255,.18);color:#c9dbf7;background:rgba(255,255,255,.04)}
+  .progress-status.is-done{border-color:rgba(120,210,145,.45);background:rgba(120,210,145,.14);color:#caf3d6}
+  .progress-status.is-plan{border-color:rgba(94,168,255,.45);background:rgba(94,168,255,.14);color:#c8e4ff}
+  .progress-status.is-none{border-color:rgba(255,255,255,.14);background:rgba(255,255,255,.03);color:#b8c9e6}
+  .progress-metrics{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+  .progress-chip{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);color:#c7d8f4;font-size:11px}
+  .progress-chip.is-agree{border-color:rgba(100,200,130,.45);background:rgba(100,200,130,.12);color:#bdeecf}
+  .progress-chip.is-object{border-color:rgba(230,120,120,.45);background:rgba(230,120,120,.12);color:#ffd1d1}
   .assign-solver-box{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(255,255,255,.02);padding:10px 11px;margin-bottom:10px}
   .assign-solver-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
   .assign-solver-title{font-size:13px;font-weight:700;color:#dceaff}
@@ -958,6 +1062,8 @@
   .att-comment-close{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05);color:#dce8ff;border-radius:999px;width:30px;height:30px;cursor:pointer}
   .att-comment-body{padding:14px;font-size:13px;line-height:1.7;color:#d5e4ff;white-space:pre-wrap;word-break:break-word}
   @media (max-width: 640px){
+    .top-actions{margin-bottom:0}
+    .top-action-btn{width:38px;height:38px}
     .todo-item{padding:8px 9px}
     .att-comment-snippet{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .att-member-head{align-items:flex-start}
@@ -1037,6 +1143,43 @@
   }
 </style>
 <script>
+  (() => {
+    const buttons = Array.from(document.querySelectorAll(".js-open-top-modal"));
+    const modals = Array.from(document.querySelectorAll(".js-top-modal"));
+    const closeBtns = Array.from(document.querySelectorAll(".js-close-top-modal"));
+    if (!buttons.length || !modals.length) return;
+    const openByName = (name) => {
+      modals.forEach((m) => {
+        const open = m.getAttribute("data-top-modal") === name;
+        m.classList.toggle("is-open", open);
+        m.setAttribute("aria-hidden", open ? "false" : "true");
+      });
+      document.body.style.overflow = "hidden";
+    };
+    const closeAll = () => {
+      modals.forEach((m) => {
+        m.classList.remove("is-open");
+        m.setAttribute("aria-hidden", "true");
+      });
+      document.body.style.overflow = "";
+    };
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const target = btn.getAttribute("data-modal-target");
+        if (target) openByName(target);
+      });
+    });
+    closeBtns.forEach((btn) => btn.addEventListener("click", closeAll));
+    modals.forEach((m) => {
+      m.addEventListener("click", (e) => {
+        if (e.target === m) closeAll();
+      });
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeAll();
+    });
+  })();
+
   (() => {
     const tabs = document.querySelectorAll('[data-role-tab]');
     const panels = document.querySelectorAll('[data-role-panel]');
@@ -1404,6 +1547,7 @@
       member: document.querySelector('[data-role-list="member"]'),
       assign: document.querySelector('[data-role-list="assign"]'),
       ownmap: document.querySelector('[data-role-list="ownmap"]'),
+      progress: document.querySelector('[data-role-list="progress"]'),
       assignCandidate: document,
     };
     const getCards = (type) => {
@@ -1413,6 +1557,7 @@
       if (type === "member") return Array.from(root.querySelectorAll(".member-card"));
       if (type === "ownmap") return Array.from(root.querySelectorAll(".own-role-card"));
       if (type === "assignCandidate") return Array.from(document.querySelectorAll(".assign-candidate-list .assign-role-card"));
+      if (type === "progress") return Array.from(root.querySelectorAll(".progress-part-card"));
       return Array.from(root.querySelectorAll(".assign-role-card"));
     };
     const normalized = (v) => (v || "").trim();
@@ -1485,7 +1630,7 @@
     const allSelects = Array.from(document.querySelectorAll(".panel-filter-select"));
     if (!allSelects.length) return;
 
-    ["att", "member", "assign", "ownmap"].forEach((type) => {
+    ["att", "member", "assign", "ownmap", "progress"].forEach((type) => {
       const partSel = document.querySelector(`[data-filter-target="${type}"][data-filter-kind="part"]`);
       if (partSel) {
         const hasStatic = partSel.getAttribute("data-static-options") === "1";

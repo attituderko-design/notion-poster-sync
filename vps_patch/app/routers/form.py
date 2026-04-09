@@ -1109,6 +1109,97 @@ def _build_assign_response_panel_data(
     return out
 
 
+def _build_manager_part_progress(
+    ctx: dict,
+    *,
+    concert_id: str,
+    participant_rows: list[dict],
+    part_master_map: dict,
+    plan_done: bool,
+    assign_done: bool,
+) -> list[dict]:
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+
+    # cast -> part_master / player -> part_master
+    cast_part: dict[str, str] = {}
+    player_part: dict[str, str] = {}
+    part_member_count: dict[str, int] = defaultdict(int)
+    for cast in participant_rows or []:
+        cast_id = cast.get("id", "")
+        pm_ids = ext_rel(cast, PARTICIPANT_PART_REL_KEYS)
+        pm_id = pm_ids[0] if pm_ids else ""
+        if cast_id and pm_id:
+            cast_part[_norm_id(cast_id)] = pm_id
+            part_member_count[pm_id] += 1
+        pids = ext_rel(cast, PARTICIPANT_PLAYER_REL_KEYS)
+        pid = pids[0] if pids else ""
+        if pid and pm_id:
+            player_part[_norm_id(pid)] = pm_id
+
+    # assignment exists by part
+    assigned_parts: set[str] = set()
+    rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
+    for r in rows:
+        cids = ext_rel(r, ASSIGNMENT_CONCERT_REL_KEYS)
+        if not any(_norm_id(x) == _norm_id(concert_id) for x in (cids or [])):
+            continue
+        rel_targets = ext_rel(r, ASSIGNMENT_PLAYER_REL_KEYS)
+        pm_id = ""
+        for t in rel_targets:
+            t_norm = _norm_id(t)
+            pm_id = cast_part.get(t_norm) or player_part.get(t_norm) or ""
+            if pm_id:
+                break
+        if pm_id:
+            assigned_parts.add(pm_id)
+
+    # response counts by part
+    concert = _find_concert(ctx, concert_id) or {}
+    harmonia_row_id = _ensure_harmonia_row_id(ctx, concert_id, _atlas_concert_name(ctx, concert))
+    response_rows = _assign_response_rows_for_concert(ctx, harmonia_row_id) if harmonia_row_id else []
+    response_by_part: dict[str, dict[str, int]] = defaultdict(lambda: {"agree": 0, "object": 0})
+    for r in response_rows:
+        cast_ids = ext_rel(r, ASSIGN_RESP_CAST_REL_KEYS)
+        cast_id = _norm_id(cast_ids[0] if cast_ids else "")
+        pm_id = cast_part.get(cast_id, "")
+        if not pm_id:
+            continue
+        status = (ext_txt(r, ASSIGN_RESP_STATUS_KEYS) or "").strip().lower()
+        if status == "agree":
+            response_by_part[pm_id]["agree"] += 1
+        elif status == "object":
+            response_by_part[pm_id]["object"] += 1
+
+    def _status_for(pm_id: str) -> str:
+        if pm_id not in assigned_parts:
+            return "未提示"
+        if assign_done:
+            return "確定済"
+        if plan_done:
+            return "提示中"
+        return "提示中"
+
+    rows_out: list[dict] = []
+    for pm_id, pm in (part_master_map or {}).items():
+        name = (pm.get("name", "") or "").strip() or pm_id[:8]
+        member_total = int(part_member_count.get(pm_id, 0))
+        agree = int(response_by_part.get(pm_id, {}).get("agree", 0))
+        obj = int(response_by_part.get(pm_id, {}).get("object", 0))
+        unanswered = max(0, member_total - agree - obj)
+        rows_out.append({
+            "part_id": pm_id,
+            "part_name": name,
+            "status": _status_for(pm_id),
+            "member_total": member_total,
+            "agree": agree,
+            "object": obj,
+            "unanswered": unanswered,
+        })
+    rows_out.sort(key=lambda x: x["part_name"].lower())
+    return rows_out
+
+
 def _build_poke_panel_data(
     ctx: dict,
     *,
@@ -2236,11 +2327,13 @@ async def form_menu(request: Request, tab: str = Query(default="")):
     show_pref = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER)
     show_own = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER) and is_perc_role
     role_mode = role >= ROLE_LEADER
-    allowed_tabs = {"att", "member", "assign", "material", "ownmap"}
+    allowed_tabs = {"att", "member", "assign", "material", "ownmap", "progress"}
     initial_role_tab = (tab or "").strip().lower()
     if initial_role_tab not in allowed_tabs:
         initial_role_tab = ""
     if initial_role_tab == "ownmap" and role < ROLE_LEADER:
+        initial_role_tab = ""
+    if initial_role_tab == "progress" and role < ROLE_MANAGER:
         initial_role_tab = ""
     upcoming_practice_id = (upcoming_practice or {}).get("id", "") if upcoming_practice else ""
     my_cast_row = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
@@ -2253,6 +2346,14 @@ async def form_menu(request: Request, tab: str = Query(default="")):
         my_cast_id=my_cast_id,
         role=role,
     )
+    manager_part_progress = _build_manager_part_progress(
+        ctx,
+        concert_id=cid,
+        participant_rows=participant_rows,
+        part_master_map=data.get("part_master_map", {}) or {},
+        plan_done=proposal_done,
+        assign_done=assign_done,
+    ) if role >= ROLE_MANAGER else []
     poke_panels = _build_poke_panel_data(
         ctx,
         concert_id=cid,
@@ -2385,6 +2486,7 @@ async def form_menu(request: Request, tab: str = Query(default="")):
         "poke_sent_items": poke_panels.get("sent", []),
         "poke_inbox_count": poke_panels.get("inbox_count", 0),
         "is_manager": role >= ROLE_MANAGER,
+        "manager_part_progress": manager_part_progress,
         "manager_part_options": manager_part_options,
         "practice_cols": _build_practice_cols(data.get("practices", [])),
         "attendance_table_rows": _build_attendance_table(
