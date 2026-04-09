@@ -552,13 +552,13 @@
 <div class="role-panel" data-role-panel="schedule">
   <div class="menu-item f4 schedule-role-panel">
     {% if schedule_practice_options %}
-    <form method="get" action="/form" class="schedule-practice-form">
+    <form method="get" action="/form" class="schedule-practice-form js-preserve-scroll">
       <input type="hidden" name="tab" value="schedule">
       <div class="panel-filter-item">
         <label for="schedule-practice-select">練習回</label>
         <select id="schedule-practice-select" name="schedule_practice_id" class="panel-filter-select" onchange="this.form.submit()">
           {% for p in schedule_practice_options %}
-          <option value="{{ p.id }}" {% if schedule_selected_practice_id == p.id %}selected{% endif %}>{{ p.label }}</option>
+          <option value="{{ p.id }}" {% if schedule_selected_practice_id == p.id %}selected{% endif %}>{{ p.label }}{% if not p.has_schedule %}（未登録）{% endif %}</option>
           {% endfor %}
         </select>
       </div>
@@ -1745,6 +1745,9 @@
     if (!flow || !reorderForm || !orderedInput) return;
 
     let dragging = null;
+    let touchDragging = null;
+    let touchTimer = null;
+    let touchStartedOnInteractive = false;
     const clearDropTargets = () => {
       flow.querySelectorAll(".js-schedule-item.is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
     };
@@ -1756,6 +1759,36 @@
       sessionStorage.setItem("form_menu_scroll_y", String(window.scrollY || window.pageYOffset || 0));
       sessionStorage.setItem("form_menu_role_panel", "schedule");
       reorderForm.submit();
+    };
+    const findDropTarget = (clientX, clientY) => {
+      const el = document.elementFromPoint(clientX, clientY);
+      if (!el) return null;
+      const target = el.closest(".js-schedule-item");
+      if (!target || target === touchDragging) return null;
+      return target;
+    };
+    const placeBeforeAfter = (moving, target, clientY) => {
+      const rect = target.getBoundingClientRect();
+      const before = (clientY - rect.top) < rect.height / 2;
+      clearDropTargets();
+      target.classList.add("is-drop-target");
+      if (before) flow.insertBefore(moving, target);
+      else flow.insertBefore(moving, target.nextSibling);
+    };
+    const cancelTouchTimer = () => {
+      if (touchTimer) {
+        clearTimeout(touchTimer);
+        touchTimer = null;
+      }
+    };
+    const finishTouchDrag = (doSubmit) => {
+      cancelTouchTimer();
+      if (touchDragging) {
+        touchDragging.classList.remove("is-dragging");
+        touchDragging = null;
+      }
+      clearDropTargets();
+      if (doSubmit) submitReorder();
     };
 
     itemList().forEach((item) => {
@@ -1790,6 +1823,51 @@
         clearDropTargets();
         submitReorder();
       });
+
+      item.addEventListener("touchstart", (e) => {
+        if (!e.touches || !e.touches.length) return;
+        touchStartedOnInteractive = !!e.target.closest("button, a, input, select, textarea, form");
+        if (touchStartedOnInteractive) return;
+        cancelTouchTimer();
+        touchTimer = setTimeout(() => {
+          touchDragging = item;
+          item.classList.add("is-dragging");
+        }, 360);
+      }, { passive: true });
+
+      item.addEventListener("touchmove", (e) => {
+        if (!e.touches || !e.touches.length) return;
+        if (touchStartedOnInteractive) return;
+        if (!touchDragging) {
+          cancelTouchTimer();
+          return;
+        }
+        const t = e.touches[0];
+        const target = findDropTarget(t.clientX, t.clientY);
+        if (target) {
+          e.preventDefault();
+          placeBeforeAfter(touchDragging, target, t.clientY);
+        }
+      }, { passive: false });
+
+      item.addEventListener("touchend", () => {
+        if (touchStartedOnInteractive) {
+          cancelTouchTimer();
+          touchStartedOnInteractive = false;
+          return;
+        }
+        if (touchDragging) {
+          finishTouchDrag(true);
+        } else {
+          cancelTouchTimer();
+        }
+        touchStartedOnInteractive = false;
+      }, { passive: true });
+
+      item.addEventListener("touchcancel", () => {
+        finishTouchDrag(false);
+        touchStartedOnInteractive = false;
+      }, { passive: true });
     });
   })();
 

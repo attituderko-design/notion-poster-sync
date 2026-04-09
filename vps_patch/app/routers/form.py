@@ -693,6 +693,9 @@ def _build_schedule_manage_rows(
             continue
         song_ids = ext_rel(row, SCHEDULE_SONG_REL_KEYS)
         song_id = song_ids[0] if song_ids else ""
+        song_name = song_name_map.get(song_id, "")
+        if song_id and not song_name:
+            song_name = "未設定の曲"
         out.append({
             "id": row.get("id", ""),
             "start": (ext_txt(row, SCHEDULE_START_KEYS) or "").strip(),
@@ -701,7 +704,7 @@ def _build_schedule_manage_rows(
             "content": (ext_txt(row, SCHEDULE_CONTENT_KEYS) or "").strip(),
             "order": (ext_txt(row, SCHEDULE_ORDER_KEYS) or "").strip(),
             "song_id": song_id,
-            "song_name": song_name_map.get(song_id, ""),
+            "song_name": song_name,
         })
 
     def _sort_key(r: dict):
@@ -2450,6 +2453,19 @@ async def form_menu(
         initial_role_tab = ""
     upcoming_practice_id = (upcoming_practice or {}).get("id", "") if upcoming_practice else ""
     selected_schedule_practice_id = (schedule_practice_id or "").strip()
+    schedule_count_by_practice: dict[str, int] = {}
+    if role >= ROLE_MANAGER:
+        schedule_db_id2 = (ctx.get("CONCERT_DB_SCHEDULE", "") or os.environ.get("CONCERT_DB_SCHEDULE", "") or "").strip()
+        if schedule_db_id2:
+            ext_rel2 = ctx["extract_relation_ids_any"]
+            try:
+                for srow in ctx["query_all"](schedule_db_id2, None):
+                    for prid in ext_rel2(srow, SCHEDULE_PRACTICE_REL_KEYS):
+                        nid = _norm_id(prid)
+                        if nid:
+                            schedule_count_by_practice[nid] = int(schedule_count_by_practice.get(nid, 0)) + 1
+            except Exception:
+                pass
     practice_options = []
     for p in practices:
         pid2 = p.get("id", "")
@@ -2458,7 +2474,13 @@ async def form_menu(
         pname = (ext(p, PRACTICE_NAME_KEYS) or "練習").strip()
         pdate = (ext(p, PRACTICE_DATE_KEYS) or "").strip()
         plabel = f"{pdate[:10]} {pname}".strip()
-        practice_options.append({"id": pid2, "label": plabel or pid2[:8]})
+        scount = int(schedule_count_by_practice.get(_norm_id(pid2), 0))
+        practice_options.append({
+            "id": pid2,
+            "label": plabel or pid2[:8],
+            "schedule_count": scount,
+            "has_schedule": scount > 0,
+        })
     if not selected_schedule_practice_id:
         selected_schedule_practice_id = upcoming_practice_id or (practice_options[0]["id"] if practice_options else "")
     schedule_manage_rows = _build_schedule_manage_rows(
