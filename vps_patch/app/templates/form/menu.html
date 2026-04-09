@@ -359,6 +359,9 @@
   <button type="button" class="role-tab is-active" data-role-tab="material" data-hold-label="資料" title="資料"><i class="bi bi-file-earmark-text"></i>資料</button>
   {% endif %}
 </div>
+{% if show_role_panel %}
+<div class="role-tab-mobile-caption" id="role-tab-mobile-caption" aria-live="polite"></div>
+{% endif %}
 
 {% if show_role_panel %}
 <div class="role-panel{% if not is_manager %} is-active{% endif %}" data-role-panel="att">
@@ -1766,6 +1769,7 @@
   }
   .role-panel{display:none}
   .role-panel.is-active{display:block}
+  .role-tab-mobile-caption{display:none}
   @media (max-width: 640px){
     .role-tabs{gap:8px;padding-right:10px}
     .role-tabs.manager-tabs{
@@ -1777,6 +1781,14 @@
     }
     .role-tab{width:46px;min-width:46px;height:42px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:0;line-height:0}
     .role-tab .bi{margin-right:0;font-size:16px;line-height:1}
+    .role-tab-mobile-caption{
+      display:block;
+      margin:-2px 2px 8px;
+      color:#a9c1e7;
+      font-size:11px;
+      letter-spacing:.04em;
+      min-height:16px;
+    }
     .role-tab.is-hold-hint::after{
       content:attr(data-hold-label);
       position:absolute;
@@ -1940,6 +1952,7 @@
 
   (() => {
     const tabWrap = document.getElementById("role-menu-panels");
+    const mobileCaption = document.getElementById("role-tab-mobile-caption");
     const tabs = document.querySelectorAll('[data-role-tab]');
     const panels = document.querySelectorAll('[data-role-panel]');
     if (!tabs.length || !panels.length || !tabWrap) return;
@@ -1950,6 +1963,11 @@
     const activate = (name) => {
       tabs.forEach(x => x.classList.toggle('is-active', x.getAttribute('data-role-tab') === name));
       panels.forEach(p => p.classList.toggle('is-active', p.getAttribute('data-role-panel') === name));
+      if (mobileCaption) {
+        const activeTab = Array.from(tabs).find((t) => t.getAttribute("data-role-tab") === name);
+        const label = (activeTab && (activeTab.getAttribute("data-hold-label") || activeTab.getAttribute("title"))) || "";
+        mobileCaption.textContent = label ? `現在: ${label}` : "";
+      }
     };
     const clearHoldHint = () => {
       tabs.forEach((t) => t.classList.remove("is-hold-hint"));
