@@ -1067,7 +1067,7 @@ def _build_assign_response_panel_data(
     status_by_cast: dict[str, tuple[str, str]] = {}
     for r in rows:
         cast_ids = ext_rel(r, ASSIGN_RESP_CAST_REL_KEYS)
-        cast_id = cast_ids[0] if cast_ids else ""
+        cast_id = _norm_id(cast_ids[0] if cast_ids else "")
         if not cast_id:
             continue
         status = (ext_txt(r, ASSIGN_RESP_STATUS_KEYS) or "").strip().lower()
@@ -1076,7 +1076,7 @@ def _build_assign_response_panel_data(
         if (not prev) or (updated_at >= prev[1]):
             status_by_cast[cast_id] = (status, updated_at)
 
-    my_status = (status_by_cast.get(my_cast_id, ("", ""))[0] or "").strip().lower()
+    my_status = (status_by_cast.get(_norm_id(my_cast_id), ("", ""))[0] or "").strip().lower()
     out["enabled"] = True
     out["my_status"] = my_status
     out["my_status_label"] = _assign_resp_status_label(my_status)
@@ -1090,7 +1090,7 @@ def _build_assign_response_panel_data(
             pids = ext_rel(cast, PARTICIPANT_PLAYER_REL_KEYS)
             pid = pids[0] if pids else ""
             name = (ext_txt(player_map.get(pid, {}), PLAYER_NAME_KEYS) or "不明").strip()
-            status = (status_by_cast.get(cast_id, ("", ""))[0] or "").strip().lower()
+            status = (status_by_cast.get(_norm_id(cast_id), ("", ""))[0] or "").strip().lower()
             rows_view.append({
                 "cast_id": cast_id,
                 "name": name,
