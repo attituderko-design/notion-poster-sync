@@ -1,4 +1,4 @@
-const SW_VERSION = "harmonia-v1";
+const SW_VERSION = "harmonia-v2";
 const STATIC_CACHE = `${SW_VERSION}-static`;
 const SHELL_CACHE = `${SW_VERSION}-shell`;
 

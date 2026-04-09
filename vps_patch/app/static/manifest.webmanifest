@@ -1,6 +1,7 @@
 {
   "name": "ArtéMis HARMONIA",
   "short_name": "HARMONIA",
+  "id": "/",
   "start_url": "/?utm_source=pwa",
   "scope": "/",
   "display": "standalone",
