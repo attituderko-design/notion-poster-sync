@@ -900,6 +900,22 @@ def _assign_resp_status_label(status: str) -> str:
     return "未回答"
 
 
+def _pick_prop_key_exact_first(type_map: dict, candidates: list[str]) -> str:
+    keys = list((type_map or {}).keys())
+    lower_map = {k.lower(): k for k in keys}
+    for c in candidates:
+        k = lower_map.get((c or "").lower())
+        if k:
+            return k
+    for c in candidates:
+        cl = (c or "").lower()
+        for k in keys:
+            kl = k.lower()
+            if cl == kl or cl in kl:
+                return k
+    return ""
+
+
 def _assign_response_rows_for_concert(ctx: dict, harmonia_row_id: str) -> list[dict]:
     db_id = (ctx.get("CONCERT_DB_ASSIGN_RESPONSE", "") or "").strip()
     if not db_id:
@@ -960,9 +976,21 @@ def _upsert_assign_response(
             break
 
     props: dict = {}
-    ctx["put_prop_any"](props, t, ASSIGN_RESP_CONCERT_REL_KEYS, harmonia_row_id)
-    ctx["put_prop_any"](props, t, ASSIGN_RESP_CAST_REL_KEYS, cast_id)
-    ctx["put_prop_any"](props, t, ASSIGN_RESP_STATUS_KEYS, status)
+    concert_key = _pick_prop_key_exact_first(t, ASSIGN_RESP_CONCERT_REL_KEYS)
+    cast_key = _pick_prop_key_exact_first(t, ASSIGN_RESP_CAST_REL_KEYS)
+    status_key = _pick_prop_key_exact_first(t, ASSIGN_RESP_STATUS_KEYS)
+    if concert_key:
+        props[concert_key] = {"relation": [{"id": str(harmonia_row_id)}]}
+    if cast_key:
+        props[cast_key] = {"relation": [{"id": str(cast_id)}]}
+    if status_key:
+        ptype = ((t.get(status_key) or {}).get("type") or "").strip().lower()
+        if ptype == "select":
+            props[status_key] = {"select": {"name": str(status)}}
+        elif ptype == "rich_text":
+            props[status_key] = {"rich_text": [{"text": {"content": str(status)}}]}
+        else:
+            props[status_key] = {"rich_text": [{"text": {"content": str(status)}}]}
     if plan_label:
         plan_key = ctx["find_prop_name"](t, ASSIGN_RESP_PLAN_KEYS)
         if plan_key:
@@ -985,7 +1013,9 @@ def _upsert_assign_response(
                 ctx["put_prop_any"](props, t, ASSIGN_RESP_PLAN_KEYS, plan_label)
     if comment:
         ctx["put_prop_any"](props, t, ASSIGN_RESP_COMMENT_KEYS, comment)
-    ctx["put_key_any"](props, t, ASSIGN_RESP_KEY_KEYS, concert_id, cast_id, status, prefix="assignresp")
+    key_key = _pick_prop_key_exact_first(t, ASSIGN_RESP_KEY_KEYS)
+    if key_key:
+        ctx["put_key_any"](props, t, [key_key], concert_id, cast_id, status, prefix="assignresp")
 
     if target and target.get("id"):
         res = ctx["api_request"](
