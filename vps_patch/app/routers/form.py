@@ -2767,6 +2767,7 @@ async def form_menu(
     own_bring_song_options: list[dict] = []
     own_bring_song_groups: list[dict] = []
     rental_manage_rows: list[dict] = []
+    rental_candidate_groups: list[dict] = []
     if role >= ROLE_LEADER:
         own_role_rows, own_role_song_options = _build_role_own_rows(
             ctx,
@@ -2819,6 +2820,10 @@ async def form_menu(
             concert_id=cid,
             practice_id=selected_own_practice_id,
             songs=data.get("songs", []) or [],
+        )
+        rental_candidate_groups = _build_rental_candidate_groups(
+            own_bring_song_groups,
+            rental_manage_rows,
         )
     resp = templates.TemplateResponse("form/menu.html", {
         "request": request,
@@ -2893,6 +2898,7 @@ async def form_menu(
         "own_bring_song_options": own_bring_song_options,
         "own_bring_song_groups": own_bring_song_groups,
         "rental_manage_rows": rental_manage_rows,
+        "rental_candidate_groups": rental_candidate_groups,
         "own_selected_practice_id": selected_own_practice_id,
         "upcoming_schedule_rows": upcoming_schedule_rows,
         "assign_solver_candidates": candidate_results,
@@ -4033,6 +4039,8 @@ async def form_rental_save(
     practice_id: Annotated[str, Form()],
     rental_id: Annotated[str, Form()] = "",
     return_tab: Annotated[str, Form()] = "",
+    song_id: Annotated[str, Form()] = "",
+    instrument_id: Annotated[str, Form()] = "",
     item_name: Annotated[str, Form()] = "",
     qty: Annotated[str, Form()] = "",
     vendor: Annotated[str, Form()] = "",
@@ -4080,6 +4088,8 @@ async def form_rental_save(
     vendor = (vendor or "").strip()
     note = (note or "").strip()
     cost_type = (cost_type or "").strip()
+    song_id = (song_id or "").strip()
+    instrument_id = (instrument_id or "").strip()
     if not item_name:
         _flash_set(request, "error", "品目名は必須です。")
         return RedirectResponse(f"/form?tab={dest_tab}&own_practice_id={practice_id}#role-menu-panels", status_code=302)
@@ -4095,6 +4105,8 @@ async def form_rental_save(
     ctx["put_prop_any"](props, t, RENTAL_UNIT_PRICE_KEYS, str(uv))
     ctx["put_prop_any"](props, t, RENTAL_COST_TYPE_KEYS, cost_type)
     ctx["put_prop_any"](props, t, RENTAL_NOTE_KEYS, note)
+    if instrument_id:
+        ctx["put_prop_any"](props, t, RENTAL_INST_REL_KEYS, instrument_id)
     rid = (rental_id or "").strip()
     if rid:
         res = ctx["api_request"]("patch", f"https://api.notion.com/v1/pages/{rid}", json={"properties": props})
@@ -4907,6 +4919,62 @@ def _build_rental_manage_rows(
         })
     out.sort(key=lambda x: ((x.get("song_name") or "").lower(), (x.get("instrument_name") or "").lower(), x.get("item_name", "")))
     return out
+
+
+def _build_rental_candidate_groups(
+    own_bring_song_groups: list[dict],
+    rental_manage_rows: list[dict],
+) -> list[dict]:
+    """レンタル管理 左ペイン向け: 不足タグの状態をまとめる。"""
+    by_key: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for r in rental_manage_rows or []:
+        sid = (r.get("song_id", "") or "").strip()
+        iid = (r.get("instrument_id", "") or "").strip()
+        if not sid or not iid:
+            continue
+        by_key[(sid, iid)].append(r)
+
+    groups: list[dict] = []
+    for g in own_bring_song_groups or []:
+        song_id = (g.get("song_id", "") or "").strip()
+        song_name = (g.get("song_name", "") or "未設定").strip()
+        tags: list[dict] = []
+        for row in g.get("needed", []) or []:
+            shortage = int(row.get("shortage", 0) or 0)
+            if shortage <= 0:
+                continue
+            inst_id = (row.get("instrument_id", "") or "").strip()
+            inst_name = (row.get("instrument_name", "") or "楽器").strip()
+            matched = by_key.get((song_id, inst_id), [])
+            best = matched[0] if matched else {}
+            vendor = (best.get("vendor", "") or "").strip()
+            unit = int(best.get("unit_price", 0) or 0)
+            qty = int(best.get("qty", 0) or 0)
+            status = "pending"
+            if matched:
+                status = "done" if (vendor or unit > 0) else "draft"
+            tags.append({
+                "song_id": song_id,
+                "song_name": song_name,
+                "instrument_id": inst_id,
+                "instrument_name": inst_name,
+                "status": status,
+                "status_label": ("未反映" if status == "pending" else ("下書き" if status == "draft" else "確定")),
+                "default_item_name": f"{song_name} / {inst_name}",
+                "default_qty": max(1, shortage if shortage > 0 else qty),
+                "default_cost_type": "楽器レンタル",
+                "default_note": "持参不足分を左ペイン候補から追加",
+                "tip": f"{song_name} / {inst_name} : 不足 {shortage}",
+            })
+        if tags:
+            tags.sort(key=lambda x: (x.get("instrument_name", "") or "").lower())
+            groups.append({
+                "song_id": song_id,
+                "song_name": song_name,
+                "tags": tags,
+            })
+    groups.sort(key=lambda x: (x.get("song_name", "") or "").lower())
+    return groups
 
 
 def _build_material_rows(ctx, partdefs, songs, my_part_id, role) -> list:

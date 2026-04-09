@@ -615,24 +615,65 @@
       </form>
     </div>
 
-    <div id="rental-manage" class="own-carry-head">レンタル項目を追加</div>
-    <form method="post" action="/form/rental/save" class="js-preserve-scroll">
-      <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
-      <input type="hidden" name="return_tab" value="rental_manage">
-      <div class="rental-manage-grid">
-        <input class="panel-filter-select" type="text" name="item_name" value="" placeholder="品目名（楽器以外の費用も可）" required>
-        <input class="panel-filter-select" type="text" name="vendor" value="" placeholder="業者名">
-        <input class="panel-filter-select" type="number" min="0" step="1" name="qty" value="1" placeholder="数量">
-        <input class="panel-filter-select" type="number" min="0" step="1" name="unit_price" value="0" placeholder="単価">
-      </div>
-      <div class="rental-manage-grid" style="margin-top:6px;">
-        <input class="panel-filter-select" type="text" name="cost_type" value="" placeholder="費用種別（例: 楽器レンタル / 運送費 / 管理費）">
-        <input class="panel-filter-select" type="text" name="note" value="" placeholder="備考">
-      </div>
-      <div class="rental-manage-actions">
-        <button type="submit" class="assign-action-btn">追加する</button>
-      </div>
-    </form>
+    <div class="rental-manage-2pane">
+      <section class="rental-left-pane js-rental-drop-zone" data-drop-zone="rental">
+        <div class="own-carry-head">左ペイン: 持参楽器整理の不足候補</div>
+        {% if rental_candidate_groups %}
+        <div class="rental-candidate-groups">
+          {% for g in rental_candidate_groups %}
+          <div class="rental-candidate-group">
+            <div class="rental-candidate-song">{{ g.song_name }}</div>
+            <div class="rental-candidate-tags">
+              {% for t in g.tags %}
+              <button
+                type="button"
+                class="rental-candidate-tag is-{{ t.status }} js-rental-candidate"
+                draggable="true"
+                title="{{ t.tip }}"
+                data-song-id="{{ t.song_id }}"
+                data-song-name="{{ t.song_name }}"
+                data-instrument-id="{{ t.instrument_id }}"
+                data-instrument-name="{{ t.instrument_name }}"
+                data-item-name="{{ t.default_item_name }}"
+                data-qty="{{ t.default_qty }}"
+                data-cost-type="{{ t.default_cost_type }}"
+                data-note="{{ t.default_note }}"
+              >
+                {{ t.instrument_name }}
+              </button>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="menu-hint">不足候補はありません。</div>
+        {% endif %}
+      </section>
+
+      <section class="rental-right-pane">
+        <div id="rental-manage" class="own-carry-head">右ペイン: 当日コスト明細を入力</div>
+        <form method="post" action="/form/rental/save" class="js-preserve-scroll js-rental-entry-form">
+          <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
+          <input type="hidden" name="return_tab" value="rental_manage">
+          <input type="hidden" name="song_id" value="">
+          <input type="hidden" name="instrument_id" value="">
+          <div class="rental-manage-grid">
+            <input class="panel-filter-select" type="text" name="item_name" value="" placeholder="品目名（楽器以外の費用も可）" required>
+            <input class="panel-filter-select" type="text" name="vendor" value="" placeholder="業者名">
+            <input class="panel-filter-select" type="number" min="0" step="1" name="qty" value="1" placeholder="数量">
+            <input class="panel-filter-select" type="number" min="0" step="1" name="unit_price" value="0" placeholder="単価">
+          </div>
+          <div class="rental-manage-grid" style="margin-top:6px;">
+            <input class="panel-filter-select" type="text" name="cost_type" value="" placeholder="費用種別（例: 楽器レンタル / 運送費 / 管理費）">
+            <input class="panel-filter-select" type="text" name="note" value="" placeholder="備考">
+          </div>
+          <div class="rental-manage-actions">
+            <button type="submit" class="assign-action-btn">追加する</button>
+          </div>
+        </form>
+      </section>
+    </div>
 
     <div class="own-carry-head" style="margin-top:12px;">レンタル手配一覧（編集）</div>
     {% if rental_manage_rows %}
@@ -1403,11 +1444,25 @@
   .rental-chip.is-unused{background:rgba(132,146,162,.2);border-color:rgba(162,174,190,.48);color:#d5deea}
   .rental-chip.is-none{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.16);color:#a9bddc}
   .rental-chip[href]{text-decoration:none}
+  .rental-manage-2pane{display:grid;grid-template-columns:minmax(250px,1fr) minmax(330px,1.2fr);gap:10px;margin-top:6px}
+  .rental-left-pane,.rental-right-pane{border:1px solid rgba(255,255,255,.08);border-radius:10px;background:rgba(255,255,255,.015);padding:10px}
+  .rental-left-pane.is-drop-over,.rental-right-pane.is-drop-over{border-color:rgba(74,158,255,.45);box-shadow:0 0 0 2px rgba(74,158,255,.18)}
+  .rental-candidate-groups{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+  .rental-candidate-group{border:1px solid rgba(255,255,255,.07);border-radius:9px;padding:8px;background:rgba(255,255,255,.02)}
+  .rental-candidate-song{font-size:12px;color:#dce8ff;margin-bottom:6px;font-weight:600}
+  .rental-candidate-tags{display:flex;flex-wrap:wrap;gap:6px}
+  .rental-candidate-tag{display:inline-flex;align-items:center;border-radius:999px;padding:4px 10px;font-size:12px;border:1px solid transparent;cursor:grab;transition:transform .14s ease,border-color .14s ease}
+  .rental-candidate-tag:active{cursor:grabbing}
+  .rental-candidate-tag:hover{transform:translateY(-1px)}
+  .rental-candidate-tag.is-pending{background:rgba(221,65,65,.16);border-color:rgba(235,90,90,.55);color:#ffd8d8}
+  .rental-candidate-tag.is-draft{background:rgba(204,110,42,.2);border-color:rgba(224,137,73,.55);color:#ffe4cb}
+  .rental-candidate-tag.is-done{background:rgba(76,155,68,.18);border-color:rgba(107,191,95,.55);color:#d9f8cf}
   .rental-manage-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
   .rental-manage-row{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:10px;padding:10px}
   .rental-manage-title{font-size:12px;color:#d9e8ff;margin-bottom:6px;font-weight:600}
   .rental-manage-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
   .rental-manage-actions{display:flex;gap:6px;align-items:center;margin-top:6px}
+  @media (max-width: 1024px){.rental-manage-2pane{grid-template-columns:1fr}}
   @media (max-width: 860px){.rental-manage-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
   .chip-tip-toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:10090;max-width:min(90vw,520px);padding:9px 12px;border-radius:10px;border:1px solid rgba(140,190,255,.35);background:rgba(10,20,34,.95);color:#d3e6ff;font-size:12px;line-height:1.55;box-shadow:0 10px 28px rgba(0,0,0,.42);opacity:0;pointer-events:none;transition:opacity .18s ease}
   .chip-tip-toast.is-show{opacity:1}
@@ -2845,6 +2900,72 @@
         const type = sel.getAttribute("data-filter-target");
         if (!type) return;
         applyFilters(type);
+      });
+    });
+  })();
+
+  (() => {
+    const form = document.querySelector(".js-rental-entry-form");
+    const candidates = Array.from(document.querySelectorAll(".js-rental-candidate"));
+    const zones = Array.from(document.querySelectorAll(".js-rental-drop-zone, .rental-right-pane"));
+    if (!form || !candidates.length) return;
+
+    const fields = {
+      itemName: form.querySelector('input[name="item_name"]'),
+      qty: form.querySelector('input[name="qty"]'),
+      costType: form.querySelector('input[name="cost_type"]'),
+      note: form.querySelector('input[name="note"]'),
+      songId: form.querySelector('input[name="song_id"]'),
+      instrumentId: form.querySelector('input[name="instrument_id"]'),
+    };
+    const applyCandidate = (data) => {
+      if (!data) return;
+      if (fields.itemName) fields.itemName.value = data.itemName || "";
+      if (fields.qty) fields.qty.value = data.qty || "1";
+      if (fields.costType) fields.costType.value = data.costType || "楽器レンタル";
+      if (fields.note) fields.note.value = data.note || "";
+      if (fields.songId) fields.songId.value = data.songId || "";
+      if (fields.instrumentId) fields.instrumentId.value = data.instrumentId || "";
+      if (fields.itemName && typeof fields.itemName.focus === "function") fields.itemName.focus();
+    };
+    const readData = (el) => ({
+      itemName: el.getAttribute("data-item-name") || "",
+      qty: el.getAttribute("data-qty") || "1",
+      costType: el.getAttribute("data-cost-type") || "楽器レンタル",
+      note: el.getAttribute("data-note") || "",
+      songId: el.getAttribute("data-song-id") || "",
+      instrumentId: el.getAttribute("data-instrument-id") || "",
+    });
+
+    candidates.forEach((el) => {
+      el.addEventListener("dragstart", (e) => {
+        const payload = JSON.stringify(readData(el));
+        e.dataTransfer.setData("application/json", payload);
+        e.dataTransfer.setData("text/plain", payload);
+        e.dataTransfer.effectAllowed = "copy";
+      });
+      el.addEventListener("click", () => {
+        applyCandidate(readData(el));
+      });
+    });
+
+    zones.forEach((zone) => {
+      zone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        zone.classList.add("is-drop-over");
+      });
+      zone.addEventListener("dragleave", () => {
+        zone.classList.remove("is-drop-over");
+      });
+      zone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        zone.classList.remove("is-drop-over");
+        const raw = e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain") || "";
+        if (!raw) return;
+        try {
+          applyCandidate(JSON.parse(raw));
+        } catch {
+        }
       });
     });
   })();
