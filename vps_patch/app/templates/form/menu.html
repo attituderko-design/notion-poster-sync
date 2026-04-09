@@ -295,7 +295,7 @@
 {% endif %}
 
 {% if can_show_assign %}
-<div class="section-label f4" id="my-assign-summary" style="margin-top:18px;">あなたのアサイン状況</div>
+<div class="section-label f4" id="my-assign-summary" style="margin-top:18px;">{{ assign_panel_title }}</div>
 <div class="menu-item f4 assign-panel" style="padding:14px 16px;">
   {% if assign_summary %}
   <div class="assign-list">
@@ -307,7 +307,47 @@
     {% endfor %}
   </div>
   {% else %}
-  <div class="menu-hint">まだ担当が確定していません。</div>
+  <div class="menu-hint">{% if proposal_phase %}あなたへのアサイン案はまだ提示されていません。{% else %}まだ担当が確定していません。{% endif %}</div>
+  {% endif %}
+
+  {% if proposal_phase and assign_response_panel.enabled %}
+  <div class="assign-response-block">
+    <div class="assign-response-head">
+      <span class="assign-response-title">この案への回答</span>
+      <span class="assign-response-current">現在: {{ assign_response_panel.my_status_label }}</span>
+    </div>
+    <div class="assign-response-actions">
+      <form method="post" action="/form/assign/respond">
+        <input type="hidden" name="response" value="agree">
+        <button type="submit" class="assign-vote-btn{% if assign_response_panel.my_status == 'agree' %} is-active is-agree{% endif %}">
+          <i class="bi bi-hand-thumbs-up"></i> 賛同する
+        </button>
+      </form>
+      <form method="post" action="/form/assign/respond">
+        <input type="hidden" name="response" value="object">
+        <button type="submit" class="assign-vote-btn{% if assign_response_panel.my_status == 'object' %} is-active is-object{% endif %}">
+          <i class="bi bi-hand-thumbs-down"></i> 異議を申し立てる
+        </button>
+      </form>
+    </div>
+    {% if show_role_panel %}
+    <div class="assign-response-stats">
+      <span class="assign-r-chip is-agree">賛同 {{ assign_response_panel.agree_count }}</span>
+      <span class="assign-r-chip is-object">異議 {{ assign_response_panel.object_count }}</span>
+      <span class="assign-r-chip">未回答 {{ assign_response_panel.unanswered_count }}</span>
+    </div>
+    {% if assign_response_panel.rows %}
+    <div class="assign-response-list">
+      {% for rr in assign_response_panel.rows %}
+      <div class="assign-response-row">
+        <span class="assign-response-name">{{ rr.name }}</span>
+        <span class="assign-r-chip{% if rr.status == 'agree' %} is-agree{% elif rr.status == 'object' %} is-object{% endif %}">{{ rr.status_label }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endif %}
+  </div>
   {% endif %}
 </div>
 {% endif %}
@@ -576,7 +616,7 @@
       {% endif %}
     </div>
 
-    <div class="assign-current-head">現在反映中のアサイン</div>
+    <div class="assign-current-head">{% if proposal_phase %}提示中のアサイン{% else %}現在反映中のアサイン{% endif %}</div>
     {% if role_assignment_rows %}
     <div class="assign-role-list" data-role-list="assign">
       {% for row in role_assignment_rows %}
@@ -739,6 +779,23 @@
   .assign-list{display:flex;flex-direction:column;gap:8px}
   .assign-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
   .assign-row:last-child{border-bottom:none}
+  .assign-response-block{margin-top:12px;padding-top:10px;border-top:1px dashed rgba(255,255,255,.12)}
+  .assign-response-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  .assign-response-title{font-size:12px;color:#a7bfde}
+  .assign-response-current{font-size:11px;color:#90a9ce}
+  .assign-response-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .assign-response-actions form{margin:0}
+  .assign-vote-btn{height:30px;padding:0 12px;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.04);color:#d4e4ff;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .assign-vote-btn:hover{background:rgba(255,255,255,.08)}
+  .assign-vote-btn.is-active.is-agree{border-color:rgba(100,200,130,.5);background:rgba(100,200,130,.14);color:#c9f3d6}
+  .assign-vote-btn.is-active.is-object{border-color:rgba(230,120,120,.5);background:rgba(230,120,120,.14);color:#ffd3d3}
+  .assign-response-stats{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .assign-r-chip{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.03);color:#c7d8f4;font-size:11px}
+  .assign-r-chip.is-agree{border-color:rgba(100,200,130,.45);background:rgba(100,200,130,.12);color:#bdeecf}
+  .assign-r-chip.is-object{border-color:rgba(230,120,120,.45);background:rgba(230,120,120,.12);color:#ffd1d1}
+  .assign-response-list{margin-top:8px;display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto;padding-right:4px}
+  .assign-response-row{display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:8px;padding:7px 9px}
+  .assign-response-name{font-size:12px;color:#d7e5ff}
   .assign-song{font-size:.92rem;color:#d8e2f5;line-height:1.45}
   .assign-part{flex-shrink:0}
   .assign-chip{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;color:#7eb8ff;background:rgba(74,158,255,.13);border:1px solid rgba(74,158,255,.35)}

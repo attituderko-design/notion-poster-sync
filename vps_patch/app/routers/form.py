@@ -110,6 +110,12 @@ POKE_TYPE_KEYS = _K.POKE_TYPE_KEYS
 POKE_MESSAGE_KEYS = _K.POKE_MESSAGE_KEYS
 POKE_STATUS_KEYS = _K.POKE_STATUS_KEYS
 POKE_EXPIRES_AT_KEYS = _K.POKE_EXPIRES_AT_KEYS
+ASSIGN_RESP_KEY_KEYS = _K.ASSIGN_RESP_KEY_KEYS
+ASSIGN_RESP_CONCERT_REL_KEYS = _K.ASSIGN_RESP_CONCERT_REL_KEYS
+ASSIGN_RESP_CAST_REL_KEYS = _K.ASSIGN_RESP_CAST_REL_KEYS
+ASSIGN_RESP_PLAN_KEYS = _K.ASSIGN_RESP_PLAN_KEYS
+ASSIGN_RESP_STATUS_KEYS = _K.ASSIGN_RESP_STATUS_KEYS
+ASSIGN_RESP_COMMENT_KEYS = _K.ASSIGN_RESP_COMMENT_KEYS
 
 
 def get_ctx():
@@ -882,6 +888,172 @@ def _poke_status_label(status: str) -> str:
         "expired": "期限切れ",
     }
     return m.get((status or "").strip().lower(), (status or "").strip() or "-")
+
+
+def _assign_resp_status_label(status: str) -> str:
+    s = (status or "").strip().lower()
+    if s == "agree":
+        return "賛同"
+    if s == "object":
+        return "異議"
+    return "未回答"
+
+
+def _assign_response_rows_for_concert(ctx: dict, harmonia_row_id: str) -> list[dict]:
+    db_id = (ctx.get("CONCERT_DB_ASSIGN_RESPONSE", "") or "").strip()
+    if not db_id:
+        return []
+    rows = ctx["query_all"](db_id, None)
+    ext_rel = ctx["extract_relation_ids_any"]
+    hid = _norm_id(harmonia_row_id)
+    return [
+        r for r in rows
+        if any(_norm_id(x) == hid for x in ext_rel(r, ASSIGN_RESP_CONCERT_REL_KEYS))
+    ]
+
+
+def _clear_assign_responses_for_concert(ctx: dict, concert_id: str) -> None:
+    concert = _find_concert(ctx, concert_id) or {}
+    harmonia_row_id = _ensure_harmonia_row_id(ctx, concert_id, _atlas_concert_name(ctx, concert))
+    if not harmonia_row_id:
+        return
+    rows = _assign_response_rows_for_concert(ctx, harmonia_row_id)
+    for r in rows:
+        rid = r.get("id", "")
+        if not rid:
+            continue
+        ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{rid}",
+            json={"archived": True},
+        )
+
+
+def _upsert_assign_response(
+    ctx: dict,
+    *,
+    concert_id: str,
+    cast_id: str,
+    status: str,
+    plan_label: str = "",
+    comment: str = "",
+) -> tuple[bool, str]:
+    db_id = (ctx.get("CONCERT_DB_ASSIGN_RESPONSE", "") or "").strip()
+    if not db_id:
+        return False, "CONCERT_DB_ASSIGN_RESPONSE が未設定です。"
+    t = ctx["get_prop_types"](db_id) or {}
+    if not t:
+        return False, "ASSIGN_RESPONSE のプロパティ情報を取得できません。"
+    concert = _find_concert(ctx, concert_id) or {}
+    harmonia_row_id = _ensure_harmonia_row_id(ctx, concert_id, _atlas_concert_name(ctx, concert))
+    if not harmonia_row_id:
+        return False, "HARMONIA_CONCERTの行を解決できません。"
+
+    ext_rel = ctx["extract_relation_ids_any"]
+    rows = _assign_response_rows_for_concert(ctx, harmonia_row_id)
+    target = None
+    for r in rows:
+        cast_ids = ext_rel(r, ASSIGN_RESP_CAST_REL_KEYS)
+        if any(_norm_id(x) == _norm_id(cast_id) for x in cast_ids):
+            target = r
+            break
+
+    props: dict = {}
+    ctx["put_prop_any"](props, t, ASSIGN_RESP_CONCERT_REL_KEYS, harmonia_row_id)
+    ctx["put_prop_any"](props, t, ASSIGN_RESP_CAST_REL_KEYS, cast_id)
+    ctx["put_prop_any"](props, t, ASSIGN_RESP_STATUS_KEYS, status)
+    if plan_label:
+        ctx["put_prop_any"](props, t, ASSIGN_RESP_PLAN_KEYS, plan_label)
+    if comment:
+        ctx["put_prop_any"](props, t, ASSIGN_RESP_COMMENT_KEYS, comment)
+    ctx["put_key_any"](props, t, ASSIGN_RESP_KEY_KEYS, concert_id, cast_id, status, prefix="assignresp")
+
+    if target and target.get("id"):
+        res = ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{target.get('id','')}",
+            json={"properties": props},
+        )
+        return (bool(res and res.status_code == 200), "updated")
+
+    res = ctx["api_request"](
+        "post",
+        "https://api.notion.com/v1/pages",
+        json={"parent": {"database_id": db_id}, "properties": props},
+    )
+    return (bool(res and res.status_code == 200), "created")
+
+
+def _build_assign_response_panel_data(
+    ctx: dict,
+    *,
+    concert_id: str,
+    participant_rows: list[dict],
+    my_cast_id: str,
+    role: int,
+) -> dict:
+    out = {
+        "enabled": False,
+        "my_status": "",
+        "my_status_label": "未回答",
+        "rows": [],
+        "agree_count": 0,
+        "object_count": 0,
+        "unanswered_count": 0,
+    }
+    if not my_cast_id:
+        return out
+    concert = _find_concert(ctx, concert_id) or {}
+    harmonia_row_id = _ensure_harmonia_row_id(ctx, concert_id, _atlas_concert_name(ctx, concert))
+    if not harmonia_row_id:
+        return out
+
+    rows = _assign_response_rows_for_concert(ctx, harmonia_row_id)
+    ext_rel = ctx["extract_relation_ids_any"]
+    ext_txt = ctx["extract_prop_text_any"]
+    players = ctx["query_all"](ctx["CONCERT_DB_PLAYER"], None)
+    player_map = {p.get("id", ""): p for p in players}
+    cast_map = {r.get("id", ""): r for r in participant_rows}
+
+    status_by_cast: dict[str, tuple[str, str]] = {}
+    for r in rows:
+        cast_ids = ext_rel(r, ASSIGN_RESP_CAST_REL_KEYS)
+        cast_id = cast_ids[0] if cast_ids else ""
+        if not cast_id:
+            continue
+        status = (ext_txt(r, ASSIGN_RESP_STATUS_KEYS) or "").strip().lower()
+        updated_at = (r.get("last_edited_time", "") or r.get("created_time", "") or "").strip()
+        prev = status_by_cast.get(cast_id)
+        if (not prev) or (updated_at >= prev[1]):
+            status_by_cast[cast_id] = (status, updated_at)
+
+    my_status = (status_by_cast.get(my_cast_id, ("", ""))[0] or "").strip().lower()
+    out["enabled"] = True
+    out["my_status"] = my_status
+    out["my_status_label"] = _assign_resp_status_label(my_status)
+
+    if role >= ROLE_LEADER:
+        rows_view: list[dict] = []
+        for cast in participant_rows or []:
+            cast_id = cast.get("id", "")
+            if not cast_id:
+                continue
+            pids = ext_rel(cast, PARTICIPANT_PLAYER_REL_KEYS)
+            pid = pids[0] if pids else ""
+            name = (ext_txt(player_map.get(pid, {}), PLAYER_NAME_KEYS) or "不明").strip()
+            status = (status_by_cast.get(cast_id, ("", ""))[0] or "").strip().lower()
+            rows_view.append({
+                "cast_id": cast_id,
+                "name": name,
+                "status": status,
+                "status_label": _assign_resp_status_label(status),
+            })
+        rows_view.sort(key=lambda x: ((0 if x["status"] == "object" else 1 if x["status"] == "agree" else 2), x["name"]))
+        out["rows"] = rows_view
+        out["agree_count"] = sum(1 for r in rows_view if r["status"] == "agree")
+        out["object_count"] = sum(1 for r in rows_view if r["status"] == "object")
+        out["unanswered_count"] = sum(1 for r in rows_view if r["status"] not in {"agree", "object"})
+    return out
 
 
 def _build_poke_panel_data(
@@ -1861,6 +2033,7 @@ async def form_menu(request: Request, tab: str = Query(default="")):
 
     flags = _harmonia_flags(ctx, cid)
     proposal_done = bool(flags.get("plan_done"))
+    assign_done = bool(flags.get("assign_done"))
     cover_url = get_cover_url(concert)
     all_assign_rows = ctx["query_all"](ctx["CONCERT_DB_CONCERT_ASSIGNMENT"], None)
     published_assign = has_published_assignments(ctx, cid, assignment_rows=all_assign_rows)
@@ -1930,7 +2103,6 @@ async def form_menu(request: Request, tab: str = Query(default="")):
                 seen_pm.add(pmid)
                 manager_part_options.append(pm_name)
         manager_part_options = sorted(set(manager_part_options), key=lambda x: x.lower())
-    assign_done = bool(flags.get("assign_done"))
     if pref_total == 0:
         pref_hint = ""
     elif assign_done:
@@ -2020,6 +2192,14 @@ async def form_menu(request: Request, tab: str = Query(default="")):
     upcoming_practice_id = (upcoming_practice or {}).get("id", "") if upcoming_practice else ""
     my_cast_row = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
     my_cast_id = (my_cast_row or {}).get("id", "")
+    proposal_phase = proposal_done and not assign_done
+    assign_response_panel = _build_assign_response_panel_data(
+        ctx,
+        concert_id=cid,
+        participant_rows=participant_rows,
+        my_cast_id=my_cast_id,
+        role=role,
+    )
     poke_panels = _build_poke_panel_data(
         ctx,
         concert_id=cid,
@@ -2137,10 +2317,13 @@ async def form_menu(request: Request, tab: str = Query(default="")):
         "pref_hint": pref_hint,
         "proposal_done": proposal_done,
         "assign_done": assign_done,
+        "proposal_phase": proposal_phase,
         "is_perc": show_own,
         "cover_url": cover_url,
         "can_show_assign": can_show_assign,
         "assign_summary": assign_summary,
+        "assign_panel_title": ("あなたへのアサイン案" if proposal_phase else "あなたのアサイン状況"),
+        "assign_response_panel": assign_response_panel,
         "show_role_panel": role_mode,
         "show_material_tab": True,
         "initial_role_tab": initial_role_tab,
@@ -2604,6 +2787,12 @@ async def form_assign_propose(
         return RedirectResponse("/form", status_code=302)
     selected = max(0, min(selected, len(results) - 1))
     selected_label = (results[selected].get("label", "") or f"候補{chr(ord('A') + selected)}").strip()
+    assignments = results[selected].get("assignments", [])
+    ok, fail = _write_assignment_rows(ctx, cid, assignments)
+    if fail > 0 or ok == 0:
+        _flash_set(request, "error", f"案提示時の反映に失敗しました（成功{ok} / 失敗{fail}）。")
+        return RedirectResponse("/form", status_code=302)
+    _clear_assign_responses_for_concert(ctx, cid)
     if isinstance(state, dict):
         state["selected"] = selected
         state["proposed_selected"] = selected
@@ -2615,7 +2804,7 @@ async def form_assign_propose(
     c_name = _atlas_concert_name(ctx, concert) if concert else cid
     _set_harmonia_checkbox(ctx, cid, HARMONIA_CONCERT_PLAN_KEYS, True, c_name)
     _set_harmonia_checkbox(ctx, cid, HARMONIA_CONCERT_ASSIGN_KEYS, False, c_name)
-    _flash_set(request, "info", f"{selected_label} を案提示しました。PDF出力が可能になりました。")
+    _flash_set(request, "info", f"{selected_label} を案提示しました（{ok}件反映）。PDF出力が可能です。")
     return RedirectResponse("/form", status_code=302)
 
 
@@ -2663,6 +2852,52 @@ async def form_assign_confirm(request: Request):
     _set_harmonia_checkbox(ctx, cid, HARMONIA_CONCERT_ASSIGN_KEYS, True, c_name)
     _flash_set(request, "info", f"アサインを確定しました（{ok}件）。")
     return RedirectResponse("/form", status_code=302)
+
+
+@router.post("/form/assign/respond")
+async def form_assign_respond(
+    request: Request,
+    response: Annotated[str, Form()],
+):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return RedirectResponse("/login", status_code=302)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+
+    status = (response or "").strip().lower()
+    if status not in {"agree", "object"}:
+        _flash_set(request, "error", "回答種別が不正です。")
+        return RedirectResponse("/form#my-assign-summary", status_code=302)
+
+    ctx = get_ctx()
+    data = load_form_data(ctx, cid)
+    participant_rows = data.get("participant_rows_concert", []) or []
+    my_cast = _find_cast_row_for_player(ctx, pid, cid, participant_rows)
+    my_cast_id = (my_cast or {}).get("id", "")
+    if not my_cast_id:
+        _flash_set(request, "error", "出演者情報を特定できませんでした。")
+        return RedirectResponse("/form#my-assign-summary", status_code=302)
+
+    flags = _harmonia_flags(ctx, cid)
+    if not bool(flags.get("plan_done")) or bool(flags.get("assign_done")):
+        _flash_set(request, "error", "アサイン案の受付期間ではありません。")
+        return RedirectResponse("/form#my-assign-summary", status_code=302)
+
+    ok, msg = _upsert_assign_response(
+        ctx,
+        concert_id=cid,
+        cast_id=my_cast_id,
+        status=status,
+        plan_label=("案提示中" if bool(flags.get("plan_done")) else ""),
+    )
+    if not ok:
+        _flash_set(request, "error", f"回答を保存できませんでした: {msg}")
+        return RedirectResponse("/form#my-assign-summary", status_code=302)
+
+    _flash_set(request, "info", ("アサイン案に賛同しました。" if status == "agree" else "アサイン案に異議を送信しました。"))
+    return RedirectResponse("/form#my-assign-summary", status_code=302)
 
 
 @router.post("/form/menu-action")
