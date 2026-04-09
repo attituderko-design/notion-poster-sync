@@ -688,40 +688,45 @@
               <button type="submit" class="assign-action-btn">追加</button>
             </div>
           </form>
-
-          {% if rental_manage_rows %}
-            {% for r in rental_manage_rows %}
-            {% set row_amount = (r.qty or 0) * (r.unit_price or 0) %}
-            <div class="rental-ledger-item">
-              <form method="post" action="/form/rental/save" class="js-preserve-scroll rental-ledger-row">
-                <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
-                <input type="hidden" name="rental_id" value="{{ r.id }}">
-                <input type="hidden" name="return_tab" value="rental_manage">
-                <input class="panel-filter-select" type="text" name="cost_type" value="{{ r.cost_type }}" placeholder="費用種別" title="費用種別">
-                <input class="panel-filter-select" type="text" name="item_name" value="{{ r.item_name }}" placeholder="品目名" title="品目名">
-                <input class="panel-filter-select" type="text" name="vendor" value="{{ r.vendor }}" placeholder="業者名" title="業者名">
-                <input class="panel-filter-select is-num" type="number" min="0" step="1" name="qty" value="{{ r.qty }}" placeholder="数量" title="数量">
-                <input class="panel-filter-select is-num" type="number" min="0" step="1" name="unit_price" value="{{ r.unit_price }}" placeholder="単価" title="単価（円）">
-                <div class="rental-amount-cell">¥ {{ "{:,}".format(row_amount) }}</div>
-                <input class="panel-filter-select" type="text" name="note" value="{{ r.note }}" placeholder="備考" title="備考">
-                <div class="rental-row-actions">
-                  <button type="submit" class="assign-action-btn">更新</button>
-                </div>
-              </form>
-              <form method="post" action="/form/rental/delete" class="js-preserve-scroll rental-row-delete-form">
-                <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
-                <input type="hidden" name="rental_id" value="{{ r.id }}">
-                <input type="hidden" name="return_tab" value="rental_manage">
-                <button type="submit" class="assign-action-btn is-danger">削除</button>
-              </form>
-            </div>
-            {% endfor %}
-          {% else %}
-            <div class="menu-hint">コスト明細はまだありません。</div>
-          {% endif %}
         </div>
       </section>
     </div>
+    <div class="own-carry-head rental-saved-head">登録済みコスト明細</div>
+    {% if rental_manage_rows %}
+    <div class="rental-saved-wrap">
+      <div class="rental-saved-grid rental-saved-grid-head">
+        <span>区分</span><span>品目名</span><span>業者</span><span>数量</span><span>単価</span><span>金額</span><span>備考</span><span>操作</span>
+      </div>
+      {% for r in rental_manage_rows %}
+      {% set row_amount = (r.qty or 0) * (r.unit_price or 0) %}
+      <div class="rental-saved-row">
+        <form method="post" action="/form/rental/save" class="js-preserve-scroll rental-saved-grid">
+          <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
+          <input type="hidden" name="rental_id" value="{{ r.id }}">
+          <input type="hidden" name="return_tab" value="rental_manage">
+          <input class="panel-filter-select" type="text" name="cost_type" value="{{ r.cost_type }}" placeholder="費用種別">
+          <input class="panel-filter-select" type="text" name="item_name" value="{{ r.item_name }}" placeholder="品目名">
+          <input class="panel-filter-select" type="text" name="vendor" value="{{ r.vendor }}" placeholder="業者名">
+          <input class="panel-filter-select is-num" type="number" min="0" step="1" name="qty" value="{{ r.qty }}" placeholder="数量">
+          <input class="panel-filter-select is-num" type="number" min="0" step="1" name="unit_price" value="{{ r.unit_price }}" placeholder="単価">
+          <div class="rental-amount-cell">¥ {{ "{:,}".format(row_amount) }}</div>
+          <input class="panel-filter-select" type="text" name="note" value="{{ r.note }}" placeholder="備考">
+          <div class="rental-row-actions">
+            <button type="submit" class="assign-action-btn">更新</button>
+          </div>
+        </form>
+        <form method="post" action="/form/rental/delete" class="js-preserve-scroll rental-row-delete-form">
+          <input type="hidden" name="practice_id" value="{{ own_selected_practice_id }}">
+          <input type="hidden" name="rental_id" value="{{ r.id }}">
+          <input type="hidden" name="return_tab" value="rental_manage">
+          <button type="submit" class="assign-action-btn is-danger">削除</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="menu-hint">コスト明細はまだありません。</div>
+    {% endif %}
   </div>
 </div>
 {% endif %}
@@ -1483,13 +1488,24 @@
   .rental-row-actions{display:flex;justify-content:flex-end}
   .rental-row-delete-form{display:flex;align-items:center}
   .rental-row-delete-form .assign-action-btn{height:32px}
+  .rental-saved-head{margin-top:12px}
+  .rental-saved-wrap{margin-top:8px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);border-radius:10px;padding:8px;overflow-x:auto}
+  .rental-saved-grid{display:grid;grid-template-columns:1.05fr 1.25fr 1.15fr .55fr .75fr .75fr 1.3fr auto;gap:6px;align-items:center;min-width:900px}
+  .rental-saved-grid-head{padding:0 2px 6px;border-bottom:1px solid rgba(255,255,255,.12);font-size:11px;color:#9db6dd;line-height:1.2}
+  .rental-saved-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+  .rental-saved-row .rental-saved-grid{padding:8px 2px;border-bottom:1px solid rgba(255,255,255,.08)}
+  .rental-saved-row:last-child .rental-saved-grid{border-bottom:none}
+  .rental-saved-grid .panel-filter-select{height:32px;padding:0 10px;font-size:12px;width:100%;min-width:0}
+  .rental-saved-grid .panel-filter-select.is-num{text-align:right}
   @media (max-width: 1280px){
     .rental-manage-2pane{grid-template-columns:minmax(240px,.9fr) minmax(500px,1.5fr)}
     .rental-ledger-head,.rental-ledger-row{grid-template-columns:1fr 1.2fr 1fr .55fr .7fr .7fr 1.1fr auto}
+    .rental-saved-grid{grid-template-columns:1fr 1.2fr 1fr .55fr .7fr .7fr 1.1fr auto}
   }
   @media (max-width: 1120px){
     .rental-manage-2pane{grid-template-columns:1fr}
     .rental-ledger-head,.rental-ledger-row{min-width:860px}
+    .rental-saved-grid{min-width:860px}
   }
   .chip-tip-toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:10090;max-width:min(90vw,520px);padding:9px 12px;border-radius:10px;border:1px solid rgba(140,190,255,.35);background:rgba(10,20,34,.95);color:#d3e6ff;font-size:12px;line-height:1.55;box-shadow:0 10px 28px rgba(0,0,0,.42);opacity:0;pointer-events:none;transition:opacity .18s ease}
   .chip-tip-toast.is-show{opacity:1}
