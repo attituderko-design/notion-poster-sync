@@ -335,6 +335,7 @@
   <button type="button" class="role-tab is-active" data-role-tab="att" data-hold-label="出欠" title="出欠"><i class="bi bi-clipboard-data"></i>出欠</button>
   <button type="button" class="role-tab" data-role-tab="member" data-hold-label="メンバー" title="メンバー"><i class="bi bi-people"></i>メンバー</button>
   <button type="button" class="role-tab" data-role-tab="ownmap" data-hold-label="所有楽器" title="所有楽器"><i class="bi bi-box-seam"></i>所有楽器</button>
+  <button type="button" class="role-tab" data-role-tab="rental" data-hold-label="持参/レンタル" title="持参/レンタル"><i class="bi bi-truck"></i>持参/レンタル</button>
   {% if is_manager %}
   <button type="button" class="role-tab" data-role-tab="progress" data-hold-label="進捗" title="進捗"><i class="bi bi-speedometer2"></i>進捗</button>
   <button type="button" class="role-tab" data-role-tab="practice" data-hold-label="練習日程" title="練習日程"><i class="bi bi-calendar2-week"></i>練習日程</button>
@@ -472,17 +473,6 @@
   <div class="menu-item f4 own-role-panel">
     {% if own_role_rows %}
     <div class="panel-filters">
-      <form method="get" action="/form" class="js-preserve-scroll">
-        <input type="hidden" name="tab" value="ownmap">
-        <div class="panel-filter-item">
-          <label for="own-practice-filter">練習日</label>
-          <select id="own-practice-filter" class="panel-filter-select" name="own_practice_id" onchange="this.form.submit()">
-            {% for p in own_practice_options %}
-            <option value="{{ p.id }}"{% if own_selected_practice_id == p.id %} selected{% endif %}>{{ p.label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-      </form>
       <div class="panel-filter-item">
         <label for="own-song-filter">曲</label>
         <select id="own-song-filter" class="panel-filter-select" data-filter-target="ownmap" data-filter-kind="song" data-static-options="1">
@@ -493,10 +483,60 @@
         </select>
       </div>
     </div>
+    <div class="own-role-list" data-role-list="ownmap">
+      {% for row in own_role_rows %}
+      <div class="own-role-card" data-song="{{ row.song_name }}">
+        <div class="own-role-head">
+          <div class="own-role-song">{{ row.song_name }}</div>
+          <div class="own-role-inst">{{ row.instrument_name }}</div>
+        </div>
+        <div class="own-role-badges">
+          {% if row.owner_badges %}
+            {% for b in row.owner_badges %}
+            <span class="own-owner-chip">{{ b.name }} ×{{ b.qty }}</span>
+            {% endfor %}
+          {% else %}
+            <span class="own-owner-empty">所有者なし</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="panel-empty is-hidden" data-empty-for="ownmap">該当する楽器がありません。</div>
+    {% else %}
+    <div class="menu-hint">所有楽器データがまだありません。</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="role-panel" data-role-panel="rental">
+  <div class="menu-item f4 own-role-panel">
+    <div class="panel-filters">
+      <form method="get" action="/form" class="js-preserve-scroll">
+        <input type="hidden" name="tab" value="rental">
+        <div class="panel-filter-item">
+          <label for="rental-practice-filter">練習日</label>
+          <select id="rental-practice-filter" class="panel-filter-select" name="own_practice_id" onchange="this.form.submit()">
+            {% for p in own_practice_options %}
+            <option value="{{ p.id }}"{% if own_selected_practice_id == p.id %} selected{% endif %}>{{ p.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </form>
+      <div class="panel-filter-item">
+        <label for="rental-song-filter">曲</label>
+        <select id="rental-song-filter" class="panel-filter-select" data-filter-target="rental" data-filter-kind="song" data-static-options="1">
+          <option value="">全曲</option>
+          {% for s in own_role_song_options %}
+          <option value="{{ s.name }}" data-filter-value="{{ s.name }}">{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
 
     {% if own_bring_rows %}
     <div class="own-carry-head">持参見込み（出欠×所有楽器）</div>
-    <div class="own-role-list" data-role-list="ownmap">
+    <div class="own-role-list" data-role-list="rental">
       {% for row in own_bring_rows %}
       <div class="own-role-card own-carry-card" data-song="{{ row.song_name }}">
         <div class="own-role-head">
@@ -538,34 +578,9 @@
       </div>
       {% endfor %}
     </div>
+    <div class="panel-empty is-hidden" data-empty-for="rental">該当する行がありません。</div>
     {% else %}
     <div class="menu-hint">練習日の出欠と所有楽器を突き合わせた結果がありません。</div>
-    {% endif %}
-
-    <div class="divider"></div>
-    <div class="own-carry-head">所有楽器一覧</div>
-    <div class="own-role-list" data-role-list="ownmap">
-      {% for row in own_role_rows %}
-      <div class="own-role-card" data-song="{{ row.song_name }}">
-        <div class="own-role-head">
-          <div class="own-role-song">{{ row.song_name }}</div>
-          <div class="own-role-inst">{{ row.instrument_name }}</div>
-        </div>
-        <div class="own-role-badges">
-          {% if row.owner_badges %}
-            {% for b in row.owner_badges %}
-            <span class="own-owner-chip">{{ b.name }} ×{{ b.qty }}</span>
-            {% endfor %}
-          {% else %}
-            <span class="own-owner-empty">所有者なし</span>
-          {% endif %}
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    <div class="panel-empty is-hidden" data-empty-for="ownmap">該当する楽器がありません。</div>
-    {% else %}
-    <div class="menu-hint">所有楽器データがまだありません。</div>
     {% endif %}
   </div>
 </div>
@@ -2482,6 +2497,7 @@
       member: document.querySelector('[data-role-list="member"]'),
       assign: document.querySelector('[data-role-list="assign"]'),
       ownmap: document.querySelector('[data-role-list="ownmap"]'),
+      rental: document.querySelector('[data-role-list="rental"]'),
       progress: document.querySelector('[data-role-list="progress"]'),
       assignCandidate: document,
     };
@@ -2492,6 +2508,7 @@
       if (type === "member") return Array.from(root.querySelectorAll(".member-card"));
       if (type === "ownmap") return Array.from(document.querySelectorAll('[data-role-panel="ownmap"] .own-role-card'));
       if (type === "assignCandidate") return Array.from(document.querySelectorAll(".assign-candidate-list .assign-role-card"));
+      if (type === "rental") return Array.from(root.querySelectorAll(".own-role-card"));
       if (type === "progress") return Array.from(root.querySelectorAll(".progress-part-card"));
       return Array.from(root.querySelectorAll(".assign-role-card"));
     };
@@ -2565,7 +2582,7 @@
     const allSelects = Array.from(document.querySelectorAll(".panel-filter-select"));
     if (!allSelects.length) return;
 
-    ["att", "member", "assign", "ownmap", "progress"].forEach((type) => {
+    ["att", "member", "assign", "ownmap", "rental", "progress"].forEach((type) => {
       const partSel = document.querySelector(`[data-filter-target="${type}"][data-filter-kind="part"]`);
       if (partSel) {
         const hasStatic = partSel.getAttribute("data-static-options") === "1";

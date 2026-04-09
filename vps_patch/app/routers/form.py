@@ -2574,11 +2574,13 @@ async def form_menu(
     show_pref = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER)
     show_own = role in (ROLE_PLAYER, ROLE_LEADER, ROLE_MANAGER) and is_perc_role
     role_mode = role >= ROLE_LEADER
-    allowed_tabs = {"att", "member", "assign", "material", "ownmap", "progress", "schedule", "practice"}
+    allowed_tabs = {"att", "member", "assign", "material", "ownmap", "rental", "progress", "schedule", "practice"}
     initial_role_tab = (tab or "").strip().lower()
     if initial_role_tab not in allowed_tabs:
         initial_role_tab = ""
     if initial_role_tab == "ownmap" and role < ROLE_LEADER:
+        initial_role_tab = ""
+    if initial_role_tab == "rental" and role < ROLE_LEADER:
         initial_role_tab = ""
     if initial_role_tab == "progress" and role < ROLE_MANAGER:
         initial_role_tab = ""
