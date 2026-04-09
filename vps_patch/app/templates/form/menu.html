@@ -556,7 +556,7 @@
       <input type="hidden" name="tab" value="schedule">
       <div class="panel-filter-item">
         <label for="schedule-practice-select">練習回</label>
-        <select id="schedule-practice-select" name="schedule_practice_id" class="panel-filter-select" onchange="this.form.submit()">
+        <select id="schedule-practice-select" name="schedule_practice_id" class="panel-filter-select">
           {% for p in schedule_practice_options %}
           <option value="{{ p.id }}" {% if schedule_selected_practice_id == p.id %}selected{% endif %}>{{ p.label }}{% if not p.has_schedule %}（未登録）{% endif %}</option>
           {% endfor %}
@@ -916,7 +916,7 @@
       <button type="button" class="top-modal-close js-close-top-modal" aria-label="閉じる"><i class="bi bi-x-lg"></i></button>
     </div>
     <div class="top-modal-body">
-      <div class="notify-intro js-notify-intro is-hidden">
+      <div class="notify-intro js-notify-intro is-hidden" data-intro-detail="ArtéMis HARMONIAへようこそ。ホーム画面への追加手順（iPhone / Android / PC）を確認しました。">
         <div class="notify-intro-head"><i class="bi bi-megaphone"></i> お知らせ</div>
         <div class="notify-intro-body">
           ArtéMis HARMONIAへようこそ！<br>
@@ -1453,10 +1453,11 @@
     };
     const appendIntroHistory = () => {
       const now = new Date();
+      const introDetail = (introBox && introBox.getAttribute("data-intro-detail")) || "";
       const row = {
         at: now.toISOString(),
         text: "PWA案内を確認",
-        detail: "ホーム画面への追加手順を確認しました。必要な場合は右上の「HowTo」からいつでも再確認できます。"
+        detail: introDetail || "ホーム画面への追加手順を確認しました。必要な場合は右上の「HowTo」からいつでも再確認できます。"
       };
       const next = [row, ...readIntroHistory()].slice(0, 20);
       writeIntroHistory(next);
@@ -1978,6 +1979,7 @@
     };
     const itemList = () => Array.from(flow.querySelectorAll(".js-schedule-item"));
     const buildOrderedIds = () => itemList().map((el) => el.getAttribute("data-id") || "").filter(Boolean).join(",");
+    const initialOrder = buildOrderedIds();
     const recomputeLocalTimes = () => {
       const items = itemList();
       if (!items.length) return;
@@ -2003,9 +2005,10 @@
       if (baseStartInput) baseStartInput.value = fmtHHMM(base);
     };
     const markDirty = () => {
-      dirty = true;
-      orderedInput.value = buildOrderedIds();
-      if (saveBtn) saveBtn.disabled = false;
+      const currentOrder = buildOrderedIds();
+      dirty = currentOrder !== initialOrder;
+      orderedInput.value = currentOrder;
+      if (saveBtn) saveBtn.disabled = !dirty;
       recomputeLocalTimes();
     };
     const findDropTarget = (clientX, clientY) => {
@@ -2130,6 +2133,7 @@
         }
       });
     }
+    if (saveBtn) saveBtn.disabled = true;
     reorderForm.addEventListener("submit", (e) => {
       orderedInput.value = buildOrderedIds();
       if (!orderedInput.value || !dirty) {
@@ -2194,6 +2198,7 @@
 
   (() => {
     const practiceSelect = document.getElementById("schedule-practice-select");
+    const practiceForm = document.querySelector(".js-schedule-practice-form");
     const syncPracticeHidden = () => {
       if (!practiceSelect) return;
       const v = practiceSelect.value || "";
@@ -2203,7 +2208,12 @@
     };
     syncPracticeHidden();
     if (practiceSelect) {
-      practiceSelect.addEventListener("change", syncPracticeHidden);
+      practiceSelect.addEventListener("change", () => {
+        syncPracticeHidden();
+        sessionStorage.setItem("form_menu_scroll_y", String(window.scrollY || window.pageYOffset || 0));
+        sessionStorage.setItem("form_menu_role_panel", "schedule");
+        if (practiceForm) practiceForm.submit();
+      });
     }
     document.querySelectorAll(".js-schedule-practice-form").forEach((form) => {
       form.addEventListener("submit", () => {
