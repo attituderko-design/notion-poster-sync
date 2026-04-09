@@ -330,7 +330,7 @@
 
 {% if show_role_panel or show_material_tab %}
 <div class="section-label f4" style="margin-top:18px;">{% if show_role_panel %}{% if is_manager %}Managerメニュー{% else %}パートリーダーメニュー{% endif %}{% else %}資料{% endif %}</div>
-<div class="role-tabs f4" id="role-menu-panels">
+<div class="role-tabs f4{% if show_role_panel and is_manager %} manager-tabs{% endif %}" id="role-menu-panels">
   {% if show_role_panel %}
   {% if is_manager %}
   <button type="button" class="role-tab is-active" data-role-tab="practice" data-hold-label="練習日程管理" title="練習日程管理"><i class="bi bi-calendar2-week"></i>練習日程管理</button>
@@ -1669,6 +1669,16 @@
     -ms-overflow-style:none;
     scrollbar-width:none
   }
+  .role-tabs.manager-tabs{
+    width:100%;
+    display:grid;
+    grid-template-columns:repeat(10,minmax(0,1fr));
+    gap:6px;
+    padding:8px 8px 10px;
+    overflow:hidden;
+    scroll-snap-type:none;
+    border-radius:12px;
+  }
   .role-tabs::-webkit-scrollbar{display:none}
   .role-tab{
     position:relative;
@@ -1686,6 +1696,40 @@
   .role-tab .bi{margin-right:6px;font-size:.9em}
   .role-tab:hover{transform:translateY(-1px) scale(1.03);border-color:rgba(122,169,244,.55);background:rgba(26,38,58,.84)}
   .role-tab.is-active{border-color:#6ca8ff;color:#fff;box-shadow:0 0 0 1px rgba(108,168,255,.25),0 8px 22px rgba(16,38,68,.38)}
+  .role-tabs.manager-tabs .role-tab{
+    width:100%;
+    min-width:0;
+    height:38px;
+    padding:0;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    font-size:0;
+    line-height:0;
+    transform-origin:center center;
+  }
+  .role-tabs.manager-tabs .role-tab .bi{
+    margin-right:0;
+    font-size:15px;
+    line-height:1;
+  }
+  .role-tabs.manager-tabs .role-tab:hover{
+    transform:scale(1.17);
+    z-index:12;
+    box-shadow:0 10px 20px rgba(7,16,30,.5),0 0 0 1px rgba(108,168,255,.35);
+  }
+  .role-tabs.manager-tabs .role-tab.is-active{
+    transform:scale(1.03);
+    z-index:8;
+  }
+  .role-tabs.manager-tabs .role-tab.is-jolt{
+    animation:roleTabJoltManager .3s cubic-bezier(.2,.8,.2,1);
+  }
+  @keyframes roleTabJoltManager{
+    0%{transform:scale(1)}
+    55%{transform:scale(1.12)}
+    100%{transform:scale(1)}
+  }
   .role-tab.is-jolt{animation:roleTabJolt .38s cubic-bezier(.2,.8,.2,1)}
   @keyframes roleTabJolt{
     0%{transform:translateY(0) scale(1)}
@@ -1724,6 +1768,13 @@
   .role-panel.is-active{display:block}
   @media (max-width: 640px){
     .role-tabs{gap:8px;padding-right:10px}
+    .role-tabs.manager-tabs{
+      display:flex;
+      overflow-x:auto;
+      overflow-y:visible;
+      padding-right:10px;
+      gap:8px;
+    }
     .role-tab{width:46px;min-width:46px;height:42px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:0;line-height:0}
     .role-tab .bi{margin-right:0;font-size:16px;line-height:1}
     .role-tab.is-hold-hint::after{
