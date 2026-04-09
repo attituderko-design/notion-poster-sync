@@ -332,17 +332,17 @@
 <div class="section-label f4" style="margin-top:18px;">{% if show_role_panel %}{% if is_manager %}Managerメニュー{% else %}パートリーダーメニュー{% endif %}{% else %}資料{% endif %}</div>
 <div class="role-tabs f4" id="role-menu-panels">
   {% if show_role_panel %}
-  <button type="button" class="role-tab is-active" data-role-tab="att" data-hold-label="出欠"><i class="bi bi-clipboard-data"></i>出欠</button>
-  <button type="button" class="role-tab" data-role-tab="member" data-hold-label="メンバー"><i class="bi bi-people"></i>メンバー</button>
-  <button type="button" class="role-tab" data-role-tab="ownmap" data-hold-label="所有楽器"><i class="bi bi-box-seam"></i>所有楽器</button>
+  <button type="button" class="role-tab is-active" data-role-tab="att" data-hold-label="出欠" title="出欠"><i class="bi bi-clipboard-data"></i>出欠</button>
+  <button type="button" class="role-tab" data-role-tab="member" data-hold-label="メンバー" title="メンバー"><i class="bi bi-people"></i>メンバー</button>
+  <button type="button" class="role-tab" data-role-tab="ownmap" data-hold-label="所有楽器" title="所有楽器"><i class="bi bi-box-seam"></i>所有楽器</button>
   {% if is_manager %}
-  <button type="button" class="role-tab" data-role-tab="progress" data-hold-label="進捗"><i class="bi bi-speedometer2"></i>進捗</button>
-  <button type="button" class="role-tab" data-role-tab="schedule" data-hold-label="進行表"><i class="bi bi-list-task"></i>進行表</button>
+  <button type="button" class="role-tab" data-role-tab="progress" data-hold-label="進捗" title="進捗"><i class="bi bi-speedometer2"></i>進捗</button>
+  <button type="button" class="role-tab" data-role-tab="schedule" data-hold-label="進行表" title="進行表"><i class="bi bi-list-task"></i>進行表</button>
   {% endif %}
-  <button type="button" class="role-tab" data-role-tab="assign" data-hold-label="アサイン"><i class="bi bi-bullseye"></i>アサイン</button>
-  <button type="button" class="role-tab" data-role-tab="material" data-hold-label="資料"><i class="bi bi-file-earmark-text"></i>資料</button>
+  <button type="button" class="role-tab" data-role-tab="assign" data-hold-label="アサイン" title="アサイン"><i class="bi bi-bullseye"></i>アサイン</button>
+  <button type="button" class="role-tab" data-role-tab="material" data-hold-label="資料" title="資料"><i class="bi bi-file-earmark-text"></i>資料</button>
   {% else %}
-  <button type="button" class="role-tab is-active" data-role-tab="material" data-hold-label="資料"><i class="bi bi-file-earmark-text"></i>資料</button>
+  <button type="button" class="role-tab is-active" data-role-tab="material" data-hold-label="資料" title="資料"><i class="bi bi-file-earmark-text"></i>資料</button>
   {% endif %}
 </div>
 
@@ -858,7 +858,7 @@
       </div>
     </details>
 
-    <details class="material-box" open>
+    <details class="material-box">
       <summary><i class="bi bi-music-note-list"></i> 楽譜リンク</summary>
       <div class="material-inner">
         {% if material_links %}
@@ -1007,8 +1007,12 @@
   .notify-history.is-hidden{display:none}
   .notify-history summary{cursor:pointer;color:#cfe1fd;font-size:12px}
   .notify-history-list{margin-top:8px;display:flex;flex-direction:column;gap:6px}
-  .notify-history-item{font-size:12px;color:#b6ccec;line-height:1.5;border-top:1px dashed rgba(255,255,255,.1);padding-top:6px}
+  .notify-history-item{border-top:1px dashed rgba(255,255,255,.1);padding-top:6px}
   .notify-history-item:first-child{border-top:none;padding-top:0}
+  .notify-history-item summary{cursor:pointer;list-style:none;display:flex;align-items:flex-start;gap:8px;color:#c9dcfb;font-size:12px;line-height:1.55}
+  .notify-history-item summary::-webkit-details-marker{display:none}
+  .notify-history-item summary::before{content:"\f282";font-family:"bootstrap-icons";font-size:11px;color:#8db9ee;line-height:1.6}
+  .notify-history-item-body{margin:6px 0 0 19px;padding:7px 9px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);font-size:12px;color:#b6ccec;line-height:1.6}
   .hero-shell{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:12px}
   .hero-poster-wrap{display:flex;justify-content:center}
   .hero-card{margin-bottom:0}
@@ -1379,6 +1383,27 @@
       z-index:20;
     }
   }
+  @media (max-width: 640px) and (hover: hover) and (pointer: fine){
+    .role-tab:hover::after,
+    .role-tab:focus-visible::after{
+      content:attr(data-hold-label);
+      position:absolute;
+      left:50%;
+      bottom:calc(100% + 8px);
+      transform:translateX(-50%);
+      padding:4px 8px;
+      border-radius:7px;
+      border:1px solid rgba(255,255,255,.2);
+      background:rgba(11,18,30,.96);
+      color:#d8e8ff;
+      font-size:11px;
+      line-height:1.2;
+      white-space:nowrap;
+      box-shadow:0 8px 20px rgba(0,0,0,.35);
+      pointer-events:none;
+      z-index:20;
+    }
+  }
   @media (min-width:900px){
     .hero-shell{grid-template-columns:220px 1fr;align-items:center}
     .hero-poster-wrap{justify-content:flex-start}
@@ -1427,7 +1452,8 @@
       const now = new Date();
       const row = {
         at: now.toISOString(),
-        text: "PWA案内を確認"
+        text: "PWA案内を確認",
+        detail: "ホーム画面への追加手順を確認しました。必要な場合は右上の「HowTo」からいつでも再確認できます。"
       };
       const next = [row, ...readIntroHistory()].slice(0, 20);
       writeIntroHistory(next);
@@ -1439,10 +1465,16 @@
       rows.forEach((r) => {
         const dt = new Date(r.at || "");
         const ts = Number.isNaN(dt.getTime()) ? "" : dt.toLocaleString("ja-JP", { hour12: false });
-        const div = document.createElement("div");
-        div.className = "notify-history-item";
-        div.textContent = ts ? `${ts} - ${r.text || "対応済み"}` : (r.text || "対応済み");
-        notifyHistoryList.appendChild(div);
+        const wrap = document.createElement("details");
+        wrap.className = "notify-history-item";
+        const summary = document.createElement("summary");
+        summary.textContent = ts ? `${ts} - ${r.text || "対応済み"}` : (r.text || "対応済み");
+        const body = document.createElement("div");
+        body.className = "notify-history-item-body";
+        body.textContent = (r.detail || r.text || "対応済み");
+        wrap.appendChild(summary);
+        wrap.appendChild(body);
+        notifyHistoryList.appendChild(wrap);
       });
       notifyHistory.classList.toggle("is-hidden", rows.length === 0);
       return rows.length;
