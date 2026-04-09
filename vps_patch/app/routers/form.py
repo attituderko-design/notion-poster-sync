@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timedelta
 import os
+import re
 import sys
 import time
 from io import BytesIO
@@ -963,7 +964,25 @@ def _upsert_assign_response(
     ctx["put_prop_any"](props, t, ASSIGN_RESP_CAST_REL_KEYS, cast_id)
     ctx["put_prop_any"](props, t, ASSIGN_RESP_STATUS_KEYS, status)
     if plan_label:
-        ctx["put_prop_any"](props, t, ASSIGN_RESP_PLAN_KEYS, plan_label)
+        plan_key = ctx["find_prop_name"](t, ASSIGN_RESP_PLAN_KEYS)
+        if plan_key:
+            ptype = ((t.get(plan_key) or {}).get("type") or "").strip().lower()
+            if ptype == "number":
+                n = None
+                txt = (plan_label or "").strip()
+                if txt:
+                    m = re.search(r"([A-D])", txt.upper())
+                    if m:
+                        n = ord(m.group(1)) - ord("A") + 1
+                    else:
+                        try:
+                            n = float(txt)
+                        except Exception:
+                            n = None
+                if n is not None:
+                    props[plan_key] = {"number": n}
+            else:
+                ctx["put_prop_any"](props, t, ASSIGN_RESP_PLAN_KEYS, plan_label)
     if comment:
         ctx["put_prop_any"](props, t, ASSIGN_RESP_COMMENT_KEYS, comment)
     ctx["put_key_any"](props, t, ASSIGN_RESP_KEY_KEYS, concert_id, cast_id, status, prefix="assignresp")
