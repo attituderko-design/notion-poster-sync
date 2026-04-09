@@ -69,6 +69,7 @@ from app.services.form_service import (
     ROLE_MANAGER,
     is_perc,
     load_form_data,
+    invalidate_form_data_cache,
     load_attendance_data,
     load_existing_prefs,
     resolve_user_role,
@@ -756,6 +757,19 @@ def _effective_role(
     override_raw = request.session.get(DEBUG_ROLE_OVERRIDE_SESSION_KEY, "")
     override_role = _role_from_override(override_raw) if _is_administrator_role(my_system_role) else None
     return override_role if override_role is not None else base_role
+
+
+def _invalidate_schedule_related_cache(ctx: dict, concert_id: str) -> None:
+    try:
+        invalidate_form_data_cache(concert_id)
+    except Exception:
+        pass
+    try:
+        inv = ctx.get("invalidate_query_cache")
+        if callable(inv):
+            inv((ctx.get("CONCERT_DB_SCHEDULE", "") or "").strip())
+    except Exception:
+        pass
 
 
 def _practice_label_by_id(ctx: dict, practice_rows: list[dict], practice_id: str) -> str:
@@ -3409,6 +3423,8 @@ async def form_schedule_save(
         )
         ok = bool(res and res.status_code in (200, 201))
         _flash_set(request, "info" if ok else "error", f"スケジュールを追加しました（{practice_label}）。" if ok else f"スケジュール追加に失敗しました。{_api_err_brief(res)}")
+    if ok:
+        _invalidate_schedule_related_cache(ctx, cid)
 
     return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={practice_id}#role-menu-panels", status_code=302)
 
@@ -3450,6 +3466,8 @@ async def form_schedule_delete(
     )
     ok = bool(res and res.status_code == 200)
     _flash_set(request, "info" if ok else "error", "スケジュールを削除しました。" if ok else "スケジュール削除に失敗しました。")
+    if ok:
+        _invalidate_schedule_related_cache(ctx, cid)
     pid_q = _selected_schedule_practice(request, practice_id)
     if pid_q:
         return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={pid_q}#role-menu-panels", status_code=302)
@@ -3558,6 +3576,8 @@ async def form_schedule_reorder(
         _flash_set(request, "error", f"並び替えは一部失敗しました（成功{success} / 失敗{failed}）。")
     else:
         _flash_set(request, "info", "並び順と時刻を更新しました。")
+    if success > 0:
+        _invalidate_schedule_related_cache(ctx, cid)
     return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={pid_q}#role-menu-panels", status_code=302)
 
 

@@ -56,6 +56,17 @@ def _metric_collect() -> list[dict]:
     return list(_METRICS.get())
 
 
+def _invalidate_query_cache(db_id: str = "") -> None:
+    target = (db_id or "").strip()
+    if not target:
+        _QUERY_CACHE.clear()
+        return
+    prefix = f"{target}::"
+    for k in list(_QUERY_CACHE.keys()):
+        if k.startswith(prefix):
+            _QUERY_CACHE.pop(k, None)
+
+
 def _headers(api_key: str) -> dict:
     return {
         "Authorization": f"Bearer {api_key}",
@@ -277,6 +288,7 @@ def build_concert_ctx() -> dict:
         "put_prop":                 _put_prop,
         "put_prop_any":             _put_prop_any,
         "put_key_any":              _put_key_any,
+        "invalidate_query_cache":   _invalidate_query_cache,
         "clear_metrics":            _metric_clear,
         "collect_metrics":          _metric_collect,
     }

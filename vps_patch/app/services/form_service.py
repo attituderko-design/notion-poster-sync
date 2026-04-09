@@ -389,6 +389,14 @@ def _form_data_cache_ttl_seconds() -> int:
         return 180
 
 
+def invalidate_form_data_cache(concert_id: str = "") -> None:
+    cid = (concert_id or "").replace("-", "").strip()
+    if not cid:
+        _FORM_DATA_CACHE.clear()
+        return
+    _FORM_DATA_CACHE.pop(cid, None)
+
+
 def _is_true(v: str | None) -> bool:
     """Notionのcheckbox/text値をboolに変換。"""
     return (v or "").strip().lower() in ("true", "1", "yes", "on", "済", "完了")
