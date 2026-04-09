@@ -115,6 +115,22 @@
       {% endfor %}
     </select>
   </div>
+  <div class="form-group" style="margin-top:16px;">
+    <details class="policy-box" style="background:rgba(255,255,255,.03);border:.5px solid rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;">
+      <summary style="cursor:pointer;color:rgba(210,225,245,.9);font-size:13px;">プライバシーポリシーを確認する</summary>
+      <div style="margin-top:8px;color:rgba(180,200,230,.86);font-size:12px;line-height:1.7;">
+        {% for line in privacy_policy_lines %}
+        <div>{{ line }}</div>
+        {% endfor %}
+      </div>
+    </details>
+  </div>
+  <div class="form-group" style="margin-top:12px;">
+    <label class="form-label" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+      <input type="checkbox" name="privacy_agree" required style="margin-top:2px;accent-color:#4a9eff;">
+      <span>プライバシーポリシーに同意します</span>
+    </label>
+  </div>
   <button class="btn btn-primary" type="submit">登録して進む</button>
 </form>
 {% endif %}

@@ -12,6 +12,7 @@ import time
 from io import BytesIO
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Form, Request, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
@@ -121,6 +122,15 @@ ASSIGN_RESP_STATUS_KEYS = _K.ASSIGN_RESP_STATUS_KEYS
 ASSIGN_RESP_COMMENT_KEYS = _K.ASSIGN_RESP_COMMENT_KEYS
 ASSIGN_RESP_REPLIED_AT_KEYS = _K.ASSIGN_RESP_REPLIED_AT_KEYS
 
+PRIVACY_POLICY_LINES = [
+    "本フォームは ArtéMis HARMONIA が提供する演奏会運営支援フォームです。",
+    "収集する情報: 氏名、メールアドレス、練習出欠、パート希望、所有楽器情報。",
+    "利用目的: 演奏会運営・調整（出欠管理、パートアサイン、楽器手配）のため。",
+    "第三者提供: 本演奏会の運営目的以外では使用せず、第三者提供は行いません。",
+    "管理者: ArtéMis HARMONIA 開発者 喜田悠太（attituderko@gmail.com）。",
+    "開示・削除請求: 上記メールアドレスへご連絡ください。",
+]
+
 
 def get_ctx():
     from app.services.notion_client import build_concert_ctx
@@ -142,6 +152,12 @@ def _flash_pop(request: Request, key: str):
 def _clear_keys(request: Request, keys: list[str]) -> None:
     for k in keys:
         request.session.pop(k, None)
+
+
+def _session_expired_redirect(request: Request) -> RedirectResponse:
+    nxt = quote("/?force_entry=1", safe="")
+    src = quote((request.url.path or "/"), safe="")
+    return RedirectResponse(f"/session-expired?next={nxt}&from_path={src}", status_code=302)
 
 
 def _get_player_by_email(ctx: dict, email: str):
@@ -1774,6 +1790,22 @@ async def login_page(request: Request):
     })
 
 
+@router.get("/session-expired", response_class=HTMLResponse)
+async def session_expired_page(
+    request: Request,
+    next: str = Query(default="/?force_entry=1"),
+    from_path: str = Query(default=""),
+):
+    next_href = (next or "/?force_entry=1").strip()
+    if not next_href.startswith("/"):
+        next_href = "/?force_entry=1"
+    return templates.TemplateResponse("form/session_expired.html", {
+        "request": request,
+        "next_href": next_href,
+        "from_path": from_path or "",
+    })
+
+
 @router.post("/login/email")
 async def login_email(request: Request, email: Annotated[str, Form()]):
     ctx = get_ctx()
@@ -1974,13 +2006,19 @@ async def register_profile_page(request: Request):
         "view": "register_profile",
         "email": request.session.get("reg_email", ""),
         "part_options": _part_options(ctx),
+        "privacy_policy_lines": PRIVACY_POLICY_LINES,
         "error": _flash_pop(request, "error"),
         "back_href": "/register/code",
     })
 
 
 @router.post("/register/profile")
-async def register_profile(request: Request, name: Annotated[str, Form()], part_id: Annotated[str, Form()]):
+async def register_profile(
+    request: Request,
+    name: Annotated[str, Form()],
+    part_id: Annotated[str, Form()],
+    privacy_agree: Annotated[str | None, Form()] = None,
+):
     email = request.session.get("reg_email", "")
     if not email:
         return RedirectResponse("/login", status_code=302)
@@ -1989,6 +2027,9 @@ async def register_profile(request: Request, name: Annotated[str, Form()], part_
         return RedirectResponse("/register/profile", status_code=302)
     if not (part_id or "").strip():
         _flash_set(request, "error", "担当パートを選択してください。")
+        return RedirectResponse("/register/profile", status_code=302)
+    if (privacy_agree or "").strip().lower() not in {"on", "true", "1", "yes"}:
+        _flash_set(request, "error", "プライバシーポリシーへの同意が必要です。")
         return RedirectResponse("/register/profile", status_code=302)
     ctx = get_ctx()
     t = ctx["get_prop_types"](ctx["CONCERT_DB_PLAYER"])
@@ -2053,7 +2094,7 @@ async def invite_error_page(request: Request):
 @router.get("/login/set-password", response_class=HTMLResponse)
 async def set_password_page(request: Request):
     if not request.session.get("player_id"):
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     return templates.TemplateResponse("form/set_password.html", {
         "request": request,
         "error": _flash_pop(request, "error"),
@@ -2065,7 +2106,7 @@ async def set_password_page(request: Request):
 async def set_password_submit(request: Request, password: Annotated[str, Form()], password_confirm: Annotated[str, Form()]):
     pid = request.session.get("player_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if len((password or "").strip()) < 6:
         _flash_set(request, "error", "パスワードは6文字以上で入力してください。")
         return RedirectResponse("/login/set-password", status_code=302)
@@ -2085,7 +2126,7 @@ async def set_password_submit(request: Request, password: Annotated[str, Form()]
 async def concert_select_page(request: Request):
     pid = request.session.get("player_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     ctx = get_ctx()
     pending = request.session.get("pending_invite_cid", "")
     reg_part_id = request.session.get("reg_part_id", "")
@@ -2119,7 +2160,7 @@ async def concert_select_submit(request: Request, concert_id: Annotated[str, For
 async def concert_add_by_invite(request: Request, invite_code: Annotated[str, Form()]):
     pid = request.session.get("player_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     ctx = get_ctx()
     cid, err = _resolve_invite_concert(ctx, invite_code)
     if not cid:
@@ -2134,7 +2175,7 @@ async def concert_add_part_page(request: Request):
     pid = request.session.get("player_id", "")
     pending_cid = request.session.get("pending_add_invite_cid", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not pending_cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
@@ -2153,7 +2194,7 @@ async def concert_add_part_submit(request: Request, part_id: Annotated[str, Form
     pid = request.session.get("player_id", "")
     cid = request.session.get("pending_add_invite_cid", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
@@ -2175,7 +2216,7 @@ async def form_menu(
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
@@ -2600,7 +2641,7 @@ async def form_material_practice_pdf(request: Request, practice_id: str):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
@@ -2637,7 +2678,7 @@ async def form_debug_role_switch(request: Request, role_mode: Annotated[str, For
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
@@ -2667,7 +2708,7 @@ async def form_poke_send(
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
 
@@ -2814,7 +2855,7 @@ async def form_poke_mark_read(request: Request, poke_id: str):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
@@ -2841,7 +2882,7 @@ async def form_poke_mark_done(request: Request, poke_id: str):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
@@ -2868,7 +2909,7 @@ async def form_poke_cancel(request: Request, poke_id: str):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
@@ -2899,7 +2940,7 @@ async def form_assign_run(
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
 
@@ -2959,7 +3000,7 @@ async def form_assign_select(request: Request, candidate_index: Annotated[int, F
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     state_all = request.session.get("assign_solver_state") or {}
@@ -2984,7 +3025,7 @@ async def form_assign_propose(
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
 
@@ -3041,7 +3082,7 @@ async def form_assign_confirm(request: Request):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
 
@@ -3098,7 +3139,7 @@ async def form_assign_respond(
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
 
@@ -3183,7 +3224,7 @@ async def form_schedule_save(
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
@@ -3266,7 +3307,7 @@ async def form_schedule_delete(
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
@@ -3299,7 +3340,7 @@ async def form_att_page(request: Request):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx = get_ctx()
@@ -3340,7 +3381,7 @@ async def form_att_save(request: Request):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     form = await request.form()
@@ -3847,7 +3888,7 @@ async def form_pref_page(request: Request):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx     = get_ctx()
@@ -3882,7 +3923,7 @@ async def form_pref_save(request: Request):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx     = get_ctx()
@@ -3951,7 +3992,7 @@ async def form_own_page(request: Request):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx     = get_ctx()
@@ -3996,7 +4037,7 @@ async def form_own_save(request: Request):
     pid = request.session.get("player_id", "")
     cid = request.session.get("concert_id", "")
     if not pid:
-        return RedirectResponse("/login", status_code=302)
+        return _session_expired_redirect(request)
     if not cid:
         return RedirectResponse("/concert/select", status_code=302)
     ctx     = get_ctx()
