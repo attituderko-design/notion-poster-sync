@@ -1656,7 +1656,19 @@
   .table-mini{width:100%;border-collapse:collapse;font-size:.92rem}
   .table-mini th,.table-mini td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;white-space:nowrap}
   .table-mini th{color:#9db1d6;font-weight:700}
-  .role-tabs{display:flex;gap:10px;margin:8px 0 10px;overflow-x:auto;padding-bottom:2px;-ms-overflow-style:none;scrollbar-width:none}
+  .role-tabs{
+    position:relative;
+    display:flex;
+    gap:10px;
+    margin:8px 0 10px;
+    overflow-x:auto;
+    overflow-y:visible;
+    padding:2px 12px 4px 2px;
+    scroll-snap-type:x proximity;
+    scroll-behavior:smooth;
+    -ms-overflow-style:none;
+    scrollbar-width:none
+  }
   .role-tabs::-webkit-scrollbar{display:none}
   .role-tab{
     position:relative;
@@ -1667,11 +1679,19 @@
     padding:8px 12px;
     cursor:pointer;
     white-space:nowrap;
-    transition:transform .16s ease,border-color .16s ease,background-color .16s ease;
+    scroll-snap-align:start;
+    transform-origin:center center;
+    transition:transform .24s cubic-bezier(.2,.8,.2,1),border-color .2s ease,background-color .2s ease,box-shadow .2s ease;
   }
   .role-tab .bi{margin-right:6px;font-size:.9em}
-  .role-tab:hover{transform:translateY(-1px);border-color:rgba(122,169,244,.5);background:rgba(26,38,58,.82)}
-  .role-tab.is-active{border-color:#6ca8ff;color:#fff}
+  .role-tab:hover{transform:translateY(-1px) scale(1.03);border-color:rgba(122,169,244,.55);background:rgba(26,38,58,.84)}
+  .role-tab.is-active{border-color:#6ca8ff;color:#fff;box-shadow:0 0 0 1px rgba(108,168,255,.25),0 8px 22px rgba(16,38,68,.38)}
+  .role-tab.is-jolt{animation:roleTabJolt .38s cubic-bezier(.2,.8,.2,1)}
+  @keyframes roleTabJolt{
+    0%{transform:translateY(0) scale(1)}
+    40%{transform:translateY(-1px) scale(1.08)}
+    100%{transform:translateY(0) scale(1)}
+  }
   .role-tabs.is-compact{gap:7px}
   .role-tabs.is-compact .role-tab{
     width:42px;min-width:42px;height:40px;padding:0;
@@ -1679,7 +1699,7 @@
     font-size:0;line-height:0;
   }
   .role-tabs.is-compact .role-tab .bi{margin-right:0;font-size:16px;line-height:1}
-  .role-tabs.is-compact .role-tab:hover{transform:translateY(-1px) scale(1.08)}
+  .role-tabs.is-compact .role-tab:hover{transform:translateY(-1px) scale(1.11)}
   .role-tabs.is-compact .role-tab:hover::after,
   .role-tabs.is-compact .role-tab:focus-visible::after,
   .role-tabs.is-compact .role-tab.is-hold-hint::after{
@@ -1703,7 +1723,7 @@
   .role-panel{display:none}
   .role-panel.is-active{display:block}
   @media (max-width: 640px){
-    .role-tabs{gap:8px}
+    .role-tabs{gap:8px;padding-right:10px}
     .role-tab{width:46px;min-width:46px;height:42px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:0;line-height:0}
     .role-tab .bi{margin-right:0;font-size:16px;line-height:1}
     .role-tab.is-hold-hint::after{
@@ -1895,12 +1915,34 @@
         tabWrap.classList.add("is-compact");
       }
     };
+    const ensureTabVisible = (tab, smooth = true) => {
+      if (!tab || typeof tab.scrollIntoView !== "function") return;
+      tab.scrollIntoView({
+        behavior: smooth ? "smooth" : "auto",
+        inline: "center",
+        block: "nearest",
+      });
+    };
+    const playTabJolt = (tab) => {
+      if (!tab) return;
+      tab.classList.remove("is-jolt");
+      void tab.offsetWidth;
+      tab.classList.add("is-jolt");
+      setTimeout(() => tab.classList.remove("is-jolt"), 420);
+    };
+    tabWrap.addEventListener("wheel", (e) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      tabWrap.scrollBy({ left: e.deltaY, behavior: "smooth" });
+    }, { passive: false });
     const restored = sessionStorage.getItem("form_menu_role_panel");
     if (restored) {
       activate(restored);
+      ensureTabVisible(Array.from(tabs).find((t) => t.getAttribute("data-role-tab") === restored), false);
       sessionStorage.removeItem("form_menu_role_panel");
     } else if (initialTab) {
       activate(initialTab);
+      ensureTabVisible(Array.from(tabs).find((t) => t.getAttribute("data-role-tab") === initialTab), false);
     }
     tabs.forEach(tab => {
       tab.addEventListener("click", (e) => {
@@ -1914,6 +1956,8 @@
       tab.addEventListener('click', () => {
         const name = tab.getAttribute('data-role-tab');
         activate(name);
+        ensureTabVisible(tab);
+        playTabJolt(tab);
       });
       if (!isMobileTouch) return;
       tab.addEventListener("pointerdown", () => {
