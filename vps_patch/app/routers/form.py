@@ -632,10 +632,12 @@ def _harmonia_flags(ctx: dict, concert_id: str) -> dict:
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
     rows = ctx["query_all"](ctx["CONCERT_DB_HARMONIA_CONCERT"], None)
+    cid_norm = _norm_id(concert_id)
     target = None
     for r in rows:
         rel = ext_rel(r, ["演奏会", "FK演奏会", "concert"])
-        if concert_id in rel:
+        rel_norm = {_norm_id(x) for x in rel if x}
+        if cid_norm and cid_norm in rel_norm:
             target = r
             break
     if not target:
@@ -651,9 +653,11 @@ def _harmonia_flags(ctx: dict, concert_id: str) -> dict:
 def _harmonia_row(ctx: dict, concert_id: str) -> dict | None:
     ext_rel = ctx["extract_relation_ids_any"]
     rows = ctx["query_all"](ctx["CONCERT_DB_HARMONIA_CONCERT"], None)
+    cid_norm = _norm_id(concert_id)
     for r in rows:
         rel = ext_rel(r, ["演奏会", "FK演奏会", "concert"])
-        if concert_id in rel:
+        rel_norm = {_norm_id(x) for x in rel if x}
+        if cid_norm and cid_norm in rel_norm:
             return r
     return None
 
@@ -1926,8 +1930,11 @@ async def form_menu(request: Request, tab: str = Query(default="")):
                 seen_pm.add(pmid)
                 manager_part_options.append(pm_name)
         manager_part_options = sorted(set(manager_part_options), key=lambda x: x.lower())
+    assign_done = bool(flags.get("assign_done"))
     if pref_total == 0:
         pref_hint = ""
+    elif assign_done:
+        pref_hint = "アサイン確定済"
     elif proposal_done:
         pref_hint = "アサイン案提示中"
     elif pref_answered == pref_total:
@@ -2129,6 +2136,7 @@ async def form_menu(request: Request, tab: str = Query(default="")):
         "pref_answered": pref_answered if show_pref else 0,
         "pref_hint": pref_hint,
         "proposal_done": proposal_done,
+        "assign_done": assign_done,
         "is_perc": show_own,
         "cover_url": cover_url,
         "can_show_assign": can_show_assign,
@@ -2663,6 +2671,13 @@ async def menu_action(request: Request, action: Annotated[str, Form()]):
     if act == "att":
         return RedirectResponse("/form/att", status_code=302)
     if act == "pref":
+        pid = request.session.get("player_id", "")
+        cid = request.session.get("concert_id", "")
+        if pid and cid:
+            ctx = get_ctx()
+            flags = _harmonia_flags(ctx, cid)
+            if bool(flags.get("plan_done")) or bool(flags.get("assign_done")):
+                return RedirectResponse("/form#my-assign-summary", status_code=302)
         return RedirectResponse("/form/pref", status_code=302)
     if act == "own":
         return RedirectResponse("/form/own", status_code=302)

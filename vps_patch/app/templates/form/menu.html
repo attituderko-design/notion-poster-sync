@@ -263,15 +263,15 @@
 {% if pref_total > 0 %}
 <form method="post" action="/form/menu-action" style="margin-bottom:8px;">
   <input type="hidden" name="action" value="pref">
-  <div class="menu-item menu-card f4" {% if not proposal_done %}onclick="this.closest('form').submit()"{% endif %}
-       style="{% if proposal_done %}opacity:.5;cursor:default;{% else %}cursor:pointer;{% endif %}">
+  <div class="menu-item menu-card f4" onclick="this.closest('form').submit()" style="cursor:pointer;">
     <div class="menu-icon icon-b"><i class="bi bi-music-note-beamed"></i></div>
     <div class="menu-body">
       <div class="menu-title">楽器・パート希望</div>
       <div class="menu-hint">{{ pref_hint }}</div>
     </div>
     <div class="menu-right">
-      {% if proposal_done %}<span class="badge badge-done">確定済</span>
+      {% if assign_done %}<span class="badge badge-done">確定済</span>
+      {% elif proposal_done %}<span class="badge">案提示中</span>
       {% elif pref_answered == pref_total %}<span class="badge badge-ok">完了</span>
       {% else %}<span class="badge badge-warn">{{ pref_total - pref_answered }}件未入力</span>{% endif %}
       <span class="chev">›</span>
@@ -295,7 +295,7 @@
 {% endif %}
 
 {% if can_show_assign %}
-<div class="section-label f4" style="margin-top:18px;">あなたのアサイン状況</div>
+<div class="section-label f4" id="my-assign-summary" style="margin-top:18px;">あなたのアサイン状況</div>
 <div class="menu-item f4 assign-panel" style="padding:14px 16px;">
   {% if assign_summary %}
   <div class="assign-list">

@@ -259,6 +259,15 @@ ASSIGNMENT_INST_REL_KEYS    = ["楽器種別", "楽器", "FK楽器", "instrument
 ASSIGNMENT_FLAG_KEYS        = ["担当フラグ", "担当", "assigned"]
 ASSIGNMENT_NOTE_KEYS        = ["備考", "メモ", "note"]
 
+# ── ASSIGN_RESPONSE（案提示への返答）DB ──────────────────────
+ASSIGN_RESP_KEY_KEYS         = ["assign_response_key", "response_key", "タイトル"]
+ASSIGN_RESP_CONCERT_REL_KEYS = ["concert_id", "演奏会", "concert"]
+ASSIGN_RESP_CAST_REL_KEYS    = ["cast_id", "対象者", "出演者", "参加者"]
+ASSIGN_RESP_PLAN_KEYS        = ["plan_variant", "案", "候補案"]
+ASSIGN_RESP_STATUS_KEYS      = ["status", "返答", "ステータス"]
+ASSIGN_RESP_COMMENT_KEYS     = ["comment", "コメント", "備考"]
+ASSIGN_RESP_REPLIED_AT_KEYS  = ["replied_at", "返答日時", "updated_time"]
+
 # ── POKE_REQUESTS（催促通知）DB ──────────────────────────────
 POKE_KEY_KEYS               = ["poke_id", "poke_key", "タイトル"]
 POKE_SENDER_CAST_REL_KEYS   = ["sender_cast_id", "送信者", "送信者参加者"]
