@@ -639,6 +639,25 @@ def _format_hhmm(v: str) -> str:
     return txt
 
 
+def _hhmm_to_minutes(v: str) -> int | None:
+    hhmm = _format_hhmm(v)
+    m = re.match(r"^(\d{1,2}):(\d{2})$", hhmm)
+    if not m:
+        return None
+    h = int(m.group(1))
+    mm = int(m.group(2))
+    if h < 0 or h > 23 or mm < 0 or mm > 59:
+        return None
+    return h * 60 + mm
+
+
+def _minutes_to_hhmm(v: int) -> str:
+    m = int(v) % (24 * 60)
+    h = m // 60
+    mm = m % 60
+    return f"{h:02d}:{mm:02d}"
+
+
 def _schedule_type_class(type_name: str) -> str:
     v = (type_name or "").strip()
     if v == "練習":
@@ -3335,6 +3354,105 @@ async def form_schedule_delete(
     if pid_q:
         return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={pid_q}#role-menu-panels", status_code=302)
     return RedirectResponse("/form?tab=schedule#role-menu-panels", status_code=302)
+
+
+@router.post("/form/schedule/reorder")
+async def form_schedule_reorder(
+    request: Request,
+    practice_id: Annotated[str, Form()],
+    ordered_ids: Annotated[str, Form()] = "",
+):
+    pid = request.session.get("player_id", "")
+    cid = request.session.get("concert_id", "")
+    if not pid:
+        return _session_expired_redirect(request)
+    if not cid:
+        return RedirectResponse("/concert/select", status_code=302)
+    ctx = get_ctx()
+    participant_rows = load_form_data(ctx, cid).get("participant_rows_concert", [])
+    role = resolve_user_role(ctx, pid, cid, participant_rows)
+    if role < ROLE_MANAGER:
+        _flash_set(request, "error", "この操作にはManager権限が必要です。")
+        return RedirectResponse("/form", status_code=302)
+
+    pid_q = (practice_id or "").strip()
+    if not pid_q:
+        _flash_set(request, "error", "対象練習を選択してください。")
+        return RedirectResponse("/form?tab=schedule#role-menu-panels", status_code=302)
+
+    db_id = (ctx.get("CONCERT_DB_SCHEDULE", "") or "").strip()
+    if not db_id:
+        _flash_set(request, "error", "CONCERT_DB_SCHEDULE が未設定です。")
+        return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={pid_q}#role-menu-panels", status_code=302)
+
+    t = ctx["get_prop_types"](db_id) or {}
+    if not t:
+        _flash_set(request, "error", "SCHEDULE DB のプロパティ取得に失敗しました。")
+        return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={pid_q}#role-menu-panels", status_code=302)
+
+    data = load_form_data(ctx, cid)
+    songs = data.get("songs", []) or []
+    rows = _build_schedule_manage_rows(ctx, practice_id=pid_q, songs=songs)
+    if not rows:
+        return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={pid_q}#role-menu-panels", status_code=302)
+
+    id_set = {r.get("id", "") for r in rows if r.get("id", "")}
+    specified = [x.strip() for x in (ordered_ids or "").split(",") if x.strip()]
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for sid in specified:
+        if sid in id_set and sid not in seen:
+            ordered.append(sid)
+            seen.add(sid)
+    for r in rows:
+        rid = r.get("id", "")
+        if rid and rid not in seen:
+            ordered.append(rid)
+            seen.add(rid)
+
+    row_map = {r.get("id", ""): r for r in rows if r.get("id", "")}
+    base_start = None
+    for sid in ordered:
+        r = row_map.get(sid, {})
+        base_start = _hhmm_to_minutes((r.get("start", "") or "").strip())
+        if base_start is not None:
+            break
+
+    current = base_start
+    success = 0
+    failed = 0
+    for idx, sid in enumerate(ordered, start=1):
+        r = row_map.get(sid, {})
+        st_old = _hhmm_to_minutes((r.get("start", "") or "").strip())
+        ed_old = _hhmm_to_minutes((r.get("end", "") or "").strip())
+        duration = 15
+        if st_old is not None and ed_old is not None and ed_old >= st_old:
+            duration = max(1, ed_old - st_old)
+
+        props: dict = {}
+        ctx["put_prop_any"](props, t, SCHEDULE_ORDER_KEYS, str(idx))
+        if current is not None:
+            st_txt = _minutes_to_hhmm(current)
+            ed_txt = _minutes_to_hhmm(current + duration)
+            ctx["put_prop_any"](props, t, SCHEDULE_START_KEYS, st_txt)
+            ctx["put_prop_any"](props, t, SCHEDULE_END_KEYS, ed_txt)
+            current = current + duration
+
+        res = ctx["api_request"](
+            "patch",
+            f"https://api.notion.com/v1/pages/{sid}",
+            json={"properties": props},
+        )
+        if res and res.status_code == 200:
+            success += 1
+        else:
+            failed += 1
+
+    if failed:
+        _flash_set(request, "error", f"並び替えは一部失敗しました（成功{success} / 失敗{failed}）。")
+    else:
+        _flash_set(request, "info", "並び順と時刻を更新しました。")
+    return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={pid_q}#role-menu-panels", status_code=302)
 
 
 @router.get("/form/att", response_class=HTMLResponse)

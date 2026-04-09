@@ -569,8 +569,7 @@
       <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}">
       <input type="hidden" name="order_no" value="{{ (last_row.order|int + 1) if last_row and last_row.order else 1 }}">
       <div class="schedule-add-head">
-        <div class="schedule-add-title"><i class="bi bi-plus-circle"></i> この次に追加</div>
-        <div class="schedule-add-note">開始時刻は前行の終了時刻を補完し、終了時刻は +15分で自動提案</div>
+        <div class="schedule-add-title"><i class="bi bi-plus-circle"></i> 追加</div>
       </div>
       <div class="schedule-grid schedule-grid-compact">
         <div class="panel-filter-item">
@@ -609,19 +608,24 @@
     </form>
 
     {% if schedule_manage_rows %}
-    <div class="schedule-flow">
+    <form method="post" action="/form/schedule/reorder" class="js-preserve-scroll js-schedule-reorder-form">
+      <input type="hidden" name="practice_id" value="{{ schedule_selected_practice_id }}">
+      <input type="hidden" name="ordered_ids" class="js-schedule-ordered-ids" value="">
+    </form>
+    <div class="schedule-flow js-schedule-flow">
       {% for row in schedule_manage_rows %}
-      <div class="schedule-flow-item">
+      <div class="schedule-flow-item js-schedule-item" draggable="true" data-id="{{ row.id }}">
         <div class="schedule-flow-line"></div>
         <div class="schedule-flow-dot"></div>
         <div class="schedule-flow-card">
           <div class="schedule-flow-time">{{ row.start or "--:--" }}{% if row.end %} - {{ row.end }}{% endif %}</div>
           <div class="schedule-flow-main">
             <span class="schedule-type {{ row.type_class }}">{{ row.type or "その他" }}</span>
-            {% if row.song %}<span class="schedule-song">{{ row.song }}</span>{% endif %}
+            {% if row.song_name %}<span class="schedule-song">{{ row.song_name }}</span>{% endif %}
           </div>
           {% if row.content %}<div class="schedule-content">{{ row.content }}</div>{% endif %}
           <div class="schedule-flow-actions">
+            <span class="schedule-drag-hint"><i class="bi bi-grip-vertical"></i> 並び替え</span>
             <button type="button"
                     class="assign-action-btn js-schedule-edit-open"
                     data-id="{{ row.id }}"
@@ -1087,7 +1091,6 @@
   .schedule-add-form{border:1px solid rgba(255,255,255,.1);border-radius:12px;background:rgba(255,255,255,.02);padding:10px}
   .schedule-add-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
   .schedule-add-title{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#dceaff}
-  .schedule-add-note{font-size:11px;color:#8ba8d3}
   .schedule-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   .schedule-grid-compact{align-items:end}
   .schedule-content-item{grid-column:1/-1}
@@ -1104,6 +1107,10 @@
   .schedule-flow-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:5px}
   .schedule-flow-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:8px}
   .schedule-flow-actions form{margin:0}
+  .schedule-flow-item{cursor:grab}
+  .schedule-flow-item.is-dragging{opacity:.5;cursor:grabbing}
+  .schedule-flow-item.is-drop-target .schedule-flow-card{border-color:rgba(95,174,255,.55);box-shadow:0 0 0 2px rgba(95,174,255,.18)}
+  .schedule-drag-hint{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#97b3db;border:1px dashed rgba(255,255,255,.2);border-radius:999px;padding:2px 8px}
   .schedule-edit-modal-backdrop{position:fixed;inset:0;background:rgba(5,10,18,.76);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:10080;padding:14px}
   .schedule-edit-modal-backdrop.is-open{display:flex}
   .schedule-edit-modal{width:min(620px,96vw);max-height:86vh;overflow:auto;border-radius:14px;border:1px solid rgba(255,255,255,.16);background:linear-gradient(180deg,rgba(14,23,38,.98),rgba(10,18,31,.96));box-shadow:0 22px 60px rgba(0,0,0,.52);padding:12px}
@@ -1111,7 +1118,7 @@
   .assign-action-btn.is-danger{border-color:rgba(230,120,120,.45);background:rgba(230,120,120,.14);color:#ffd1d1}
   @media (max-width: 640px){
     .schedule-grid{grid-template-columns:1fr}
-    .schedule-add-note{width:100%}
+    .schedule-drag-hint{display:none}
   }
   .assign-solver-box{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(255,255,255,.02);padding:10px 11px;margin-bottom:10px}
   .assign-solver-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
@@ -1729,6 +1736,61 @@
     startInput.addEventListener("change", syncEndFromStart);
     startInput.addEventListener("blur", syncEndFromStart);
     syncEndFromStart();
+  })();
+
+  (() => {
+    const flow = document.querySelector(".js-schedule-flow");
+    const reorderForm = document.querySelector(".js-schedule-reorder-form");
+    const orderedInput = reorderForm ? reorderForm.querySelector(".js-schedule-ordered-ids") : null;
+    if (!flow || !reorderForm || !orderedInput) return;
+
+    let dragging = null;
+    const clearDropTargets = () => {
+      flow.querySelectorAll(".js-schedule-item.is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+    };
+    const itemList = () => Array.from(flow.querySelectorAll(".js-schedule-item"));
+    const buildOrderedIds = () => itemList().map((el) => el.getAttribute("data-id") || "").filter(Boolean).join(",");
+    const submitReorder = () => {
+      orderedInput.value = buildOrderedIds();
+      if (!orderedInput.value) return;
+      sessionStorage.setItem("form_menu_scroll_y", String(window.scrollY || window.pageYOffset || 0));
+      sessionStorage.setItem("form_menu_role_panel", "schedule");
+      reorderForm.submit();
+    };
+
+    itemList().forEach((item) => {
+      item.addEventListener("dragstart", (e) => {
+        dragging = item;
+        item.classList.add("is-dragging");
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", item.getAttribute("data-id") || "");
+        }
+      });
+      item.addEventListener("dragend", () => {
+        item.classList.remove("is-dragging");
+        clearDropTargets();
+        dragging = null;
+      });
+      item.addEventListener("dragover", (e) => {
+        if (!dragging || dragging === item) return;
+        e.preventDefault();
+        const rect = item.getBoundingClientRect();
+        const before = (e.clientY - rect.top) < rect.height / 2;
+        clearDropTargets();
+        item.classList.add("is-drop-target");
+        if (before) {
+          flow.insertBefore(dragging, item);
+        } else {
+          flow.insertBefore(dragging, item.nextSibling);
+        }
+      });
+      item.addEventListener("drop", (e) => {
+        e.preventDefault();
+        clearDropTargets();
+        submitReorder();
+      });
+    });
   })();
 
   (() => {
