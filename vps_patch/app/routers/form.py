@@ -719,6 +719,30 @@ def _build_schedule_manage_rows(
     return out
 
 
+def _selected_schedule_practice(request: Request, raw_practice_id: str = "") -> str:
+    pid_q = (raw_practice_id or "").strip()
+    if pid_q:
+        request.session["schedule_selected_practice_id"] = pid_q
+        return pid_q
+    return (request.session.get("schedule_selected_practice_id", "") or "").strip()
+
+
+def _api_err_brief(res) -> str:
+    try:
+        if not res:
+            return "no response"
+        raw = ""
+        try:
+            raw = (res.text or "").strip()
+        except Exception:
+            raw = ""
+        if len(raw) > 140:
+            raw = raw[:140] + "..."
+        return f"status={res.status_code} {raw}"
+    except Exception:
+        return "unknown error"
+
+
 def _harmonia_flags(ctx: dict, concert_id: str) -> dict:
     ext_rel = ctx["extract_relation_ids_any"]
     ext_txt = ctx["extract_prop_text_any"]
@@ -2453,6 +2477,8 @@ async def form_menu(
         initial_role_tab = ""
     upcoming_practice_id = (upcoming_practice or {}).get("id", "") if upcoming_practice else ""
     selected_schedule_practice_id = (schedule_practice_id or "").strip()
+    if not selected_schedule_practice_id:
+        selected_schedule_practice_id = (request.session.get("schedule_selected_practice_id", "") or "").strip()
     schedule_count_by_practice: dict[str, int] = {}
     if role >= ROLE_MANAGER:
         schedule_db_id2 = (ctx.get("CONCERT_DB_SCHEDULE", "") or os.environ.get("CONCERT_DB_SCHEDULE", "") or "").strip()
@@ -2483,6 +2509,8 @@ async def form_menu(
         })
     if not selected_schedule_practice_id:
         selected_schedule_practice_id = upcoming_practice_id or (practice_options[0]["id"] if practice_options else "")
+    if selected_schedule_practice_id:
+        request.session["schedule_selected_practice_id"] = selected_schedule_practice_id
     schedule_manage_rows = _build_schedule_manage_rows(
         ctx,
         practice_id=selected_schedule_practice_id,
@@ -3287,7 +3315,7 @@ async def form_schedule_save(
         _flash_set(request, "error", "SCHEDULE DB のプロパティ取得に失敗しました。")
         return RedirectResponse("/form?tab=schedule#role-menu-panels", status_code=302)
 
-    practice_id = (practice_id or "").strip()
+    practice_id = _selected_schedule_practice(request, practice_id)
     if not practice_id:
         _flash_set(request, "error", "対象練習を選択してください。")
         return RedirectResponse("/form?tab=schedule#role-menu-panels", status_code=302)
@@ -3327,16 +3355,16 @@ async def form_schedule_save(
             f"https://api.notion.com/v1/pages/{schedule_id}",
             json={"properties": props},
         )
-        ok = bool(res and res.status_code == 200)
-        _flash_set(request, "info" if ok else "error", "スケジュールを更新しました。" if ok else "スケジュール更新に失敗しました。")
+        ok = bool(res and res.status_code in (200, 201))
+        _flash_set(request, "info" if ok else "error", "スケジュールを更新しました。" if ok else f"スケジュール更新に失敗しました。{_api_err_brief(res)}")
     else:
         res = ctx["api_request"](
             "post",
             "https://api.notion.com/v1/pages",
             json={"parent": {"database_id": db_id}, "properties": props},
         )
-        ok = bool(res and res.status_code == 200)
-        _flash_set(request, "info" if ok else "error", "スケジュールを追加しました。" if ok else "スケジュール追加に失敗しました。")
+        ok = bool(res and res.status_code in (200, 201))
+        _flash_set(request, "info" if ok else "error", "スケジュールを追加しました。" if ok else f"スケジュール追加に失敗しました。{_api_err_brief(res)}")
 
     return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={practice_id}#role-menu-panels", status_code=302)
 
@@ -3372,7 +3400,7 @@ async def form_schedule_delete(
     )
     ok = bool(res and res.status_code == 200)
     _flash_set(request, "info" if ok else "error", "スケジュールを削除しました。" if ok else "スケジュール削除に失敗しました。")
-    pid_q = (practice_id or "").strip()
+    pid_q = _selected_schedule_practice(request, practice_id)
     if pid_q:
         return RedirectResponse(f"/form?tab=schedule&schedule_practice_id={pid_q}#role-menu-panels", status_code=302)
     return RedirectResponse("/form?tab=schedule#role-menu-panels", status_code=302)
@@ -3397,7 +3425,7 @@ async def form_schedule_reorder(
         _flash_set(request, "error", "この操作にはManager権限が必要です。")
         return RedirectResponse("/form", status_code=302)
 
-    pid_q = (practice_id or "").strip()
+    pid_q = _selected_schedule_practice(request, practice_id)
     if not pid_q:
         _flash_set(request, "error", "対象練習を選択してください。")
         return RedirectResponse("/form?tab=schedule#role-menu-panels", status_code=302)
@@ -3465,7 +3493,7 @@ async def form_schedule_reorder(
             f"https://api.notion.com/v1/pages/{sid}",
             json={"properties": props},
         )
-        if res and res.status_code == 200:
+        if res and res.status_code in (200, 201):
             success += 1
         else:
             failed += 1
