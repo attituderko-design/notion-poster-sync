@@ -5089,7 +5089,7 @@ def _build_rental_day_summaries(
         pid = (p.get("id", "") or "").strip()
         if not pid:
             continue
-        practice_label_map[pid] = _practice_label(ctx, p)
+        practice_label_map[pid] = _practice_label_by_id(ctx, practices, pid)
 
     bucket: dict[str, dict] = {}
     for r in ctx["query_all"](db_id, None):
@@ -5101,7 +5101,7 @@ def _build_rental_day_summaries(
             continue
         row = bucket.setdefault(pid, {
             "practice_id": pid,
-            "practice_label": practice_label_map.get(pid, _practice_label_from_rows(ctx, pid, practices)),
+            "practice_label": practice_label_map.get(pid, _practice_label_by_id(ctx, practices, pid)),
             "count": 0,
             "confirmed_count": 0,
             "amount_total": 0,
