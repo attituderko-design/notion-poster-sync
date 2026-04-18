@@ -12,16 +12,25 @@ target = "https://artemis-harmonia.com/"
 components.html(
     f"""
     <script>
-      window.top.location.replace("{target}");
+      const target = "{target}";
+      try {{
+        window.top.location.replace(target);
+      }} catch (e) {{}}
+      window.location.replace(target);
     </script>
+    <div style="font-family:sans-serif;padding:8px 12px;font-size:14px;">
+      新URLへ移動します。移動しない場合は
+      <a href="{target}" target="_top" rel="noopener noreferrer">こちら</a>
+    </div>
     <noscript>
       <meta http-equiv="refresh" content="0;url={target}">
     </noscript>
     """,
-    height=0,
+    height=72,
     width=0,
 )
 st.stop()
+
 
 st.set_page_config(
     page_title="HARMONIA",
