@@ -6,20 +6,21 @@ artemis-form.streamlit.app のエントリポイント。
 import streamlit as st
 from concert.services.notion_client import build_concert_ctx
 from concert.pages.form import verify_form_token, render_form
+import streamlit.components.v1 as components
 
-TARGET_URL = "https://artemis-harmonia.com/"
-
-st.set_page_config(page_title="Moved", layout="centered")
-st.markdown(
+target = "https://artemis-harmonia.com/"
+components.html(
     f"""
-    <meta http-equiv="refresh" content="0;url={TARGET_URL}">
     <script>
-      window.location.replace("{TARGET_URL}");
+      window.top.location.replace("{target}");
     </script>
+    <noscript>
+      <meta http-equiv="refresh" content="0;url={target}">
+    </noscript>
     """,
-    unsafe_allow_html=True,
+    height=0,
+    width=0,
 )
-st.info(f"移転しました: {TARGET_URL}")
 st.stop()
 
 st.set_page_config(
