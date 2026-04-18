@@ -1,35 +1,45 @@
-"""
-artemis-cers/form.py
-artemis-form.streamlit.app のエントリポイント。
-実装は concert/pages/form.py に集約。
-"""
-import streamlit as st
-from concert.services.notion_client import build_concert_ctx
-from concert.pages.form import verify_form_token, render_form
-import streamlit.components.v1 as components
-
 target = "https://artemis-harmonia.com/"
+
 components.html(
     f"""
     <script>
       const target = "{target}";
+      // まずトップ遷移を試す
       try {{
-        window.top.location.replace(target);
-      }} catch (e) {{}}
-      window.location.replace(target);
+        if (window.top) {{
+          window.top.location.href = target;
+        }} else {{
+          window.location.href = target;
+        }}
+      }} catch (e) {{
+        window.location.href = target;
+      }}
     </script>
-    <div style="font-family:sans-serif;padding:8px 12px;font-size:14px;">
-      新URLへ移動します。移動しない場合は
-      <a href="{target}" target="_top" rel="noopener noreferrer">こちら</a>
+
+    <div style="
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #f3f4f6;
+      background: #111827;
+      border: 1px solid #374151;
+      border-radius: 10px;
+      padding: 14px;
+      margin: 8px;
+      line-height: 1.6;
+    ">
+      新URLへ移動しています。移動しない場合は
+      <a href="{target}" target="_top" rel="noopener noreferrer" style="color:#93c5fd;">
+        こちらをクリック
+      </a>
     </div>
+
     <noscript>
       <meta http-equiv="refresh" content="0;url={target}">
     </noscript>
     """,
-    height=72,
-    width=0,
+    height=110,   # 見える高さ
 )
 st.stop()
+
 
 
 st.set_page_config(
