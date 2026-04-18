@@ -24,65 +24,65 @@ st.markdown(
           linear-gradient(160deg, #050a1a 0%, #0a1533 45%, #0d2047 100%);
       }
       .hero-wrap {
-        max-width: 760px;
-        margin: 10vh auto 0;
-        padding: 40px 34px;
+        max-width: 740px;
+        margin: 8vh auto 0;
+        padding: 34px 30px;
         border: 1px solid rgba(180, 210, 255, 0.25);
-        border-radius: 18px;
+        border-radius: 16px;
         background: rgba(8, 16, 38, 0.78);
-        box-shadow: 0 25px 80px rgba(0, 0, 0, 0.5);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
         backdrop-filter: blur(6px);
       }
       .eyebrow {
         margin: 0;
         color: #9bb8ff;
-        font-size: 0.9rem;
-        letter-spacing: 0.12em;
+        font-size: 0.82rem;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
       }
       .hero-title {
-        margin: 12px 0 10px;
+        margin: 10px 0 12px;
         color: #f4f7ff;
-        font-size: 2.2rem;
-        line-height: 1.2;
-        letter-spacing: 0.03em;
+        font-size: 1.7rem;
+        line-height: 1.35;
+        letter-spacing: 0.01em;
       }
       .hero-copy {
         margin: 0 0 24px;
         color: #d5e2ff;
-        font-size: 1.02rem;
-        line-height: 1.7;
+        font-size: 0.98rem;
+        line-height: 1.75;
       }
       .cta-row {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
       }
       .cta-btn {
         display: inline-block;
-        padding: 12px 18px;
-        border-radius: 10px;
-        background: linear-gradient(135deg, #9fd4ff 0%, #75a8ff 100%);
-        color: #061126;
+        padding: 10px 16px;
+        border-radius: 9px;
+        background: linear-gradient(135deg, #8fc6ff 0%, #6d9eff 100%);
+        color: #081a3b;
         font-weight: 700;
         text-decoration: none;
       }
       .cta-btn:hover {
         filter: brightness(1.05);
       }
-      .plain-link {
-        color: #9ec4ff;
-        text-decoration: underline;
-        word-break: break-all;
+      .sub-note {
+        margin: 0;
+        color: #aac2ef;
+        font-size: 0.86rem;
       }
       @media (max-width: 768px) {
         .hero-wrap {
           margin-top: 4vh;
-          padding: 30px 22px;
+          padding: 28px 20px;
         }
         .hero-title {
-          font-size: 1.72rem;
+          font-size: 1.4rem;
         }
       }
     </style>
@@ -103,10 +103,8 @@ st.markdown(
         <a class="cta-btn" href="{TARGET_URL}" target="_blank" rel="noopener noreferrer">
           HARMONIAを開く
         </a>
-        <a class="plain-link" href="{TARGET_URL}" target="_blank" rel="noopener noreferrer">
-          {TARGET_URL}
-        </a>
       </div>
+      <p class="sub-note">遷移先: {TARGET_URL}</p>
     </section>
     """,
     unsafe_allow_html=True,
