@@ -1,10 +1,18 @@
-target = "https://artemis-harmonia.com/"
+"""
+artemis-cers/form.py
+artemis-form.streamlit.app のエントリポイント。
+実装は concert/pages/form.py に集約。
+"""
+import streamlit as st
+from concert.services.notion_client import build_concert_ctx
+from concert.pages.form import verify_form_token, render_form
+import streamlit.components.v1 as components
 
+target = "https://artemis-harmonia.com/"
 components.html(
     f"""
     <script>
       const target = "{target}";
-      // まずトップ遷移を試す
       try {{
         if (window.top) {{
           window.top.location.href = target;
@@ -15,7 +23,6 @@ components.html(
         window.location.href = target;
       }}
     </script>
-
     <div style="
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       color: #f3f4f6;
@@ -31,16 +38,13 @@ components.html(
         こちらをクリック
       </a>
     </div>
-
     <noscript>
       <meta http-equiv="refresh" content="0;url={target}">
     </noscript>
     """,
-    height=110,   # 見える高さ
+    height=110,
 )
 st.stop()
-
-
 
 st.set_page_config(
     page_title="HARMONIA",
@@ -49,9 +53,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-_qp    = st.query_params
+_qp = st.query_params
 _token = _qp.get("concert", "")
-_cid   = _qp.get("cid", "")
+_cid = _qp.get("cid", "")
 
 if _token and _cid:
     try:
