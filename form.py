@@ -7,6 +7,21 @@ import streamlit as st
 from concert.services.notion_client import build_concert_ctx
 from concert.pages.form import verify_form_token, render_form
 
+TARGET_URL = "https://artemis-harmonia.com/"
+
+st.set_page_config(page_title="Moved", layout="centered")
+st.markdown(
+    f"""
+    <meta http-equiv="refresh" content="0;url={TARGET_URL}">
+    <script>
+      window.location.replace("{TARGET_URL}");
+    </script>
+    """,
+    unsafe_allow_html=True,
+)
+st.info(f"移転しました: {TARGET_URL}")
+st.stop()
+
 st.set_page_config(
     page_title="HARMONIA",
     page_icon="https://raw.githubusercontent.com/attituderko-design/artemis-cers/main/assets/favicon.png",
